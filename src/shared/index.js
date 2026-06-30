@@ -5,3 +5,4 @@ export * from "./backend.js";
 export * from "./theme.jsx";
 export * from "./catalog.jsx";
 export * from "./ui.jsx";
+export * from "./liveBlocks.jsx";

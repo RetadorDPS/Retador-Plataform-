@@ -6,3 +6,4 @@ export * from "./theme.jsx";
 export * from "./catalog.jsx";
 export * from "./ui.jsx";
 export * from "./liveBlocks.jsx";
+export * from "./hooks.js";

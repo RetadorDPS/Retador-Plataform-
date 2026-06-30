@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - claude/marketplace-vite-github-pages-sduckr
   workflow_dispatch:
 
 # Permisos necesarios para que la Action pueda publicar en Pages.

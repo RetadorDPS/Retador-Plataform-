@@ -16,7 +16,9 @@ permissions:
 # Permite un solo despliegue a la vez (cancela los antiguos en cola).
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # false: no cancelar despliegues de Pages a mitad (recomendación oficial de
+  # GitHub; cancelarlos provoca "Deployment cancelled" y fallos intermitentes).
+  cancel-in-progress: false
 
 jobs:
   build:

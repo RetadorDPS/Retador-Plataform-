@@ -48,6 +48,7 @@ import { ProfileMain, FreeProfileScreen } from "./screens/Profile.jsx";
 import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
+import InstallPrompt from "./pwa/InstallPrompt.jsx";
 
 
 // OMNIPANEL — panel admin integrado (CSS aislado bajo .omni)
@@ -69,16 +70,22 @@ export default function App() {
     return () => { alive = false; sub?.subscription?.unsubscribe?.(); };
   }, []);
 
-  if (sessionUser === undefined) return <PantallaCargando />;
-
   return (
-    <DensityProvider defaultMode="pequena">
-      <CatalogProvider>
-        {sessionUser
-          ? <AppShell sessionUser={sessionUser} />
-          : <RetadorInicio onGoogle={signInWithGoogle} />}
-      </CatalogProvider>
-    </DensityProvider>
+    <>
+      {sessionUser === undefined
+        ? <PantallaCargando />
+        : (
+          <DensityProvider defaultMode="pequena">
+            <CatalogProvider>
+              {sessionUser
+                ? <AppShell sessionUser={sessionUser} />
+                : <RetadorInicio onGoogle={signInWithGoogle} />}
+            </CatalogProvider>
+          </DensityProvider>
+        )}
+      {/* Cartel de instalación PWA propio — montado siempre, decide solo si se muestra */}
+      <InstallPrompt />
+    </>
   );
 }
 

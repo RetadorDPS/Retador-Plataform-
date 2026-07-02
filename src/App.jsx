@@ -13,6 +13,7 @@ import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip,
 // ═════════════════════════════════════════════════════════════════════════════
 import {
   supabase,
+  signInWithGoogle, signOutUser, loadSessionUser,
   MOCK_PRODUCTS, MOCK_USER,
   authSignUp, authSignIn, authSignOut, authGetSession,
   getUserById, getUserName, updateUserName,
@@ -46,6 +47,7 @@ import { SettingsScreen } from "./screens/Settings.jsx";
 import { ProfileMain, FreeProfileScreen } from "./screens/Profile.jsx";
 import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
+import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
 
 
 // OMNIPANEL — panel admin integrado (CSS aislado bajo .omni)
@@ -54,23 +56,40 @@ import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 // APP ROOT
 // ═════════════════════════════════════════════════════════════════════════════
 export default function App() {
+  // Control de sesión: undefined = comprobando, null = sin sesión, objeto = logueado.
+  const [sessionUser, setSessionUser] = useState(undefined);
+
+  useEffect(() => {
+    let alive = true;
+    loadSessionUser().then(u => { if (alive) setSessionUser(u); });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session?.user) { setSessionUser(null); return; }
+      loadSessionUser().then(u => { if (alive) setSessionUser(u); });
+    });
+    return () => { alive = false; sub?.subscription?.unsubscribe?.(); };
+  }, []);
+
+  if (sessionUser === undefined) return <PantallaCargando />;
+
   return (
     <DensityProvider defaultMode="pequena">
       <CatalogProvider>
-        <AppShell />
+        {sessionUser
+          ? <AppShell sessionUser={sessionUser} />
+          : <RetadorInicio onGoogle={signInWithGoogle} />}
       </CatalogProvider>
     </DensityProvider>
   );
 }
 
-function AppShell() {
+function AppShell({ sessionUser }) {
   useCSS();
   const rsp = useResponsive();
 
   // Estado inicial configurado directamente - sin login, solo visual
   const [scr,       setScr]       = useState("main");
   const [tab,       setTab]       = useState("market");
-  const [user,      setUser]      = useState(MOCK_USER); // Usuario ya configurado
+  const [user,      setUser]      = useState(sessionUser); // usuario REAL logueado (Supabase)
   const [toast,     setToast]     = useState(null);
   const [unread,    setUnread]    = useState(0); // contador de no leídos (real)
   // (el contador real de notificaciones es unreadNotif, calculado más abajo)

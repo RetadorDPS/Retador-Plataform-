@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Gavel, Globe, HardDrive, HelpCircle, Info, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Phone, Plus, Shield, ShoppingBag, Smartphone, Star, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
-import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity } from "../shared/index.js";
+import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser } from "../shared/index.js";
 
 const CFG_DARK = {
   P:"#FFC01E", PL:"#FFC01E18",
@@ -368,7 +368,7 @@ function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=fal
         <CFG_Row icon={Lock} bg="bg-zinc-600" label={hasPw ? "Cambiar contraseña" : "Crear contraseña"} sub={hasPw ? "Actualiza tu contraseña" : "Aún no tienes contraseña"} onClick={() => setPwSheet(true)} />
       </CFG_Crd>
       <CFG_Lbl>Sesión</CFG_Lbl>
-      <CFG_Crd><CFG_Row icon={LogOut} bg="bg-red-700" label="Cerrar sesión" danger onClick={onSignOut || (() => {})} /></CFG_Crd>
+      <CFG_Crd><CFG_Row icon={LogOut} bg="bg-red-700" label="Cerrar sesión" danger onClick={onSignOut || (() => signOutUser())} /></CFG_Crd>
       <div className="h-8" />
       {pwSheet && <CFG_PasswordSheet hasPw={hasPw} current={accountPassword} onClose={() => setPwSheet(false)} onSave={(pw) => { onSetPassword && onSetPassword(pw); setPwSheet(false); flash && flash(hasPw ? "🔒 Contraseña actualizada" : "🔒 Contraseña creada"); }} />}
     </div>

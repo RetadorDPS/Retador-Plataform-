@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, ratingForName, useAt, useR } from "../shared/index.js";
+import { G, Ic, ratingForName, useAt, useR, signOutUser } from "../shared/index.js";
 
 export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProfile, onAdmin, onWallet, onTools, onCourier, isOwner, profileData = {} }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
@@ -1186,7 +1186,7 @@ function FP_SettingsScreen({ onClose }) {
         {/* Zona peligro */}
         <div style={{ background:FP_C.surface, border:`1px solid ${FP_C.border}`,
           borderRadius:10, overflow:"hidden", marginBottom:24 }}>
-          <FP_Row border onClick={() => { /* INTEGRATION POINT: auth.signOut() */ }}>
+          <FP_Row border onClick={() => signOutUser()}>
             <div style={{ display:"flex", alignItems:"center", gap:12 }}>
               <FP_Icon d={FP_Icons.logout} size={15} color={FP_C.warning}/>
               <span style={{ fontSize:13, fontWeight:600, color:FP_C.warning }}>Cerrar sesión</span>

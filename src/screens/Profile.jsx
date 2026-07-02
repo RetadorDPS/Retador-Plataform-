@@ -1329,9 +1329,10 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, onProfile
 
   const defaultProfile = {
     avatar:   initialProfile.avatar   || { type:"emoji", value:"😊" },
-    name:     initialProfile.name     || user?.name || "Usuario Demo",
-    username: initialProfile.username || "usuario_demo",
-    bio:      "Vendo cosas que ya no uso. Envío rápido y empaque cuidado.",
+    name:     initialProfile.name     || user?.name || "Usuario",
+    username: initialProfile.username || (user?.email ? user.email.split("@")[0] : "usuario"),
+    email:    initialProfile.email    || user?.email || "",
+    bio:      "",
     isVerified: false,
   };
 
@@ -1351,7 +1352,7 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, onProfile
       const real = (typeof ratingForName === "function") ? ratingForName(initialProfile?.name, "seller").reviews : [];
       if (real && real.length) return real.sort((a, b) => b.at - a.at).map((r, i) => ({ id: "r" + i, user: "Comprador verificado", stars: r.stars, text: r.msg, date: new Date(r.at).toLocaleDateString("es-ES", { day: "2-digit", month: "short" }) }));
     } catch (e) {}
-    return FP_INITIAL_REVIEWS;
+    return [];
   });
 
   function toast_(msg) { setToast(msg); setTimeout(() => setToast(null), 2500); }
@@ -1360,7 +1361,7 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, onProfile
     setProfile(updated);
     setEditProfile(false);
     toast_("Perfil actualizado");
-    onProfileUpdate?.({ avatar: updated.avatar, name: updated.name, username: updated.username, rating: 4.9, sales: 60 });
+    onProfileUpdate?.({ avatar: updated.avatar, name: updated.name, username: updated.username, email: updated.email, rating: 0, sales: 0 });
   }
   function saveAbout()   { setAbout({...ad});   setEditAbout(false);   toast_("Información actualizada"); }
   function cancelProfile() { setPd({...profile}); setEditProfile(false); }
@@ -1480,7 +1481,7 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, onProfile
             {profile.name}
           </div>
           <div style={{ fontSize:12, color:FP_C.textSecondary, marginBottom:8 }}>
-            @{profile.username} · {about.city}, {about.country}
+            @{profile.username}{profile.email ? " · " + profile.email : ""}
           </div>
 
           {/* Rating */}
@@ -1566,7 +1567,7 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, onProfile
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr",
             border:`1px solid ${FP_C.border}`, borderRadius:8, overflow:"hidden",
             marginBottom:14 }}>
-            {[{v:"60",l:"Ventas"},(()=>{ const sr=(typeof ratingForName==='function')?ratingForName(profile.name,"seller"):{avg:0,count:0}; return {v: sr.count?("⭐"+sr.avg):"—", l: sr.count?(sr.count+" reseñas"):"Sin reseñas"}; })(),{v:"124",l:"Seguidores"}].map((s,i)=>(
+            {[{v:"0",l:"Ventas"},(()=>{ const sr=(typeof ratingForName==='function')?ratingForName(profile.name,"seller"):{avg:0,count:0}; return {v: sr.count?("⭐"+sr.avg):"—", l: sr.count?(sr.count+" reseñas"):"Sin reseñas"}; })(),{v:"0",l:"Seguidores"}].map((s,i)=>(
               <div key={s.l} style={{ textAlign:"center", padding:"10px 6px",
                 borderRight:i<2?`1px solid ${FP_C.border}`:"none",
                 background:FP_C.surface }}>

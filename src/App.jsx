@@ -205,7 +205,14 @@ function AppShell({ sessionUser }) {
   const [buyModal,   setBuyModal]   = useState(null);
   const [plusMenu,   setPlusMenu]   = useState(null); // { top, right } posición del dropdown
   const [subOpenCreate, setSubOpenCreate] = useState(false); // abre CreateAuction directo
-  const [profileData, setProfileData] = useState({ avatar:{ type:"emoji", value:"😊" }, name:"Usuario Demo", username:"usuario_demo", rating:4.9, sales:60 });
+  const [profileData, setProfileData] = useState({
+    avatar: { type:"emoji", value:"😊" },
+    name: sessionUser?.name || "Usuario",
+    username: (sessionUser?.email ? sessionUser.email.split("@")[0] : (sessionUser?.name || "usuario")).toLowerCase().replace(/[^a-z0-9._]/g, ""),
+    email: sessionUser?.email || "",
+    rating: 0,
+    sales: 0,
+  });
 
   // Productos y búsqueda - Productos ya cargados
   const [products,  setProducts]  = useState([]); // productos REALES del backend

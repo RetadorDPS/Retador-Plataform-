@@ -899,7 +899,7 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
   return (
     <div style={{ flex: 1, overflowY: "auto" }}>
       {/* Header */}
-      <div style={{ position: "sticky", top: 0, zIndex: 50, background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(18px)", borderBottom: `1px solid ${isDark ? "#131313" : B}`, padding: isDesktop ? "8px 36px" : "8px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 50, background: isDark ? BG : "#fff", borderBottom: "none", padding: isDesktop ? "8px 36px" : "8px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
         {!isDesktop && <Logo size={19} />}
         {isDesktop && (
           <div style={{ flex: 1, maxWidth: 520 }}>
@@ -972,7 +972,7 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
       )}
 
       {/* Filtros - Ahora con sticky */}
-      <div style={{ position: "sticky", top: 0, zIndex: 50, background: isDark ? "rgba(8,8,8,.98)" : "rgba(255,255,255,.98)", backdropFilter: "blur(12px)", borderBottom: `1px solid ${B}`, padding: "12px clamp(18px,3vw,48px)", display: "flex", gap: 7, overflowX: "auto", boxShadow: isDark ? "0 2px 8px rgba(0,0,0,.3)" : "none" }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 50, background: isDark ? BG : "#fff", borderBottom: "none", padding: "12px clamp(18px,3vw,48px)", display: "flex", gap: 7, overflowX: "auto" }}>
         {[["TODOS", "🏷️"], ["OFERTAS", "🔥"], ["NUEVO", "✨"], ["RECOMENDADO", "⭐"], ["FAVORITOS", "❤️"]].map(([f, ic]) => (
           <button key={f} onClick={() => setFilter(f)} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: filter === f ? G : isDark ? "#0e0e0e" : S, color: filter === f ? "#000" : T3, border: `1.5px solid ${filter === f ? G : B}`, padding: "7px 12px", fontSize: 10 * ts, fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>{ic} {f}</button>
         ))}
@@ -1835,7 +1835,7 @@ export function BottomNav({ tab, onTab, unread, hidden }) {
     { id: "perfil",   ic: "user",   label: "Perfil" },
   ];
   return (
-    <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 60, background: isDark ? "rgba(6,6,6,.97)" : "rgba(255,255,255,.97)", backdropFilter: "blur(22px)", borderTop: `1px solid ${B}`, display: "flex", alignItems: "center", justifyContent: "space-around", padding: "8px 4px calc(20px + env(safe-area-inset-bottom, 0px) / var(--img-s, 1))", transform: hidden ? "translateY(115%)" : "translateY(0)", transition: "transform .28s cubic-bezier(.4,0,.2,1)", willChange: "transform" }}>
+    <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 60, background: isDark ? BG : "#fff", borderTop: "none", display: "flex", alignItems: "center", justifyContent: "space-around", padding: "8px 4px calc(20px + env(safe-area-inset-bottom, 0px) / var(--img-s, 1))", transform: hidden ? "translateY(115%)" : "translateY(0)", transition: "transform .28s cubic-bezier(.4,0,.2,1)", willChange: "transform" }}>
       {items.map(it => {
         const active = tab === it.id;
         return (

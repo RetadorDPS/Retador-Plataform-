@@ -341,12 +341,22 @@ function AppShell({ sessionUser }) {
   const appTk = { ...(effectiveTheme === "light" ? LIGHT_T : DARK_T), imgScale: densZoom, ts: 1 };
 
   const changeTheme = (t) => {
-    // Pinta la barra del sistema del color del NUEVO tema en el MISMO instante
-    // (síncrono), antes de que React repinte. Así barra y fondo cambian juntos en
-    // el mismo frame y no queda la raya/filito bajo la barra de estado.
-    setThemeColor(bgForTheme(t));
-    setAppTheme(t);
+    if (t === appTheme) return;
     try { localStorage.setItem("retador_theme", t); } catch {}
+    // En MIUI/HyperOS, cambiar el color de la barra con la app ABIERTA deja una
+    // raya fija bajo la barra de estado que solo se limpia al arrancar de cero.
+    // Por eso, al cambiar de tema, refrescamos: la app vuelve a arrancar en el
+    // tema nuevo (leído de localStorage) con la barra limpia, sin filito. Antes
+    // de recargar dejamos el fondo del nuevo tema para que el refresco no
+    // parpadee de un color a otro.
+    const bg = bgForTheme(t);
+    try {
+      setThemeColor(bg);
+      document.documentElement.style.background = bg;
+      document.body.style.background = bg;
+    } catch {}
+    if (typeof window !== "undefined") { window.location.reload(); return; }
+    setAppTheme(t);
   };
 
   // Pintado inicial: al montar (y si el sistema cambia de modo estando en "auto"),

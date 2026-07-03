@@ -11,6 +11,18 @@
     <!-- Color inicial de las barras del sistema (pantalla de inicio, oscura).
          La app lo actualiza por JS en cada cambio de tema (claro/oscuro). -->
     <meta name="theme-color" content="#080808" />
+    <!-- Arranque: pinta el fondo del tema guardado al instante, para que el
+         refresco al cambiar de tema no parpadee de un color a otro. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("retador_theme") || "auto";
+          var dark = t === "dark" || (t === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          var bg = dark ? "#080808" : "#FFFFFF";
+          document.documentElement.style.background = bg;
+        } catch (e) {}
+      })();
+    </script>
     <link rel="icon" type="image/png" href="icons/icon-192.png" />
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
     <meta name="mobile-web-app-capable" content="yes" />

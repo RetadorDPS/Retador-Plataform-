@@ -899,7 +899,7 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
   return (
     <div style={{ flex: 1, overflowY: "auto" }}>
       {/* Header */}
-      <div style={{ position: "sticky", top: 0, zIndex: 50, background: isDark ? BG : "#fff", borderBottom: "none", padding: isDesktop ? "8px 36px" : "calc(8px + env(safe-area-inset-top, 0px) / var(--img-s, 1)) 16px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 50, background: isDark ? BG : "#fff", borderBottom: "none", padding: isDesktop ? "8px 36px" : "8px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
         {!isDesktop && <Logo size={19} />}
         {isDesktop && (
           <div style={{ flex: 1, maxWidth: 520 }}>

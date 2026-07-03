@@ -49,6 +49,7 @@ import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
 import InstallPrompt from "./pwa/InstallPrompt.jsx";
+import { setThemeColor } from "./pwa/themeColor.js";
 
 
 // OMNIPANEL — panel admin integrado (CSS aislado bajo .omni)
@@ -69,6 +70,11 @@ export default function App() {
     });
     return () => { alive = false; sub?.subscription?.unsubscribe?.(); };
   }, []);
+
+  // Pantalla de inicio y de carga son SIEMPRE oscuras: cuando no hay sesión,
+  // las barras del sistema se ponen del mismo tono (#080808). Al entrar, AppShell
+  // toma el control y las sincroniza con el tema elegido (claro/oscuro).
+  useEffect(() => { if (!sessionUser) setThemeColor("#080808"); }, [sessionUser]);
 
   return (
     <>
@@ -318,43 +324,22 @@ function AppShell({ sessionUser }) {
   }, []);
   useEffect(() => { setNavHidden(false); navScrollRef.current = 0; }, [tab, mScr, pScr, eScr]);
 
-  // Modo claro/oscuro del TELÉFONO, en vivo. En modo "Automático" la app entera
-  // sigue este valor, igual que la barra del sistema (que lo sigue de forma nativa
-  // por CSS/media-query). Así app y barra van siempre juntas, como una sola hoja.
-  const [sysDark, setSysDark] = useState(() =>
-    typeof window !== "undefined" && !!window.matchMedia?.("(prefers-color-scheme: dark)").matches);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const onSys = () => setSysDark(mq.matches);
-    mq.addEventListener?.("change", onSys);
-    return () => mq.removeEventListener?.("change", onSys);
-  }, []);
-
-  const effectiveTheme = appTheme === "auto" ? (sysDark ? "dark" : "light") : appTheme;
+  const effectiveTheme = appTheme === "auto"
+    ? (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : appTheme;
   // ts queda en 1: el escalado de texto se aplica de forma global (arriba), evitando
   // doble escala en los pocos componentes que multiplicaban por ts.
   const appTk = { ...(effectiveTheme === "light" ? LIGHT_T : DARK_T), imgScale: densZoom, ts: 1 };
 
-  // Fondo de la página (html/body) del tono del tema cargado, para que el rebote/
-  // overscroll y las zonas bajo las barras combinen. Es solo el fondo del
-  // documento (NO la meta theme-color del sistema), así que no provoca la raya.
-  useEffect(() => {
-    try {
-      document.documentElement.style.background = appTk.BG;
-      document.body.style.background = appTk.BG;
-    } catch (e) {}
-  }, [appTk.BG]);
-
-  // Cambio de tema, al instante. La app va a PANTALLA COMPLETA (manifest display
-  // "fullscreen"): no hay barra del sistema encima, así que cambiar de tema solo
-  // repinta el contenido (React) y NUNCA aparece la raya, porque ya no existe la
-  // barra que tu teléfono "fijaba" al arrancar. El interruptor cambia todo al vuelo.
   const changeTheme = (t) => {
     setAppTheme(t);
     try { localStorage.setItem("retador_theme", t); } catch {}
   };
 
+  // Barras del sistema = tono exacto del tema actual. Al cambiar de tema (claro/
+  // oscuro) cambia appTk.BG y este efecto vuelve a pintar la meta theme-color al
+  // instante, para que NUNCA se note un corte entre las barras y el fondo.
+  useEffect(() => { setThemeColor(appTk.BG); }, [appTk.BG]);
   const changeTextScale = (s) => {
     setAppTextScale(s);
     try { localStorage.setItem("retador_txt_scale", String(s)); } catch {}

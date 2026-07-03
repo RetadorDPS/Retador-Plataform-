@@ -94,18 +94,10 @@ export function RetadorInicio({ onGoogle }) {
   );
 }
 
-// Pantalla breve mientras se comprueba si hay sesión guardada. Toma el fondo del
-// tema guardado (el mismo con el que arranca la app tras un cambio de tema), para
-// que el re-montaje no muestre un destello de otro color.
+// Pantalla breve mientras se comprueba si hay sesión guardada.
 export function PantallaCargando() {
-  let bg = "#080808";
-  try {
-    const t = localStorage.getItem("retador_theme") || "auto";
-    const dark = t === "dark" || (t === "auto" && (!window.matchMedia || window.matchMedia("(prefers-color-scheme: dark)").matches));
-    bg = dark ? "#080808" : "#FFFFFF";
-  } catch (e) {}
   return (
-    <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ minHeight: "100vh", background: "#080808", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <Loader2 size={30} style={{ color: INICIO_GOLD, animation: "spin 1s linear infinite" }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>

@@ -336,14 +336,47 @@ function AppShell({ sessionUser }) {
   // doble escala en los pocos componentes que multiplicaban por ts.
   const appTk = { ...(effectiveTheme === "light" ? LIGHT_T : DARK_T), imgScale: densZoom, ts: 1 };
 
-  // NO tocamos el color de las barras del sistema por JavaScript: lo hace el
-  // navegador solo, según el modo del teléfono (metas theme-color con media-query
-  // en index.html + CSS en index.css). Cambiarlo en caliente era justo lo que en
-  // MIUI/HyperOS dejaba la raya fija bajo la barra de estado; al no tocarlo nunca,
-  // esa raya no puede aparecer.
+  // Fondo de la página (html/body) del tono del tema cargado, para que el rebote/
+  // overscroll y las zonas bajo las barras combinen. Es solo el fondo del
+  // documento (NO la meta theme-color del sistema), así que no provoca la raya.
+  useEffect(() => {
+    try {
+      document.documentElement.style.background = appTk.BG;
+      document.body.style.background = appTk.BG;
+    } catch (e) {}
+  }, [appTk.BG]);
+
+  // Al montar, si veníamos de un cambio de tema, restaura la pantalla donde estaba
+  // el usuario (guardada antes de recargar), para que el re-montaje no lo saque al
+  // inicio. Se aplica una sola vez y se borra.
+  useEffect(() => {
+    let snap;
+    try { snap = JSON.parse(sessionStorage.getItem("retador_nav") || "null"); } catch { snap = null; }
+    if (!snap) return;
+    try { sessionStorage.removeItem("retador_nav"); } catch {}
+    if (snap.scr)  setScr(snap.scr);
+    if (snap.tab)  setTab(snap.tab);
+    if (snap.mScr) setMScr(snap.mScr);
+    if (snap.pScr) setPScr(snap.pScr);
+    if (snap.eScr) setEScr(snap.eScr);
+  }, []);
+
+  // Cambio de tema. CLAVE contra el "filito": en MIUI/HyperOS, cambiar el color de
+  // la barra del sistema con la app ABIERTA deja una raya fija bajo la barra de
+  // estado. Fijar ese color UNA vez al arrancar NO la deja (por eso al abrir la
+  // app se ve limpia). Así que, al cambiar de tema, guardamos la elección y la
+  // pantalla actual y RE-MONTAMOS la app (recarga): el arranque fija el color del
+  // nuevo tema limpio, como al abrir la app. Resultado: cambia el tema al completo
+  // (barra incluida) sin que aparezca nunca la raya, conservando el reloj arriba.
   const changeTheme = (t) => {
-    setAppTheme(t);
+    if (t === appTheme) return;
     try { localStorage.setItem("retador_theme", t); } catch {}
+    try { sessionStorage.setItem("retador_nav", JSON.stringify({ scr, tab, mScr, pScr, eScr })); } catch {}
+    if (typeof window !== "undefined" && typeof window.location?.reload === "function") {
+      window.location.reload();
+      return;
+    }
+    setAppTheme(t);
   };
 
   const changeTextScale = (s) => {

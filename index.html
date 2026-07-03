@@ -8,21 +8,13 @@
     <!-- PWA: manifest + tema oscuro + íconos. Rutas relativas: la app vive en un
          subdirectorio de GitHub Pages (/Retador-Plataform-/). -->
     <link rel="manifest" href="manifest.webmanifest" />
-    <!-- Color inicial de las barras del sistema (pantalla de inicio, oscura).
-         La app lo actualiza por JS en cada cambio de tema (claro/oscuro). -->
-    <meta name="theme-color" content="#080808" />
-    <!-- Arranque: pinta el fondo del tema guardado al instante, para que el
-         refresco al cambiar de tema no parpadee de un color a otro. -->
-    <script>
-      (function () {
-        try {
-          var t = localStorage.getItem("retador_theme") || "auto";
-          var dark = t === "dark" || (t === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
-          var bg = dark ? "#080808" : "#FFFFFF";
-          document.documentElement.style.background = bg;
-        } catch (e) {}
-      })();
-    </script>
+    <!-- Color de las barras del sistema = modo claro/oscuro del TELÉFONO, de forma
+         NATIVA (dos metas con media-query). El navegador elige la que toca; NUNCA
+         lo cambiamos por JavaScript. Ese cambio en caliente era lo que en
+         MIUI/HyperOS dejaba una raya fija bajo la barra de estado. Al no tocarlo
+         nunca, la raya no puede aparecer. -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FFFFFF" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#080808" />
     <link rel="icon" type="image/png" href="icons/icon-192.png" />
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
     <meta name="mobile-web-app-capable" content="yes" />

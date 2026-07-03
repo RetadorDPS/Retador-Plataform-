@@ -49,16 +49,6 @@ import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
 import InstallPrompt from "./pwa/InstallPrompt.jsx";
-import { setThemeColor } from "./pwa/themeColor.js";
-
-// Color de fondo (y de las barras del sistema) que corresponde a un tema dado.
-// "auto" sigue el modo claro/oscuro del teléfono.
-function bgForTheme(t) {
-  const eff = t === "auto"
-    ? (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-    : t;
-  return eff === "light" ? LIGHT_T.BG : DARK_T.BG;
-}
 
 
 // OMNIPANEL — panel admin integrado (CSS aislado bajo .omni)
@@ -79,11 +69,6 @@ export default function App() {
     });
     return () => { alive = false; sub?.subscription?.unsubscribe?.(); };
   }, []);
-
-  // Pantalla de inicio y de carga son SIEMPRE oscuras: cuando no hay sesión, las
-  // barras del sistema van del mismo tono (#080808). Al entrar, AppShell toma el
-  // control y las sincroniza con el tema elegido (claro/oscuro).
-  useEffect(() => { if (!sessionUser) setThemeColor("#080808"); }, [sessionUser]);
 
   return (
     <>
@@ -333,43 +318,33 @@ function AppShell({ sessionUser }) {
   }, []);
   useEffect(() => { setNavHidden(false); navScrollRef.current = 0; }, [tab, mScr, pScr, eScr]);
 
-  const effectiveTheme = appTheme === "auto"
-    ? (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-    : appTheme;
+  // Modo claro/oscuro del TELÉFONO, en vivo. En modo "Automático" la app entera
+  // sigue este valor, igual que la barra del sistema (que lo sigue de forma nativa
+  // por CSS/media-query). Así app y barra van siempre juntas, como una sola hoja.
+  const [sysDark, setSysDark] = useState(() =>
+    typeof window !== "undefined" && !!window.matchMedia?.("(prefers-color-scheme: dark)").matches);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSys = () => setSysDark(mq.matches);
+    mq.addEventListener?.("change", onSys);
+    return () => mq.removeEventListener?.("change", onSys);
+  }, []);
+
+  const effectiveTheme = appTheme === "auto" ? (sysDark ? "dark" : "light") : appTheme;
   // ts queda en 1: el escalado de texto se aplica de forma global (arriba), evitando
   // doble escala en los pocos componentes que multiplicaban por ts.
   const appTk = { ...(effectiveTheme === "light" ? LIGHT_T : DARK_T), imgScale: densZoom, ts: 1 };
 
+  // NO tocamos el color de las barras del sistema por JavaScript: lo hace el
+  // navegador solo, según el modo del teléfono (metas theme-color con media-query
+  // en index.html + CSS en index.css). Cambiarlo en caliente era justo lo que en
+  // MIUI/HyperOS dejaba la raya fija bajo la barra de estado; al no tocarlo nunca,
+  // esa raya no puede aparecer.
   const changeTheme = (t) => {
-    if (t === appTheme) return;
-    try { localStorage.setItem("retador_theme", t); } catch {}
-    // En MIUI/HyperOS, cambiar el color de la barra con la app ABIERTA deja una
-    // raya fija bajo la barra de estado que solo se limpia al arrancar de cero.
-    // Por eso, al cambiar de tema, refrescamos: la app vuelve a arrancar en el
-    // tema nuevo (leído de localStorage) con la barra limpia, sin filito. Antes
-    // de recargar dejamos el fondo del nuevo tema para que el refresco no
-    // parpadee de un color a otro.
-    const bg = bgForTheme(t);
-    try {
-      setThemeColor(bg);
-      document.documentElement.style.background = bg;
-      document.body.style.background = bg;
-    } catch {}
-    if (typeof window !== "undefined") { window.location.reload(); return; }
     setAppTheme(t);
+    try { localStorage.setItem("retador_theme", t); } catch {}
   };
-
-  // Pintado inicial: al montar (y si el sistema cambia de modo estando en "auto"),
-  // deja la barra del color del tema efectivo. Es un único ajuste, no un cambio en
-  // caliente, así que no genera ninguna raya.
-  useEffect(() => {
-    setThemeColor(appTk.BG);
-    if (appTheme !== "auto" || typeof window === "undefined") return;
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const onSys = () => setThemeColor(bgForTheme("auto"));
-    mq.addEventListener?.("change", onSys);
-    return () => mq.removeEventListener?.("change", onSys);
-  }, [appTheme]);
 
   const changeTextScale = (s) => {
     setAppTextScale(s);

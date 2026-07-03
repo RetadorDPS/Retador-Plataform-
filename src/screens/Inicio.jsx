@@ -94,14 +94,13 @@ export function RetadorInicio({ onGoogle }) {
   );
 }
 
-// Pantalla breve mientras se comprueba si hay sesión guardada. Toma el fondo del
-// tema guardado para que, al refrescar tras cambiar de tema, no haya un destello
-// oscuro en modo claro.
+// Pantalla breve mientras se comprueba si hay sesión guardada. Sigue el modo
+// claro/oscuro del teléfono, igual que la barra del sistema, para que no haya un
+// destello de otro color.
 export function PantallaCargando() {
   let bg = "#080808";
   try {
-    const t = localStorage.getItem("retador_theme") || "auto";
-    const dark = t === "dark" || (t === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    const dark = !window.matchMedia || window.matchMedia("(prefers-color-scheme: dark)").matches;
     bg = dark ? "#080808" : "#FFFFFF";
   } catch (e) {}
   return (

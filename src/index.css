@@ -9,9 +9,17 @@ body,
   margin: 0;
 }
 
-/* Fondo base oscuro (pantalla de inicio) para evitar destellos antes de que
-   cargue el JS. La app repinta html/body con el tono del tema activo. */
+/* Fondo del documento = modo claro/oscuro del teléfono, de forma nativa (CSS),
+   igual que la barra del sistema. Así la zona bajo la barra de estado siempre es
+   del mismo tono que el resto y todo se ve como una sola hoja, sin cortes ni
+   raya. No lo tocamos por JavaScript. */
 html,
 body {
-  background-color: #080808;
+  background-color: #FFFFFF;
+}
+@media (prefers-color-scheme: dark) {
+  html,
+  body {
+    background-color: #080808;
+  }
 }

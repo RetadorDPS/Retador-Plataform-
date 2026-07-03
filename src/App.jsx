@@ -331,10 +331,27 @@ function AppShell({ sessionUser }) {
   // doble escala en los pocos componentes que multiplicaban por ts.
   const appTk = { ...(effectiveTheme === "light" ? LIGHT_T : DARK_T), imgScale: densZoom, ts: 1 };
 
+  // Aviso al cambiar de tema: en algunos teléfonos (Xiaomi/MIUI) la barra de
+  // estado no toma bien el color nuevo hasta reabrir la app, así que avisamos con
+  // un cartel claro, pintado ya con el tema NUEVO. Inteligente: solo aparece si
+  // el aspecto realmente cambió (p. ej. auto→oscuro con el teléfono ya en oscuro
+  // no muestra nada) y se cierra solo o al tocarlo.
+  const [themeNotice, setThemeNotice] = useState(false);
+  const themeNoticeTimer = useRef(null);
   const changeTheme = (t) => {
+    const effOf = (x) => x === "auto"
+      ? (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+      : x;
+    const before = effOf(appTheme);
     setAppTheme(t);
     try { localStorage.setItem("retador_theme", t); } catch {}
+    if (effOf(t) !== before) {
+      setThemeNotice(true);
+      clearTimeout(themeNoticeTimer.current);
+      themeNoticeTimer.current = setTimeout(() => setThemeNotice(false), 8000);
+    }
   };
+  useEffect(() => () => clearTimeout(themeNoticeTimer.current), []);
 
   // Barras del sistema = tono exacto del tema actual. Al cambiar de tema (claro/
   // oscuro) cambia appTk.BG y este efecto vuelve a pintar la meta theme-color al
@@ -542,6 +559,29 @@ function AppShell({ sessionUser }) {
     <AppThCtx.Provider value={appTk}>
     <RCtx.Provider value={rsp}>
     <div style={{ fontFamily: "'Barlow',sans-serif", background: appTk.BG, color: appTk.T1, height: `calc(100dvh / ${densZoom})`, width: `calc(100vw / ${densZoom})`, overflow: "hidden", position: "relative", display: "flex", flexDirection: rsp.isDesktop ? "row" : "column", paddingTop: "calc(env(safe-area-inset-top, 0px) / var(--img-s, 1))" }}>
+
+      {/* Aviso de cambio de tema: pintado con el tema NUEVO (appTk ya es el nuevo).
+          Toca en cualquier parte del cartel para cerrarlo; se cierra solo a los 8 s. */}
+      {themeNotice && (
+        <div onClick={() => { clearTimeout(themeNoticeTimer.current); setThemeNotice(false); }}
+          style={{ position: "fixed", top: "calc(env(safe-area-inset-top, 0px) / var(--img-s, 1) + 12px)", left: "50%", transform: "translateX(-50%)",
+            width: "min(92vw, 400px)", zIndex: 6000, cursor: "pointer",
+            background: appTk.isDark ? "#141414" : "#fff", color: appTk.T1,
+            border: `1px solid ${appTk.isDark ? "#2a2a2a" : "#E4E6EB"}`, borderRadius: 14,
+            padding: "12px 14px", display: "flex", alignItems: "flex-start", gap: 11,
+            boxShadow: appTk.isDark ? "0 10px 30px rgba(0,0,0,.6)" : "0 10px 30px rgba(0,0,0,.16)" }}>
+          <div style={{ width: 34, height: 34, borderRadius: 10, flexShrink: 0, background: "rgba(245,179,1,.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17 }}>
+            {appTk.isDark ? "🌙" : "☀️"}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 800 }}>Tema {appTk.isDark ? "oscuro" : "claro"} activado</div>
+            <div style={{ fontSize: 12, marginTop: 2, lineHeight: 1.45, color: appTk.T2 }}>
+              Para que la app se vea perfecta de arriba a abajo, ciérrala y vuelve a abrirla.
+            </div>
+          </div>
+          <div style={{ marginLeft: "auto", flexShrink: 0, fontSize: 12, fontWeight: 700, color: "#F5B301", padding: "2px 2px 0 4px" }}>OK</div>
+        </div>
+      )}
 
       {/* Sidebar nav – solo desktop */}
       {rsp.isDesktop && (

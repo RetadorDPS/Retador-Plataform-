@@ -1047,6 +1047,8 @@ function FP_SettingsScreen({ onClose }) {
   const [notif,      setNotif]      = useState({ ventas:true, mensajes:true, reseñas:true, promo:false });
   const [privacy,    setPrivacy]    = useState("public");
   const [subScreen,  setSubScreen]  = useState(null); // null | "email" | "password"
+  const [toast,      setToast]      = useState(null);
+  function toast_(msg) { setToast(msg); setTimeout(() => setToast(null), 2500); }
 
   // INTEGRATION POINT:
   // const { settings, save } = useSettings()   → GET/POST /api/user/settings
@@ -1204,6 +1206,20 @@ function FP_SettingsScreen({ onClose }) {
           Motor de Arranque · v1.0.0
         </div>
       </div>
+
+      {/* TOAST */}
+      {toast && (
+        <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)",
+          background:FP_C.surfaceTop, color:FP_C.positive,
+          border:`1px solid ${FP_C.positiveDim}`,
+          borderRadius:8, padding:"9px 16px", fontSize:12, fontWeight:600,
+          fontFamily:FP_FH, zIndex:700, boxShadow:"0 8px 24px rgba(0,0,0,0.6)",
+          display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap",
+          letterSpacing:"0.2px" }}>
+          <FP_Icon d={FP_Icons.check} size={14} color={FP_C.positive}/>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

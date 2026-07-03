@@ -7,7 +7,7 @@
 //   · Otros orígenes (Supabase, imágenes externas): NO se tocan → van directo a la red.
 // No interfiere con el login de Google, el perfil, los productos ni las tasas.
 // ─────────────────────────────────────────────────────────────────────────────
-const CACHE = "retador-pwa-v11";
+const CACHE = "retador-pwa-v12";
 const START = self.registration.scope; // p.ej. https://retadordps.github.io/Retador-Plataform-/
 
 self.addEventListener("install", (event) => {

@@ -346,37 +346,13 @@ function AppShell({ sessionUser }) {
     } catch (e) {}
   }, [appTk.BG]);
 
-  // Al montar, si veníamos de un cambio de tema, restaura la pantalla donde estaba
-  // el usuario (guardada antes de recargar), para que el re-montaje no lo saque al
-  // inicio. Se aplica una sola vez y se borra.
-  useEffect(() => {
-    let snap;
-    try { snap = JSON.parse(sessionStorage.getItem("retador_nav") || "null"); } catch { snap = null; }
-    if (!snap) return;
-    try { sessionStorage.removeItem("retador_nav"); } catch {}
-    if (snap.scr)  setScr(snap.scr);
-    if (snap.tab)  setTab(snap.tab);
-    if (snap.mScr) setMScr(snap.mScr);
-    if (snap.pScr) setPScr(snap.pScr);
-    if (snap.eScr) setEScr(snap.eScr);
-  }, []);
-
-  // Cambio de tema. CLAVE contra el "filito": en MIUI/HyperOS, cambiar el color de
-  // la barra del sistema con la app ABIERTA deja una raya fija bajo la barra de
-  // estado. Fijar ese color UNA vez al arrancar NO la deja (por eso al abrir la
-  // app se ve limpia). Así que, al cambiar de tema, guardamos la elección y la
-  // pantalla actual y RE-MONTAMOS la app (recarga): el arranque fija el color del
-  // nuevo tema limpio, como al abrir la app. Resultado: cambia el tema al completo
-  // (barra incluida) sin que aparezca nunca la raya, conservando el reloj arriba.
+  // Cambio de tema, al instante. La app va a PANTALLA COMPLETA (manifest display
+  // "fullscreen"): no hay barra del sistema encima, así que cambiar de tema solo
+  // repinta el contenido (React) y NUNCA aparece la raya, porque ya no existe la
+  // barra que tu teléfono "fijaba" al arrancar. El interruptor cambia todo al vuelo.
   const changeTheme = (t) => {
-    if (t === appTheme) return;
-    try { localStorage.setItem("retador_theme", t); } catch {}
-    try { sessionStorage.setItem("retador_nav", JSON.stringify({ scr, tab, mScr, pScr, eScr })); } catch {}
-    if (typeof window !== "undefined" && typeof window.location?.reload === "function") {
-      window.location.reload();
-      return;
-    }
     setAppTheme(t);
+    try { localStorage.setItem("retador_theme", t); } catch {}
   };
 
   const changeTextScale = (s) => {

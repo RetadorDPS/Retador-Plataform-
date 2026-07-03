@@ -8,3 +8,10 @@ body,
   height: 100%;
   margin: 0;
 }
+
+/* Fondo base oscuro (pantalla de inicio) para evitar destellos antes de que
+   cargue el JS. La app repinta html/body con el tono del tema activo. */
+html,
+body {
+  background-color: #09090b;
+}

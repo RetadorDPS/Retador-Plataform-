@@ -49,6 +49,7 @@ import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
 import InstallPrompt from "./pwa/InstallPrompt.jsx";
+import { setThemeColor } from "./pwa/themeColor.js";
 
 
 // OMNIPANEL — panel admin integrado (CSS aislado bajo .omni)
@@ -69,6 +70,11 @@ export default function App() {
     });
     return () => { alive = false; sub?.subscription?.unsubscribe?.(); };
   }, []);
+
+  // Pantalla de inicio y de carga son SIEMPRE oscuras: cuando no hay sesión,
+  // las barras del sistema se ponen del mismo tono (#09090b). Al entrar, AppShell
+  // toma el control y las sincroniza con el tema elegido (claro/oscuro).
+  useEffect(() => { if (!sessionUser) setThemeColor("#09090b"); }, [sessionUser]);
 
   return (
     <>
@@ -329,6 +335,11 @@ function AppShell({ sessionUser }) {
     setAppTheme(t);
     try { localStorage.setItem("retador_theme", t); } catch {}
   };
+
+  // Barras del sistema = tono exacto del tema actual. Al cambiar de tema (claro/
+  // oscuro) cambia appTk.BG y este efecto vuelve a pintar la meta theme-color al
+  // instante, para que NUNCA se note un corte entre las barras y el fondo.
+  useEffect(() => { setThemeColor(appTk.BG); }, [appTk.BG]);
   const changeTextScale = (s) => {
     setAppTextScale(s);
     try { localStorage.setItem("retador_txt_scale", String(s)); } catch {}
@@ -530,7 +541,7 @@ function AppShell({ sessionUser }) {
   return (
     <AppThCtx.Provider value={appTk}>
     <RCtx.Provider value={rsp}>
-    <div style={{ fontFamily: "'Barlow',sans-serif", background: appTk.BG, color: appTk.T1, height: `calc(100dvh / ${densZoom})`, width: `calc(100vw / ${densZoom})`, overflow: "hidden", position: "relative", display: "flex", flexDirection: rsp.isDesktop ? "row" : "column" }}>
+    <div style={{ fontFamily: "'Barlow',sans-serif", background: appTk.BG, color: appTk.T1, height: `calc(100dvh / ${densZoom})`, width: `calc(100vw / ${densZoom})`, overflow: "hidden", position: "relative", display: "flex", flexDirection: rsp.isDesktop ? "row" : "column", paddingTop: "calc(env(safe-area-inset-top, 0px) / var(--img-s, 1))" }}>
 
       {/* Sidebar nav – solo desktop */}
       {rsp.isDesktop && (

@@ -1835,7 +1835,7 @@ export function BottomNav({ tab, onTab, unread, hidden }) {
     { id: "perfil",   ic: "user",   label: "Perfil" },
   ];
   return (
-    <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 60, background: isDark ? "rgba(6,6,6,.97)" : "rgba(255,255,255,.97)", backdropFilter: "blur(22px)", borderTop: `1px solid ${B}`, display: "flex", alignItems: "center", justifyContent: "space-around", padding: "8px 4px 20px", transform: hidden ? "translateY(115%)" : "translateY(0)", transition: "transform .28s cubic-bezier(.4,0,.2,1)", willChange: "transform" }}>
+    <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 60, background: isDark ? "rgba(6,6,6,.97)" : "rgba(255,255,255,.97)", backdropFilter: "blur(22px)", borderTop: `1px solid ${B}`, display: "flex", alignItems: "center", justifyContent: "space-around", padding: "8px 4px calc(20px + env(safe-area-inset-bottom, 0px) / var(--img-s, 1))", transform: hidden ? "translateY(115%)" : "translateY(0)", transition: "transform .28s cubic-bezier(.4,0,.2,1)", willChange: "transform" }}>
       {items.map(it => {
         const active = tab === it.id;
         return (

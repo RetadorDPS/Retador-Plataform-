@@ -49,6 +49,16 @@ import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
 import InstallPrompt from "./pwa/InstallPrompt.jsx";
+import { setThemeColor } from "./pwa/themeColor.js";
+
+// Color de fondo (y de las barras del sistema) que corresponde a un tema dado.
+// "auto" sigue el modo claro/oscuro del teléfono.
+function bgForTheme(t) {
+  const eff = t === "auto"
+    ? (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : t;
+  return eff === "light" ? LIGHT_T.BG : DARK_T.BG;
+}
 
 
 // OMNIPANEL — panel admin integrado (CSS aislado bajo .omni)
@@ -69,6 +79,11 @@ export default function App() {
     });
     return () => { alive = false; sub?.subscription?.unsubscribe?.(); };
   }, []);
+
+  // Pantalla de inicio y de carga son SIEMPRE oscuras: cuando no hay sesión, las
+  // barras del sistema van del mismo tono (#080808). Al entrar, AppShell toma el
+  // control y las sincroniza con el tema elegido (claro/oscuro).
+  useEffect(() => { if (!sessionUser) setThemeColor("#080808"); }, [sessionUser]);
 
   return (
     <>
@@ -326,15 +341,26 @@ function AppShell({ sessionUser }) {
   const appTk = { ...(effectiveTheme === "light" ? LIGHT_T : DARK_T), imgScale: densZoom, ts: 1 };
 
   const changeTheme = (t) => {
+    // Pinta la barra del sistema del color del NUEVO tema en el MISMO instante
+    // (síncrono), antes de que React repinte. Así barra y fondo cambian juntos en
+    // el mismo frame y no queda la raya/filito bajo la barra de estado.
+    setThemeColor(bgForTheme(t));
     setAppTheme(t);
     try { localStorage.setItem("retador_theme", t); } catch {}
   };
 
-  // NOTA: NO tocamos <meta theme-color> por JavaScript. En MIUI/HyperOS, cambiar
-  // ese meta en caliente convierte la barra de estado transparente ("enteriza")
-  // en una barra opaca con una raya divisoria que ya no se quita. Dejamos la
-  // barra transparente y quieta; el fondo real de la app (appTk.BG en el
-  // contenedor raíz) se ve a través de ella y acompaña al tema solo.
+  // Pintado inicial: al montar (y si el sistema cambia de modo estando en "auto"),
+  // deja la barra del color del tema efectivo. Es un único ajuste, no un cambio en
+  // caliente, así que no genera ninguna raya.
+  useEffect(() => {
+    setThemeColor(appTk.BG);
+    if (appTheme !== "auto" || typeof window === "undefined") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSys = () => setThemeColor(bgForTheme("auto"));
+    mq.addEventListener?.("change", onSys);
+    return () => mq.removeEventListener?.("change", onSys);
+  }, [appTheme]);
+
   const changeTextScale = (s) => {
     setAppTextScale(s);
     try { localStorage.setItem("retador_txt_scale", String(s)); } catch {}

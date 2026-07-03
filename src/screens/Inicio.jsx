@@ -32,7 +32,7 @@ function GoogleG({ size = 19 }) {
 
 export function RetadorInicio({ onGoogle }) {
   return (
-    <div style={{ minHeight: "100vh", width: "100%", background: "#09090b", display: "flex", justifyContent: "center", WebkitFontSmoothing: "antialiased" }}>
+    <div style={{ minHeight: "100vh", width: "100%", background: "#080808", display: "flex", justifyContent: "center", WebkitFontSmoothing: "antialiased" }}>
       <style>{`
         @keyframes retShine { 0%{background-position:200% 0} 22%{background-position:-80% 0} 100%{background-position:-80% 0} }
         @keyframes retGlow { 0%,100%{opacity:.5;transform:scale(1)} 50%{opacity:.8;transform:scale(1.06)} }
@@ -40,9 +40,9 @@ export function RetadorInicio({ onGoogle }) {
         .ret-shine{ background:linear-gradient(110deg,transparent 38%,rgba(255,255,255,.9) 50%,transparent 62%); background-size:250% 100%; -webkit-background-clip:text;background-clip:text;color:transparent; animation:retShine 5s ease-in-out infinite; }
         @media (prefers-reduced-motion: reduce){ .ret-shine{animation:none} .ret-glow{animation:none!important} }
       `}</style>
-      <div style={{ position: "relative", width: "100%", maxWidth: 430, background: "#09090b", overflow: "hidden" }}>
+      <div style={{ position: "relative", width: "100%", maxWidth: 430, background: "#080808", overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", backgroundImage: "linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px)", backgroundSize: "58px 58px" }} />
-        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(120% 80% at 50% 0%, transparent 55%, #09090b 100%)" }} />
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(120% 80% at 50% 0%, transparent 55%, #080808 100%)" }} />
         <div style={{ position: "relative", zIndex: 10, padding: "26px 24px 34px", minHeight: "100vh", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ color: "#fff", fontSize: 14, letterSpacing: "0.18em", fontWeight: 800, fontStyle: "italic", fontFamily: INICIO_DISPLAY }}>RETADOR</span>
@@ -97,7 +97,7 @@ export function RetadorInicio({ onGoogle }) {
 // Pantalla breve mientras se comprueba si hay sesión guardada.
 export function PantallaCargando() {
   return (
-    <div style={{ minHeight: "100vh", background: "#09090b", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ minHeight: "100vh", background: "#080808", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <Loader2 size={30} style={{ color: INICIO_GOLD, animation: "spin 1s linear infinite" }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>

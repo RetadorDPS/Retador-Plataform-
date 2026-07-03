@@ -13,5 +13,5 @@ body,
    cargue el JS. La app repinta html/body con el tono del tema activo. */
 html,
 body {
-  background-color: #09090b;
+  background-color: #080808;
 }

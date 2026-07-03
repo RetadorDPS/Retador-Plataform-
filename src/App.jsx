@@ -72,9 +72,9 @@ export default function App() {
   }, []);
 
   // Pantalla de inicio y de carga son SIEMPRE oscuras: cuando no hay sesión,
-  // las barras del sistema se ponen del mismo tono (#09090b). Al entrar, AppShell
+  // las barras del sistema se ponen del mismo tono (#080808). Al entrar, AppShell
   // toma el control y las sincroniza con el tema elegido (claro/oscuro).
-  useEffect(() => { if (!sessionUser) setThemeColor("#09090b"); }, [sessionUser]);
+  useEffect(() => { if (!sessionUser) setThemeColor("#080808"); }, [sessionUser]);
 
   return (
     <>

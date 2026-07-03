@@ -49,7 +49,6 @@ import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
 import InstallPrompt from "./pwa/InstallPrompt.jsx";
-import { setThemeColor } from "./pwa/themeColor.js";
 
 
 // OMNIPANEL — panel admin integrado (CSS aislado bajo .omni)
@@ -70,11 +69,6 @@ export default function App() {
     });
     return () => { alive = false; sub?.subscription?.unsubscribe?.(); };
   }, []);
-
-  // Pantalla de inicio y de carga son SIEMPRE oscuras: cuando no hay sesión,
-  // las barras del sistema se ponen del mismo tono (#080808). Al entrar, AppShell
-  // toma el control y las sincroniza con el tema elegido (claro/oscuro).
-  useEffect(() => { if (!sessionUser) setThemeColor("#080808"); }, [sessionUser]);
 
   return (
     <>
@@ -336,10 +330,11 @@ function AppShell({ sessionUser }) {
     try { localStorage.setItem("retador_theme", t); } catch {}
   };
 
-  // Barras del sistema = tono exacto del tema actual. Al cambiar de tema (claro/
-  // oscuro) cambia appTk.BG y este efecto vuelve a pintar la meta theme-color al
-  // instante, para que NUNCA se note un corte entre las barras y el fondo.
-  useEffect(() => { setThemeColor(appTk.BG); }, [appTk.BG]);
+  // NOTA: NO tocamos <meta theme-color> por JavaScript. En MIUI/HyperOS, cambiar
+  // ese meta en caliente convierte la barra de estado transparente ("enteriza")
+  // en una barra opaca con una raya divisoria que ya no se quita. Dejamos la
+  // barra transparente y quieta; el fondo real de la app (appTk.BG en el
+  // contenedor raíz) se ve a través de ella y acompaña al tema solo.
   const changeTextScale = (s) => {
     setAppTextScale(s);
     try { localStorage.setItem("retador_txt_scale", String(s)); } catch {}

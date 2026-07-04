@@ -118,7 +118,19 @@ function AppShell({ sessionUser }) {
   const [editProd,  setEditProd]  = useState(null);
   const [confirmCfg, setConfirmCfg] = useState(null);
   const askConfirm = (msg, onYes) => setConfirmCfg({ msg, onYes });
-  const updateProduct = (id, changes) => setProducts(prev => prev.map(p => p.id === id ? { ...p, ...changes } : p));
+  const updateProduct = async (id, changes) => {
+    const upd = {};
+    if (changes.title       !== undefined) upd.title       = changes.title;
+    if (changes.price       !== undefined) upd.price       = Number(changes.price) || 0;
+    if (changes.description !== undefined) upd.description = changes.description;
+    if (changes.cat         !== undefined) upd.cat         = changes.cat || null;
+    if (changes.subcat      !== undefined) upd.subcat      = changes.subcat || null;
+    if (changes.images      !== undefined) upd.images      = Array.isArray(changes.images) ? changes.images : [];
+    const { data, error } = await supabase.from("products").update(upd).eq("id", id).select().single();
+    if (error) { flash("⚠️ " + (error.message || "No se pudo editar")); return; }
+    setProducts(prev => prev.map(p => p.id === id ? mapProduct(data) : p));
+    flash("✏️ Producto actualizado");
+  };
   const [selChat,   setSelChat]   = useState(null);
   const [selSeller, setSelSeller] = useState(null);
 
@@ -390,15 +402,32 @@ function AppShell({ sessionUser }) {
     flash("👋 Sesión cerrada (demo)");
   };
 
-  const handlePublish = d => {
-    const meName = profileData?.name || user?.name || "Usuario";
-    const meId = user?.id || meName;
-    const newProduct = { ...d, id: Date.now(), seller_id: meId, seller_name: meName, image: d.image || "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400" };
-    setProducts(prev => [newProduct, ...prev]);
+  const handlePublish = async d => {
+    if (!user?.id) { flash("⚠️ Debes iniciar sesión para publicar"); return; }
+    const row = {
+      seller_id: user.id,
+      title: d.title,
+      description: d.desc || null,
+      price: Number(d.price) || 0,
+      orig_price: d.orig_price ? Number(d.orig_price) : null,
+      currency: d.currency || "USD",
+      cat: d.cat || null,
+      subcat: d.subcat || null,
+      images: Array.isArray(d.images) ? d.images : [],
+      badge: d.badge || null,
+      ship_modes: d.shipModes || { local: true, intl: false, persona: false },
+      ship_price: Number(d.shippingPrice) || 0,
+      location: d.location || null,
+    };
+    const { data, error } = await supabase.from("products").insert(row).select().single();
+    if (error) { flash("⚠️ " + (error.message || "No se pudo publicar")); return; }
+    setProducts(prev => [mapProduct(data), ...prev]);
     flash("✅ Producto publicado — visible para todos");
   };
 
-  const handleDelete = id => {
+  const handleDelete = async id => {
+    const { error } = await supabase.from("products").update({ status: "deleted" }).eq("id", id);
+    if (error) { flash("⚠️ " + (error.message || "No se pudo eliminar")); return; }
     setProducts(prev => prev.filter(p => p.id !== id));
     flash("🗑️ Eliminado");
   };
@@ -795,8 +824,8 @@ function AppShell({ sessionUser }) {
                 onDelivery={() => { setTab("envios"); setEScr("local"); }}
                 onChat={requestChat} onViewProfile={id => { setSelSeller(id); setMScr("sellerProfile"); }}
                 onBuy={handleBuy} onFav={toggleFav} isFav={favorites.has(selProd.id)} canChat={hasOrderWith(selProd.seller_id)}
-                onDelete={(selProd.seller_id === (user?.id || user?.name) || selProd.seller_name === (profileData?.name || user?.name)) ? (() => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => { handleDelete(selProd.id); if (prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); } else setMScr("home"); })) : null}
-                onEdit={(selProd.seller_id === (user?.id || user?.name) || selProd.seller_name === (profileData?.name || user?.name)) ? (() => setEditProd(selProd)) : null}
+                onDelete={(selProd.seller_id === user?.id) ? (() => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => { handleDelete(selProd.id); if (prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); } else setMScr("home"); })) : null}
+                onEdit={(selProd.seller_id === user?.id) ? (() => setEditProd(selProd)) : null}
                 flash={flash} requireAuth={requireAuth} user={user}
               />
             )}
@@ -847,7 +876,7 @@ function AppShell({ sessionUser }) {
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
               const paid = payments.filter(p => p.sellerName === me).reduce((a, p) => a + (p.amount || 0), 0);
               const myDebt = Math.max(0, accrued - paid);
-              return <FreeProfileScreen onBack={() => setPScr("main")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={(p) => addVerification({ userName: me || "Usuario", ...p })} isVerified={verifiedUsers.includes(me)} onRequestPlan={(plan) => addPlanRequest({ userName: me || "Usuario", plan })} currentPlan={userPlans[me] || "Básico"} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={products.filter(p => (p.seller_name || p.seller_id) === me)} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} />;
+              return <FreeProfileScreen onBack={() => setPScr("main")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={(p) => addVerification({ userName: me || "Usuario", ...p })} isVerified={verifiedUsers.includes(me)} onRequestPlan={(plan) => addPlanRequest({ userName: me || "Usuario", plan })} currentPlan={userPlans[me] || "Básico"} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={products.filter(p => p.seller_id === user?.id)} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} />;
             })()}
             {pScr === "messages" && <MessagesScreen user={user} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setPScr("chat"); }} />}
             {pScr === "chat"     && selChat && <ChatScreen chat={selChat} user={user} onBack={() => setPScr("messages")} flash={flash} />}

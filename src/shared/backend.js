@@ -47,7 +47,11 @@ export const loadProducts = async () => {
 export const getFeed = async (ctx) => loadProducts();
 export const saveProduct = async (data, userId) => ({ ...data, id: Date.now(), seller_id: userId, seller_name: MOCK_USER.name });
 export const deleteProduct = async (id) => {};
-export const getProductsBySeller = async (id) => MOCK_PRODUCTS.filter(p => p.seller_id === id);
+export const getProductsBySeller = async (id) => {
+  const { data, error } = await supabase.from("products").select("*").eq("seller_id", id).neq("status", "deleted").order("created_at", { ascending: false });
+  if (error) { console.error("getProductsBySeller:", error.message); return []; }
+  return (data || []).map(mapProduct);
+};
 export const uploadImage = async (file) => URL.createObjectURL(file);
 
 // Conversation & Message functions

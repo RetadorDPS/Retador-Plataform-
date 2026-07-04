@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Banknote, Fingerprint, Home, KeyRound, Landmark, Phone, PlusCircle, QrCode, Search, Send, ShieldCheck, ShoppingBag, UserCircle2, Users, Wallet, AlertCircle, ArrowLeft, BadgeCheck, Building2, Camera, Check, CheckCircle2, ChevronRight, Copy, CreditCard, Eye, EyeOff, Info, Loader2, Lock, Plus, Receipt, Share2, Trash2 } from "lucide-react";
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Banknote, Fingerprint, History, Home, KeyRound, Landmark, Phone, PlusCircle, QrCode, Search, Send, ShieldCheck, ShoppingBag, UserCircle2, Users, Wallet, AlertCircle, ArrowLeft, BadgeCheck, Building2, Camera, Check, CheckCircle2, ChevronRight, Copy, CreditCard, Eye, EyeOff, Info, Loader2, Lock, Plus, Receipt, Share2, Trash2 } from "lucide-react";
 
 const WalletApp = (() => {
 

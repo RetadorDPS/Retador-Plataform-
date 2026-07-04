@@ -20,10 +20,28 @@ export const authSignIn = async (email, password) => ({ user: MOCK_USER });
 export const authSignOut = async () => {};
 export const authGetSession = async () => ({ user: MOCK_USER });
 
-// User functions
-export const getUserById = async (id) => MOCK_USER;
-export const getUserName = async (id) => MOCK_USER.name;
-export const updateUserName = async (id, name) => ({ ...MOCK_USER, name });
+// User functions — leen la tabla `profiles` del backend (nombre/avatar reales).
+// Con caché en memoria para no repetir consultas por el mismo usuario.
+const _profileCache = new Map();
+export const getUserById = async (id) => {
+  if (!id) return null;
+  if (_profileCache.has(id)) return _profileCache.get(id);
+  try {
+    const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url").eq("id", id).single();
+    if (error || !data) { _profileCache.set(id, null); return null; }
+    const p = { id: data.id, name: data.full_name || "Vendedor", avatar: data.avatar_url || null };
+    _profileCache.set(id, p);
+    return p;
+  } catch (e) { return null; }
+};
+export const getUserName = async (id) => {
+  const p = await getUserById(id);
+  return p?.name || "Vendedor";
+};
+export const updateUserName = async (id, name) => {
+  try { await supabase.from("profiles").update({ full_name: name }).eq("id", id); _profileCache.delete(id); } catch (e) {}
+  return { id, name };
+};
 
 // Product functions
 // ── Productos REALES del backend ─────────────────────────────────────────────
@@ -52,7 +70,52 @@ export const getProductsBySeller = async (id) => {
   if (error) { console.error("getProductsBySeller:", error.message); return []; }
   return (data || []).map(mapProduct);
 };
-export const uploadImage = async (file) => URL.createObjectURL(file);
+// ── Subida REAL de imágenes de producto ──────────────────────────────────────
+// 1) Comprime la foto en el teléfono (máx. 1280px, JPEG) para que pese poco.
+// 2) La sube al almacenamiento de Supabase (bucket público "product-images") y
+//    devuelve su URL pública — visible para todos y permanente.
+// 3) Si el bucket no existe o falla la subida, devuelve la foto comprimida en
+//    formato incrustado (data URL): se guarda dentro del producto y también se
+//    ve en todos lados. (Antes se usaba URL.createObjectURL, una dirección
+//    temporal que moría al recargar — por eso las fotos "desaparecían".)
+const compressImage = (file, maxSide = 1280, quality = 0.82) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error("No se pudo leer la imagen"));
+  reader.onload = () => {
+    const img = new window.Image();
+    img.onerror = () => reject(new Error("Imagen no válida"));
+    img.onload = () => {
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("No se pudo comprimir")), "image/jpeg", quality);
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+const blobToDataURL = (blob) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onerror = () => reject(new Error("No se pudo procesar la imagen"));
+  r.onload = () => resolve(r.result);
+  r.readAsDataURL(blob);
+});
+export const uploadImage = async (file, userId) => {
+  const blob = await compressImage(file);
+  try {
+    const path = `${userId || "anon"}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const { error } = await supabase.storage.from("product-images").upload(path, blob, { contentType: "image/jpeg", upsert: false });
+    if (error) throw error;
+    const { data } = supabase.storage.from("product-images").getPublicUrl(path);
+    if (data?.publicUrl) return data.publicUrl;
+    throw new Error("Sin URL pública");
+  } catch (e) {
+    console.warn("uploadImage: almacenamiento no disponible, usando imagen incrustada →", e?.message || e);
+    return blobToDataURL(blob);
+  }
+};
 
 // Conversation & Message functions
 export const sendMessage = async (convId, senderId, text) => ({ id: Date.now(), text, sender_id: senderId, created_at: new Date() });

@@ -409,7 +409,7 @@ function AppShell({ sessionUser }) {
       title: d.title,
       description: d.desc || null,
       price: Number(d.price) || 0,
-      orig_price: d.orig_price ? Number(d.orig_price) : null,
+      orig_price: (d.orig_price ?? d.orig) ? Number(d.orig_price ?? d.orig) : null,
       currency: d.currency || "USD",
       cat: d.cat || null,
       subcat: d.subcat || null,
@@ -833,7 +833,8 @@ function AppShell({ sessionUser }) {
               <FreeProfileScreen
                 onBack={() => setMScr(selProd ? "product" : "home")}
                 user={user}
-                initialProfile={{ name: selSeller, username: selSeller }}
+                sellerId={selSeller}
+                initialProfile={{}}
                 onProfileUpdate={() => {}}
                 isOwner={false}
                 onChat={requestChat}

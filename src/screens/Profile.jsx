@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, ratingForName, useAt, useR, signOutUser } from "../shared/index.js";
+import { G, Ic, getUserById, ratingForName, useAt, useR, signOutUser } from "../shared/index.js";
 
 export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProfile, onAdmin, onWallet, onTools, onCourier, isOwner, profileData = {} }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
@@ -1325,7 +1325,7 @@ function FP_ReportModal({ targetName, onClose, onSubmit, C }) {
     </div>
   );
 }
-export function FreeProfileScreen({ onBack, user, initialProfile = {}, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, onRequestPlan, currentPlan = "Básico", plans = [], myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct }) {
+export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, onRequestPlan, currentPlan = "Básico", plans = [], myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const FP_C = useFP_C();
   const isOwner = isOwnerProp !== undefined ? isOwnerProp : FP_MOCK_IS_OWNER;
@@ -1345,15 +1345,31 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, onProfile
 
   const defaultProfile = {
     avatar:   initialProfile.avatar   || { type:"emoji", value:"😊" },
-    name:     initialProfile.name     || user?.name || "Usuario",
-    username: initialProfile.username || (user?.email ? user.email.split("@")[0] : "usuario"),
-    email:    initialProfile.email    || user?.email || "",
+    name:     initialProfile.name     || (isOwner ? (user?.name || "Usuario") : "Vendedor"),
+    username: initialProfile.username || (isOwner && user?.email ? user.email.split("@")[0] : ""),
+    // El correo es privado: solo se usa en el perfil PROPIO (nunca el del visitante
+    // como relleno del perfil de otra persona).
+    email:    initialProfile.email    || (isOwner ? (user?.email || "") : ""),
     bio:      "",
     isVerified: false,
   };
 
   const [profile, setProfile] = useState(defaultProfile);
   const [pd, setPd] = useState({ ...defaultProfile });
+
+  // Perfil de OTRO usuario: trae su nombre/avatar reales desde la tabla profiles
+  // del backend (por su id). Mientras carga se muestra "Vendedor", nunca el id.
+  useEffect(() => {
+    if (!sellerId || isOwner) return;
+    let alive = true;
+    getUserById(sellerId).then(p => {
+      if (!alive || !p?.name) return;
+      const uname = String(p.name).toLowerCase().replace(/[^a-z0-9._]/g, "");
+      setProfile(prev => ({ ...prev, name: p.name, username: uname, avatar: p.avatar ? { type: "photo", url: p.avatar } : prev.avatar }));
+      setPd(prev => ({ ...prev, name: p.name, username: uname }));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [sellerId, isOwner]);
 
   const [about, setAbout] = useState({
     city:"Guadalajara", state:"Jalisco", country:"México",
@@ -1389,10 +1405,11 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, onProfile
     toast_("Reseña publicada");
   }
 
-  const avgRating = (reviews.reduce((a,r) => a + r.stars, 0) / reviews.length).toFixed(1);
+  // Sin reseñas no hay promedio (evita NaN): avgRating queda null y se muestra "Nuevo".
+  const avgRating = reviews.length ? (reviews.reduce((a,r) => a + r.stars, 0) / reviews.length).toFixed(1) : null;
   const ratingDist = [5,4,3,2,1].map(s => ({
     stars:s,
-    pct: Math.round(reviews.filter(r => r.stars===s).length / reviews.length * 100),
+    pct: reviews.length ? Math.round(reviews.filter(r => r.stars===s).length / reviews.length * 100) : 0,
   }));
 
   return (
@@ -1496,15 +1513,17 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, onProfile
             fontFamily:FP_FH, marginBottom:3 }}>
             {profile.name}
           </div>
-          <div style={{ fontSize:12, color:FP_C.textSecondary, marginBottom:8 }}>
-            @{profile.username}{profile.email ? " · " + profile.email : ""}
-          </div>
+          {profile.username ? (
+            <div style={{ fontSize:12, color:FP_C.textSecondary, marginBottom:8 }}>
+              @{profile.username}
+            </div>
+          ) : null}
 
           {/* Rating */}
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
-            <FP_StarRow count={Math.round(parseFloat(avgRating))} size={13}/>
+            <FP_StarRow count={avgRating ? Math.round(parseFloat(avgRating)) : 0} size={13}/>
             <span style={{ fontSize:13, fontWeight:700, color:FP_C.textPrimary, fontFamily:FP_FH }}>
-              {avgRating}
+              {avgRating ?? "Nuevo"}
             </span>
             <span style={{ fontSize:12, color:FP_C.textSecondary }}>
               · {reviews.length} reseñas
@@ -1635,27 +1654,10 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, onProfile
               </div>
             )}
 
-            {/* Resp. rápida — INTEGRATION POINT: mostrar si avgResponseTime < 2h en backend */}
-            <div style={{ display:"inline-flex", alignItems:"center", gap:5,
-              background:FP_C.warningDim, border:"1px solid #261C08",
-              borderRadius:6, padding:"4px 10px" }}>
-              <FP_Icon d={FP_Icons.zap} size={12} color={FP_C.warning}/>
-              <span style={{ fontSize:11, color:FP_C.warning, fontWeight:600,
-                fontFamily:FP_FH, letterSpacing:"0.2px" }}>
-                Resp. rápida
-              </span>
-            </div>
-
-            {/* Ventas — INTEGRATION POINT: mostrar conteo real desde backend */}
-            <div style={{ display:"inline-flex", alignItems:"center", gap:5,
-              background:FP_C.accentSoft, border:`1px solid ${FP_C.accentSoft}`,
-              borderRadius:6, padding:"4px 10px" }}>
-              <FP_Icon d={FP_Icons.package} size={12} color={FP_C.accentText}/>
-              <span style={{ fontSize:11, color:FP_C.accentText, fontWeight:600,
-                fontFamily:FP_FH, letterSpacing:"0.2px" }}>
-                60 ventas
-              </span>
-            </div>
+            {/* INTEGRATION POINT: aquí van las insignias reales cuando el backend
+                las provea — "Resp. rápida" (si avgResponseTime < 2h) y el conteo
+                real de ventas. Se quitaron las versiones de ejemplo ("60 ventas")
+                para no mostrar datos falsos a los usuarios. */}
 
           </div>
         </div>

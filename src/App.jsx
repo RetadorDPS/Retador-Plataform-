@@ -336,75 +336,6 @@ function AppShell({ sessionUser }) {
   }, []);
   useEffect(() => { setNavHidden(false); navScrollRef.current = 0; }, [tab, mScr, pScr, eScr]);
 
-  // ── Botón ATRÁS del teléfono: retrocede UN paso dentro de la app en vez de
-  // cerrarla, siguiendo el CAMINO REAL que hizo el usuario (no reglas fijas).
-  //   1) Si hay un overlay anidado registrado (visor de fotos, detalle de subasta,
-  //      crear subasta…), lo cierra.
-  //   2) Si hay un modal de App abierto, lo cierra (del más reciente al más viejo).
-  //   3) Si no, deshace la ÚLTIMA navegación de pantalla/pestaña usando un HISTORIAL
-  //      real (restaura el estado guardado justo antes de ese paso).
-  //   4) En el inicio de Tienda, sin nada que deshacer, sale de la app.
-  // Las pestañas de abajo siguen siendo el atajo instantáneo para salir de un hueco.
-  const navRef = useRef(null);
-  navRef.current = { tab, mScr, pScr, eScr,
-    plusMenu, showCourier, toolApp, showTools, showAdmin, showWallet, showChats, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
-
-  // Historial de navegación (pila de estados de pantalla). Se graba solo cuando
-  // cambia la RUTA (pestaña/pantalla); restaurar no vuelve a grabar (restoringRef).
-  const histRef = useRef([]);
-  const lastSnapRef = useRef(null);
-  const restoringRef = useRef(false);
-  const curSnap = { tab, mScr, pScr, eScr, selProd, selSeller, selOrderId, prodBackTo };
-  useEffect(() => {
-    const prev = lastSnapRef.current;
-    if (prev && !restoringRef.current && (prev.tab !== tab || prev.mScr !== mScr || prev.pScr !== pScr || prev.eScr !== eScr)) {
-      histRef.current.push(prev);
-      if (histRef.current.length > 40) histRef.current.shift();
-    }
-    restoringRef.current = false;
-    lastSnapRef.current = curSnap;
-  }, [tab, mScr, pScr, eScr]);
-  const restoreNav = (snap) => {
-    restoringRef.current = true;
-    setTab(snap.tab); setMScr(snap.mScr); setPScr(snap.pScr); setEScr(snap.eScr);
-    setSelProd(snap.selProd); setSelSeller(snap.selSeller); setSelOrderId(snap.selOrderId); setProdBackTo(snap.prodBackTo);
-  };
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.history) return;
-    const rearm = () => { try { window.history.pushState({ retador: true }, ""); } catch (e) {} };
-    rearm(); // deja una "trampa" para capturar el primer atrás
-    const onPop = () => {
-      const s = navRef.current || {};
-      if (consumeBack()) { rearm(); return; }        // 1) overlays anidados (visor, subasta…)
-      const action = decideSystemBack(s);
-      if (action !== "screens") {                    // 2) modal abierto → cerrarlo
-        switch (action) {
-          case "plusMenu":    setPlusMenu(null);     break;
-          case "editProd":    setEditProd(null);     break;
-          case "confirmCfg":  setConfirmCfg(null);   break;
-          case "buyModal":    setBuyModal(null);     break;
-          case "toolApp":     setToolApp(false);     break;
-          case "showTools":   setShowTools(false);   break;
-          case "showCourier": setShowCourier(false); break;
-          case "showAdmin":   setShowAdmin(false);   break;
-          case "showWallet":  setShowWallet(false);  break;
-          case "showChats":   setShowChats(false);   break;
-          case "showNotif":   setShowNotif(false);   break;
-          case "showCats":    setShowCats(false);    break;
-          case "pubOpen":     setPubOpen(false);     break;
-          default: break;
-        }
-        rearm(); return;
-      }
-      // 3) pantallas: deshacer el último paso con el historial real
-      if (histRef.current.length) { restoreNav(histRef.current.pop()); rearm(); return; }
-      // 4) nada que deshacer → salir de la app
-      window.history.back();
-    };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, []);
 
   const effectiveTheme = appTheme === "auto"
     ? (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")
@@ -536,6 +467,69 @@ function AppShell({ sessionUser }) {
   useEffect(() => { try { localStorage.setItem('retador_promoreq', JSON.stringify(promoRequests)); } catch {} }, [promoRequests]);
   const addPromoRequest = (req) => setPromoRequests(prev => [{ id: 'prm_' + Date.now(), state: 'pending', at: Date.now(), ...req }, ...prev]);
   const [selOrderId, setSelOrderId] = useState(null);
+
+  // ── Botón ATRÁS del teléfono: retrocede UN paso dentro de la app en vez de
+  // cerrarla, siguiendo el CAMINO REAL que hizo el usuario (no reglas fijas).
+  //   1) Overlay anidado registrado (visor de fotos, detalle de subasta…) → cerrar.
+  //   2) Modal de App abierto → cerrarlo (del más reciente al más viejo).
+  //   3) Si no, deshace la ÚLTIMA navegación de pantalla/pestaña con un HISTORIAL real.
+  //   4) En el inicio de Tienda, sin nada que deshacer → salir de la app.
+  // (Va DESPUÉS de declarar todos los estados de navegación que lee, incl. selOrderId.)
+  const navRef = useRef(null);
+  navRef.current = { tab, mScr, pScr, eScr,
+    plusMenu, showCourier, toolApp, showTools, showAdmin, showWallet, showChats, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
+  const histRef = useRef([]);
+  const lastSnapRef = useRef(null);
+  const restoringRef = useRef(false);
+  const curSnap = { tab, mScr, pScr, eScr, selProd, selSeller, selOrderId, prodBackTo };
+  useEffect(() => {
+    const prev = lastSnapRef.current;
+    if (prev && !restoringRef.current && (prev.tab !== tab || prev.mScr !== mScr || prev.pScr !== pScr || prev.eScr !== eScr)) {
+      histRef.current.push(prev);
+      if (histRef.current.length > 40) histRef.current.shift();
+    }
+    restoringRef.current = false;
+    lastSnapRef.current = curSnap;
+  }, [tab, mScr, pScr, eScr]);
+  const restoreNav = (snap) => {
+    restoringRef.current = true;
+    setTab(snap.tab); setMScr(snap.mScr); setPScr(snap.pScr); setEScr(snap.eScr);
+    setSelProd(snap.selProd); setSelSeller(snap.selSeller); setSelOrderId(snap.selOrderId); setProdBackTo(snap.prodBackTo);
+  };
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.history) return;
+    const rearm = () => { try { window.history.pushState({ retador: true }, ""); } catch (e) {} };
+    rearm(); // deja una "trampa" para capturar el primer atrás
+    const onPop = () => {
+      const s = navRef.current || {};
+      if (consumeBack()) { rearm(); return; }        // 1) overlays anidados (visor, subasta…)
+      const action = decideSystemBack(s);
+      if (action !== "screens") {                    // 2) modal abierto → cerrarlo
+        switch (action) {
+          case "plusMenu":    setPlusMenu(null);     break;
+          case "editProd":    setEditProd(null);     break;
+          case "confirmCfg":  setConfirmCfg(null);   break;
+          case "buyModal":    setBuyModal(null);     break;
+          case "toolApp":     setToolApp(false);     break;
+          case "showTools":   setShowTools(false);   break;
+          case "showCourier": setShowCourier(false); break;
+          case "showAdmin":   setShowAdmin(false);   break;
+          case "showWallet":  setShowWallet(false);  break;
+          case "showChats":   setShowChats(false);   break;
+          case "showNotif":   setShowNotif(false);   break;
+          case "showCats":    setShowCats(false);    break;
+          case "pubOpen":     setPubOpen(false);     break;
+          default: break;
+        }
+        rearm(); return;
+      }
+      if (histRef.current.length) { restoreNav(histRef.current.pop()); rearm(); return; }  // 3) historial
+      window.history.back();                         // 4) salir de la app
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   const addOrder = (order) => {
     if (!order) return null;
     registerPerson(order.sellerId || order.sellerName, order.sellerName);

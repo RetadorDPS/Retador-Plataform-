@@ -34,7 +34,7 @@ import {
   CATS, SUBCATS, CatalogContext, CatalogProvider, useCatalog, CatIcon,
   useCSS, Ic, Spin, Logo,
   getPageLayout, liveSlot, LiveBlock, LiveSlot,
-  useScrollDir,
+  useScrollDir, consumeBack, decideSystemBack,
 } from "./shared/index.js";
 import WalletApp from "./screens/Wallet.jsx";
 import ProductToolsApp from "./screens/ProductTools.jsx";
@@ -335,6 +335,52 @@ function AppShell({ sessionUser }) {
     navScrollRef.current = st < 0 ? 0 : st;
   }, []);
   useEffect(() => { setNavHidden(false); navScrollRef.current = 0; }, [tab, mScr, pScr, eScr]);
+
+  // ── Botón ATRÁS del teléfono: retrocede UN paso dentro de la app en vez de
+  // cerrarla. Cada atrás cierra la capa/overlay más reciente o vuelve una pantalla;
+  // solo sale de la app cuando ya estás en el inicio de Tienda. (Las pestañas de
+  // abajo siguen siendo el atajo instantáneo para salir de cualquier hueco.)
+  // El estado actual se lee por navRef para que el manejador nunca quede desfasado.
+  const navRef = useRef(null);
+  navRef.current = { tab, mScr, pScr, eScr, prodBackTo, selProd,
+    plusMenu, showCourier, toolApp, showTools, showAdmin, showWallet, showChats, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.history) return;
+    const rearm = () => { try { window.history.pushState({ retador: true }, ""); } catch (e) {} };
+    rearm(); // deja una "trampa" para capturar el primer atrás
+    const onPop = () => {
+      const s = navRef.current || {};
+      if (consumeBack()) { rearm(); return; }        // overlays anidados (visor de fotos)
+      switch (decideSystemBack(s)) {
+        case "plusMenu":    setPlusMenu(null);     break;
+        case "editProd":    setEditProd(null);     break;
+        case "confirmCfg":  setConfirmCfg(null);   break;
+        case "buyModal":    setBuyModal(null);     break;
+        case "toolApp":     setToolApp(false);     break;
+        case "showTools":   setShowTools(false);   break;
+        case "showCourier": setShowCourier(false); break;
+        case "showAdmin":   setShowAdmin(false);   break;
+        case "showWallet":  setShowWallet(false);  break;
+        case "showChats":   setShowChats(false);   break;
+        case "showNotif":   setShowNotif(false);   break;
+        case "showCats":    setShowCats(false);    break;
+        case "pubOpen":     setPubOpen(false);     break;
+        case "marketScreen":
+          if (s.mScr === "sellerProfile") setMScr(s.selProd ? "product" : "home");
+          else if (s.mScr === "product" && s.prodBackTo === "sellerProfile") { setProdBackTo(null); setMScr("sellerProfile"); }
+          else if (s.mScr === "product" && s.prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); }
+          else setMScr("home");
+          break;
+        case "perfilScreen": setPScr(s.pScr === "order-detail" ? "orders" : "main"); break;
+        case "enviosScreen": setEScr("menu"); break;
+        case "toMarket":     setTab("market"); break;
+        default: window.history.back(); return;      // inicio de Tienda → salir de la app
+      }
+      rearm();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   const effectiveTheme = appTheme === "auto"
     ? (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")

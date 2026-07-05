@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, Logo, Spin, createOrder, densityCols, estimateDeliveryFee, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, useR, useScrollDir } from "../shared/index.js";
+import { BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, Logo, Spin, createOrder, densityCols, estimateDeliveryFee, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, useR, useScrollDir } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -1197,13 +1197,15 @@ function ProductImageViewer({ images = [], index = 0, setIndex, onClose }) {
   const onEnd = () => {
     const mode = g.current.mode; g.current.mode = null;
     if (mode === "pinch") { if (z.scale <= 1.05) reset(); return; }
-    if (z.scale > 1) return;                              // con zoom no cambia de foto
-    if (!g.current.moved) {                               // toque: detectar doble toque
+    if (!g.current.moved) {                               // toque simple → doble toque ALTERNA zoom
       const now = Date.now();
-      if (now - g.current.lastTap < 300) { setZ({ scale: 2.4, tx: 0, ty: 0 }); g.current.lastTap = 0; }
-      else g.current.lastTap = now;
+      if (now - g.current.lastTap < 300) {
+        g.current.lastTap = 0;
+        setZ((prev) => (prev.scale > 1 ? { scale: 1, tx: 0, ty: 0 } : { scale: 2.4, tx: 0, ty: 0 }));
+      } else { g.current.lastTap = now; }
       return;
     }
+    if (z.scale > 1) return;                              // con zoom, arrastrar mueve la foto (no cambia)
     if (g.current.dx <= -50) go(index + 1);
     else if (g.current.dx >= 50) go(index - 1);
   };
@@ -1245,6 +1247,11 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
   const [imgIdx, setImgIdx] = useState(0);
   const [viewerOpen, setViewerOpen] = useState(false);
   useEffect(() => { setImgIdx(0); setViewerOpen(false); }, [p.id]);
+  // Mientras el visor esté abierto, el botón ATRÁS del teléfono lo cierra primero.
+  useEffect(() => {
+    if (!viewerOpen) return;
+    return pushBackHandler(() => setViewerOpen(false));
+  }, [viewerOpen]);
 
   useEffect(() => {
     if (!p.seller_id) { setSellerName("Vendedor"); return; }

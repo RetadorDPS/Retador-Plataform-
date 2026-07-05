@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { LiveSlot, useAt, useScrollDir } from "../shared/index.js";
+import { LiveSlot, pushBackHandler, useAt, useScrollDir } from "../shared/index.js";
 
 const VIP_ACCESS_MIN = 50;
 const VIP_ACCESS_MAX = 500;
@@ -1207,6 +1207,14 @@ export function SubastasScreen({ forceCreate = false, onForceCreateDone, onNav, 
   useEffect(() => {
     if (forceCreate) { setCreating(true); onForceCreateDone?.(); }
   }, [forceCreate]);
+
+  // Botón ATRÁS del teléfono: cierra primero la sub-pantalla interna que esté
+  // abierta (detalle de subasta, crear, buscar, siguiendo) antes de salir de la
+  // pestaña de Subastas.
+  useEffect(() => { if (!selected)  return; return pushBackHandler(() => closeDetail()); }, [selected]);
+  useEffect(() => { if (!creating)  return; return pushBackHandler(() => setCreating(false)); }, [creating]);
+  useEffect(() => { if (!searching) return; return pushBackHandler(() => setSearching(false)); }, [searching]);
+  useEffect(() => { if (!siguiendo) return; return pushBackHandler(() => setSiguiendo(false)); }, [siguiendo]);
 
   const heroRef    = useRef(null);
   const autoRef    = useRef(null);

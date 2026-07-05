@@ -24,10 +24,10 @@ export function consumeBack() {
   return false;
 }
 
-// Decide QUÉ debe hacer el botón atrás del teléfono según el estado de navegación,
-// del overlay más reciente al más antiguo, luego pantallas, luego pestañas, y por
-// último salir. Función pura (sin efectos) para poder probarla a fondo.
-// Devuelve una etiqueta que App.jsx traduce a la acción concreta.
+// Decide QUÉ debe hacer el botón atrás del teléfono. Primero los overlays/modales
+// que están "por encima" (del más reciente al más antiguo); si no hay ninguno,
+// devuelve "screens" para que App.jsx use el HISTORIAL real de pasos (deshace la
+// última navegación de pantalla/pestaña, sea la que sea). Función pura y probable.
 export function decideSystemBack(s = {}) {
   if (s.plusMenu)    return "plusMenu";
   if (s.editProd)    return "editProd";
@@ -42,9 +42,5 @@ export function decideSystemBack(s = {}) {
   if (s.showNotif)   return "showNotif";
   if (s.showCats)    return "showCats";
   if (s.pubOpen)     return "pubOpen";
-  if (s.tab === "market" && s.mScr !== "home") return "marketScreen";
-  if (s.tab === "perfil" && s.pScr !== "main") return "perfilScreen";
-  if (s.tab === "envios" && s.eScr !== "menu") return "enviosScreen";
-  if (s.tab && s.tab !== "market") return "toMarket";
-  return "exit";
+  return "screens";
 }

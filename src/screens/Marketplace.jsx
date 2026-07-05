@@ -1119,29 +1119,108 @@ export function EditProductModal({ product, onClose, onSave, flash }) {
   );
 }
 
-// Carrusel de fotos deslizable (izq/der) para el detalle del producto.
-// Rellena el contenedor (position:absolute inset:0) para que la degradación, el
-// botón de favorito y la insignia queden por encima. Los puntos indican la foto
-// actual y cuántas hay. Si no hay fotos, muestra la imagen de respaldo.
 const CAROUSEL_FALLBACK = "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800";
-function ImageCarousel({ images = [] }) {
-  const [i, setI] = useState(0);
+
+// Carrusel controlado por índice (no depende del scroll nativo, que fallaba en
+// algunos teléfonos). Se desliza con el dedo izq/der en círculo. Un TOQUE simple
+// (sin arrastrar) llama a onOpen para abrir el visor a pantalla completa. Los
+// puntos van SOBRE la foto. El índice lo controla el padre (para las miniaturas).
+function ImageCarousel({ images = [], index = 0, setIndex, onOpen }) {
   const list = (images && images.length) ? images : [null];
+  const n = list.length;
+  const t = useRef({ x0: 0, dx: 0, moved: false, active: false });
+  const go = (to) => setIndex && setIndex((to + n) % n);
+  const onStart = (e) => { const p = e.touches[0]; t.current = { x0: p.clientX, dx: 0, moved: false, active: true }; };
+  const onMove = (e) => { if (!t.current.active) return; t.current.dx = e.touches[0].clientX - t.current.x0; if (Math.abs(t.current.dx) > 10) t.current.moved = true; };
+  const onEnd = () => {
+    const { dx, moved, active } = t.current;
+    t.current.active = false;
+    if (!active) return;
+    if (!moved) { onOpen && onOpen(); return; }           // toque simple → visor
+    if (dx <= -40) go(index + 1);
+    else if (dx >= 40) go(index - 1);
+  };
   return (
-    <div style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
-      <div
-        onScroll={(e) => { const w = e.currentTarget.clientWidth || 1; setI(Math.round(e.currentTarget.scrollLeft / w)); }}
-        style={{ display: "flex", height: "100%", overflowX: "auto", scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch" }}>
+    <div
+      onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
+      onClick={() => { if (typeof window !== "undefined" && !("ontouchstart" in window)) onOpen && onOpen(); }}
+      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "hidden", touchAction: "pan-y", cursor: "pointer" }}>
+      <div style={{ display: "flex", height: "100%", width: `${n * 100}%`, transform: `translateX(-${index * (100 / n)}%)`, transition: "transform .28s ease" }}>
         {list.map((src, idx) => (
-          <img key={idx} src={src || CAROUSEL_FALLBACK} alt=""
+          <img key={idx} src={src || CAROUSEL_FALLBACK} alt="" draggable={false}
             onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }}
-            style={{ minWidth: "100%", width: "100%", height: "100%", objectFit: "cover", scrollSnapAlign: "start", background: "#161616" }} />
+            style={{ width: `${100 / n}%`, height: "100%", objectFit: "cover", flexShrink: 0, background: "#161616", pointerEvents: "none" }} />
         ))}
       </div>
-      {list.length > 1 && (
+      {n > 1 && (
         <div style={{ position: "absolute", bottom: 12, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 6, pointerEvents: "none" }}>
           {list.map((_, idx) => (
-            <span key={idx} style={{ height: 6, width: idx === i ? 18 : 6, borderRadius: 999, background: idx === i ? "#fff" : "rgba(255,255,255,.5)", transition: "all .2s", boxShadow: "0 0 4px rgba(0,0,0,.4)" }} />
+            <span key={idx} style={{ height: 6, width: idx === index ? 18 : 6, borderRadius: 999, background: idx === index ? "#fff" : "rgba(255,255,255,.5)", transition: "all .2s", boxShadow: "0 0 4px rgba(0,0,0,.4)" }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Visor a pantalla completa (solo producto): fondo negro, solo las imágenes.
+// Deslizar entre fotos, doble toque para acercar y PELLIZCAR (dos dedos) para
+// zoom; con zoom se puede arrastrar para mover. Botón atrás normalito arriba.
+function ProductImageViewer({ images = [], index = 0, setIndex, onClose }) {
+  const list = (images && images.length) ? images : [null];
+  const n = list.length;
+  const [z, setZ] = useState({ scale: 1, tx: 0, ty: 0 });
+  const g = useRef({ mode: null, x0: 0, y0: 0, dx: 0, moved: false, startDist: 1, startScale: 1, startTx: 0, startTy: 0, lastTap: 0 });
+  const reset = () => setZ({ scale: 1, tx: 0, ty: 0 });
+  const go = (to) => { reset(); setIndex && setIndex((to + n) % n); };
+  const dist = (tt) => Math.hypot(tt[0].clientX - tt[1].clientX, tt[0].clientY - tt[1].clientY);
+  const onStart = (e) => {
+    if (e.touches.length === 2) {
+      g.current.mode = "pinch"; g.current.startDist = dist(e.touches) || 1; g.current.startScale = z.scale;
+    } else {
+      const p = e.touches[0];
+      g.current = { ...g.current, mode: "pan", x0: p.clientX, y0: p.clientY, dx: 0, moved: false, startTx: z.tx, startTy: z.ty };
+    }
+  };
+  const onMove = (e) => {
+    if (g.current.mode === "pinch" && e.touches.length === 2) {
+      const s = Math.min(4, Math.max(1, g.current.startScale * (dist(e.touches) / g.current.startDist)));
+      setZ((prev) => ({ ...prev, scale: s }));
+    } else if (g.current.mode === "pan") {
+      const p = e.touches[0];
+      g.current.dx = p.clientX - g.current.x0;
+      const dy = p.clientY - g.current.y0;
+      if (Math.abs(g.current.dx) > 8 || Math.abs(dy) > 8) g.current.moved = true;
+      if (z.scale > 1) setZ((prev) => ({ ...prev, tx: g.current.startTx + g.current.dx, ty: g.current.startTy + dy }));
+    }
+  };
+  const onEnd = () => {
+    const mode = g.current.mode; g.current.mode = null;
+    if (mode === "pinch") { if (z.scale <= 1.05) reset(); return; }
+    if (z.scale > 1) return;                              // con zoom no cambia de foto
+    if (!g.current.moved) {                               // toque: detectar doble toque
+      const now = Date.now();
+      if (now - g.current.lastTap < 300) { setZ({ scale: 2.4, tx: 0, ty: 0 }); g.current.lastTap = 0; }
+      else g.current.lastTap = now;
+      return;
+    }
+    if (g.current.dx <= -50) go(index + 1);
+    else if (g.current.dx >= 50) go(index - 1);
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9000, background: "#000", overflow: "hidden", touchAction: "none" }}
+      onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}>
+      <img src={list[index] || CAROUSEL_FALLBACK} alt="" draggable={false}
+        onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }}
+        style={{ position: "absolute", inset: 0, margin: "auto", maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
+          transform: `translate(${z.tx}px, ${z.ty}px) scale(${z.scale})`, transition: g.current.mode ? "none" : "transform .2s ease", pointerEvents: "none", userSelect: "none" }} />
+      <button onClick={onClose} aria-label="Cerrar" style={{ position: "absolute", top: "calc(env(safe-area-inset-top, 0px) / var(--img-s, 1) + 12px)", left: 14, width: 42, height: 42, borderRadius: 12, background: "rgba(20,20,22,.62)", WebkitBackdropFilter: "blur(14px)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.25)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2, cursor: "pointer" }}>
+        <Ic n="back" c="#fff" s={20} />
+      </button>
+      {n > 1 && (
+        <div style={{ position: "absolute", bottom: "calc(env(safe-area-inset-bottom, 0px) / var(--img-s, 1) + 18px)", left: 0, right: 0, display: "flex", justifyContent: "center", gap: 6, pointerEvents: "none" }}>
+          {list.map((_, idx) => (
+            <span key={idx} style={{ height: 7, width: idx === index ? 20 : 7, borderRadius: 999, background: idx === index ? "#fff" : "rgba(255,255,255,.45)", transition: "all .2s" }} />
           ))}
         </div>
       )}
@@ -1161,6 +1240,11 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
   const scrollRef = useRef(null);
   const scrollDir = useScrollDir(scrollRef);
   const backHidden = scrollDir === "down";
+  // Fotos del producto (todas), índice actual y visor a pantalla completa.
+  const imgs = (p.images && p.images.length) ? p.images : (p.image ? [p.image] : (p.img ? [p.img] : []));
+  const [imgIdx, setImgIdx] = useState(0);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  useEffect(() => { setImgIdx(0); setViewerOpen(false); }, [p.id]);
 
   useEffect(() => {
     if (!p.seller_id) { setSellerName("Vendedor"); return; }
@@ -1194,15 +1278,31 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
       </div>
       {/* Imagen hero — carrusel deslizable entre todas las fotos del producto */}
       <div style={{ position: "relative", aspectRatio: "1 / 1", background: "#161616", overflow: "hidden" }}>
-        <ImageCarousel images={(p.images && p.images.length) ? p.images : (p.image ? [p.image] : (p.img ? [p.img] : []))} />
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom,rgba(0,0,0,.5) 0%,transparent 35%,rgba(0,0,0,.72) 100%)" }} />
+        <ImageCarousel images={imgs} index={imgIdx} setIndex={setImgIdx} onOpen={() => setViewerOpen(true)} />
+        {/* pointerEvents:none → deja pasar el dedo al carrusel (antes lo bloqueaba) */}
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(to bottom,rgba(0,0,0,.5) 0%,transparent 35%,rgba(0,0,0,.72) 100%)" }} />
         <div style={{ position: "absolute", top: 14, right: 14, display: "flex", gap: 8 }}>
           <button className="p" onClick={() => requireAuth(() => onFav(p.id))} style={{ width: 31, height: 31, background: "rgba(0,0,0,.55)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,.08)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill={isFav ? "#F87171" : "none"} stroke={isFav ? "#F87171" : "#fff"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
           </button>
         </div>
-        {p.badge && <div style={{ position: "absolute", bottom: 14, left: 14, background: bc.bg, borderRadius: 100, padding: "5px 13px", fontSize: 9, fontWeight: 700, color: bc.tx }}>{p.badge}</div>}
+        {p.badge && <div style={{ position: "absolute", bottom: 14, left: 14, pointerEvents: "none", background: bc.bg, borderRadius: 100, padding: "5px 13px", fontSize: 9, fontWeight: 700, color: bc.tx }}>{p.badge}</div>}
       </div>
+
+      {/* Miniaturas: una por foto; tocar una salta a esa. Van pegadas al borde de
+          la foto, justo antes de la categoría. Solo si hay 2 o más fotos. */}
+      {imgs.length > 1 && (
+        <div style={{ display: "flex", gap: 8, padding: "10px 16px 0", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+          {imgs.map((src, idx) => (
+            <button key={idx} onClick={() => setImgIdx(idx)} aria-label={`Foto ${idx + 1}`}
+              style={{ flexShrink: 0, width: 52, height: 52, borderRadius: 10, overflow: "hidden", padding: 0, cursor: "pointer", background: "#161616", border: idx === imgIdx ? `2px solid ${G}` : `1px solid ${B}`, opacity: idx === imgIdx ? 1 : 0.72, transition: "opacity .2s, border-color .2s" }}>
+              <img src={src || CAROUSEL_FALLBACK} alt="" onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {viewerOpen && <ProductImageViewer images={imgs} index={imgIdx} setIndex={setImgIdx} onClose={() => setViewerOpen(false)} />}
 
       <div style={{ padding: "16px 18px 10px" }}>
         {cat && (

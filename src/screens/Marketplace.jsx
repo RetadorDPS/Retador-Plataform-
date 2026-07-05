@@ -1025,7 +1025,7 @@ function PCard({ p, onClick, isFav, onFav }) {
   return (
     <div className="cd" onClick={onClick} style={{ background: S, borderRadius: 15, overflow: "hidden", border: `1px solid ${B}` }}>
       <div style={{ position: "relative", aspectRatio: "4 / 3", background: "#161616", overflow: "hidden" }}>
-        <img src={p.img || "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400"} alt={p.title}
+        <img src={p.img || p.image || (p.images && p.images[0]) || "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400"} alt={p.title}
           style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform .3s" }}
           onError={e => { e.target.src = "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400"; }} />
         <div style={{ position: "absolute", top: 7, left: 7, background: "rgba(0,0,0,.72)", backdropFilter: "blur(6px)", borderRadius: 100, padding: "3px 8px", fontSize: 9, fontWeight: 700, color: cat ? cat.color + "cc" : "#999" }}>
@@ -1119,6 +1119,36 @@ export function EditProductModal({ product, onClose, onSave, flash }) {
   );
 }
 
+// Carrusel de fotos deslizable (izq/der) para el detalle del producto.
+// Rellena el contenedor (position:absolute inset:0) para que la degradación, el
+// botón de favorito y la insignia queden por encima. Los puntos indican la foto
+// actual y cuántas hay. Si no hay fotos, muestra la imagen de respaldo.
+const CAROUSEL_FALLBACK = "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800";
+function ImageCarousel({ images = [] }) {
+  const [i, setI] = useState(0);
+  const list = (images && images.length) ? images : [null];
+  return (
+    <div style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
+      <div
+        onScroll={(e) => { const w = e.currentTarget.clientWidth || 1; setI(Math.round(e.currentTarget.scrollLeft / w)); }}
+        style={{ display: "flex", height: "100%", overflowX: "auto", scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch" }}>
+        {list.map((src, idx) => (
+          <img key={idx} src={src || CAROUSEL_FALLBACK} alt=""
+            onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }}
+            style={{ minWidth: "100%", width: "100%", height: "100%", objectFit: "cover", scrollSnapAlign: "start", background: "#161616" }} />
+        ))}
+      </div>
+      {list.length > 1 && (
+        <div style={{ position: "absolute", bottom: 12, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 6, pointerEvents: "none" }}>
+          {list.map((_, idx) => (
+            <span key={idx} style={{ height: 6, width: idx === i ? 18 : 6, borderRadius: 999, background: idx === i ? "#fff" : "rgba(255,255,255,.5)", transition: "all .2s", boxShadow: "0 0 4px rgba(0,0,0,.4)" }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewProfile, onBuy, onFav, isFav, flash, requireAuth, user, canChat, onDelete, onEdit }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { S, B, T1, T2, T3, isDark, ts } = useAt();
@@ -1162,11 +1192,9 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
           </div>
         )}
       </div>
-      {/* Imagen hero */}
+      {/* Imagen hero — carrusel deslizable entre todas las fotos del producto */}
       <div style={{ position: "relative", aspectRatio: "1 / 1", background: "#161616", overflow: "hidden" }}>
-        <img src={p.img || "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800"} alt={p.title}
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          onError={e => { e.target.src = "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800"; }} />
+        <ImageCarousel images={(p.images && p.images.length) ? p.images : (p.image ? [p.image] : (p.img ? [p.img] : []))} />
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom,rgba(0,0,0,.5) 0%,transparent 35%,rgba(0,0,0,.72) 100%)" }} />
         <div style={{ position: "absolute", top: 14, right: 14, display: "flex", gap: 8 }}>
           <button className="p" onClick={() => requireAuth(() => onFav(p.id))} style={{ width: 31, height: 31, background: "rgba(0,0,0,.55)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,.08)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>

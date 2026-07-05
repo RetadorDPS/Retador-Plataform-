@@ -96,25 +96,18 @@ const compressImage = (file, maxSide = 1280, quality = 0.82) => new Promise((res
   };
   reader.readAsDataURL(file);
 });
-const blobToDataURL = (blob) => new Promise((resolve, reject) => {
-  const r = new FileReader();
-  r.onerror = () => reject(new Error("No se pudo procesar la imagen"));
-  r.onload = () => resolve(r.result);
-  r.readAsDataURL(blob);
-});
 export const uploadImage = async (file, userId) => {
+  // Comprime en el teléfono y sube al bucket público "product-images".
+  // Devuelve el enlace público PERSISTENTE que se guarda en products.images.
+  // Si falla, lanza el error para que se vea un mensaje claro al publicar.
   const blob = await compressImage(file);
-  try {
-    const path = `${userId || "anon"}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-    const { error } = await supabase.storage.from("product-images").upload(path, blob, { contentType: "image/jpeg", upsert: false });
-    if (error) throw error;
-    const { data } = supabase.storage.from("product-images").getPublicUrl(path);
-    if (data?.publicUrl) return data.publicUrl;
-    throw new Error("Sin URL pública");
-  } catch (e) {
-    console.warn("uploadImage: almacenamiento no disponible, usando imagen incrustada →", e?.message || e);
-    return blobToDataURL(blob);
-  }
+  const path = `${userId || "anon"}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
+  const { error } = await supabase.storage.from("product-images").upload(path, blob, {
+    cacheControl: "3600", upsert: false, contentType: "image/jpeg",
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from("product-images").getPublicUrl(path);
+  return data.publicUrl;
 };
 
 // Conversation & Message functions

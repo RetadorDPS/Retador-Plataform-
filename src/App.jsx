@@ -480,21 +480,25 @@ function AppShell({ sessionUser }) {
     plusMenu, showCourier, toolApp, showTools, showAdmin, showWallet, showChats, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
   const histRef = useRef([]);
   const lastSnapRef = useRef(null);
-  const restoringRef = useRef(false);
+  const suppressRef = useRef(false);
   const curSnap = { tab, mScr, pScr, eScr, selProd, selSeller, selOrderId, prodBackTo };
   useEffect(() => {
     const prev = lastSnapRef.current;
-    if (prev && !restoringRef.current && (prev.tab !== tab || prev.mScr !== mScr || prev.pScr !== pScr || prev.eScr !== eScr)) {
+    // Graba el estado ANTERIOR en el historial solo si de verdad cambió la ruta
+    // (pestaña/pantalla) y NO estamos restaurando. La supresión NO se apaga aquí
+    // (se apaga con setTimeout en restoreNav), para que aunque restaurar dispare
+    // varios re-render seguidos, ninguno grabe basura → el historial no se corrompe.
+    if (prev && !suppressRef.current && (prev.tab !== tab || prev.mScr !== mScr || prev.pScr !== pScr || prev.eScr !== eScr)) {
       histRef.current.push(prev);
       if (histRef.current.length > 40) histRef.current.shift();
     }
-    restoringRef.current = false;
     lastSnapRef.current = curSnap;
   }, [tab, mScr, pScr, eScr]);
   const restoreNav = (snap) => {
-    restoringRef.current = true;
+    suppressRef.current = true;
     setTab(snap.tab); setMScr(snap.mScr); setPScr(snap.pScr); setEScr(snap.eScr);
     setSelProd(snap.selProd); setSelSeller(snap.selSeller); setSelOrderId(snap.selOrderId); setProdBackTo(snap.prodBackTo);
+    setTimeout(() => { suppressRef.current = false; }, 0);
   };
   useEffect(() => {
     if (typeof window === "undefined" || !window.history) return;

@@ -50,6 +50,8 @@ export const updateUserName = async (id, name) => {
 export const mapProduct = (p) => ({
   ...p,
   image: Array.isArray(p.images) ? (p.images[0] || null) : (p.images || null),
+  shipModes: p.ship_modes || { local: true },
+  shippingPrice: p.ship_price ?? 0,
 });
 // Listado público del marketplace (sin login): solo activos y aprobados.
 export const loadProducts = async () => {

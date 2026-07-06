@@ -34,7 +34,7 @@ import {
   CATS, SUBCATS, CatalogContext, CatalogProvider, useCatalog, CatIcon,
   useCSS, Ic, Spin, Logo,
   getPageLayout, liveSlot, LiveBlock, LiveSlot,
-  useScrollDir, consumeBack, decideSystemBack,
+  useScrollDir, consumeBack,
 } from "./shared/index.js";
 import WalletApp from "./screens/Wallet.jsx";
 import ProductToolsApp from "./screens/ProductTools.jsx";
@@ -475,75 +475,65 @@ function AppShell({ sessionUser }) {
   //   3) Si no, deshace la ÚLTIMA navegación de pantalla/pestaña con un HISTORIAL real.
   //   4) En el inicio de Tienda, sin nada que deshacer → salir de la app.
   // (Va DESPUÉS de declarar todos los estados de navegación que lee, incl. selOrderId.)
-  const navRef = useRef(null);
-  navRef.current = { tab, mScr, pScr, eScr,
+  // Estado de navegación actual (pantallas + modales) y su "firma" para comparar.
+  const navSnap = { tab, mScr, pScr, eScr, selProd, selSeller, selOrderId, prodBackTo,
     plusMenu, showCourier, toolApp, showTools, showAdmin, showWallet, showChats, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
-  const histRef = useRef([]);
-  const lastSnapRef = useRef(null);
-  const suppressRef = useRef(false);
-  const curSnap = { tab, mScr, pScr, eScr, selProd, selSeller, selOrderId, prodBackTo };
-  useEffect(() => {
-    const prev = lastSnapRef.current;
-    // Graba el estado ANTERIOR en el historial solo si de verdad cambió la ruta
-    // (pestaña/pantalla) y NO estamos restaurando. La supresión NO se apaga aquí
-    // (se apaga con setTimeout en restoreNav), para que aunque restaurar dispare
-    // varios re-render seguidos, ninguno grabe basura → el historial no se corrompe.
-    if (prev && !suppressRef.current && (prev.tab !== tab || prev.mScr !== mScr || prev.pScr !== pScr || prev.eScr !== eScr)) {
-      histRef.current.push(prev);
-      if (histRef.current.length > 40) histRef.current.shift();
-    }
-    lastSnapRef.current = curSnap;
-  }, [tab, mScr, pScr, eScr]);
-  const restoreNav = (snap) => {
-    suppressRef.current = true;
-    setTab(snap.tab); setMScr(snap.mScr); setPScr(snap.pScr); setEScr(snap.eScr);
-    setSelProd(snap.selProd); setSelSeller(snap.selSeller); setSelOrderId(snap.selOrderId); setProdBackTo(snap.prodBackTo);
-    setTimeout(() => { suppressRef.current = false; }, 0);
+  const navSig = [tab, mScr, pScr, eScr, (selProd && selProd.id) || selProd || 0, selSeller || 0, selOrderId || 0, prodBackTo || 0,
+    !!plusMenu, !!showCourier, !!toolApp, !!showTools, !!showAdmin, !!showWallet, !!showChats, !!showNotif, !!showCats, !!pubOpen, !!buyModal, !!confirmCfg, !!editProd].join("|");
+
+  const stackRef = useRef([]);      // [{sig, snap}] una entrada por cada paso hacia adelante
+  const lastRef = useRef(null);     // {sig, snap} del estado actual
+  const ignorePopRef = useRef(0);   // popstate que debemos ignorar (los que provocamos nosotros)
+  const restoringRef = useRef(false);
+
+  const applySnap = (sn) => {
+    setTab(sn.tab); setMScr(sn.mScr); setPScr(sn.pScr); setEScr(sn.eScr);
+    setSelProd(sn.selProd); setSelSeller(sn.selSeller); setSelOrderId(sn.selOrderId); setProdBackTo(sn.prodBackTo);
+    setPlusMenu(sn.plusMenu); setShowCourier(sn.showCourier); setToolApp(sn.toolApp); setShowTools(sn.showTools);
+    setShowAdmin(sn.showAdmin); setShowWallet(sn.showWallet); setShowChats(sn.showChats); setShowNotif(sn.showNotif);
+    setShowCats(sn.showCats); setPubOpen(sn.pubOpen); setBuyModal(sn.buyModal); setConfirmCfg(sn.confirmCfg); setEditProd(sn.editProd);
   };
+
+  // Detecta la navegación del USUARIO y mantiene el historial del navegador con la
+  // MISMA profundidad que la app: una entrada real por cada paso hacia adelante.
+  // Así el atrás del sistema retrocede paso a paso con entradas reales (no hay que
+  // "re-armar" nada, no se escapa por rápido que se pulse) y en el inicio de Tienda
+  // el usuario ya está en la primera entrada → un solo atrás cierra la app.
+  useEffect(() => {
+    const cur = { sig: navSig, snap: navSnap };
+    if (lastRef.current === null) { lastRef.current = cur; return; }  // primer render
+    if (navSig === lastRef.current.sig) return;                       // sin cambio
+    if (restoringRef.current) { restoringRef.current = false; lastRef.current = cur; return; } // cambio por atrás del sistema
+    const stack = stackRef.current;
+    if (stack.length && stack[stack.length - 1].sig === navSig) {
+      // el usuario volvió a un estado anterior con un botón DENTRO de la app
+      // (cerrar modal, botón atrás propio) → quitamos la entrada del navegador.
+      stack.pop();
+      ignorePopRef.current++;
+      try { window.history.back(); } catch (e) { ignorePopRef.current = Math.max(0, ignorePopRef.current - 1); }
+    } else {
+      // navegación hacia adelante → nueva entrada de historial.
+      stack.push(lastRef.current);
+      try { window.history.pushState({ rt: stack.length }, ""); } catch (e) {}
+    }
+    lastRef.current = cur;
+  }, [navSig]);
+
+  // Botón ATRÁS del sistema (teléfono/navegador).
   useEffect(() => {
     if (typeof window === "undefined" || !window.history) return;
-    // COLCHÓN de historial: en vez de re-armar UNA sola "trampa" dentro del
-    // popstate (frágil si el usuario da atrás muy rápido: el re-armado no llega y
-    // el 2º atrás se escapa y cierra la app), sembramos un colchón de BUFFER
-    // entradas. Cada atrás consume una; siempre quedan de sobra, así que nunca se
-    // escapa por más rápido que se pulse. Cuando bajan de 3, se rellena. Cada
-    // entrada guarda su profundidad (rtDepth) para poder salir limpio en Tienda.
-    const BUFFER = 20;
-    const seed = () => {
-      let cur = (window.history.state && window.history.state.rtDepth) || 0;
-      for (let d = cur + 1; d <= BUFFER; d++) {
-        try { window.history.pushState({ rtDepth: d }, ""); } catch (e) {}
+    const onPop = () => {
+      if (ignorePopRef.current > 0) { ignorePopRef.current--; return; } // fue un history.back() nuestro (sync)
+      if (consumeBack()) {                     // 1) overlay anidado (visor de fotos, detalle de subasta)
+        // el navegador quitó una entrada; recomponemos una para no perder profundidad.
+        try { window.history.pushState({ rt: stackRef.current.length + 1 }, ""); } catch (e) {}
+        return;
       }
-    };
-    seed();
-    const onPop = (e) => {
-      const depth = (e && e.state && e.state.rtDepth) || 0; // profundidad tras el atrás
-      const refill = () => { if (depth <= 3) seed(); };
-      const s = navRef.current || {};
-      if (consumeBack()) { refill(); return; }       // 1) overlays anidados (visor, subasta…)
-      const action = decideSystemBack(s);
-      if (action !== "screens") {                    // 2) modal abierto → cerrarlo
-        switch (action) {
-          case "plusMenu":    setPlusMenu(null);     break;
-          case "editProd":    setEditProd(null);     break;
-          case "confirmCfg":  setConfirmCfg(null);   break;
-          case "buyModal":    setBuyModal(null);     break;
-          case "toolApp":     setToolApp(false);     break;
-          case "showTools":   setShowTools(false);   break;
-          case "showCourier": setShowCourier(false); break;
-          case "showAdmin":   setShowAdmin(false);   break;
-          case "showWallet":  setShowWallet(false);  break;
-          case "showChats":   setShowChats(false);   break;
-          case "showNotif":   setShowNotif(false);   break;
-          case "showCats":    setShowCats(false);    break;
-          case "pubOpen":     setPubOpen(false);     break;
-          default: break;
-        }
-        refill(); return;
+      if (stackRef.current.length) {           // 2) deshacer el último paso (pantalla o modal)
+        restoringRef.current = true;
+        applySnap(stackRef.current.pop().snap);
       }
-      if (histRef.current.length) { restoreNav(histRef.current.pop()); refill(); return; }  // 3) historial
-      // 4) inicio de Tienda, nada que deshacer → salir de la app saltando el colchón
-      window.history.go(-(depth + 1));
+      // 3) pila vacía = inicio de Tienda: el navegador ya salió de la app (no llega aquí).
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);

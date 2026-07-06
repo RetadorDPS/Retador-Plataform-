@@ -145,7 +145,29 @@ export function money(amount, cur = DEFAULT_CURRENCY) {
 }
 
 // Order functions
-export const createOrder = async (data) => ({ ...data, id: "ord_" + Date.now(), status: "pendiente", createdAt: Date.now() });
+export const createOrder = async (data) => {
+  const row = {
+    buyer_id:   data.buyerId,
+    seller_id:  data.sellerId,
+    product_id: data.productId || null,
+    title:      data.title || null,
+    image:      data.image || null,
+    cat:        data.cat || null,
+    qty:        data.qty || 1,
+    unit_price: Number(data.unitPrice) || 0,
+    amount:     Number(data.amount) || 0,
+    currency:   data.currency || "USD",
+    ship_mode:  data.shipMode,
+    modalidad:  data.modalidad || null,
+    ship_price: Number(data.shipPrice) || 0,
+    ship_to:    data.shipTo || null,
+    delivery:   data.delivery || null,
+    payment_method: "coordinado",
+  };
+  const { data: created, error } = await supabase.from("orders").insert(row).select().single();
+  if (error) throw error;
+  return { ...data, id: created.id, status: created.status || "creada", createdAt: Date.now() };
+};
 // Cálculo del domicilio local. km = null mientras no haya mapa/backend → usa tarifa base (estimado plano).
 // Cuando entre el backend, se pasa la distancia real y NO hay que tocar la interfaz.
 export const estimateDeliveryFee = (cfg, km) => {

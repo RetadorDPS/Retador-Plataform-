@@ -502,11 +502,25 @@ function AppShell({ sessionUser }) {
   };
   useEffect(() => {
     if (typeof window === "undefined" || !window.history) return;
-    const rearm = () => { try { window.history.pushState({ retador: true }, ""); } catch (e) {} };
-    rearm(); // deja una "trampa" para capturar el primer atrás
-    const onPop = () => {
+    // COLCHÓN de historial: en vez de re-armar UNA sola "trampa" dentro del
+    // popstate (frágil si el usuario da atrás muy rápido: el re-armado no llega y
+    // el 2º atrás se escapa y cierra la app), sembramos un colchón de BUFFER
+    // entradas. Cada atrás consume una; siempre quedan de sobra, así que nunca se
+    // escapa por más rápido que se pulse. Cuando bajan de 3, se rellena. Cada
+    // entrada guarda su profundidad (rtDepth) para poder salir limpio en Tienda.
+    const BUFFER = 20;
+    const seed = () => {
+      let cur = (window.history.state && window.history.state.rtDepth) || 0;
+      for (let d = cur + 1; d <= BUFFER; d++) {
+        try { window.history.pushState({ rtDepth: d }, ""); } catch (e) {}
+      }
+    };
+    seed();
+    const onPop = (e) => {
+      const depth = (e && e.state && e.state.rtDepth) || 0; // profundidad tras el atrás
+      const refill = () => { if (depth <= 3) seed(); };
       const s = navRef.current || {};
-      if (consumeBack()) { rearm(); return; }        // 1) overlays anidados (visor, subasta…)
+      if (consumeBack()) { refill(); return; }       // 1) overlays anidados (visor, subasta…)
       const action = decideSystemBack(s);
       if (action !== "screens") {                    // 2) modal abierto → cerrarlo
         switch (action) {
@@ -525,10 +539,11 @@ function AppShell({ sessionUser }) {
           case "pubOpen":     setPubOpen(false);     break;
           default: break;
         }
-        rearm(); return;
+        refill(); return;
       }
-      if (histRef.current.length) { restoreNav(histRef.current.pop()); rearm(); return; }  // 3) historial
-      window.history.back();                         // 4) salir de la app
+      if (histRef.current.length) { restoreNav(histRef.current.pop()); refill(); return; }  // 3) historial
+      // 4) inicio de Tienda, nada que deshacer → salir de la app saltando el colchón
+      window.history.go(-(depth + 1));
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);

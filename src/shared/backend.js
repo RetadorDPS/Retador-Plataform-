@@ -188,8 +188,40 @@ export const serviceRating = (field) => aggRating(readRatings().map(r => r[field
 export const serviceReviews = (field) => readRatings().filter(r => r[field + "Msg"] && r[field] > 0).map(r => ({ stars: r[field], msg: r[field + "Msg"], at: r.at })).sort((a, b) => b.at - a.at);
 export const ratingForName = (name, kind) => { if (!name) return { avg: 0, count: 0, reviews: [] }; const all = readRatings(); const key = kind === "courier" ? "courierName" : "sellerName"; const sc = kind === "courier" ? "courier" : "seller"; const mk = kind === "courier" ? "courierMsg" : "sellerMsg"; const mine = all.filter(r => r[key] === name && r[sc] > 0); return { ...aggRating(mine.map(r => r[sc])), reviews: mine.filter(r => r[mk]).map(r => ({ stars: r[sc], msg: r[mk], at: r.at })) }; };
 export const systemReviews = () => readRatings().filter(r => r.sysMsg && r.sys > 0).map(r => ({ stars: r.sys, msg: r.sysMsg, at: r.at })).sort((a, b) => b.at - a.at);
-export const getUserOrders = async (userId) => [];
-export const updateOrderStatus = async (orderId, status) => {};
+// Trae los pedidos donde el usuario es COMPRADOR o VENDEDOR (el RLS del backend
+// ya limita a lo suyo). Etiqueta cada uno con role "compra"/"venta" y lo mapea a
+// la MISMA forma que usan OrdersScreen y OrderDetailScreen (flujo por ship_mode,
+// stepIdx según el estado, alias camelCase), para no romper el detalle.
+export const getUserOrders = async (userId) => {
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*")
+    .or(`buyer_id.eq.${userId},seller_id.eq.${userId}`)
+    .order("created_at", { ascending: false });
+  if (error) { console.error("getUserOrders:", error.message); return []; }
+  return (data || []).map(o => {
+    const shipMode = o.ship_mode || "local";
+    const flow = ORDER_FLOW[shipMode] || ORDER_FLOW.local;
+    let stepIdx = flow.findIndex(s => s.key === o.status);
+    if (stepIdx < 0) stepIdx = 0;
+    const createdAt = o.created_at ? new Date(o.created_at).getTime() : Date.now();
+    return {
+      ...o,
+      role: o.buyer_id === userId ? "compra" : "venta",
+      buyerId: o.buyer_id, sellerId: o.seller_id, productId: o.product_id,
+      unitPrice: o.unit_price, shipMode, shipType: shipMode, shipPrice: o.ship_price, shipTo: o.ship_to,
+      flow, stepIdx,
+      status: o.status || (flow[0] && flow[0].key),
+      history: [{ key: flow[0].key, label: flow[0].label, at: createdAt, note: "Pedido creado." }],
+      createdAt,
+      updatedAt: o.updated_at ? new Date(o.updated_at).getTime() : createdAt,
+    };
+  });
+};
+export const updateOrderStatus = async (orderId, status) => {
+  try { await supabase.from("orders").update({ status }).eq("id", orderId); } catch (e) { console.error("updateOrderStatus:", e?.message || e); }
+};
 
 // Plantillas de estados del pedido según la forma de entrega elegida.
 // Cada pedido recorre uno de estos flujos; el envío "cuelga" del pedido y hereda sus datos.

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, createContext, useContext, useCallback, us
 import { Edit2, Trash2 } from "lucide-react";
 import { G, Ic, getUserById, ratingForName, useAt, useR, signOutUser } from "../shared/index.js";
 
-export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProfile, onAdmin, onWallet, onTools, onCourier, isOwner, profileData = {} }) {
+export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProfile, onAdmin, onWallet, onTools, onCourier, isOwner, profileData = {}, ordersBadge = 0 }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const name     = profileData.name || user?.name || "Usuario";
@@ -38,7 +38,7 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
 
         {[
           { ic: "msg",  label: "Mensajes",       sub: "Chats y conversaciones",     action: onMessages, color: G        },
-          { ic: "pkg",  label: "Mis pedidos",     sub: "Historial de compras",       action: onOrders,   color: "#60A5FA" },
+          { ic: "pkg",  label: "Mis pedidos",     sub: "Compras y ventas",           action: onOrders,   color: "#60A5FA", badge: ordersBadge },
           { ic: "wallet", label: "Mi billetera",  sub: "Enviar, recibir, pagar y convertir", action: onWallet, color: "#22C55E" },
           { ic: "tools", label: "Herramientas",  sub: "Importador inteligente y más", action: onTools, color: "#6EE7B7" },
           { ic: "moto", label: "Modo Mensajero",  sub: "Gana dinero repartiendo pedidos", action: onCourier, color: "#6366F1" },
@@ -59,6 +59,11 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
               <p style={{ fontSize: 13 * ts, fontWeight: 700, color: T1 }}>{it.label}</p>
               <p style={{ fontSize: 9 * ts, color: T2, marginTop: 1 }}>{it.sub}</p>
             </div>
+            {it.badge > 0 && (
+              <span style={{ minWidth: 18, height: 18, borderRadius: 999, background: "#EF4444", color: "#fff", fontSize: 10.5 * ts, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px", marginRight: 2 }}>
+                {it.badge > 99 ? "99+" : it.badge}
+              </span>
+            )}
             {it.action
               ? <span style={{ color: T3, fontSize: 18, fontWeight: 300 }}>›</span>
               : <span style={{ fontSize: 8 * ts, color: T2, fontWeight: 700, background: isDark ? "#141414" : B, borderRadius: 6, padding: "3px 7px" }}>PRONTO</span>

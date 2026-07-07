@@ -575,6 +575,50 @@ function AppShell({ sessionUser }) {
   const myNotifs = notifs.filter(n => n.to != null && myIds.includes(n.to));
   const unreadNotif = myNotifs.filter(n => !n.read).length;
   const markNotifRead = id => setNotifs(prev => prev.map(n => id == null ? { ...n, read: true } : (n.id === id ? { ...n, read: true } : n)));
+
+  // ── PEDIDOS REALES (Compras/Ventas) a nivel de app ─────────────────────────
+  // Cargamos aquí (no solo en la pantalla) para poder mostrar el aviso de "nuevo"
+  // en el botón de Pedidos y notificar ventas aunque no estés en esa pantalla.
+  const [dbOrders, setDbOrders] = useState([]);
+  const reloadOrders = useCallback(() => {
+    if (!user?.id) { setDbOrders([]); return; }
+    getUserOrders(user.id).then(d => setDbOrders(d || [])).catch(() => {});
+  }, [user?.id]);
+  useEffect(() => { reloadOrders(); }, [reloadOrders]);
+  useEffect(() => { if (pScr === "orders" || pScr === "order-detail") reloadOrders(); }, [pScr, reloadOrders]);
+
+  // Mezcla: pedidos reales del backend + los locales de esta sesión (los locales
+  // ganan porque llevan los avances en vivo). Sin duplicados (por id).
+  const roleOf = (o) => (((o.buyerId ?? o.buyer_id) === user?.id) ? "compra" : "venta");
+  const mergedOrders = useMemo(() => {
+    const m = new Map();
+    (dbOrders || []).forEach(o => m.set(o.id, o));
+    (orders || []).forEach(o => m.set(o.id, o));
+    return [...m.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [orders, dbOrders]);
+
+  // Marcas de "visto" por pestaña (para los avisos de nuevo).
+  const [ordersSeen, setOrdersSeen] = useState(() => { try { return JSON.parse(localStorage.getItem("retador_orders_seen") || "{}"); } catch { return {}; } });
+  useEffect(() => { try { localStorage.setItem("retador_orders_seen", JSON.stringify(ordersSeen)); } catch (e) {} }, [ordersSeen]);
+  const markOrdersSeen = (tabKey) => setOrdersSeen(prev => ({ ...prev, [tabKey]: Date.now() }));
+  const comprasUnseen = mergedOrders.filter(o => roleOf(o) === "compra" && (o.createdAt || 0) > (ordersSeen.compras || 0)).length;
+  const ventasUnseen  = mergedOrders.filter(o => roleOf(o) === "venta"  && (o.createdAt || 0) > (ordersSeen.ventas  || 0)).length;
+  const ordersUnseen  = comprasUnseen + ventasUnseen;
+
+  // Notifica cada VENTA nueva (más reciente que lastSeenVentas) una sola vez,
+  // usando el sistema de avisos local ya existente (pushNotif).
+  const notifiedSalesRef = useRef(new Set());
+  useEffect(() => {
+    const seenV = ordersSeen.ventas || 0;
+    mergedOrders.forEach(o => {
+      if (roleOf(o) !== "venta" || (o.createdAt || 0) <= seenV) return;
+      if (notifiedSalesRef.current.has(o.id)) return;
+      notifiedSalesRef.current.add(o.id);
+      if (notifs.some(n => n.orderId === o.id && (n.text || "").includes("Nueva venta"))) return; // ya avisado antes
+      pushNotif(user?.id, "🛒 ¡Nueva venta! " + (o.title || "Producto"), o.id);
+    });
+  }, [mergedOrders]);
+
   // Coreografía de 3 partes
   const sellerConfirmOrder = (orderId) => {
     setOrders(prev => prev.map(o => { if (o.id !== orderId) return o; const idx = (o.flow || []).findIndex(s => s.key === "confirmado"); return { ...o, sellerConfirmed: true, stepIdx: idx >= 0 ? Math.max(o.stepIdx || 0, idx) : (o.stepIdx || 0), status: "confirmado", history: [...(o.history || []), { key: "confirmado", label: "Confirmado por el vendedor", at: Date.now() }] }; }));
@@ -944,7 +988,7 @@ function AppShell({ sessionUser }) {
           )}
 
           {tab === "perfil" && <>
-            {pScr === "main"         && <ProfileMain user={user} onMessages={() => { setSelChat(null); setShowChats(true); }} onSettings={() => setPScr("settings")} onOrders={() => setPScr("orders")} onViewProfile={() => setPScr("profile-full")} onAdmin={() => setShowAdmin(true)} onWallet={() => setShowWallet(true)} onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} isOwner={isOwner} profileData={profileData} />}
+            {pScr === "main"         && <ProfileMain user={user} onMessages={() => { setSelChat(null); setShowChats(true); }} onSettings={() => setPScr("settings")} onOrders={() => setPScr("orders")} onViewProfile={() => setPScr("profile-full")} onAdmin={() => setShowAdmin(true)} onWallet={() => setShowWallet(true)} onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} isOwner={isOwner} profileData={profileData} ordersBadge={ordersUnseen} />}
             {pScr === "profile-full" && (() => {
               const me = profileData?.name || user?.name;
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
@@ -961,8 +1005,8 @@ function AppShell({ sessionUser }) {
               accountPassword={accountPassword} onSetPassword={setAccountPassword}
               blockedUsers={blockedUsers} onToggleBlock={toggleBlock}
               onOpenWallet={() => setShowWallet(true)} orders={orders.filter(o => (o.buyerId ? o.buyerId === user?.id : true))} />}
-            {pScr === "orders"   && <OrdersScreen user={user} orders={orders} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { setSelOrderId(o.id); setPScr("order-detail"); }} />}
-            {pScr === "order-detail" && (() => { const o = orders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onAdvance={() => advanceOrder(o.id)} onChat={() => requestChat(o.sellerId, o.sellerName)} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} orders={orders} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
+            {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { setSelOrderId(o.id); setPScr("order-detail"); }} />}
+            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onAdvance={() => advanceOrder(o.id)} onChat={() => requestChat(o.sellerId, o.sellerName)} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
           </>}
         </>
       </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, Spin, getUserOrders, money, useAt, useR } from "../shared/index.js";
+import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, useAt, useR } from "../shared/index.js";
 
 export function OrderDetailScreen({ order: o, user, me, onBack, onAdvance, onChat, flash, onSellerConfirm, onBuyerConfirm, onSellerPayment, onApproveFee }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
@@ -208,21 +208,30 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onAdvance, onCha
   );
 }
 
-export function OrdersScreen({ user, onBack, flash, orders: liveOrders = [], onOpen }) {
+export function OrdersScreen({ user, me, onBack, flash, orders = [], lastSeen = {}, onSeen, onOpen }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const { cols, isMobile, isTablet, isDesktop } = useR();
-  const [orders,  setOrders]  = useState(liveOrders);
-  const [loading, setLoading] = useState(true);
-  const [showDone, setShowDone] = useState(false);
+  const [tab, setTab] = useState("compras");   // "compras" | "ventas"
 
+  // Rol de cada pedido según quién soy (por id de comprador/vendedor).
+  const roleOf = (o) => o.role || (((o.buyerId ?? o.buyer_id) === user?.id) ? "compra" : "venta");
+  const compras = orders.filter(o => roleOf(o) === "compra");
+  const ventas  = orders.filter(o => roleOf(o) === "venta");
+  const countNew = (list, ts) => list.filter(o => (o.createdAt || 0) > (ts || 0)).length;
+  const comprasNew = countNew(compras, lastSeen.compras);
+  const ventasNew  = countNew(ventas, lastSeen.ventas);
+
+  // "Base" = cuándo se vio por última vez cada pestaña, capturada al abrirla ESTA
+  // sesión (antes de marcarla vista). Con ella el "NUEVO" de las tarjetas se
+  // mantiene mientras miras y desaparece la próxima vez, en vez de parpadear.
+  const baselineRef = useRef({});
   useEffect(() => {
-    let alive = true;
-    getUserOrders(user?.id).then(d => { if (alive) { setOrders([...(liveOrders || []), ...(d || [])]); setLoading(false); } }).catch(() => { if (alive) { setOrders(liveOrders || []); setLoading(false); } });
-    return () => { alive = false; };
-  }, [user?.id, liveOrders]);
+    if (baselineRef.current[tab] === undefined) baselineRef.current[tab] = lastSeen[tab] || 0;
+    onSeen && onSeen(tab);   // al abrir/cambiar de pestaña, márcala vista (limpia su badge)
+  }, [tab]);
 
-  const statusColors = { pendiente: "#FBBF24", pending: "#FBBF24", confirmed: "#60A5FA", shipped: "#A78BFA", delivered: "#22C55E", cancelled: "#F87171" };
-  const statusLabels = { pendiente: "Pendiente", pending: "Pendiente", confirmed: "Confirmado", shipped: "En camino", delivered: "Entregado", cancelled: "Cancelado" };
+  const statusColors = { pendiente: "#FBBF24", pending: "#FBBF24", creada: "#FBBF24", confirmed: "#60A5FA", confirmado: "#60A5FA", shipped: "#A78BFA", delivered: "#22C55E", entregado: "#22C55E", cancelled: "#F87171", fallido: "#F87171" };
+  const statusLabels = { pendiente: "Pendiente", pending: "Pendiente", creada: "Creado", confirmed: "Confirmado", confirmado: "Confirmado", shipped: "En camino", delivered: "Entregado", entregado: "Entregado", cancelled: "Cancelado", fallido: "Fallido" };
   const stepLabel = (o) => o.feeApproval === "pending" ? "Confirma la tarifa" : ((o.flow && o.flow[o.stepIdx]) ? o.flow[o.stepIdx].label : (statusLabels[o.status] || o.status));
   const stepColor = (o) => {
     if (o.feeApproval === "pending") return "#F59E0B";
@@ -232,26 +241,29 @@ export function OrdersScreen({ user, onBack, flash, orders: liveOrders = [], onO
     return "#60A5FA";
   };
 
-  const isDone = o => o.courierStage === "completado" || o.status === "fallido" || (o.buyerConfirmed && o.sellerPaid) || (o.flow && (o.stepIdx || 0) > 0 && (o.stepIdx || 0) >= o.flow.length - 1);
-  const activeOrders = orders.filter(o => !isDone(o));
-  const doneOrders = orders.filter(o => isDone(o));
-  const renderCard = (o, i) => {
+  const isNew = (o) => (o.createdAt || 0) > (baselineRef.current[tab] ?? (lastSeen[tab] || 0));
+  const renderCard = (o) => {
     const sc = stepColor(o);
     const sl = SHIP_LABELS[o.shipType || o.shipMode] || SHIP_LABELS.local;
     const md = MODALIDAD_LABELS[o.modalidad] || null;
     return (
-      <div key={o.id} onClick={() => onOpen?.(o)} className={onOpen ? "cd" : ""} style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, padding: "14px", marginBottom: 10, cursor: onOpen ? "pointer" : "default" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <p style={{ fontSize: 11, color: "#888", marginBottom: 2 }}>Pedido #{String(o.id).slice(-8).toUpperCase()}</p>
-            {o.title && <p style={{ fontSize: 12, fontWeight: 700, color: T1, marginBottom: 3 }}>{o.title}{o.qty > 1 ? ` ×${o.qty}` : ""}</p>}
-            <p style={{ fontSize: 18, fontWeight: 900, color: G }}>{money(o.amount, o.currency)}</p>
+      <div key={o.id} onClick={() => onOpen?.(o)} className={onOpen ? "cd" : ""} style={{ position: "relative", background: S, border: `1px solid ${isNew(o) ? G + "66" : B}`, borderRadius: 14, padding: "14px", marginBottom: 10, cursor: onOpen ? "pointer" : "default" }}>
+        <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ width: 52, height: 52, borderRadius: 12, background: "#1a1a1a", overflow: "hidden", flexShrink: 0 }}>
+            {o.image && <img src={o.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
           </div>
-          <div style={{ background: sc + "20", border: `1px solid ${sc}35`, borderRadius: 100, padding: "4px 11px", flexShrink: 0 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: sc }}>{stepLabel(o)}</span>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+              <p style={{ fontSize: 11, color: "#888" }}>Pedido #{String(o.id).slice(-8).toUpperCase()}{isNew(o) ? <span style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 800, color: "#fff", background: G, borderRadius: 5, padding: "1px 5px", verticalAlign: "middle" }}>NUEVO</span> : null}</p>
+              <div style={{ background: sc + "20", border: `1px solid ${sc}35`, borderRadius: 100, padding: "3px 10px", flexShrink: 0 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: sc }}>{stepLabel(o)}</span>
+              </div>
+            </div>
+            {o.title && <p style={{ fontSize: 12.5, fontWeight: 700, color: T1, margin: "2px 0 3px" }}>{o.title}{o.qty > 1 ? ` ×${o.qty}` : ""}</p>}
+            <p style={{ fontSize: 17, fontWeight: 900, color: G }}>{money(o.amount, o.currency)}</p>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", margin: "9px 0 8px" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: isDark ? "#111" : "#F2F3F5", border: `1px solid ${B}`, borderRadius: 50, padding: "3px 9px", fontSize: 9.5, fontWeight: 700, color: T2 }}>{sl.icon} {sl.label}</span>
           {md && <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: `${G}12`, border: `1px solid ${G}28`, borderRadius: 50, padding: "3px 9px", fontSize: 9.5, fontWeight: 700, color: G }}>{md.label}</span>}
         </div>
@@ -263,33 +275,43 @@ export function OrdersScreen({ user, onBack, flash, orders: liveOrders = [], onO
     );
   };
 
+  const TabBtn = ({ id, label, nuevos }) => {
+    const on = tab === id;
+    return (
+      <button onClick={() => setTab(id)} className="p" style={{ flex: 1, position: "relative", background: "transparent", border: "none", borderBottom: `2px solid ${on ? G : "transparent"}`, padding: "12px 4px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+        <span style={{ fontSize: 13, fontWeight: on ? 800 : 600, color: on ? T1 : T2 }}>{label}</span>
+        {nuevos > 0 && <span style={{ minWidth: 17, height: 17, borderRadius: 999, background: "#EF4444", color: "#fff", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{nuevos > 99 ? "99+" : nuevos}</span>}
+      </button>
+    );
+  };
+
+  const list = tab === "compras" ? compras : ventas;
+  const empty = tab === "compras"
+    ? { icon: "🛍️", title: "Aún no has comprado nada.", sub: "Cuando compres, tus pedidos aparecerán aquí." }
+    : { icon: "🏷️", title: "Aún no te han comprado nada.", sub: "Publica productos para empezar a vender." };
+
   return (
     <div style={{ flex: 1, overflowY: "auto" }}>
-      <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "13px 18px", display: "flex", alignItems: "center", gap: 8 }}>
-        <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c="#666" s={20} /></button>
-        <p style={{ fontSize: 14, fontWeight: 800 }}>Mis pedidos</p>
+      <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, position: "sticky", top: 0, zIndex: 5 }}>
+        <div style={{ padding: "13px 18px", display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c="#666" s={20} /></button>
+          <p style={{ fontSize: 14, fontWeight: 800, color: T1 }}>Pedidos</p>
+        </div>
+        <div style={{ display: "flex", padding: "0 10px" }}>
+          <TabBtn id="compras" label="Compras" nuevos={comprasNew} />
+          <TabBtn id="ventas"  label="Ventas"  nuevos={ventasNew} />
+        </div>
       </div>
-      {loading
-        ? <div style={{ display: "flex", justifyContent: "center", padding: "44px 0" }}><Spin size={26} /></div>
-        : orders.length === 0
-          ? <div style={{ padding: "64px 32px", textAlign: "center" }}>
-              <div style={{ fontSize: 50, marginBottom: 16 }}>📦</div>
-              <p style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Sin pedidos aún</p>
-              <p style={{ fontSize: 11, color: "#3e3e3e" }}>Tus compras aparecerán aquí.</p>
-            </div>
-          : <div style={{ padding: "14px 18px 80px" }}>
-              {activeOrders.map((o, i) => renderCard(o, i))}
-              {activeOrders.length === 0 && <p style={{ fontSize: 11.5, color: T3, textAlign: "center", padding: "20px 0" }}>No tienes pedidos en curso.</p>}
-              {doneOrders.length > 0 && (
-                <div style={{ marginTop: activeOrders.length ? 18 : 4 }}>
-                  <button onClick={() => setShowDone(s => !s)} className="p" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: isDark ? "#111" : "#F2F3F5", border: `1px solid ${B}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10, cursor: "pointer" }}>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: T2 }}>✓ Completados ({doneOrders.length})</span>
-                    <span style={{ fontSize: 11, color: T3, transform: showDone ? "rotate(90deg)" : "none", transition: "transform .15s" }}>›</span>
-                  </button>
-                  {showDone && doneOrders.map((o, i) => renderCard(o, i))}
-                </div>
-              )}
-            </div>
+
+      {list.length === 0
+        ? <div style={{ padding: "60px 32px", textAlign: "center" }}>
+            <div style={{ fontSize: 46, marginBottom: 14 }}>{empty.icon}</div>
+            <p style={{ fontSize: 14, fontWeight: 700, color: T1, marginBottom: 7 }}>{empty.title}</p>
+            <p style={{ fontSize: 11.5, color: T3, lineHeight: 1.5 }}>{empty.sub}</p>
+          </div>
+        : <div style={{ padding: "14px 18px 90px" }}>
+            {list.map(o => renderCard(o))}
+          </div>
       }
     </div>
   );

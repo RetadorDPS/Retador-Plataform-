@@ -619,25 +619,40 @@ function AppShell({ sessionUser }) {
     });
   }, [mergedOrders]);
 
-  // Coreografía de 3 partes
-  const sellerConfirmOrder = (orderId) => {
-    setOrders(prev => prev.map(o => { if (o.id !== orderId) return o; const idx = (o.flow || []).findIndex(s => s.key === "confirmado"); return { ...o, sellerConfirmed: true, stepIdx: idx >= 0 ? Math.max(o.stepIdx || 0, idx) : (o.stepIdx || 0), status: "confirmado", history: [...(o.history || []), { key: "confirmado", label: "Confirmado por el vendedor", at: Date.now() }] }; }));
-    const o = orders.find(x => x.id === orderId); if (o) pushNotif(o.delivery?.name || o.buyerName, "Tu pedido fue confirmado por el vendedor. Buscando mensajero.", orderId);
+  // Coreografía de 3 partes — sincronizada al backend con RPCs seguras.
+  // NUNCA hacemos UPDATE directo del status: usamos advance_order / confirm_order,
+  // que aplican el candado de seguridad del servidor. Así ambas partes ven lo mismo.
+  const sellerConfirmOrder = async (orderId) => {
+    const o = mergedOrders.find(x => x.id === orderId);
+    const { error } = await supabase.rpc("advance_order", { p_order_id: orderId, p_new_status: "confirmado" });
+    if (error) { console.error("advance_order:", error.message); flash("⚠️ No se pudo confirmar: " + error.message); return; }
+    setOrders(prev => prev.map(x => { if (x.id !== orderId) return x; const idx = (x.flow || []).findIndex(s => s.key === "confirmado"); return { ...x, sellerConfirmed: true, stepIdx: idx >= 0 ? Math.max(x.stepIdx || 0, idx) : (x.stepIdx || 0), status: "confirmado", history: [...(x.history || []), { key: "confirmado", label: "Confirmado por el vendedor", at: Date.now() }] }; }));
+    reloadOrders();
+    if (o) pushNotif(o.buyer_id || o.buyerId || o.delivery?.name || o.buyerName, "Tu pedido fue confirmado por el vendedor. Buscando mensajero.", orderId);
     flash("✅ Pedido confirmado — disponible para mensajeros");
   };
-  const buyerConfirmReceipt = (orderId) => {
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, buyerConfirmed: true, history: [...(o.history || []), { key: "recibido", label: "Comprador confirmó recepción", at: Date.now() }] } : o));
-    const o = orders.find(x => x.id === orderId); if (o) { pushNotif(o.sellerName, "El comprador confirmó que recibió el producto.", orderId); if (o.courierName) pushNotif(o.courierName, "El comprador confirmó la recepción.", orderId); }
+  const buyerConfirmReceipt = async (orderId) => {
+    const o = mergedOrders.find(x => x.id === orderId);
+    const { error } = await supabase.rpc("confirm_order", { p_order_id: orderId, p_who: "buyer" });
+    if (error) { console.error("confirm_order buyer:", error.message); flash("⚠️ No se pudo confirmar: " + error.message); return; }
+    setOrders(prev => prev.map(x => x.id === orderId ? { ...x, buyerConfirmed: true, history: [...(x.history || []), { key: "recibido", label: "Comprador confirmó recepción", at: Date.now() }] } : x));
+    reloadOrders();
+    if (o) { pushNotif(o.seller_id || o.sellerId || o.sellerName, "El comprador confirmó que recibió el producto.", orderId); if (o.courierName) pushNotif(o.courierName, "El comprador confirmó la recepción.", orderId); }
     flash("✅ Confirmaste la recepción");
   };
-  const sellerConfirmPayment = (orderId, ok) => {
-    setOrders(prev => prev.map(o => {
-      if (o.id !== orderId) return o;
-      if (!ok) return { ...o, courierStage: "fallido", status: "fallido", history: [...(o.history || []), { key: "fallido", label: "Sin pago — entrega fallida", at: Date.now() }] };
-      const idx = (o.flow || []).findIndex(s => s.key === "entregado");
-      return { ...o, courierStage: "completado", sellerPaid: true, stepIdx: idx >= 0 ? Math.max(o.stepIdx || 0, idx) : (o.stepIdx || 0), status: "entregado", history: [...(o.history || []), { key: "pago_ok", label: "Vendedor confirmó el pago", at: Date.now() }] };
+  const sellerConfirmPayment = async (orderId, ok) => {
+    const o = mergedOrders.find(x => x.id === orderId);
+    if (ok) {
+      const { error } = await supabase.rpc("confirm_order", { p_order_id: orderId, p_who: "seller" });
+      if (error) { console.error("confirm_order seller:", error.message); flash("⚠️ No se pudo confirmar: " + error.message); return; }
+    }
+    setOrders(prev => prev.map(x => {
+      if (x.id !== orderId) return x;
+      if (!ok) return { ...x, courierStage: "fallido", status: "fallido", history: [...(x.history || []), { key: "fallido", label: "Sin pago — entrega fallida", at: Date.now() }] };
+      const idx = (x.flow || []).findIndex(s => s.key === "entregado");
+      return { ...x, courierStage: "completado", sellerPaid: true, stepIdx: idx >= 0 ? Math.max(x.stepIdx || 0, idx) : (x.stepIdx || 0), status: "entregado", history: [...(x.history || []), { key: "pago_ok", label: "Vendedor confirmó el pago", at: Date.now() }] };
     }));
-    const o = orders.find(x => x.id === orderId);
+    reloadOrders();
     if (o && o.courierName) pushNotif(o.courierName, ok ? "El vendedor confirmó el pago. Entrega cerrada ✅" : "El vendedor reportó que no hubo pago. Devuelve el producto.", orderId);
     flash(ok ? "✅ Pago confirmado — entrega cerrada" : "⚠️ Marcado como sin pago");
   };

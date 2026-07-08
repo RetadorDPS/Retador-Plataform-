@@ -18,8 +18,8 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onAdvance, onCha
   const card = isDark ? "#0d0d0d" : S;
   const soft = isDark ? "#111" : "#F5F6F7";
   const commission = o.commissionPct ? (o.amount * o.commissionPct / 100) : 0;
-  const viewerIsSeller = !!me && o.sellerName === me;
-  const viewerLooksBuyer = (o.buyerId != null && o.buyerId === user?.id) || (!!o.buyerName && o.buyerName === me) || o.feeApproval === "pending";
+  const viewerIsSeller = (!!user?.id && (o.seller_id === user.id || o.sellerId === user.id)) || (!!me && o.sellerName === me);
+  const viewerLooksBuyer = (!!user?.id && (o.buyer_id === user.id || o.buyerId === user.id)) || (!!o.buyerName && o.buyerName === me) || o.feeApproval === "pending";
   const isCompleted = done || o.courierStage === "completado" || o.status === "completado" || o.status === "entregado" || (o.buyerConfirmed && o.sellerPaid);
   const submitRatings = () => {
     try {
@@ -121,8 +121,8 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onAdvance, onCha
 
         {/* Coreografía 3 partes: confirmaciones por rol + aviso */}
         {(() => {
-          const isSeller = !!me && o.sellerName === me;
-          const viewerIsBuyer = (o.buyerId != null && o.buyerId === user?.id) || (!!o.buyerName && o.buyerName === me) || !isSeller;
+          const isSeller = (!!user?.id && (o.seller_id === user.id || o.sellerId === user.id)) || (!!me && o.sellerName === me);
+          const viewerIsBuyer = (!!user?.id && (o.buyer_id === user.id || o.buyerId === user.id)) || (o.buyerId != null && o.buyerId === user?.id) || (!!o.buyerName && o.buyerName === me) || !isSeller;
           const isLocal = (o.shipType || o.shipMode) === "local";
           const cash = (o.payMethod || o.payment || "efectivo").toString().toLowerCase().includes("efect") || !o.payMethod;
           const notConfirmed = (o.stepIdx || 0) < 1 && !o.sellerConfirmed;

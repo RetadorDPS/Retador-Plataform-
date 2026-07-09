@@ -2,7 +2,7 @@
 // RETADOR MARKETPLACE — Demo Version
 // Versión de demostración con datos simulados para visualización
 // ═════════════════════════════════════════════════════════════════════════════
-import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
 import { User, Palette, Bell, Shield, MessageCircle, Truck, Gavel, CreditCard, BarChart2, Globe, HardDrive, HelpCircle, Info, ChevronRight, ArrowLeft, Check, Plus, Edit2, Camera, Lock, LogOut, MapPin, Clock, Download, FileText, Award, ShoppingBag, Package, AlertCircle, CheckCircle2, Zap, TrendingUp, Database, Mail, Phone, Fingerprint, Star, Volume2, Smartphone, Calendar, Activity, Send, ArrowDownLeft, ArrowUpRight, PlusCircle, Eye, EyeOff, ShieldCheck, Search, X, Users, QrCode, Landmark, Wallet, Home, History, UserCircle2, Copy, Share2, Loader2, Banknote, Building2, Trash2, KeyRound, BadgeCheck, Receipt, ArrowLeftRight } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -152,21 +152,17 @@ function AppShell({ sessionUser }) {
     const without = prev.filter(c => c.userName !== meName);
     return [...without, { id: "cou_" + Date.now(), userName: meName, status: "pending", createdAt: Date.now(), ...data }];
   });
-  // El mensajero acepta una entrega disponible
-  const acceptDelivery = (orderId, fee) => {
-    const meName = profileData?.name || user?.name || "Usuario";
-    setOrders(prev => prev.map(o => {
-      if (o.id !== orderId || o.courierName) return o;
-      const baseFee = o.deliveryCost || o.shipPrice || o.shipCost || 0;
-      const newFee = (fee != null && fee > 0) ? Math.round(fee) : baseFee;
-      if (newFee > baseFee) {
-        // El mensajero propone una tarifa mayor → necesita aprobación del comprador.
-        pushNotif(o.buyerId || o.buyerName, `Tu mensajero propone un domicilio de ${newFee} CUP (estimado: ${baseFee}). Apruébalo para continuar.`, o.id);
-        return { ...o, courierName: meName, courierAcceptedAt: Date.now(), proposedFee: newFee, baseFee, feeApproval: "pending", courierStage: "propuesta", history: [...(o.history || []), { key: "propuesta", label: "Tarifa propuesta", at: Date.now(), note: `${meName} propone ${newFee} CUP de domicilio` }] };
-      }
-      const idx = (o.flow || []).findIndex(s => s.key === "asignado");
-      return { ...o, courierName: meName, courierStage: "aceptado", courierAcceptedAt: Date.now(), deliveryCost: newFee, stepIdx: idx >= 0 ? Math.max(o.stepIdx || 0, idx) : (o.stepIdx || 0), history: [...(o.history || []), { key: "asignado", label: "Mensajero asignado", at: Date.now(), note: `Aceptado por ${meName}` }] };
-    }));
+  // El mensajero acepta una entrega disponible — se registra en el backend con RPC
+  // segura. Si propone una tarifa mayor a la base, el backend deja el pedido a la
+  // espera de que el comprador la apruebe. Nunca tocamos el status a mano.
+  const acceptDelivery = async (orderId, fee) => {
+    const o = mergedOrders.find(x => x.id === orderId);
+    const baseFee = (o?.deliveryCost) || (o?.shipPrice) || o?.shipCost || 0;
+    const newFee = (fee != null && fee > 0) ? Math.round(fee) : baseFee;
+    const { error } = await supabase.rpc("courier_accept_delivery", { p_order_id: orderId, p_fee: newFee, p_base_fee: baseFee });
+    if (error) { console.error("courier_accept_delivery:", error.message); flash("⚠️ No se pudo aceptar: " + error.message); return; }
+    await loadOrders();
+    flash(newFee > baseFee ? "✅ Aceptada · tarifa propuesta enviada al comprador" : "✅ Entrega aceptada");
   };
   // El mensajero libera una entrega → vuelve a estar disponible para otro.
   const cancelDelivery = (orderId) => {
@@ -176,29 +172,22 @@ function AppShell({ sessionUser }) {
       return { ...o, courierName: null, courierStage: null, proposedFee: null, baseFee: null, feeApproval: null, stepIdx: idx >= 0 ? Math.min(o.stepIdx || 0, idx) : (o.stepIdx || 0), history: [...(o.history || []), { key: "liberado", label: "Entrega liberada", at: Date.now(), note: "El mensajero liberó la entrega. Disponible de nuevo." }] };
     }));
   };
-  // El comprador aprueba o rechaza la tarifa propuesta por el mensajero.
-  const buyerApproveFee = (orderId, ok) => {
-    setOrders(prev => prev.map(o => {
-      if (o.id !== orderId) return o;
-      if (ok) {
-        const idx = (o.flow || []).findIndex(s => s.key === "asignado");
-        pushNotif(o.courierName, "El comprador aprobó tu tarifa. ¡Ya puedes recoger!", o.id);
-        return { ...o, deliveryCost: o.proposedFee || o.deliveryCost, feeApproval: "approved", courierStage: "aceptado", stepIdx: idx >= 0 ? Math.max(o.stepIdx || 0, idx) : (o.stepIdx || 0), history: [...(o.history || []), { key: "asignado", label: "Mensajero asignado", at: Date.now(), note: `Tarifa de ${o.proposedFee} CUP aprobada` }] };
-      }
-      pushNotif(o.courierName, "El comprador rechazó la tarifa propuesta. El pedido volvió a estar disponible.", o.id);
-      return { ...o, courierName: null, courierStage: null, proposedFee: null, feeApproval: "rejected", history: [...(o.history || []), { key: "rechazo", label: "Tarifa rechazada", at: Date.now(), note: "El comprador rechazó la tarifa. Disponible de nuevo." }] };
-    }));
+  // El comprador aprueba o rechaza la tarifa propuesta por el mensajero — vía RPC
+  // segura en el backend. Recarga desde el backend para que todos vean lo mismo.
+  const buyerApproveFee = async (orderId, ok) => {
+    const { error } = await supabase.rpc("buyer_respond_fee", { p_order_id: orderId, p_approve: !!ok });
+    if (error) { console.error("buyer_respond_fee:", error.message); flash("⚠️ No se pudo responder: " + error.message); return; }
+    await loadOrders();
+    flash(ok ? "✅ Tarifa aprobada — el mensajero ya puede recoger" : "Tarifa rechazada · disponible de nuevo");
   };
-  // El mensajero avanza su etapa: recogido → en_camino → entregado → cobrado → completado
-  const courierStage = (orderId, stage) => {
-    const flowKey = { recogido: "recogido", en_camino: "en_ruta", entregado: "entregado", completado: "entregado" }[stage];
-    const label = { recogido: "Artículo recogido", en_camino: "En camino", entregado: "Entregado", cobrado: "Pago cobrado", completado: "Entrega completada" }[stage] || stage;
-    setOrders(prev => prev.map(o => {
-      if (o.id !== orderId) return o;
-      let stepIdx = o.stepIdx || 0;
-      if (flowKey) { const idx = (o.flow || []).findIndex(s => s.key === flowKey); if (idx >= 0) stepIdx = Math.max(stepIdx, idx); }
-      return { ...o, courierStage: stage, stepIdx, status: stage === "completado" ? "completado" : (flowKey || o.status), history: [...(o.history || []), { key: stage, label, at: Date.now(), note: "" }] };
-    }));
+  // El mensajero avanza su etapa. El backend SOLO acepta "recogido" y "entregado"
+  // ("recogido" auto-avanza a en_ruta; "entregado" cierra el pedido). RPC segura.
+  const courierStage = async (orderId, stage) => {
+    const p_stage = (stage === "recogido") ? "recogido" : "entregado";
+    const { error } = await supabase.rpc("courier_advance_stage", { p_order_id: orderId, p_stage });
+    if (error) { console.error("courier_advance_stage:", error.message); flash("⚠️ No se pudo avanzar: " + error.message); return; }
+    await loadOrders();
+    flash(p_stage === "recogido" ? "✅ Producto recogido — en ruta" : "✅ Entregado — pedido cerrado");
   };
   // MODO PRUEBA: dueño siempre true para que puedas entrar al panel sin cuentas.
   // En producción: ligado al correo del dueño (o a un permiso/rol del usuario).
@@ -555,16 +544,6 @@ function AppShell({ sessionUser }) {
     setOrders(prev => [enriched, ...prev]);
     return enriched;
   };
-  const advanceOrder = (orderId) => {
-    setOrders(prev => prev.map(o => {
-      if (o.id !== orderId) return o;
-      const last = (o.flow?.length || 1) - 1;
-      const next = Math.min(last, (o.stepIdx || 0) + 1);
-      if (next === o.stepIdx) return o;
-      const step = o.flow[next];
-      return { ...o, stepIdx: next, status: step.key, history: [...(o.history || []), { key: step.key, label: step.label, at: Date.now(), note: "" }] };
-    }));
-  };
   const hasOrderWith = (sellerKey) => !!sellerKey && orders.some(o => o.sellerId === sellerKey || o.sellerName === sellerKey);
   // Avisos/notificaciones (persistentes)
   const [notifs, setNotifs] = useState(() => { try { return JSON.parse(localStorage.getItem("retador_notifs") || "[]"); } catch { return []; } });
@@ -576,26 +555,18 @@ function AppShell({ sessionUser }) {
   const unreadNotif = myNotifs.filter(n => !n.read).length;
   const markNotifRead = id => setNotifs(prev => prev.map(n => id == null ? { ...n, read: true } : (n.id === id ? { ...n, read: true } : n)));
 
-  // ── PEDIDOS REALES (Compras/Ventas) a nivel de app ─────────────────────────
-  // Cargamos aquí (no solo en la pantalla) para poder mostrar el aviso de "nuevo"
-  // en el botón de Pedidos y notificar ventas aunque no estés en esa pantalla.
-  const [dbOrders, setDbOrders] = useState([]);
-  const reloadOrders = useCallback(() => {
-    if (!user?.id) { setDbOrders([]); return; }
-    getUserOrders(user.id).then(d => setDbOrders(d || [])).catch(() => {});
+  // ── PEDIDOS REALES (Compras/Ventas) — el BACKEND es la ÚNICA fuente ─────────
+  // loadOrders recarga desde Supabase y reemplaza el estado local, para que las
+  // dos partes (comprador/vendedor/mensajero) vean SIEMPRE lo mismo, sin duplicar.
+  const loadOrders = useCallback(async () => {
+    if (!user?.id) return;
+    try { const real = await getUserOrders(user.id); setOrders(real || []); } catch (e) {}
   }, [user?.id]);
-  useEffect(() => { reloadOrders(); }, [reloadOrders]);
-  useEffect(() => { if (pScr === "orders" || pScr === "order-detail") reloadOrders(); }, [pScr, reloadOrders]);
+  useEffect(() => { loadOrders(); }, [loadOrders]);
+  useEffect(() => { if (pScr === "orders" || pScr === "order-detail") loadOrders(); }, [pScr, loadOrders]);
 
-  // Mezcla: pedidos reales del backend + los locales de esta sesión (los locales
-  // ganan porque llevan los avances en vivo). Sin duplicados (por id).
   const roleOf = (o) => (((o.buyerId ?? o.buyer_id) === user?.id) ? "compra" : "venta");
-  const mergedOrders = useMemo(() => {
-    const m = new Map();
-    (dbOrders || []).forEach(o => m.set(o.id, o));
-    (orders || []).forEach(o => m.set(o.id, o));
-    return [...m.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  }, [orders, dbOrders]);
+  const mergedOrders = orders;
 
   // Marcas de "visto" por pestaña (para los avisos de nuevo).
   const [ordersSeen, setOrdersSeen] = useState(() => { try { return JSON.parse(localStorage.getItem("retador_orders_seen") || "{}"); } catch { return {}; } });
@@ -627,7 +598,7 @@ function AppShell({ sessionUser }) {
     const { error } = await supabase.rpc("advance_order", { p_order_id: orderId, p_new_status: "confirmado" });
     if (error) { console.error("advance_order:", error.message); flash("⚠️ No se pudo confirmar: " + error.message); return; }
     setOrders(prev => prev.map(x => { if (x.id !== orderId) return x; const idx = (x.flow || []).findIndex(s => s.key === "confirmado"); return { ...x, sellerConfirmed: true, stepIdx: idx >= 0 ? Math.max(x.stepIdx || 0, idx) : (x.stepIdx || 0), status: "confirmado", history: [...(x.history || []), { key: "confirmado", label: "Confirmado por el vendedor", at: Date.now() }] }; }));
-    reloadOrders();
+    loadOrders();
     if (o) pushNotif(o.buyer_id || o.buyerId || o.delivery?.name || o.buyerName, "Tu pedido fue confirmado por el vendedor. Buscando mensajero.", orderId);
     flash("✅ Pedido confirmado — disponible para mensajeros");
   };
@@ -636,7 +607,7 @@ function AppShell({ sessionUser }) {
     const { error } = await supabase.rpc("confirm_order", { p_order_id: orderId, p_who: "buyer" });
     if (error) { console.error("confirm_order buyer:", error.message); flash("⚠️ No se pudo confirmar: " + error.message); return; }
     setOrders(prev => prev.map(x => x.id === orderId ? { ...x, buyerConfirmed: true, history: [...(x.history || []), { key: "recibido", label: "Comprador confirmó recepción", at: Date.now() }] } : x));
-    reloadOrders();
+    loadOrders();
     if (o) { pushNotif(o.seller_id || o.sellerId || o.sellerName, "El comprador confirmó que recibió el producto.", orderId); if (o.courierName) pushNotif(o.courierName, "El comprador confirmó la recepción.", orderId); }
     flash("✅ Confirmaste la recepción");
   };
@@ -652,7 +623,7 @@ function AppShell({ sessionUser }) {
       const idx = (x.flow || []).findIndex(s => s.key === "entregado");
       return { ...x, courierStage: "completado", sellerPaid: true, stepIdx: idx >= 0 ? Math.max(x.stepIdx || 0, idx) : (x.stepIdx || 0), status: "entregado", history: [...(x.history || []), { key: "pago_ok", label: "Vendedor confirmó el pago", at: Date.now() }] };
     }));
-    reloadOrders();
+    loadOrders();
     if (o && o.courierName) pushNotif(o.courierName, ok ? "El vendedor confirmó el pago. Entrega cerrada ✅" : "El vendedor reportó que no hubo pago. Devuelve el producto.", orderId);
     flash(ok ? "✅ Pago confirmado — entrega cerrada" : "⚠️ Marcado como sin pago");
   };
@@ -902,10 +873,14 @@ function AppShell({ sessionUser }) {
       })()}
       {showCourier && (() => {
         const meName = profileData?.name || user?.name || "Usuario";
-        const myRecord = couriers.find(c => c.userName === meName) || null;
+        // Acceso por ROL real: una cuenta con role="courier" entra al modo mensajero
+        // en cualquier teléfono, sin depender del registro local de solicitudes.
+        const myRecord = (user?.role === "courier")
+          ? { userName: meName, name: meName, status: "approved" }
+          : (couriers.find(c => c.userName === meName) || null);
         return <CourierFlow myRecord={myRecord} dark={effectiveTheme === "dark"} onClose={() => setShowCourier(false)} onSubmit={(data) => { submitCourierApp(data); flash("🛵 Solicitud enviada — en revisión"); }}
           meName={meName} orders={orders} localBase={adminCfg.localBase || 150}
-          onAccept={(id, fee) => { acceptDelivery(id, fee); flash(fee ? "✅ Aceptada · tarifa propuesta enviada al comprador" : "✅ Entrega aceptada"); }}
+          onAccept={(id, fee) => { acceptDelivery(id, fee); }}
           onStage={(id, st) => { courierStage(id, st); }}
           onCancel={(id) => { cancelDelivery(id); flash("Entrega liberada · disponible de nuevo"); }}
           onReport={(rep) => { addReport(rep); flash("Reporte enviado al equipo de RETADOR"); }} />;
@@ -1021,7 +996,7 @@ function AppShell({ sessionUser }) {
               blockedUsers={blockedUsers} onToggleBlock={toggleBlock}
               onOpenWallet={() => setShowWallet(true)} orders={orders.filter(o => (o.buyerId ? o.buyerId === user?.id : true))} />}
             {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { setSelOrderId(o.id); setPScr("order-detail"); }} />}
-            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onAdvance={() => advanceOrder(o.id)} onChat={() => requestChat(o.sellerId, o.sellerName)} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
+            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => requestChat(o.sellerId, o.sellerName)} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
           </>}
         </>
       </div>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, useAt, useR } from "../shared/index.js";
 
-export function OrderDetailScreen({ order: o, user, me, onBack, onAdvance, onChat, flash, onSellerConfirm, onBuyerConfirm, onSellerPayment, onApproveFee }) {
+export function OrderDetailScreen({ order: o, user, me, onBack, onChat, flash, onSellerConfirm, onBuyerConfirm, onSellerPayment, onApproveFee }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
   const [rated, setRated] = useState(() => { try { return !!(JSON.parse(localStorage.getItem("retador_ratings") || "{}")[o?.id]); } catch (e) { return false; } });
   const [rate, setRate] = useState({ sys: 0, courier: 0, seller: 0 });
@@ -144,7 +144,10 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onAdvance, onCha
             if (isSeller) actions.push(btn("Confirmar pedido — tengo el producto listo", onSellerConfirm));
           } else if (delivered) {
             if (!o.buyerConfirmed) {
-              if (!isSeller) { nudge = "Tu pedido fue entregado. Confírmalo para cerrar."; actions.push(btn("Confirmar que recibí el producto", onBuyerConfirm)); }
+              // En flujo con mensajero (local) el "Entregué" del mensajero cierra el
+              // pedido: el comprador NO confirma. En "en persona"/coordinado sí lo hace.
+              if (!isSeller && isLocal) { nudge = "Tu mensajero marcó la entrega. ¡Pedido cerrado, gracias!"; }
+              else if (!isSeller) { nudge = "Tu pedido fue entregado. Confírmalo para cerrar."; actions.push(btn("Confirmar que recibí el producto", onBuyerConfirm)); }
               else nudge = "Entregado. Esperando que el comprador confirme la recepción.";
             } else if (!o.sellerPaid) {
               if (isSeller && cash) { nudge = "El mensajero te entregó el efectivo. Confírmalo para cerrar."; actions.push(btn("Confirmar que recibí mi pago", () => onSellerPayment(true))); }
@@ -197,12 +200,11 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onAdvance, onCha
               <button type="button" disabled={!rate.sys && !rate.courier && !rate.seller} onClick={submitRatings} style={{ width: "100%", marginTop: 11, background: (rate.sys || rate.courier || rate.seller) ? G : soft, color: (rate.sys || rate.courier || rate.seller) ? "#000" : T3, border: "none", borderRadius: 13, padding: "14px", fontSize: 13.5, fontWeight: 800, cursor: (rate.sys || rate.courier || rate.seller) ? "pointer" : "default" }}>Enviar calificación</button>
             </div>)}
 
-        {/* Chat + avanzar demo */}
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="p" onClick={onAdvance} style={{ flex: 1, background: "transparent", color: T3, border: `1px dashed ${B}`, borderRadius: 50, padding: "12px", fontSize: 11, fontWeight: 700 }}>Avanzar estado (demo)</button>
+        {/* Chat con la otra parte */}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button className="p" onClick={onChat} style={{ width: 48, height: 48, borderRadius: "50%", border: `1px solid ${B}`, background: soft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Ic n="msg" c={T2} s={19} /></button>
         </div>
-        <p style={{ fontSize: 9, color: T3, textAlign: "center", marginTop: 10, lineHeight: 1.5 }}>Cada confirmación la marca quien corresponde (vendedor, comprador o mensajero). El botón "demo" es solo para probar el avance.</p>
+        <p style={{ fontSize: 9, color: T3, textAlign: "center", marginTop: 10, lineHeight: 1.5 }}>Cada confirmación la marca quien corresponde: el vendedor confirma el pedido, y el mensajero marca cuando recoge y cuando entrega.</p>
       </div>
     </div>
   );

@@ -18,7 +18,7 @@ function CourierDashboard({ meName, orders, localBase, onAccept, onStage, onCanc
     { id: "demo2", shipMode: "local", title: "Perfume 100ml", amount: 1200, deliveryCost: 350, payMethod: "transferencia", sellerName: "Boutique Lux", delivery: { pickup: "Boutique Lux", pickupAddress: "San Rafael #112 e/ Industria y Consulado, Centro Habana", pickupPhone: "+53 5 444 5566", address: "Ave. Salvador Allende #210, Centro Habana", name: "Carlos M.", phone: "+53 5 876 1234", ref: "Casa con reja blanca, entre Belascoaín y Lucena." }, status: "confirmado" },
   ]);
   const demoAccept = (id, fee) => setDemoOrders(prev => prev.map(o => { if (o.id !== id) return o; const base = o.deliveryCost || o.shipPrice || localBase; const nf = (fee != null && fee > 0) ? Math.round(fee) : base; if (nf > base) return { ...o, courierName: meName, courierStage: "propuesta", proposedFee: nf, baseFee: base, feeApproval: "pending" }; return { ...o, courierName: meName, courierStage: "aceptado", deliveryCost: nf }; }));
-  const demoStage = (id, st) => setDemoOrders(prev => prev.map(o => o.id === id ? { ...o, courierStage: st } : o));
+  const demoStage = (id, st) => { const cs = st === "entregado" ? "completado" : st; setDemoOrders(prev => prev.map(o => o.id === id ? { ...o, courierStage: cs, status: cs === "completado" ? "entregado" : o.status } : o)); };
   // En demo mezclamos los pedidos REALES locales con los de ejemplo, para que el dueño vea su propio pedido aquí.
   const srcOrders = demo ? [...orders.filter(o => (o.shipMode || o.shipType) === "local"), ...demoOrders] : orders;
   const acceptFn = (id, fee) => { if (String(id).startsWith("demo")) demoAccept(id, fee); else onAccept && onAccept(id, fee); };
@@ -28,7 +28,8 @@ function CourierDashboard({ meName, orders, localBase, onAccept, onStage, onCanc
   const mine = srcOrders.filter(o => o.courierName === meName);
   const active = mine.find(o => o.courierStage && o.courierStage !== "completado" && o.courierStage !== "fallido");
   const done = mine.filter(o => o.courierStage === "completado");
-  const available = srcOrders.filter(o => o.shipMode === "local" && !o.courierName && o.status !== "entregado" && o.status !== "cancelado");
+  // Solo aparecen entregas de pedidos YA confirmados por el vendedor y sin mensajero.
+  const available = srcOrders.filter(o => o.shipMode === "local" && !o.courierName && o.status === "confirmado");
   const baseFeeOf = o => o.deliveryCost || o.shipCost || o.shipPrice || localBase;
   const surgeCfg = (() => { try { const r = localStorage.getItem("retador_admincfg"); if (r) { const c = JSON.parse(r); return { on: c.surgeActive === true, every: Number(c.surgeIntervalMin) || 30, step: Number(c.surgeStepPct) || 15, cap: Number(c.surgeCapPct) || 60 }; } } catch (e) {} return { on: false, every: 30, step: 15, cap: 60 }; })();
   const surgePct = o => { if (!surgeCfg.on || o.courierName) return 0; const mins = (Date.now() - (o.createdAt || o.created_at || Date.now())) / 60000; const steps = Math.floor(mins / surgeCfg.every); return Math.min(surgeCfg.cap, steps * surgeCfg.step); };
@@ -105,12 +106,11 @@ function CourierDashboard({ meName, orders, localBase, onAccept, onStage, onCanc
       </div>}
     </div>;
     if (o.courierStage === "fallido") return <div style={{ textAlign: "center", color: "#ef4444", fontWeight: 700, fontSize: 13.5, padding: "12px", background: "#ef444414", borderRadius: 12 }}>❌ Sin pago · producto devuelto al vendedor</div>;
-    if (o.courierStage === "recogido") {
-      const next = cash ? "completado" : "esperando_pago";
-      const label = cash ? "Entregué y cobré" : "Entregué (cobré mi tarifa)";
-      return <button onClick={() => { stageFn(o.id, next); if (next === "completado") setDetail(null); }} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: AC, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>{label}</button>;
+    if (o.courierStage === "recogido" || o.status === "en_ruta") {
+      // "Entregué" cierra el pedido (el backend marca entregado y termina).
+      return <button onClick={() => { stageFn(o.id, "entregado"); setDetail(null); }} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: AC, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>Entregué</button>;
     }
-    return <button onClick={() => stageFn(o.id, "recogido")} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: AC, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>Recogí el producto</button>;
+    return <button onClick={() => stageFn(o.id, "recogido")} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: AC, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>Recogí</button>;
   };
   const miniCard = o => {
     const cash = isCash(o);

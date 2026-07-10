@@ -52,7 +52,18 @@ export const mapProduct = (p) => ({
   image: Array.isArray(p.images) ? (p.images[0] || null) : (p.images || null),
   shipModes: p.ship_modes || { local: true },
   shippingPrice: p.ship_price ?? 0,
+  // Dirección/teléfono de recogida que escribió el vendedor al publicar.
+  pickupAddress: p.pickup_address || "",
+  pickupPhone: p.pickup_phone || "",
 });
+// Un solo producto por id (para leer la dirección de recogida en el detalle del
+// mensajero cuando el producto no está cargado en memoria).
+export const getProductById = async (id) => {
+  if (!id) return null;
+  const { data, error } = await supabase.from("products").select("*").eq("id", id).single();
+  if (error || !data) return null;
+  return mapProduct(data);
+};
 // Listado público del marketplace (sin login): solo activos y aprobados.
 export const loadProducts = async () => {
   const { data, error } = await supabase
@@ -194,10 +205,11 @@ export const systemReviews = () => readRatings().filter(r => r.sysMsg && r.sys >
 // stepIdx según el estado, alias camelCase), para no romper el detalle.
 export const getUserOrders = async (userId) => {
   if (!userId) return [];
+  // Trae lo del usuario como COMPRADOR, VENDEDOR o MENSAJERO asignado (nunca ajeno).
   const { data, error } = await supabase
     .from("orders")
     .select("*")
-    .or(`buyer_id.eq.${userId},seller_id.eq.${userId}`)
+    .or(`buyer_id.eq.${userId},seller_id.eq.${userId},courier_id.eq.${userId}`)
     .order("created_at", { ascending: false });
   if (error) { console.error("getUserOrders:", error.message); return []; }
   return (data || []).map(o => {
@@ -206,10 +218,11 @@ export const getUserOrders = async (userId) => {
     let stepIdx = flow.findIndex(s => s.key === o.status);
     if (stepIdx < 0) stepIdx = 0;
     const createdAt = o.created_at ? new Date(o.created_at).getTime() : Date.now();
+    const role = o.buyer_id === userId ? "compra" : (o.seller_id === userId ? "venta" : "entrega");
     return {
       ...o,
-      role: o.buyer_id === userId ? "compra" : "venta",
-      buyerId: o.buyer_id, sellerId: o.seller_id, productId: o.product_id,
+      role,
+      buyerId: o.buyer_id, sellerId: o.seller_id, courierId: o.courier_id, productId: o.product_id,
       unitPrice: o.unit_price, shipMode, shipType: shipMode, shipPrice: o.ship_price ?? 0, shipTo: o.ship_to,
       flow, stepIdx,
       status: o.status || (flow[0] && flow[0].key),
@@ -221,6 +234,15 @@ export const getUserOrders = async (userId) => {
       updatedAt: o.updated_at ? new Date(o.updated_at).getTime() : createdAt,
     };
   });
+};
+// Pool PÚBLICO de entregas disponibles para el mensajero (el backend decide qué
+// exponer: categoría, tarifa, ids de comprador/vendedor — NUNCA monto ni ganancia).
+export const getAvailableDeliveries = async () => {
+  try {
+    const { data, error } = await supabase.rpc("get_available_deliveries");
+    if (error) { console.error("get_available_deliveries:", error.message); return []; }
+    return data || [];
+  } catch (e) { console.error("get_available_deliveries:", e?.message || e); return []; }
 };
 export const updateOrderStatus = async (orderId, status) => {
   try { await supabase.from("orders").update({ status }).eq("id", orderId); } catch (e) { console.error("updateOrderStatus:", e?.message || e); }

@@ -133,6 +133,12 @@ function AppShell({ sessionUser }) {
   };
   const [selChat,   setSelChat]   = useState(null);
   const [selSeller, setSelSeller] = useState(null);
+  // Perfil PÚBLICO flotante: se abre al tocar el nombre/avatar de cualquiera desde
+  // el pool del mensajero, el detalle del pedido, el chat o el detalle de producto.
+  // Solo muestra reputación pública (nombre, foto, verificado, productos): nunca el
+  // historial privado ni los números de negocio de esa persona.
+  const [viewProfileId, setViewProfileId] = useState(null);
+  const openPublicProfile = (id) => { if (id) setViewProfileId(id); };
 
   // Overlays
   const [showCats,   setShowCats]   = useState(false);
@@ -408,6 +414,9 @@ function AppShell({ sessionUser }) {
       ship_modes: d.shipModes || { local: true, intl: false, persona: false },
       ship_price: Number(d.shippingPrice) || 0,
       location: d.location || null,
+      // Dirección/teléfono de recogida (los usa el mensajero al aceptar la entrega).
+      pickup_address: d.pickupAddress || null,
+      pickup_phone: d.pickupPhone || null,
     };
     const { data, error } = await supabase.from("products").insert(row).select().single();
     if (error) { flash("⚠️ " + (error.message || "No se pudo publicar")); return; }
@@ -879,12 +888,30 @@ function AppShell({ sessionUser }) {
           ? { userName: meName, name: meName, status: "approved" }
           : (couriers.find(c => c.userName === meName) || null);
         return <CourierFlow myRecord={myRecord} dark={effectiveTheme === "dark"} onClose={() => setShowCourier(false)} onSubmit={(data) => { submitCourierApp(data); flash("🛵 Solicitud enviada — en revisión"); }}
-          meName={meName} orders={orders} localBase={adminCfg.localBase || 150}
+          meName={meName} meId={user?.id} orders={orders} localBase={adminCfg.localBase || 150}
           onAccept={(id, fee) => { acceptDelivery(id, fee); }}
           onStage={(id, st) => { courierStage(id, st); }}
+          onViewProfile={openPublicProfile}
           onCancel={(id) => { cancelDelivery(id); flash("Entrega liberada · disponible de nuevo"); }}
           onReport={(rep) => { addReport(rep); flash("Reporte enviado al equipo de RETADOR"); }} />;
       })()}
+      {viewProfileId && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 5200, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <FreeProfileScreen
+            onBack={() => setViewProfileId(null)}
+            user={user}
+            sellerId={viewProfileId}
+            initialProfile={{}}
+            onProfileUpdate={() => {}}
+            isOwner={false}
+            onChat={(id, name) => { setViewProfileId(null); requestChat(id, name); }}
+            isVerified={verifiedUsers.includes(viewProfileId)}
+            onReport={(p) => addReport({ targetName: p.targetName, reason: p.reason, detail: p.detail, reporterName: user?.name || "Usuario" })}
+            userProducts={products.filter(p => p.seller_id === viewProfileId)}
+            onProduct={p => { setViewProfileId(null); setSelProd(p); setTab("market"); setMScr("product"); }}
+          />
+        </div>
+      )}
       {showAdmin  && <OmniPanel onClose={() => setShowAdmin(false)} theme={appTk} zoom={densZoom} data={{
         orders, cfg: adminCfg,
         onCfg: (patch) => setAdminCfg(c => ({ ...c, ...patch })),
@@ -996,7 +1023,7 @@ function AppShell({ sessionUser }) {
               blockedUsers={blockedUsers} onToggleBlock={toggleBlock}
               onOpenWallet={() => setShowWallet(true)} orders={orders.filter(o => (o.buyerId ? o.buyerId === user?.id : true))} />}
             {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { setSelOrderId(o.id); setPScr("order-detail"); }} />}
-            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => requestChat(o.sellerId, o.sellerName)} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
+            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => requestChat(o.sellerId, o.sellerName)} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
           </>}
         </>
       </div>

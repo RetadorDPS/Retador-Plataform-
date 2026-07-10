@@ -1,10 +1,42 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
+import { getAvailableDeliveries, getUserById, getProductById } from "../shared/index.js";
 
-function CourierDashboard({ meName, orders, localBase, onAccept, onStage, onCancel, onReport, onClose, dark, record, demo }) {
+// Chip de PERFIL PÚBLICO: foto + nombre reales (tabla profiles). Al tocarlo abre
+// el perfil público de esa persona. No expone nada privado, solo reputación.
+function ProfileChip({ id, fallback = "Usuario", role, onOpen, dark }) {
+  const [p, setP] = useState(null);
+  useEffect(() => { let a = true; if (id) getUserById(id).then(x => { if (a) setP(x); }).catch(() => {}); return () => { a = false; }; }, [id]);
+  const t1 = dark ? "#f0f0f2" : "#0f172a", t3 = dark ? "#6b7280" : "#94a3b8", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)";
+  const name = p?.name || fallback;
+  return (
+    <button onClick={(e) => { e.stopPropagation(); id && onOpen && onOpen(id); }} disabled={!id}
+      style={{ display: "flex", alignItems: "center", gap: 7, background: "transparent", border: `1px solid ${bd}`, borderRadius: 100, padding: "5px 10px 5px 5px", cursor: id ? "pointer" : "default" }}>
+      <span style={{ width: 24, height: 24, borderRadius: "50%", overflow: "hidden", background: dark ? "#26262b" : "#e2e8f0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: t1, flexShrink: 0 }}>
+        {p?.avatar ? <img src={p.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : name[0]?.toUpperCase()}
+      </span>
+      <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.1 }}>
+        {role && <span style={{ fontSize: 8.5, color: t3, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>{role}</span>}
+        <span style={{ fontSize: 12, color: t1, fontWeight: 700, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+      </span>
+    </button>
+  );
+}
+
+function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, onCancel, onReport, onClose, dark, record, demo, onViewProfile }) {
   const bg = dark ? "#0a0a0a" : "#f1f5f9", card = dark ? "#141417" : "#fff", t1 = dark ? "#f0f0f2" : "#0f172a", t2 = dark ? "#9aa0aa" : "#64748b", t3 = dark ? "#6b7280" : "#94a3b8", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)", AC = "#6366F1";
   const [tab, setTab] = useState("disp");
   const [online, setOnline] = useState(true);
   const [detail, setDetail] = useState(null);
+  // Producto del pedido abierto en detalle: de ahí salen la dirección y el teléfono
+  // de RECOGIDA que escribió el vendedor. Se busca por product_id cuando hace falta.
+  const [detailProduct, setDetailProduct] = useState(null);
+  useEffect(() => {
+    setDetailProduct(null);
+    const pid = detail && (detail.product_id || detail.productId);
+    if (!pid || String(detail.id).startsWith("demo")) return;
+    let a = true; getProductById(pid).then(p => { if (a) setDetailProduct(p); }).catch(() => {});
+    return () => { a = false; };
+  }, [detail]);
   const [reportFor, setReportFor] = useState(null);
   const [reportSent, setReportSent] = useState({});
   const [adjustFor, setAdjustFor] = useState(null);
@@ -19,17 +51,39 @@ function CourierDashboard({ meName, orders, localBase, onAccept, onStage, onCanc
   ]);
   const demoAccept = (id, fee) => setDemoOrders(prev => prev.map(o => { if (o.id !== id) return o; const base = o.deliveryCost || o.shipPrice || localBase; const nf = (fee != null && fee > 0) ? Math.round(fee) : base; if (nf > base) return { ...o, courierName: meName, courierStage: "propuesta", proposedFee: nf, baseFee: base, feeApproval: "pending" }; return { ...o, courierName: meName, courierStage: "aceptado", deliveryCost: nf }; }));
   const demoStage = (id, st) => { const cs = st === "entregado" ? "completado" : st; setDemoOrders(prev => prev.map(o => o.id === id ? { ...o, courierStage: cs, status: cs === "completado" ? "entregado" : o.status } : o)); };
+  // POOL de entregas disponibles: viene del backend (get_available_deliveries),
+  // que solo expone categoría, tarifa e ids de comprador/vendedor. En demo usamos
+  // los pedidos de ejemplo. Se recarga al abrir y tras aceptar/liberar.
+  const [pool, setPool] = useState([]);
+  const reloadPool = useCallback(async () => {
+    if (demo) return;
+    const rows = await getAvailableDeliveries();
+    setPool((rows || []).map(r => ({
+      ...r,
+      shipPrice: r.ship_price ?? r.shipPrice ?? 0,
+      deliveryCost: r.ship_price ?? r.shipPrice ?? 0,
+      buyerId: r.buyer_id ?? r.buyerId ?? null,
+      sellerId: r.seller_id ?? r.sellerId ?? null,
+      cat: r.cat ?? r.category ?? r.categoria ?? null,
+      shipMode: "local", status: "confirmado", __pool: true,
+    })));
+  }, [demo]);
+  useEffect(() => { reloadPool(); }, [reloadPool]);
+
   // En demo mezclamos los pedidos REALES locales con los de ejemplo, para que el dueño vea su propio pedido aquí.
   const srcOrders = demo ? [...orders.filter(o => (o.shipMode || o.shipType) === "local"), ...demoOrders] : orders;
-  const acceptFn = (id, fee) => { if (String(id).startsWith("demo")) demoAccept(id, fee); else onAccept && onAccept(id, fee); };
-  const cancelFn = id => { if (String(id).startsWith("demo")) setDemoOrders(prev => prev.map(o => o.id === id ? { ...o, courierName: null, courierStage: null, proposedFee: null, feeApproval: null } : o)); else onCancel && onCancel(id); setDetail(null); setTab("disp"); };
+  const isMineOrder = o => o.courierName === meName || (meId && (o.courierId === meId || o.courier_id === meId));
+  const acceptFn = (id, fee) => { if (String(id).startsWith("demo")) demoAccept(id, fee); else { onAccept && onAccept(id, fee); setTimeout(reloadPool, 800); } };
+  const cancelFn = id => { if (String(id).startsWith("demo")) setDemoOrders(prev => prev.map(o => o.id === id ? { ...o, courierName: null, courierStage: null, proposedFee: null, feeApproval: null } : o)); else { onCancel && onCancel(id); setTimeout(reloadPool, 800); } setDetail(null); setTab("disp"); };
   const stageFn = (id, st) => { if (String(id).startsWith("demo")) demoStage(id, st); else onStage && onStage(id, st); };
   const money = n => Math.round(n || 0).toLocaleString() + " CUP";
-  const mine = srcOrders.filter(o => o.courierName === meName);
+  const mine = srcOrders.filter(isMineOrder);
   const active = mine.find(o => o.courierStage && o.courierStage !== "completado" && o.courierStage !== "fallido");
-  const done = mine.filter(o => o.courierStage === "completado");
-  // Solo aparecen entregas de pedidos YA confirmados por el vendedor y sin mensajero.
-  const available = srcOrders.filter(o => o.shipMode === "local" && !o.courierName && o.status === "confirmado");
+  const done = mine.filter(o => o.courierStage === "completado" || o.status === "entregado" || o.status === "completado");
+  // Entregas disponibles: en demo, los de ejemplo sin mensajero; en real, el pool del backend.
+  const available = demo
+    ? demoOrders.filter(o => o.shipMode === "local" && !o.courierName && o.status === "confirmado")
+    : pool;
   const baseFeeOf = o => o.deliveryCost || o.shipCost || o.shipPrice || localBase;
   const surgeCfg = (() => { try { const r = localStorage.getItem("retador_admincfg"); if (r) { const c = JSON.parse(r); return { on: c.surgeActive === true, every: Number(c.surgeIntervalMin) || 30, step: Number(c.surgeStepPct) || 15, cap: Number(c.surgeCapPct) || 60 }; } } catch (e) {} return { on: false, every: 30, step: 15, cap: 60 }; })();
   const surgePct = o => { if (!surgeCfg.on || o.courierName) return 0; const mins = (Date.now() - (o.createdAt || o.created_at || Date.now())) / 60000; const steps = Math.floor(mins / surgeCfg.every); return Math.min(surgeCfg.cap, steps * surgeCfg.step); };
@@ -83,11 +137,11 @@ function CourierDashboard({ meName, orders, localBase, onAccept, onStage, onCanc
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: t2, padding: "4px 0" }}><span>Valor del producto · cobras al comprador</span><span style={{ color: t1, fontWeight: 700 }}>{pmoney(prod)}</span></div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: t2, padding: "4px 0" }}><span>Se lo entregas al vendedor</span><span style={{ color: t1, fontWeight: 700 }}>{pmoney(prod)}</span></div>
           </>
-        : <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: t2, padding: "4px 0" }}><span>Valor del producto · lo paga por transferencia al vendedor</span><span style={{ color: t1, fontWeight: 700 }}>{pmoney(prod)}</span></div>}
+        : <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: t2, padding: "4px 0" }}><span>El producto lo paga el comprador por transferencia al vendedor</span><span style={{ color: t3, fontWeight: 700 }}>—</span></div>}
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "8px 0 0", marginTop: 4, borderTop: `1px solid ${bd}` }}><span style={{ color: "#22C55E", fontWeight: 800 }}>Tu tarifa de entrega (efectivo)</span><span style={{ color: "#22C55E", fontWeight: 800 }}>{money(fee)}</span></div>
       <div style={{ fontSize: 10.5, color: t3, marginTop: 8, lineHeight: 1.45 }}>{cash
         ? <>Cobras al comprador <b>{pmoney(prod)}</b> del producto (se lo entregas al vendedor) <b>más tu tarifa de {money(fee)} en efectivo</b>, que es tuya.</>
-        : <>El producto (<b>{pmoney(prod)}</b>) lo paga el comprador por transferencia al vendedor. Tú solo cobras <b>tu tarifa de {money(fee)} en efectivo</b>. La entrega se cierra cuando el vendedor confirme la transferencia.</>}</div>
+        : <>El producto lo paga el comprador por transferencia al vendedor. Tú solo cobras <b>tu tarifa de {money(fee)} en efectivo</b>. La entrega se cierra cuando el vendedor confirme la transferencia.</>}</div>
     </div>;
   };
   const actionBtn = o => {
@@ -129,6 +183,22 @@ function CourierDashboard({ meName, orders, localBase, onAccept, onStage, onCanc
       </div>
     </div>;
   };
+  // Tarjeta del POOL (ANTES de aceptar): solo categoría + tarifa + perfiles públicos
+  // tocables del comprador y del vendedor. Sin monto, sin ganancia, sin dirección.
+  const poolCard = o => (
+    <div key={o.id} style={{ background: card, border: `1px solid ${bd}`, borderRadius: 16, padding: 14, marginBottom: 11 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <span style={{ fontSize: 11, fontWeight: 800, color: AC, background: AC + "16", borderRadius: 100, padding: "4px 11px" }}>{o.cat || o.category || o.title || "Pedido"}</span>
+        <span style={{ fontSize: 16, fontWeight: 900, color: "#22C55E", whiteSpace: "nowrap" }}>+{money(feeOf(o))}</span>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <ProfileChip id={o.buyerId} fallback="Comprador" role="Comprador" onOpen={onViewProfile} dark={dark} />
+        <ProfileChip id={o.sellerId} fallback="Vendedor" role="Vendedor" onOpen={onViewProfile} dark={dark} />
+      </div>
+      <button onClick={() => { setAdjustVal(String(feeOf(o))); setAdjustFor(o); }} disabled={!online} style={{ width: "100%", height: 46, borderRadius: 12, border: "none", background: !online ? (dark ? "#26262b" : "#e2e8f0") : AC, color: !online ? t3 : "#fff", fontSize: 14, fontWeight: 800, cursor: !online ? "default" : "pointer" }}>{!online ? "Conéctate para aceptar" : "Aceptar entrega"}</button>
+      <div style={{ fontSize: 10, color: t3, textAlign: "center", marginTop: 8, lineHeight: 1.4 }}>Al aceptar verás las direcciones exactas de recogida y entrega y los contactos.</div>
+    </div>
+  );
 
   const activeView = () => {
     const actives = mine.filter(o => o.courierStage && o.courierStage !== "completado" && o.courierStage !== "fallido");
@@ -151,7 +221,7 @@ function CourierDashboard({ meName, orders, localBase, onAccept, onStage, onCanc
           <span style={{ fontSize: 12.5, fontWeight: 800, color: "#16a34a" }}>{available.length === 1 ? "¡Tienes 1 entrega disponible!" : `¡Tienes ${available.length} entregas disponibles!`}</span>
         </div>}
         {!online && <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 13, padding: "11px 14px", marginBottom: 12, fontSize: 12, color: t3, fontWeight: 600 }}>Estás desconectado. Ponte <b style={{ color: t2 }}>En línea</b> arriba para recibir entregas.</div>}
-        {available.map(o => miniCard(o))}
+        {available.map(o => poolCard(o))}
       </>;
 
   const histView = () => done.length === 0
@@ -160,7 +230,20 @@ function CourierDashboard({ meName, orders, localBase, onAccept, onStage, onCanc
 
   const detailModal = () => {
     if (!detail) return null;
-    const o = srcOrders.find(x => x.id === detail.id) || detail, cash = isCash(o);
+    const base = srcOrders.find(x => x.id === detail.id) || detail;
+    // Al aceptar, el mensajero SÍ ve los datos exactos para cumplir: recogida (del
+    // producto), entrega (del pedido) y contactos. Los números del negocio no.
+    const o = { ...base,
+      delivery: { ...(base.delivery || {}),
+        pickupAddress: base.delivery?.pickupAddress || detailProduct?.pickupAddress || "",
+        pickupPhone: base.delivery?.pickupPhone || detailProduct?.pickupPhone || "",
+        address: base.delivery?.address || base.ship_to || base.shipTo || "",
+        name: base.delivery?.name || base.buyerName || "",
+      },
+      sellerName: base.sellerName || detailProduct?.seller_name || "",
+    };
+    const cash = isCash(o);
+    const buyerId = o.buyerId || o.buyer_id || null, sellerId = o.sellerId || o.seller_id || null;
     return <div onClick={() => setDetail(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 4200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
       <div onClick={e => e.stopPropagation()} style={{ background: bg, width: "100%", maxWidth: 480, borderRadius: "20px 20px 0 0", padding: "8px 16px 28px", maxHeight: "92vh", overflowY: "auto" }}>
         <div style={{ width: 40, height: 4, borderRadius: 2, background: bd, margin: "8px auto 14px" }} />
@@ -168,6 +251,10 @@ function CourierDashboard({ meName, orders, localBase, onAccept, onStage, onCanc
           <span style={{ fontSize: 17, fontWeight: 800, color: t1 }}>{o.title || "Pedido"}</span>
           <span style={{ fontSize: 17, fontWeight: 800, color: "#22C55E", whiteSpace: "nowrap" }}>+{money(feeOf(o))}</span>
         </div>
+        {(buyerId || sellerId) && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          {sellerId && <ProfileChip id={sellerId} fallback={o.sellerName || "Vendedor"} role="Vendedor" onOpen={onViewProfile} dark={dark} />}
+          {buyerId && <ProfileChip id={buyerId} fallback={o.delivery?.name || "Comprador"} role="Comprador" onOpen={onViewProfile} dark={dark} />}
+        </div>}
         <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 14, padding: "2px 14px", marginBottom: 12 }}>
           {addrRow("🏪", "Recoger en", pickupAddrOf(o) || pickupOf(o), pickupAddrOf(o) ? (pickupOf(o) + (pickupPhoneOf(o) ? " · " + pickupPhoneOf(o) : "")) : "Dirección exacta: coordínala con el vendedor")}
           <div style={{ height: 1, background: bd }} />
@@ -284,7 +371,7 @@ function CourierDashboard({ meName, orders, localBase, onAccept, onStage, onCanc
   </div>;
 }
 
-export function CourierFlow({ myRecord, onSubmit, onClose, dark, meName, orders = [], localBase = 150, onAccept, onStage, onCancel, onReport }) {
+export function CourierFlow({ myRecord, onSubmit, onClose, dark, meName, meId, orders = [], localBase = 150, onAccept, onStage, onCancel, onReport, onViewProfile }) {
   const bg = dark ? "#0a0a0a" : "#f1f5f9", card = dark ? "#141417" : "#fff", t1 = dark ? "#f0f0f2" : "#0f172a", t2 = dark ? "#9aa0aa" : "#64748b", t3 = dark ? "#6b7280" : "#94a3b8", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)", AC = "#6366F1";
   const [started, setStarted] = useState(false);
   const [preview, setPreview] = useState(false);
@@ -293,7 +380,7 @@ export function CourierFlow({ myRecord, onSubmit, onClose, dark, meName, orders 
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const readImg = (file, k) => { if (!file) return; const r = new FileReader(); r.onload = () => set(k, r.result); r.readAsDataURL(file); };
   const needsLicense = f.vehiculo === "Moto" || f.vehiculo === "Auto";
-  if (preview) return <CourierDashboard demo meName={meName || "Mensajero"} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onClose={() => setPreview(false)} dark={dark} record={{ nombre: meName }} />;
+  if (preview) return <CourierDashboard demo meName={meName || "Mensajero"} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onClose={() => setPreview(false)} dark={dark} record={{ nombre: meName }} />;
 
   const wrap = (children) => <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 4000, overflowY: "auto", WebkitOverflowScrolling: "touch", background: bg }}>{children}</div>;
   const backBtn = <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${bd}`, color: t2, borderRadius: 9, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 16 }}>‹ Volver a RETADOR</button>;
@@ -310,7 +397,7 @@ export function CourierFlow({ myRecord, onSubmit, onClose, dark, meName, orders 
       </div>
     </div>
   );
-  if (myRecord?.status === "approved") return <CourierDashboard meName={meName} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onClose={onClose} dark={dark} record={myRecord} />;
+  if (myRecord?.status === "approved") return <CourierDashboard meName={meName} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onClose={onClose} dark={dark} record={myRecord} />;
 
   // Intro
   if (!started) return wrap(

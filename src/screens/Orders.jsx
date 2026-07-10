@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, useAt, useR } from "../shared/index.js";
 
-export function OrderDetailScreen({ order: o, user, me, onBack, onChat, flash, onSellerConfirm, onBuyerConfirm, onSellerPayment, onApproveFee }) {
+export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewProfile, flash, onSellerConfirm, onBuyerConfirm, onSellerPayment, onApproveFee }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
   const [rated, setRated] = useState(() => { try { return !!(JSON.parse(localStorage.getItem("retador_ratings") || "{}")[o?.id]); } catch (e) { return false; } });
   const [rate, setRate] = useState({ sys: 0, courier: 0, seller: 0 });
@@ -49,7 +49,14 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, flash, o
             <p style={{ fontSize: 10, color: T3, marginBottom: 2 }}>Pedido #{String(o.id).slice(-8).toUpperCase()}</p>
             <p style={{ fontSize: 13, fontWeight: 800, color: T1 }}>{o.title}{o.qty > 1 ? ` ×${o.qty}` : ""}</p>
             <p style={{ fontSize: 16, fontWeight: 900, color: G, marginTop: 3 }}>{money(o.amount, cur)}</p>
-            {o.sellerName && <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>Vendedor: {o.sellerName}</p>}
+            {(() => {
+              const sellerId = o.sellerId || o.seller_id, buyerId = o.buyerId || o.buyer_id;
+              const link = { color: G, fontWeight: 700, cursor: "pointer", textDecoration: "underline" };
+              return <>
+                {o.sellerName && <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>Vendedor: {sellerId && onViewProfile ? <span onClick={() => onViewProfile(sellerId)} style={link}>{o.sellerName}</span> : o.sellerName}</p>}
+                {viewerIsSeller && (o.buyerName || buyerId) && <p style={{ fontSize: 10, color: T2, marginTop: 2 }}>Comprador: {buyerId && onViewProfile ? <span onClick={() => onViewProfile(buyerId)} style={link}>{o.buyerName || "Ver perfil"}</span> : (o.buyerName || "—")}</p>}
+              </>;
+            })()}
           </div>
         </div>
 

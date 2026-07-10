@@ -1408,7 +1408,7 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
 // ═════════════════════════════════════════════════════════════════════════════
 // SELLER PROFILE — getUserById + trust stats + productos
 // ═════════════════════════════════════════════════════════════════════════════
-function SellerProfile({ userId, currentUser, onBack, onChat, onProduct }) {
+export function SellerProfile({ userId, currentUser, onBack, onChat, onProduct }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const [profile,  setProfile]  = useState(null);

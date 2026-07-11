@@ -216,16 +216,18 @@ const T = {
 };
 
 /* ── ROOT ───────────────────────────────────────────────────────── */
-export function LocalDelivery({ onBack, onNav }) {
+export function LocalDelivery({ onBack, onNav, onChat }) {
   const { isDark } = useAt();
   const [screen, setScreen] = useState('home');
+  // El chat del seguimiento abre el chat REAL conectado (conversations/messages),
+  // no el chat local de demo. Si no hay uno específico, lleva a "Mensajes".
+  const openConnectedChat = onChat || (() => onNav && onNav("perfil"));
   return (
     <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column', background: isDark ? DL_DARK.bg : DL_LIGHT.bg, fontFamily:"'Outfit',sans-serif", color: isDark ? DL_DARK.text1 : DL_LIGHT.text1 }}>
       <style>{DELIVERY_LOCAL_CSS}</style>
       {screen==='home'     && <DLHomeScreen      key="home"     onNew={()=>setScreen('nuevo')} onRastrear={()=>setScreen('rastrear')} onMenuBack={onBack} onNav={onNav}/>}
       {screen==='nuevo'    && <DLNuevoEnvioScreen key="nuevo"   onBack={()=>setScreen('home')}/>}
-      {screen==='rastrear' && <DLRastrearScreen   key="rastrear" onBack={()=>setScreen('home')} onChat={()=>setScreen('chat')}/>}
-      {screen==='chat'     && <DLChatScreen       key="chat"    onBack={()=>setScreen('rastrear')}/>}
+      {screen==='rastrear' && <DLRastrearScreen   key="rastrear" onBack={()=>setScreen('home')} onChat={openConnectedChat}/>}
     </div>
   );
 }

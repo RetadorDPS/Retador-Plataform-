@@ -135,11 +135,61 @@ export const uploadAvatar = async (file, userId) => {
   return data.publicUrl;
 };
 
-// Conversation & Message functions
-export const sendMessage = async (convId, senderId, text) => ({ id: Date.now(), text, sender_id: senderId, created_at: new Date() });
-export const loadMessages = async (convId) => [];
-export const markRead = async (msgId) => {};
-export const getMyConversations = async (userId) => [];
+// ── CHAT REAL (conversations / messages, con realtime) ───────────────────────
+// Obtiene (o crea) la conversación entre el usuario actual y `otherId` usando la
+// función del backend get_or_create_conversation, y devuelve su id.
+const _getOrCreateConversation = async (otherId) => {
+  // Probamos los nombres de parámetro más comunes por si el SQL usa uno u otro.
+  const names = ["other_user_id", "other_id", "p_other_user_id", "p_other_id"];
+  let lastErr = null;
+  for (const key of names) {
+    const { data, error } = await supabase.rpc("get_or_create_conversation", { [key]: otherId });
+    if (!error) return typeof data === "string" ? data : (data?.id || data);
+    lastErr = error;
+    // Si el error NO es por el nombre del parámetro, no seguimos probando.
+    if (!/parameter|argument|function|does not exist|schema cache/i.test(error.message || "")) break;
+  }
+  throw lastErr || new Error("No se pudo abrir la conversación");
+};
+// Envía un mensaje: asegura la conversación y lo inserta. Devuelve conversation_id.
+export const sendMessage = async (senderId, otherId, text) => {
+  if (!senderId || !otherId || !text || !text.trim()) throw new Error("Faltan datos del mensaje");
+  const cid = await _getOrCreateConversation(otherId);
+  const { error } = await supabase.from("messages").insert({ conversation_id: cid, sender_id: senderId, content: text.trim() });
+  if (error) throw error;
+  return cid;
+};
+export const loadMessages = async (convId) => {
+  if (!convId) return [];
+  const { data, error } = await supabase.from("messages").select("*").eq("conversation_id", convId).order("created_at", { ascending: true });
+  if (error) { console.error("loadMessages:", error.message); return []; }
+  return data || [];
+};
+// Marca como leídos los mensajes de la conversación que NO son míos.
+export const markRead = async (convId, userId) => {
+  if (!convId || !userId) return;
+  try { await supabase.from("messages").update({ read_at: new Date().toISOString() }).eq("conversation_id", convId).neq("sender_id", userId).is("read_at", null); } catch (e) {}
+};
+// Lista mis conversaciones con el nombre real de la otra persona, último mensaje y
+// no leídos. El RLS del backend ya limita conversations a las MÍAS, así que no
+// dependemos del nombre exacto de las columnas de participante: buscamos en la fila
+// el id que no es el mío (formato uuid) para saber quién es la otra persona.
+export const getMyConversations = async (userId) => {
+  if (!userId) return [];
+  const { data, error } = await supabase.from("conversations").select("*");
+  if (error) { console.error("getMyConversations:", error.message); return []; }
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const mine = (data || []).filter(c => Object.values(c).some(v => v === userId));
+  const convs = await Promise.all(mine.map(async (c) => {
+    const otherId = Object.entries(c).find(([k, v]) => typeof v === "string" && v !== userId && v !== c.id && uuid.test(v))?.[1] || null;
+    const name = otherId ? await getUserName(otherId).catch(() => "Usuario") : "Usuario";
+    const { data: last } = await supabase.from("messages").select("content, created_at").eq("conversation_id", c.id).order("created_at", { ascending: false }).limit(1);
+    const lm = last && last[0];
+    const { count } = await supabase.from("messages").select("id", { count: "exact", head: true }).eq("conversation_id", c.id).neq("sender_id", userId).is("read_at", null);
+    return { id: c.id, key: String(otherId || c.id), otherId, name, lastMsg: lm?.content || "", lastTime: lm?.created_at || c.created_at || null, unread: count || 0 };
+  }));
+  return convs.sort((a, b) => new Date(b.lastTime || 0) - new Date(a.lastTime || 0));
+};
 
 
 // Favorite functions
@@ -324,5 +374,6 @@ export const blockUser = async (userId, blockedId) => {};
 export const isBlocked = async (userId, otherId) => false;
 
 // Helper functions
-export const getSB = async () => null;
+// Devuelve el cliente de Supabase (lo usa el chat para el realtime por canal).
+export const getSB = async () => supabase;
 export const convKey = (id1, id2) => [id1, id2].sort().join("_");

@@ -22,7 +22,7 @@ function ProfileChip({ id, fallback = "Usuario", role, onOpen, dark }) {
   );
 }
 
-function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, onCancel, onReport, onClose, dark, record, demo, onViewProfile }) {
+function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, onCancel, onReport, onClose, dark, record, demo, onViewProfile, onChat }) {
   const bg = dark ? "#0a0a0a" : "#f1f5f9", card = dark ? "#141417" : "#fff", t1 = dark ? "#f0f0f2" : "#0f172a", t2 = dark ? "#9aa0aa" : "#64748b", t3 = dark ? "#6b7280" : "#94a3b8", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)", AC = "#6366F1";
   const [tab, setTab] = useState("disp");
   const [online, setOnline] = useState(true);
@@ -266,6 +266,7 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
         <div style={{ display: "flex", gap: 8, marginBottom: actionMode ? 8 : 12 }}>
           <button onClick={() => setActionMode(actionMode === "call" ? null : "call")} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: actionMode === "call" ? "#22C55E22" : "#22C55E18", border: "1px solid #22C55E45", color: "#16a34a", borderRadius: 12, padding: "11px", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>📞 Llamar</button>
           <button onClick={() => setActionMode(actionMode === "map" ? null : "map")} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: actionMode === "map" ? AC + "1e" : card, border: `1px solid ${actionMode === "map" ? AC + "55" : bd}`, color: t1, borderRadius: 12, padding: "11px", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🗺️ Mapa</button>
+          {!demo && buyerId && onChat && <button onClick={() => onChat(buyerId, o.delivery?.name || o.buyerName || "Comprador")} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: card, border: `1px solid ${bd}`, color: t1, borderRadius: 12, padding: "11px", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>💬 Mensaje</button>}
           <button onClick={() => { setActionMode(actionMode === "report" ? null : "report"); setReportTarget(""); }} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: actionMode === "report" ? "#ef444418" : card, border: `1px solid ${actionMode === "report" ? "#ef444455" : bd}`, color: actionMode === "report" ? "#ef4444" : t1, borderRadius: 12, padding: "11px", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>⚠️ Reportar</button>
         </div>
         {actionMode === "call" && <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
@@ -371,7 +372,7 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   </div>;
 }
 
-export function CourierFlow({ myRecord, onSubmit, onClose, dark, meName, meId, orders = [], localBase = 150, onAccept, onStage, onCancel, onReport, onViewProfile }) {
+export function CourierFlow({ myRecord, onSubmit, onClose, dark, meName, meId, orders = [], localBase = 150, onAccept, onStage, onCancel, onReport, onViewProfile, onChat }) {
   const bg = dark ? "#0a0a0a" : "#f1f5f9", card = dark ? "#141417" : "#fff", t1 = dark ? "#f0f0f2" : "#0f172a", t2 = dark ? "#9aa0aa" : "#64748b", t3 = dark ? "#6b7280" : "#94a3b8", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)", AC = "#6366F1";
   const [started, setStarted] = useState(false);
   const [preview, setPreview] = useState(false);
@@ -380,7 +381,7 @@ export function CourierFlow({ myRecord, onSubmit, onClose, dark, meName, meId, o
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const readImg = (file, k) => { if (!file) return; const r = new FileReader(); r.onload = () => set(k, r.result); r.readAsDataURL(file); };
   const needsLicense = f.vehiculo === "Moto" || f.vehiculo === "Auto";
-  if (preview) return <CourierDashboard demo meName={meName || "Mensajero"} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onClose={() => setPreview(false)} dark={dark} record={{ nombre: meName }} />;
+  if (preview) return <CourierDashboard demo meName={meName || "Mensajero"} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onChat={onChat} onClose={() => setPreview(false)} dark={dark} record={{ nombre: meName }} />;
 
   const wrap = (children) => <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 4000, overflowY: "auto", WebkitOverflowScrolling: "touch", background: bg }}>{children}</div>;
   const backBtn = <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${bd}`, color: t2, borderRadius: 9, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 16 }}>‹ Volver a RETADOR</button>;
@@ -397,7 +398,7 @@ export function CourierFlow({ myRecord, onSubmit, onClose, dark, meName, meId, o
       </div>
     </div>
   );
-  if (myRecord?.status === "approved") return <CourierDashboard meName={meName} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onClose={onClose} dark={dark} record={myRecord} />;
+  if (myRecord?.status === "approved") return <CourierDashboard meName={meName} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onChat={onChat} onClose={onClose} dark={dark} record={myRecord} />;
 
   // Intro
   if (!started) return wrap(

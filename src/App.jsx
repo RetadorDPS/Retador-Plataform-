@@ -40,7 +40,7 @@ import WalletApp from "./screens/Wallet.jsx";
 import ProductToolsApp from "./screens/ProductTools.jsx";
 import { LocalDelivery, IntlShipping } from "./screens/Delivery.jsx";
 import { CourierFlow } from "./screens/Courier.jsx";
-import { CatModal, NotifPanel, BuyModal, AdvancedSearch, ChatsModal, MarketHome, EditProductModal, ProductDetail, PubSheet, EnviosMenu, BottomNav } from "./screens/Marketplace.jsx";
+import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProductModal, ProductDetail, PubSheet, EnviosMenu, BottomNav } from "./screens/Marketplace.jsx";
 import OmniPanel from "./screens/AdminPanel.jsx";
 import { SubastasScreen } from "./screens/Auctions.jsx";
 import { SettingsScreen } from "./screens/Settings.jsx";
@@ -144,7 +144,7 @@ function AppShell({ sessionUser }) {
   const [showCats,   setShowCats]   = useState(false);
   const [pubOpen,    setPubOpen]    = useState(false);
   const [showNotif,  setShowNotif]  = useState(false);
-  const [showChats,  setShowChats]  = useState(false);
+  const [chatOpen,   setChatOpen]   = useState(false);
   const [showAdmin,  setShowAdmin]  = useState(false);
   const [showWallet, setShowWallet] = useState(false);
   const [showTools, setShowTools] = useState(false);
@@ -433,11 +433,14 @@ function AppShell({ sessionUser }) {
     flash("🗑️ Eliminado");
   };
 
+  // Abre el chat CONECTADO (realtime, conversations/messages) con la otra persona,
+  // como overlay para no perder la pantalla de fondo (producto, pedido, etc.).
   const openChat = (otherId, otherName) => {
-    registerPerson(otherId || otherName, otherName);
+    if (!otherId) { flash("No se pudo abrir el chat: falta el usuario"); return; }
     setSelChat({ otherId, otherName });
-    setShowChats(true); // overlay — no cambia tab, preserva el producto activo
+    setChatOpen(true);
   };
+  const openMessages = () => { setSelChat(null); setChatOpen(false); setTab("perfil"); setPScr("messages"); };
 
   // Chat libre: cualquiera puede escribir desde cualquier lugar. Capturamos la información igual.
   const [orders, setOrders] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_orders') || '[]'); } catch { return []; } });
@@ -477,9 +480,9 @@ function AppShell({ sessionUser }) {
   // (Va DESPUÉS de declarar todos los estados de navegación que lee, incl. selOrderId.)
   // Estado de navegación actual (pantallas + modales) y su "firma" para comparar.
   const navSnap = { tab, mScr, pScr, eScr, selProd, selSeller, selOrderId, prodBackTo,
-    plusMenu, showCourier, toolApp, showTools, showAdmin, showWallet, showChats, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
+    plusMenu, showCourier, toolApp, showTools, showAdmin, showWallet, chatOpen, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
   const navSig = [tab, mScr, pScr, eScr, (selProd && selProd.id) || selProd || 0, selSeller || 0, selOrderId || 0, prodBackTo || 0,
-    !!plusMenu, !!showCourier, !!toolApp, !!showTools, !!showAdmin, !!showWallet, !!showChats, !!showNotif, !!showCats, !!pubOpen, !!buyModal, !!confirmCfg, !!editProd].join("|");
+    !!plusMenu, !!showCourier, !!toolApp, !!showTools, !!showAdmin, !!showWallet, !!chatOpen, !!showNotif, !!showCats, !!pubOpen, !!buyModal, !!confirmCfg, !!editProd].join("|");
 
   const stackRef = useRef([]);      // [{sig, snap}] una entrada por cada paso hacia adelante
   const lastRef = useRef(null);     // {sig, snap} del estado actual
@@ -490,7 +493,7 @@ function AppShell({ sessionUser }) {
     setTab(sn.tab); setMScr(sn.mScr); setPScr(sn.pScr); setEScr(sn.eScr);
     setSelProd(sn.selProd); setSelSeller(sn.selSeller); setSelOrderId(sn.selOrderId); setProdBackTo(sn.prodBackTo);
     setPlusMenu(sn.plusMenu); setShowCourier(sn.showCourier); setToolApp(sn.toolApp); setShowTools(sn.showTools);
-    setShowAdmin(sn.showAdmin); setShowWallet(sn.showWallet); setShowChats(sn.showChats); setShowNotif(sn.showNotif);
+    setShowAdmin(sn.showAdmin); setShowWallet(sn.showWallet); setChatOpen(sn.chatOpen); setShowNotif(sn.showNotif);
     setShowCats(sn.showCats); setPubOpen(sn.pubOpen); setBuyModal(sn.buyModal); setConfirmCfg(sn.confirmCfg); setEditProd(sn.editProd);
   };
 
@@ -541,7 +544,6 @@ function AppShell({ sessionUser }) {
 
   const addOrder = (order) => {
     if (!order) return null;
-    registerPerson(order.sellerId || order.sellerName, order.sellerName);
     const flow = ORDER_FLOW[order.shipMode] || ORDER_FLOW.local;
     const enriched = {
       ...order,
@@ -640,35 +642,11 @@ function AppShell({ sessionUser }) {
   };
   const requestChat = (sellerId, sellerName) => openChat(sellerId, sellerName); // sin bloqueo
 
-  // Mensajes de chat reales (persisten en el navegador)
-  const [chatMsgs, setChatMsgs] = useState(() => {
-    try { const raw = localStorage.getItem("retador_chatmsgs"); if (raw) return JSON.parse(raw); } catch {}
-    return {};
-  });
-  useEffect(() => { try { localStorage.setItem("retador_chatmsgs", JSON.stringify(chatMsgs)); } catch {} }, [chatMsgs]);
-  // Registro de nombres por persona, para conversaciones aunque no haya pedido todavía.
-  const [chatPeople, setChatPeople] = useState(() => {
-    try { const raw = localStorage.getItem("retador_chatpeople"); if (raw) return JSON.parse(raw); } catch {}
-    return {};
-  });
-  useEffect(() => { try { localStorage.setItem("retador_chatpeople", JSON.stringify(chatPeople)); } catch {} }, [chatPeople]);
-  // Usuarios bloqueados y conversaciones eliminadas (persistentes)
+  // Usuarios bloqueados (persistentes) — los usa Ajustes. El chat en sí ya va por
+  // el backend (conversations/messages con realtime); no hay chat local.
   const [blockedUsers, setBlockedUsers] = useState(() => { try { return JSON.parse(localStorage.getItem("retador_blocked") || "[]"); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem("retador_blocked", JSON.stringify(blockedUsers)); } catch {} }, [blockedUsers]);
-  const [deletedConvs, setDeletedConvs] = useState(() => { try { return JSON.parse(localStorage.getItem("retador_delconvs") || "[]"); } catch { return []; } });
-  useEffect(() => { try { localStorage.setItem("retador_delconvs", JSON.stringify(deletedConvs)); } catch {} }, [deletedConvs]);
   const toggleBlock = (key, name) => setBlockedUsers(prev => prev.some(b => b.key === String(key)) ? prev.filter(b => b.key !== String(key)) : [...prev, { key: String(key), name: name || "Usuario" }]);
-  const deleteConv = (key) => setDeletedConvs(prev => prev.includes(String(key)) ? prev : [...prev, String(key)]);
-  function registerPerson(key, name) {
-    if (!key) return;
-    const k = String(key);
-    setChatPeople(prev => (prev[k] === (name || "Vendedor")) ? prev : ({ ...prev, [k]: name || "Vendedor" }));
-  }
-  const sendChatMsg = (key, text) => {
-    if (!key || !text || !text.trim()) return;
-    const m = { id: Date.now(), me: true, text: text.trim(), time: new Date().toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" }) };
-    setChatMsgs(prev => ({ ...prev, [key]: [...(prev[key] || []), m] }));
-  };
 
   const toggleFav = (productId) => {
     const isFav = favorites.has(productId);
@@ -788,7 +766,11 @@ function AppShell({ sessionUser }) {
       {showCats   && <CatModal onClose={() => setShowCats(false)} onSelect={cat => { setActiveCat(cat); setShowCats(false); }} active={activeCat} />}
       {pubOpen    && <PubSheet onClose={() => setPubOpen(false)} onPublish={async d => { setPubOpen(false); await handlePublish(d); }} user={user} flash={flash} />}
       {showNotif  && <NotifPanel onClose={() => { markNotifRead(null); setShowNotif(false); }} notifs={myNotifs} onRead={markNotifRead} onOpenOrder={(oid) => { setShowNotif(false); markNotifRead(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }} />}
-      {showChats  && <ChatsModal onClose={() => setShowChats(false)} initial={selChat} orders={orders} chatMsgs={chatMsgs} chatPeople={chatPeople} onSend={sendChatMsg} user={user} blockedUsers={blockedUsers} onToggleBlock={toggleBlock} deletedConvs={deletedConvs} onDeleteConv={deleteConv} flash={flash} />}
+      {chatOpen && selChat && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 5100, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <ChatScreen chat={selChat} user={user} onBack={() => setChatOpen(false)} flash={flash} />
+        </div>
+      )}
       {showWallet && (() => {
         const meName = profileData?.name || user?.name || "Usuario";
         const meUser = { name: meName, username: "@" + meName.toLowerCase().replace(/[^a-z0-9]/g, ""), omegaId: "RT-" + String(Math.abs([...meName].reduce((a, c) => a + c.charCodeAt(0), 0)) * 7).padStart(6, "0"), phone: profileData?.phone || "—", verifiedSince: verifiedUsers.includes(meName) ? "Cuenta verificada" : "Sin verificar" };
@@ -894,6 +876,7 @@ function AppShell({ sessionUser }) {
           onAccept={(id, fee) => { acceptDelivery(id, fee); }}
           onStage={(id, st) => { courierStage(id, st); }}
           onViewProfile={openPublicProfile}
+          onChat={openChat}
           onCancel={(id) => { cancelDelivery(id); flash("Entrega liberada · disponible de nuevo"); }}
           onReport={(rep) => { addReport(rep); flash("Reporte enviado al equipo de RETADOR"); }} />;
       })()}
@@ -945,7 +928,7 @@ function AppShell({ sessionUser }) {
                 notifCount={unreadNotif} onNotif={() => setShowNotif(true)}
                 onPublish={() => setPubOpen(true)}
                 onPlusMenu={rect => setPlusMenu(rect)}
-                onOpenChats={() => { setSelChat(null); setShowChats(true); }}
+                onOpenChats={openMessages}
                 banners={banners}
                 onNav={navTo}
               />
@@ -998,7 +981,7 @@ function AppShell({ sessionUser }) {
 
           {tab === "envios" && <>
             {eScr === "menu"  && <EnviosMenu onLocal={() => setEScr("local")} onIntl={() => setEScr("intl")} user={user} requireAuth={requireAuth} />}
-            {eScr === "local" && <LocalDelivery onBack={() => setEScr("menu")} flash={flash} cfg={adminCfg} user={user} onNav={navTo} />}
+            {eScr === "local" && <LocalDelivery onBack={() => setEScr("menu")} flash={flash} cfg={adminCfg} user={user} onNav={navTo} onChat={openMessages} />}
             {eScr === "intl"  && <IntlShipping  onBack={() => setEScr("menu")} flash={flash} cfg={cfg} onNav={navTo} />}
           </>}
 
@@ -1007,7 +990,7 @@ function AppShell({ sessionUser }) {
           )}
 
           {tab === "perfil" && <>
-            {pScr === "main"         && <ProfileMain user={user} onMessages={() => { setSelChat(null); setShowChats(true); }} onSettings={() => setPScr("settings")} onOrders={() => setPScr("orders")} onViewProfile={() => setPScr("profile-full")} onAdmin={() => setShowAdmin(true)} onWallet={() => setShowWallet(true)} onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} isOwner={isOwner} profileData={profileData} ordersBadge={ordersUnseen} />}
+            {pScr === "main"         && <ProfileMain user={user} onMessages={openMessages} onSettings={() => setPScr("settings")} onOrders={() => setPScr("orders")} onViewProfile={() => setPScr("profile-full")} onAdmin={() => setShowAdmin(true)} onWallet={() => setShowWallet(true)} onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} isOwner={isOwner} profileData={profileData} ordersBadge={ordersUnseen} />}
             {pScr === "profile-full" && (() => {
               const me = profileData?.name || user?.name;
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);

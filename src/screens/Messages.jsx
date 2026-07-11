@@ -81,17 +81,21 @@ export function MessagesScreen({ user, onBack, onChat }) {
 // realtime (que re-renderizan el chat) NO le roban el foco ni borran las letras.
 const ChatInput = memo(function ChatInput({ onSend, blocked, S, B, T1 }) {
   const [draft, setDraft] = useState("");
-  const send = () => { const t = draft.trim(); if (!t) return; setDraft(""); onSend(t); };
+  const inputRef = useRef(null);
+  // Al enviar NO se hace blur: se limpia el texto y el input CONSERVA el foco,
+  // así el teclado se queda abierto (con botón y con Enter).
+  const send = () => { const t = draft.trim(); if (!t) return; setDraft(""); onSend(t); inputRef.current?.focus(); };
   if (blocked) return <div style={{ padding: "10px 14px calc(10px + env(safe-area-inset-bottom, 0px))", borderTop: `1px solid ${B}`, flexShrink: 0 }}><p style={{ textAlign: "center", fontSize: 11, color: "#F87171" }}>🚫 No puedes enviar mensajes</p></div>;
   return (
-    <div style={{ padding: "10px 14px calc(10px + env(safe-area-inset-bottom, 0px))", borderTop: `1px solid ${B}`, display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-      <input value={draft} onChange={e => setDraft(e.target.value)}
+    <div style={{ padding: "8px 12px calc(8px + env(safe-area-inset-bottom, 0px))", borderTop: `1px solid ${B}`, display: "flex", gap: 9, alignItems: "center", flexShrink: 0 }}>
+      <input ref={inputRef} value={draft} onChange={e => setDraft(e.target.value)}
         onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
         placeholder="Escribe un mensaje..."
-        style={{ flex: 1, background: S, border: `1px solid ${B}`, borderRadius: 50, padding: "11px 16px", color: T1, fontSize: 12, outline: "none" }} />
+        style={{ flex: 1, minWidth: 0, background: S, border: `1px solid ${B}`, borderRadius: 50, padding: "10px 15px", color: T1, fontSize: 13, outline: "none" }} />
       <button onClick={send} disabled={!draft.trim()} className="p"
-        style={{ width: 31, height: 31, background: draft.trim() ? G : "#141414", border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "background .15s" }}>
-        <Ic n="send" c={draft.trim() ? "#000" : "#2a2a2a"} s={17} />
+        onPointerDown={e => e.preventDefault()} /* que tocar el botón no le quite el foco al input (teclado abierto) */
+        style={{ width: 42, height: 42, background: draft.trim() ? G : "#141414", border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "background .15s", boxShadow: draft.trim() ? "0 2px 10px rgba(255,192,30,.35)" : "none" }}>
+        <Ic n="send" c={draft.trim() ? "#000" : "#2a2a2a"} s={20} />
       </button>
     </div>
   );
@@ -108,17 +112,15 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
   const scrollRef = useRef(null);
   const subRef = useRef(null);
   const convIdRef = useRef(convId);
-  // Altura REAL visible (sin el teclado): con el viewport del teclado (visualViewport)
-  // el chat mide justo el hueco libre, así el input queda pegado encima del teclado.
-  const [vvH, setVvH] = useState(null);
+  // Teclado: NADA de visualViewport ni cálculos por dispositivo. Con el meta
+  // viewport interactive-widget=resizes-content (estándar), el navegador encoge
+  // el área visible al abrir el teclado y este flex-column (altura 100%) se
+  // adapta solo: el input, al final del flujo, queda justo encima del teclado.
+  // Solo bajamos el scroll al último mensaje cuando cambia el tamaño visible.
   useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const on = () => { setVvH(Math.round(vv.height)); setTimeout(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, 60); };
-    on();
-    vv.addEventListener("resize", on);
-    vv.addEventListener("scroll", on);
-    return () => { vv.removeEventListener("resize", on); vv.removeEventListener("scroll", on); };
+    const onResize = () => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
 
   // Baja el scroll al final SIN mover el foco del input (no usamos scrollIntoView).
@@ -184,7 +186,7 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
   const displayName = otherName || "Usuario";
   const openProfile = () => { if (onViewProfile && chat.otherId) onViewProfile(chat.otherId); };
   return (
-    <div style={{ height: vvH ? `${vvH}px` : "100%", flex: vvH ? "none" : 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "11px 16px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
         <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c="#666" s={20} /></button>
         <div onClick={openProfile} style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, cursor: onViewProfile && chat.otherId ? "pointer" : "default" }}>

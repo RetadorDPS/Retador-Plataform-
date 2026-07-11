@@ -2,7 +2,11 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- interactive-widget=resizes-content (estándar W3C): al abrir el teclado el
+         navegador ENCOGE el área visible, así el input del chat (al final de un
+         flex-column de 100dvh) queda justo encima del teclado en CUALQUIER teléfono,
+         sin JS ni ajustes por dispositivo. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>RETADOR</title>
 
     <!-- PWA: manifest + tema oscuro + íconos. Rutas relativas: la app vive en un

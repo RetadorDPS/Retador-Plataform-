@@ -34,7 +34,7 @@ import {
   CATS, SUBCATS, CatalogContext, CatalogProvider, useCatalog, CatIcon,
   useCSS, Ic, Spin, Logo,
   getPageLayout, liveSlot, LiveBlock, LiveSlot,
-  useScrollDir, consumeBack,
+  useScrollDir, consumeBack, pushBackHandler,
 } from "./shared/index.js";
 import WalletApp from "./screens/Wallet.jsx";
 import ProductToolsApp from "./screens/ProductTools.jsx";
@@ -139,6 +139,12 @@ function AppShell({ sessionUser }) {
   // historial privado ni los números de negocio de esa persona.
   const [viewProfileId, setViewProfileId] = useState(null);
   const openPublicProfile = (id) => { if (id) setViewProfileId(id); };
+  // El perfil flotante es una capa: el botón ATRÁS del teléfono la cierra (vuelve
+  // al chat/pantalla de abajo), nunca cierra la app. Una capa = un atrás.
+  useEffect(() => {
+    if (!viewProfileId) return;
+    return pushBackHandler(() => setViewProfileId(null));
+  }, [viewProfileId]);
 
   // Overlays
   const [showCats,   setShowCats]   = useState(false);
@@ -777,8 +783,10 @@ function AppShell({ sessionUser }) {
       {showCats   && <CatModal onClose={() => setShowCats(false)} onSelect={cat => { setActiveCat(cat); setShowCats(false); }} active={activeCat} />}
       {pubOpen    && <PubSheet onClose={() => setPubOpen(false)} onPublish={async d => { setPubOpen(false); await handlePublish(d); }} user={user} flash={flash} />}
       {showNotif  && <NotifPanel onClose={() => { markNotifRead(null); setShowNotif(false); }} notifs={myNotifs} onRead={markNotifRead} onOpenOrder={(oid) => { setShowNotif(false); markNotifRead(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }} />}
+      {/* Chat: capa OPACA a pantalla completa (inset 0 cubre TODO el viewport,
+          estándar) — nada del producto/pantalla de atrás puede asomar. */}
       {chatOpen && selChat && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, height: "100dvh", zIndex: 5100, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 5100, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
           <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => setChatOpen(false)} flash={flash} onViewProfile={openPublicProfile} />
         </div>
       )}
@@ -892,7 +900,7 @@ function AppShell({ sessionUser }) {
           onReport={(rep) => { addReport(rep); flash("Reporte enviado al equipo de RETADOR"); }} />;
       })()}
       {viewProfileId && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 5200, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 5200, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
           <FreeProfileScreen
             onBack={() => setViewProfileId(null)}
             user={user}

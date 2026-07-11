@@ -29,7 +29,7 @@ export const getUserById = async (id) => {
   try {
     const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url").eq("id", id).single();
     if (error || !data) { _profileCache.set(id, null); return null; }
-    const p = { id: data.id, name: data.full_name || "Vendedor", avatar: data.avatar_url || null };
+    const p = { id: data.id, name: data.full_name || "Usuario", avatar: data.avatar_url || null };
     _profileCache.set(id, p);
     return p;
   } catch (e) { return null; }

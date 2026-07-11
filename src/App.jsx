@@ -433,11 +433,15 @@ function AppShell({ sessionUser }) {
     flash("🗑️ Eliminado");
   };
 
-  // Abre el chat CONECTADO (realtime, conversations/messages) con la otra persona,
-  // como overlay para no perder la pantalla de fondo (producto, pedido, etc.).
+  // Abre el chat CONECTADO (realtime) con la otra persona. La identidad SIEMPRE es
+  // el uuid real del usuario: así "mensaje" con la misma persona abre SIEMPRE la
+  // misma conversación (nunca duplica ni cae a "Vendedor"). El nombre/foto se
+  // derivan del id dentro del chat.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const openChat = (otherId, otherName) => {
-    if (!otherId) { flash("No se pudo abrir el chat: falta el usuario"); return; }
-    setSelChat({ otherId, otherName });
+    const id = typeof otherId === "string" && UUID_RE.test(otherId) ? otherId : null;
+    if (!id) { flash("No se pudo abrir el chat: usuario no identificado"); return; }
+    setSelChat({ otherId: id, otherName });
     setChatOpen(true);
   };
   const openMessages = () => { setSelChat(null); setChatOpen(false); setTab("perfil"); setPScr("messages"); };
@@ -767,8 +771,8 @@ function AppShell({ sessionUser }) {
       {pubOpen    && <PubSheet onClose={() => setPubOpen(false)} onPublish={async d => { setPubOpen(false); await handlePublish(d); }} user={user} flash={flash} />}
       {showNotif  && <NotifPanel onClose={() => { markNotifRead(null); setShowNotif(false); }} notifs={myNotifs} onRead={markNotifRead} onOpenOrder={(oid) => { setShowNotif(false); markNotifRead(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }} />}
       {chatOpen && selChat && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 5100, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <ChatScreen chat={selChat} user={user} onBack={() => setChatOpen(false)} flash={flash} onViewProfile={openPublicProfile} />
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, height: "100dvh", zIndex: 5100, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => setChatOpen(false)} flash={flash} onViewProfile={openPublicProfile} />
         </div>
       )}
       {showWallet && (() => {
@@ -915,7 +919,7 @@ function AppShell({ sessionUser }) {
       {buyModal   && <BuyModal product={buyModal} user={user} onClose={() => setBuyModal(null)} flash={flash} onSuccess={(order) => { setBuyModal(null); const eo = addOrder(order); if (eo) { setSelOrderId(eo.id); setTab("perfil"); setPScr("order-detail"); } }} />}
 
       {/* Pantallas */}
-      <div onScrollCapture={handleNavScroll} style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div onScrollCapture={handleNavScroll} style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", paddingBottom: rsp.isDesktop ? 0 : "calc(62px + env(safe-area-inset-bottom, 0px))" }}>
         <>
           {tab === "market" && <>
             {mScr === "home" && (
@@ -998,8 +1002,7 @@ function AppShell({ sessionUser }) {
               const myDebt = Math.max(0, accrued - paid);
               return <FreeProfileScreen onBack={() => setPScr("main")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={(p) => addVerification({ userName: me || "Usuario", ...p })} isVerified={verifiedUsers.includes(me)} onRequestPlan={(plan) => addPlanRequest({ userName: me || "Usuario", plan })} currentPlan={userPlans[me] || "Básico"} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={products.filter(p => p.seller_id === user?.id)} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} />;
             })()}
-            {pScr === "messages" && <MessagesScreen user={user} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setPScr("chat"); }} />}
-            {pScr === "chat"     && selChat && <ChatScreen chat={selChat} user={user} onBack={() => setPScr("messages")} flash={flash} onViewProfile={openPublicProfile} />}
+            {pScr === "messages" && <MessagesScreen user={user} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
             {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}
               profileData={profileData} onProfileUpdate={setProfileData}
               isVerified={verifiedUsers.includes(profileData?.name || user?.name)}
@@ -1008,7 +1011,7 @@ function AppShell({ sessionUser }) {
               blockedUsers={blockedUsers} onToggleBlock={toggleBlock}
               onOpenWallet={() => setShowWallet(true)} orders={orders.filter(o => (o.buyerId ? o.buyerId === user?.id : true))} />}
             {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { setSelOrderId(o.id); setPScr("order-detail"); }} />}
-            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => requestChat(o.sellerId, o.sellerName)} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
+            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => { const meSeller = (o.seller_id || o.sellerId) === user?.id; requestChat(meSeller ? (o.buyer_id || o.buyerId) : (o.seller_id || o.sellerId), meSeller ? (o.buyerName || "Comprador") : (o.sellerName || "Vendedor")); }} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
           </>}
         </>
       </div>

@@ -6,7 +6,6 @@ export function MessagesScreen({ user, onBack, onChat }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const [convs,   setConvs]   = useState([]);
   const [loading, setLoading] = useState(true);
-  const colors = ["#60A5FA","#E879F9","#4ADE80","#FBBF24","#F87171",G];
 
   useEffect(() => {
     if (!user?.id) { setLoading(false); return; }
@@ -15,12 +14,24 @@ export function MessagesScreen({ user, onBack, onChat }) {
 
   const totalUnread = convs.reduce((a, c) => a + (c.unread || 0), 0);
 
+  // Hora/fecha corta estilo WhatsApp: "14:30" hoy, "Ayer", "lun", o "3 mar".
+  const shortTime = (t) => {
+    if (!t) return "";
+    const d = new Date(t), now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    if (sameDay) return d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+    const y = new Date(now); y.setDate(now.getDate() - 1);
+    if (d.toDateString() === y.toDateString()) return "Ayer";
+    if ((now - d) < 7 * 864e5) return d.toLocaleDateString("es-ES", { weekday: "short" });
+    return d.toLocaleDateString("es-ES", { day: "2-digit", month: "short" });
+  };
+
   return (
     <div style={{ flex: 1, overflowY: "auto" }}>
-      <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "13px 18px", display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "13px 18px", display: "flex", alignItems: "center", gap: 8, position: "sticky", top: 0, zIndex: 2 }}>
         <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c={T2} s={20} /></button>
-        <p style={{ fontSize: 14, fontWeight: 800, color: T1 }}>Mensajes</p>
-        {totalUnread > 0 && <div style={{ marginLeft: "auto", background: G, borderRadius: "50%", width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#000" }}>{totalUnread}</div>}
+        <p style={{ fontSize: 15, fontWeight: 800, color: T1 }}>Mensajes</p>
+        {totalUnread > 0 && <div style={{ marginLeft: "auto", background: G, borderRadius: 100, minWidth: 22, height: 20, padding: "0 6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: "#000" }}>{totalUnread}</div>}
       </div>
       {!user
         ? <div style={{ padding: "44px 18px", textAlign: "center" }}><p style={{ color: T2, fontSize: 12 }}>Inicia sesión para ver tus mensajes</p></div>
@@ -32,21 +43,21 @@ export function MessagesScreen({ user, onBack, onChat }) {
                 <p style={{ fontSize: 14, fontWeight: 700, marginBottom: 8, color: T1 }}>Sin mensajes aún</p>
                 <p style={{ fontSize: 11, color: T2, lineHeight: 1.6 }}>Contacta a un vendedor desde el detalle de un producto.</p>
               </div>
-            : <div style={{ padding: "0 18px" }}>
+            : <div style={{ padding: "4px 10px 24px" }}>
                 {convs.map(c => {
-                  const color = colors[c.key?.charCodeAt(0) % colors.length] || G;
+                  const unread = c.unread || 0;
                   return (
-                    <div key={c.id} className="cd" onClick={() => onChat(c)} style={{ display: "flex", alignItems: "center", gap: 13, padding: "14px 0", borderBottom: `1px solid ${B}` }}>
-                      <div style={{ position: "relative", flexShrink: 0 }}>
-                        <Avatar url={c.otherAvatar} name={c.name} size={42} />
-                        {(c.unread || 0) > 0 && <div style={{ position: "absolute", top: -2, right: -2, width: 18, height: 18, borderRadius: "50%", background: G, border: `2px solid ${BG}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#000" }}>{c.unread}</div>}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                          <p style={{ fontSize: 12, fontWeight: 700, color: T1 }}>{c.name}</p>
-                          <p style={{ fontSize: 10, color: T3 }}>{c.lastTime ? new Date(c.lastTime).toLocaleDateString("es-ES", { day: "2-digit", month: "short" }) : ""}</p>
+                    <div key={c.id} className="cd" onClick={() => onChat(c)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 10px", borderRadius: 14, cursor: "pointer" }}>
+                      <Avatar url={c.otherAvatar} name={c.name} size={50} />
+                      <div style={{ flex: 1, minWidth: 0, borderBottom: `1px solid ${B}`, paddingBottom: 11 }}>
+                        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 3 }}>
+                          <p style={{ fontSize: 14, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</p>
+                          <p style={{ fontSize: 11, color: unread ? G : T3, fontWeight: unread ? 700 : 500, flexShrink: 0, whiteSpace: "nowrap" }}>{shortTime(c.lastTime)}</p>
                         </div>
-                        <p style={{ fontSize: 11, color: T2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.lastMsg || "Sin mensajes"}</p>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <p style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: unread ? T1 : T2, fontWeight: unread ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.lastMsg || "Sin mensajes"}</p>
+                          {unread > 0 && <div style={{ flexShrink: 0, background: G, borderRadius: 100, minWidth: 20, height: 20, padding: "0 6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, fontWeight: 800, color: "#000" }}>{unread > 99 ? "99+" : unread}</div>}
+                        </div>
                       </div>
                     </div>
                   );
@@ -65,9 +76,9 @@ export function MessagesScreen({ user, onBack, onChat }) {
 const ChatInput = memo(function ChatInput({ onSend, blocked, S, B, T1 }) {
   const [draft, setDraft] = useState("");
   const send = () => { const t = draft.trim(); if (!t) return; setDraft(""); onSend(t); };
-  if (blocked) return <div style={{ padding: "10px 14px", borderTop: `1px solid ${B}`, flexShrink: 0 }}><p style={{ textAlign: "center", fontSize: 11, color: "#F87171" }}>🚫 No puedes enviar mensajes</p></div>;
+  if (blocked) return <div style={{ padding: "10px 14px calc(10px + env(safe-area-inset-bottom, 0px))", borderTop: `1px solid ${B}`, flexShrink: 0 }}><p style={{ textAlign: "center", fontSize: 11, color: "#F87171" }}>🚫 No puedes enviar mensajes</p></div>;
   return (
-    <div style={{ padding: "10px 14px", borderTop: `1px solid ${B}`, display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+    <div style={{ padding: "10px 14px calc(10px + env(safe-area-inset-bottom, 0px))", borderTop: `1px solid ${B}`, display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
       <input value={draft} onChange={e => setDraft(e.target.value)}
         onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
         placeholder="Escribe un mensaje..."

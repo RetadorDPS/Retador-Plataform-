@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, getUserById, ratingForName, useAt, useR, signOutUser } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, signOutUser } from "../shared/index.js";
 
 export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProfile, onAdmin, onWallet, onTools, onCourier, isOwner, profileData = {}, ordersBadge = 0 }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
@@ -8,13 +8,9 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
   const name     = profileData.name || user?.name || "Usuario";
   const rating   = profileData.rating || 4.9;
   const sales    = profileData.sales || 0;
-  const avatar   = profileData.avatar;
-  // Render avatar: emoji or first letter
-  const AvatarPreview = () => {
-    if (avatar?.type === "emoji") return <span style={{ fontSize: 26 }}>{avatar.value}</span>;
-    if (avatar?.type === "photo" && avatar.url) return <img src={avatar.url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:"50%" }} />;
-    return <span style={{ fontSize: 22, fontWeight: 900, color: "#000" }}>{name[0]?.toUpperCase()}</span>;
-  };
+  // Foto de perfil real: del avatar guardado (objeto) o de user.avatar (URL de
+  // Google/Supabase). Si no hay, la inicial del nombre. Nunca emoji.
+  const avatarSrc = avatarUrlOf(profileData.avatar) || avatarUrlOf(user?.avatar);
 
   return (
     <div style={{ flex: 1, overflowY: "auto" }}>
@@ -22,9 +18,7 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
 
         {/* Avatar/nombre — toca para ver perfil completo */}
         <div onClick={onViewProfile} className="cd" style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, background: CARD, border: `1px solid ${B}`, borderRadius: 16, padding: "14px 14px", cursor: "pointer" }}>
-          <div style={{ width: 56, height: 56, borderRadius: "50%", background: `linear-gradient(135deg,${G},#7a5200)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: `0 0 18px ${G}35`, overflow: "hidden" }}>
-            <AvatarPreview />
-          </div>
+          <Avatar url={avatarSrc} name={name} size={56} style={{ boxShadow: `0 0 18px ${G}35` }} />
           <div style={{ flex: 1 }}>
             <p style={{ fontSize: 15 * ts, fontWeight: 800, color: T1 }}>{name}</p>
             <p style={{ fontSize: 10 * ts, color: T2, marginTop: 2 }}>{user?.email || "Ver perfil completo"}</p>
@@ -217,13 +211,6 @@ const FP_PRODUCTS = [
   { id:6, name:"Reloj Vintage",       price:"$1,650", emoji:"⌚", sales:5,  tag:"Nuevo"       },
 ];
 
-const FP_EMOJI_CATS = [
-  { label:"😀", emojis:["😀","😃","😄","😁","😆","😅","🤣","😂","🙂","😊","😇","🥰","😍","🤩","😘","😋","😛","😜","🤪","😎","🤓","🧐","😏","😒","🙄","😬","😌","😴","😷","🤒","🤕","🥳","😈","👿","💀","👻","👽","🤖","🥸","😺","😸","😻","😼","😽","🙀","😿"] },
-  { label:"🧑", emojis:["🧑","👦","👧","👨","👩","🧓","👴","👵","👶","🧒","👱","🧔","🧕","🎅","🤶","🧙","🧝","🧛","🧟","🧞","🧜","🧚","👼","🤰","🙍","🙅","🙆","💁","🙋","🙇","🤦","🤷","👮","💂","👷","🤴","👸","🦸","🦹","💆","💇","🚶","🏃","💃","🕺"] },
-  { label:"🐶", emojis:["🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮","🐷","🐸","🐵","🙈","🙉","🙊","🐒","🐔","🐧","🐦","🦆","🦅","🦉","🦇","🐺","🐴","🦄","🦋","🐢","🐍","🐙","🐟","🐬","🐳","🦈","🐅","🐆","🦓","🐘","🦒","🦘","🐕","🐈","🦊","🦔"] },
-  { label:"⚽", emojis:["⚽","🏀","🏈","⚾","🎾","🎱","🏆","🥇","🎸","🎧","🎮","🧩","💎","🔮","🎈","🎉","🎁","💻","📱","⌚","📷","🔑","🏠","🚗","✈️","🚀","🔥","💫","🌈","❄️","🌊","🍕","🎂","☕","🌸","🌺","🌻","🍀","🌴","🌵"] },
-  { label:"❤️", emojis:["❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❣️","💕","💞","💓","💗","💖","💘","💝","✨","💫","⭐","🌟","💥","💯","✅","❌","🔴","🟠","🟡","🟢","🔵","🟣","⚫","⚪","👑","🎵","🎶"] },
-];
 
 const FP_SHIPPING_OPTS = ["Mismo día","1–2 días hábiles","1–3 días hábiles","3–5 días hábiles","Con el comprador"];
 const FP_RESPONSE_OPTS = ["Menos de 1 hora","Aprox. 2 horas","Aprox. 4 horas","Mismo día","1–2 días"];
@@ -296,50 +283,41 @@ function FP_Row({ children, border=false, onClick, style={} }) {
 }
 
 // ── AVATAR ────────────────────────────────────────────────────────
-function FP_Avatar({ avatar, size=72, fontSize=34 }) {
-  const FP_C = useFP_C();
-  const isImg = avatar?.type === "image";
-  return (
-    <div style={{ width:size, height:size, borderRadius:"50%", flexShrink:0,
-      background: isImg ? "transparent" : FP_C.surfaceTop,
-      border:`1px solid ${FP_C.borderMid}`,
-      display:"flex", alignItems:"center", justifyContent:"center",
-      fontSize, overflow:"hidden" }}>
-      {isImg
-        ? <img src={avatar.value} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
-        : <span>{avatar?.value || "😊"}</span>
-      }
-    </div>
-  );
+// Reutiliza el Avatar único de la app: foto si hay; si no, inicial en círculo de
+// color. Nunca emoji.
+function FP_Avatar({ avatar, name, size=72 }) {
+  return <Avatar avatar={avatar} name={name} size={size} />;
 }
 
-// ── AVATAR PICKER ─────────────────────────────────────────────────
-function FP_AvatarPicker({ current, onSelect, onClose }) {
+// ── AVATAR PICKER (SOLO FOTO) ─────────────────────────────────────
+// Ya no hay emojis: el avatar SOLO puede ser una foto. Se sube de verdad al
+// bucket 'avatars' (uploadAvatar) y se guarda su URL pública.
+function FP_AvatarPicker({ current, onSelect, onClose, userId, name }) {
   const FP_C = useFP_C();
-  const [catIdx, setCatIdx] = useState(0);
-  const [search, setSearch] = useState("");
-  const [mode,   setMode]   = useState("emoji");
   const [fileErr, setFileErr] = useState("");
+  const [uploading, setUploading] = useState(false);
   const fileRef = useRef();
 
-  const emojis = search
-    ? FP_EMOJI_CATS.flatMap(c => c.emojis).filter(e => e.includes(search))
-    : FP_EMOJI_CATS[catIdx].emojis;
-
-  function handleFile(e) {
+  async function handleFile(e) {
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) { setFileErr("La imagen supera los 5 MB. Elige una más liviana."); return; }
-    setFileErr("");
-    const reader = new FileReader();
-    reader.onload = ev => onSelect({ type:"image", value:ev.target.result });
-    reader.readAsDataURL(file);
+    setFileErr(""); setUploading(true);
+    try {
+      const url = await uploadAvatar(file, userId);
+      onSelect({ type: "image", value: url });
+    } catch (err) {
+      setFileErr("No se pudo subir la foto: " + (err?.message || "intenta de nuevo"));
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
   }
 
+  const hasPhoto = avatarUrlOf(current);
   return (
     <div style={{ position:"fixed", inset:0, zIndex:600,
       background:FP_C.bg, display:"flex", flexDirection:"column" }}>
-
       {/* Top bar */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
         padding:"0 20px", height:50, flexShrink:0,
@@ -356,101 +334,38 @@ function FP_AvatarPicker({ current, onSelect, onClose }) {
         <div style={{ width:80 }}/>
       </div>
 
-      {/* Mode tabs */}
-      <div style={{ display:"flex", borderBottom:`1px solid ${FP_C.border}`, flexShrink:0 }}>
-        {[["emoji","Emoji"],["upload","Subir foto"]].map(([m,l]) => (
-          <button key={m} onClick={() => setMode(m)} style={{
-            flex:1, background:"none", border:"none", cursor:"pointer",
-            padding:"13px", fontSize:13, fontWeight: mode===m ? 700 : 500,
-            color: mode===m ? FP_C.textPrimary : FP_C.textSecondary,
-            fontFamily:FP_FB,
-            borderBottom: mode===m ? `2px solid ${FP_C.accent}` : "2px solid transparent",
-            transition:"all 0.15s",
-          }}>{l}</button>
-        ))}
+      <div style={{ flex:1, display:"flex", flexDirection:"column",
+        alignItems:"center", justifyContent:"center", gap:20, padding:32 }}>
+        <input ref={fileRef} type="file"
+          accept="image/jpeg,image/png,image/webp"
+          style={{ display:"none" }} onChange={handleFile}/>
+
+        <div onClick={() => !uploading && fileRef.current.click()} style={{
+          width:120, height:120, borderRadius:"50%",
+          background:FP_C.surfaceTop, border:`2px dashed ${FP_C.borderMid}`,
+          display:"flex", alignItems:"center", justifyContent:"center",
+          overflow:"hidden", cursor: uploading ? "default" : "pointer", position:"relative",
+        }}>
+          {hasPhoto
+            ? <img src={hasPhoto} alt="preview" style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+            : <Avatar name={name} size={116} />}
+          {uploading && <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,.5)", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:12, fontWeight:700 }}>Subiendo…</div>}
+        </div>
+
+        <div style={{ textAlign:"center" }}>
+          <FP_Btn onClick={() => !uploading && fileRef.current.click()} style={{ marginBottom:10 }}>
+            {uploading ? "Subiendo…" : (hasPhoto ? "Cambiar foto" : "Seleccionar imagen")}
+          </FP_Btn>
+          <div style={{ fontSize:11, color:FP_C.textMuted }}>JPG, PNG o WEBP · Máx. 5 MB</div>
+          {fileErr && <div style={{ fontSize:11.5, color:"#ef4444", marginTop:8, fontWeight:600 }}>{fileErr}</div>}
+        </div>
+
+        {hasPhoto && !uploading && (
+          <FP_Btn variant="ghost" onClick={() => onSelect(null)}>
+            Quitar foto
+          </FP_Btn>
+        )}
       </div>
-
-      {mode === "emoji" && (
-        <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
-          {/* Search */}
-          <div style={{ padding:"12px 20px 8px", flexShrink:0 }}>
-            <input placeholder="Buscar emoji…" value={search}
-              onChange={e => setSearch(e.target.value)}
-              onFocus={e => e.target.style.borderColor = FP_C.accent}
-              onBlur={e => e.target.style.borderColor = FP_C.border}
-              style={{ ...fpInputStyle(FP_C) }}/>
-          </div>
-          {/* Category tabs */}
-          {!search && (
-            <div style={{ display:"flex", gap:4, padding:"0 20px 10px",
-              flexShrink:0, overflowX:"auto" }}>
-              {FP_EMOJI_CATS.map((cat, i) => (
-                <button key={i} onClick={() => setCatIdx(i)} style={{
-                  background: catIdx===i ? FP_C.surfaceTop : "none",
-                  border:`1px solid ${catIdx===i ? FP_C.borderMid : "transparent"}`,
-                  borderRadius:8, padding:"6px 10px", fontSize:18,
-                  cursor:"pointer", flexShrink:0,
-                }}>{cat.label}</button>
-              ))}
-            </div>
-          )}
-          {/* Grid */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(8,1fr)",
-            gap:2, padding:"4px 20px 20px", overflowY:"auto", flex:1 }}>
-            {emojis.map((e, i) => (
-              <button key={i} onClick={() => onSelect({ type:"emoji", value:e })}
-                style={{
-                  background: current?.value===e ? FP_C.accentSoft : "none",
-                  border:`1px solid ${current?.value===e ? FP_C.accent : "transparent"}`,
-                  borderRadius:8, padding:"7px 0", fontSize:24,
-                  cursor:"pointer", lineHeight:1.2,
-                }}>{e}</button>
-            ))}
-            {emojis.length === 0 && (
-              <div style={{ gridColumn:"1/-1", textAlign:"center",
-                color:FP_C.textMuted, fontSize:13, padding:"30px 0" }}>
-                Sin resultados
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {mode === "upload" && (
-        <div style={{ flex:1, display:"flex", flexDirection:"column",
-          alignItems:"center", justifyContent:"center", gap:20, padding:32 }}>
-          <input ref={fileRef} type="file"
-            accept="image/jpeg,image/png,image/webp"
-            style={{ display:"none" }} onChange={handleFile}/>
-
-          <div onClick={() => fileRef.current.click()} style={{
-            width:120, height:120, borderRadius:"50%",
-            background:FP_C.surfaceTop, border:`2px dashed ${FP_C.borderMid}`,
-            display:"flex", alignItems:"center", justifyContent:"center",
-            overflow:"hidden", cursor:"pointer",
-          }}>
-            {current?.type==="image"
-              ? <img src={current.value} alt="preview"
-                  style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
-              : <FP_Icon d={FP_Icons.camera} size={32} color={FP_C.textMuted}/>
-            }
-          </div>
-
-          <div style={{ textAlign:"center" }}>
-            <FP_Btn onClick={() => fileRef.current.click()} style={{ marginBottom:10 }}>
-              Seleccionar imagen
-            </FP_Btn>
-            <div style={{ fontSize:11, color:FP_C.textMuted }}>JPG, PNG o WEBP · Máx. 5 MB</div>
-            {fileErr && <div style={{ fontSize:11.5, color:"#ef4444", marginTop:8, fontWeight:600 }}>{fileErr}</div>}
-          </div>
-
-          {current?.type==="image" && (
-            <FP_Btn variant="ghost" onClick={() => onSelect({ type:"emoji", value:"😊" })}>
-              Quitar foto
-            </FP_Btn>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -1349,7 +1264,7 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
   const [toast,        setToast]        = useState(null);
 
   const defaultProfile = {
-    avatar:   initialProfile.avatar   || { type:"emoji", value:"😊" },
+    avatar:   initialProfile.avatar   || (isOwner && user?.avatar ? { type:"image", value: avatarUrlOf(user.avatar) } : null),
     name:     initialProfile.name     || (isOwner ? (user?.name || "Usuario") : "Vendedor"),
     username: initialProfile.username || (isOwner && user?.email ? user.email.split("@")[0] : ""),
     // El correo es privado: solo se usa en el perfil PROPIO (nunca el del visitante
@@ -1393,12 +1308,20 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
   });
 
   function toast_(msg) { setToast(msg); setTimeout(() => setToast(null), 2500); }
-  function saveProfile() {
+  async function saveProfile() {
     const updated = {...pd};
     setProfile(updated);
     setEditProfile(false);
     toast_("Perfil actualizado");
     onProfileUpdate?.({ avatar: updated.avatar, name: updated.name, username: updated.username, email: updated.email, rating: 0, sales: 0 });
+    // Guarda en el backend (nombre y, si es foto, la URL del avatar). Así el cambio
+    // se refleja en TODOS lados y en el otro teléfono.
+    if (isOwner && user?.id) {
+      const patch = { full_name: updated.name };
+      const url = avatarUrlOf(updated.avatar);
+      if (updated.avatar?.type === "image" && url) patch.avatar_url = url;
+      try { await supabase.from("profiles").update(patch).eq("id", user.id); } catch (e) { console.error("saveProfile:", e?.message || e); }
+    }
   }
   function saveAbout()   { setAbout({...ad});   setEditAbout(false);   toast_("Información actualizada"); }
   function cancelProfile() { setPd({...profile}); setEditProfile(false); }
@@ -1422,7 +1345,7 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
       {/* fonts loaded via @import in useCSS */}
 
       {/* OVERLAYS */}
-      {showPicker   && <FP_AvatarPicker current={pd.avatar} onSelect={a=>{ setPd(d=>({...d,avatar:a})); setShowPicker(false); }} onClose={() => setShowPicker(false)}/>}
+      {showPicker   && <FP_AvatarPicker current={pd.avatar} name={pd.name} userId={user?.id} onSelect={a=>{ setPd(d=>({...d,avatar:a})); setShowPicker(false); }} onClose={() => setShowPicker(false)}/>}
       {showPro      && isOwner && <FP_ProModal onClose={() => setShowPro(false)}/>}
       {showSettings && isOwner && <FP_SettingsScreen onClose={() => setShowSettings(false)}/>}
       {showReport && !isOwner && <FP_ReportModal targetName={profile.name} onClose={() => setShowReport(false)} onSubmit={(payload) => { onReport?.(payload); setShowReport(false); toast_("Reporte enviado. Gracias por avisar."); }} C={FP_C}/>}
@@ -1486,7 +1409,7 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
           <div style={{ display:"flex", justifyContent:"space-between",
             alignItems:"flex-start", marginBottom:16 }}>
             <div style={{ position:"relative" }}>
-              <FP_Avatar avatar={profile.avatar} size={72} fontSize={34}/>
+              <FP_Avatar avatar={profile.avatar} name={profile.name} size={72}/>
               {/* FREE chip */}
               <div style={{ position:"absolute", bottom:-2, left:"50%",
                 transform:"translateX(-50%)",
@@ -1682,7 +1605,7 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
           {/* Avatar edit */}
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", marginBottom:22 }}>
             <div style={{ position:"relative", cursor:"pointer" }} onClick={() => setShowPicker(true)}>
-              <FP_Avatar avatar={pd.avatar} size={80} fontSize={38}/>
+              <FP_Avatar avatar={pd.avatar} name={pd.name} size={80}/>
               <div style={{ position:"absolute", bottom:0, right:-4,
                 background:FP_C.accent, borderRadius:"50%", width:24, height:24,
                 display:"flex", alignItems:"center", justifyContent:"center",

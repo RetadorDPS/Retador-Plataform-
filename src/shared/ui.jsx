@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { G, useAt } from "./theme.jsx";
+import { getUserById } from "./backend.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CSS GLOBAL
@@ -114,6 +115,40 @@ export const Ic = ({ n, c = "#fff", s = 22 }) => {
 export const Spin = ({ size = 20, color = G }) => (
   <div className="spn" style={{ width: size, height: size, border: `2px solid #181818`, borderTopColor: color, borderRadius: "50%", flexShrink: 0 }} />
 );
+
+// Saca la URL de la FOTO a partir de cualquiera de las formas que usa la app:
+// un string (avatar_url), o un objeto { type:"image"|"photo", value|url }. Los
+// avatares tipo "emoji" (formato viejo) se ignoran: ya no se muestran emojis.
+export const avatarUrlOf = (a) => {
+  if (!a) return null;
+  if (typeof a === "string") return a || null;
+  if (a.type === "image" || a.type === "photo") return a.value || a.url || null;
+  if (a.type === "emoji") return null;
+  return a.value || a.url || null;
+};
+// Colores de relleno para la inicial (deterministas por nombre).
+const _AV_COLORS = ["#6366F1", "#0EA5E9", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#14B8A6"];
+// AVATAR REUTILIZABLE — único en toda la app. Si hay foto muestra <img>; si no,
+// la inicial del nombre en un círculo de color (o un ícono de persona). NUNCA emoji.
+export const Avatar = ({ url, avatar, name, size = 40, style }) => {
+  const src = avatarUrlOf(url != null ? url : avatar);
+  const nm = (name || "").trim();
+  const letter = nm ? nm[0].toUpperCase() : null;
+  const color = _AV_COLORS[(nm.charCodeAt(0) || 0) % _AV_COLORS.length];
+  const base = { width: size, height: size, borderRadius: "50%", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", ...style };
+  if (src) return <div style={base}><img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.style.display = "none"; }} /></div>;
+  return <div style={{ ...base, background: color, color: "#fff", fontWeight: 800, fontSize: Math.round(size * 0.42) }}>
+    {letter || <Ic n="user" c="#fff" s={Math.round(size * 0.55)} />}
+  </div>;
+};
+// Igual que Avatar, pero resuelve la foto y el nombre REALES de una persona por su
+// id (tabla profiles, con caché). Úsalo donde solo tienes el id/el nombre viejo:
+// vendedor del producto, partes de un pedido, resultados. Solo foto pública.
+export const AvatarUser = ({ userId, name, size = 40, style }) => {
+  const [p, setP] = useState(null);
+  useEffect(() => { let a = true; if (userId) getUserById(userId).then(x => { if (a) setP(x); }).catch(() => {}); return () => { a = false; }; }, [userId]);
+  return <Avatar url={p?.avatar || null} name={p?.name || name} size={size} style={style} />;
+};
 
 export const Logo = ({ size = 21, sub = null }) => {
   const { isDark } = useAt();

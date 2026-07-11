@@ -122,6 +122,18 @@ export const uploadImage = async (file, userId) => {
   const { data } = supabase.storage.from("product-images").getPublicUrl(path);
   return data.publicUrl;
 };
+// Sube la FOTO DE PERFIL al bucket público "avatars" y devuelve su URL pública
+// persistente (se guarda en profiles.avatar_url). Comprime en el teléfono.
+export const uploadAvatar = async (file, userId) => {
+  const blob = await compressImage(file, 512, 0.85);
+  const path = `${userId || "anon"}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
+  const { error } = await supabase.storage.from("avatars").upload(path, blob, {
+    cacheControl: "3600", upsert: true, contentType: "image/jpeg",
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+  return data.publicUrl;
+};
 
 // Conversation & Message functions
 export const sendMessage = async (convId, senderId, text) => ({ id: Date.now(), text, sender_id: senderId, created_at: new Date() });

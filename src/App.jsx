@@ -226,7 +226,9 @@ function AppShell({ sessionUser }) {
   const [plusMenu,   setPlusMenu]   = useState(null); // { top, right } posición del dropdown
   const [subOpenCreate, setSubOpenCreate] = useState(false); // abre CreateAuction directo
   const [profileData, setProfileData] = useState({
-    avatar: { type:"emoji", value:"😊" },
+    // Foto real del usuario (Google/Supabase) si la hay; si no, null → inicial.
+    // Ya NO se usa emoji como avatar por defecto.
+    avatar: sessionUser?.avatar ? { type: "image", value: sessionUser.avatar } : null,
     name: sessionUser?.name || "Usuario",
     username: (sessionUser?.email ? sessionUser.email.split("@")[0] : (sessionUser?.name || "usuario")).toLowerCase().replace(/[^a-z0-9._]/g, ""),
     email: sessionUser?.email || "",

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, Logo, Spin, createOrder, densityCols, estimateDeliveryFee, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, useR, useScrollDir } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, Logo, Spin, createOrder, densityCols, estimateDeliveryFee, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, useR, useScrollDir } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -1336,9 +1336,7 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
         {/* Vendedor con trust stats */}
         <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, padding: "13px", marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 33, height: 33, borderRadius: "50%", background: `linear-gradient(135deg,${G},#8a6200)`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 15, color: "#000", flexShrink: 0 }}>
-              {sellerName ? sellerName[0].toUpperCase() : "?"}
-            </div>
+            <AvatarUser userId={p.seller_id} name={sellerName || p.seller_name} size={33} />
             <div style={{ flex: 1 }}>
               {sellerName === null
                 ? <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Spin size={13} /><span style={{ fontSize: 11, color: "#3e3e3e" }}>Cargando...</span></div>
@@ -1440,9 +1438,7 @@ export function SellerProfile({ userId, currentUser, onBack, onChat, onProduct }
       </div>
       <div style={{ padding: "22px 18px 16px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 18 }}>
-          <div style={{ width: 70, height: 70, borderRadius: "50%", background: `linear-gradient(135deg,${G},#7a5200)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 21, fontWeight: 900, color: "#000", flexShrink: 0, boxShadow: `0 0 22px ${G}35` }}>
-            {name[0].toUpperCase()}
-          </div>
+          <Avatar url={profile?.avatar} name={name} size={70} style={{ boxShadow: `0 0 22px ${G}35` }} />
           <div style={{ flex: 1 }}>
             <p style={{ fontSize: 17, fontWeight: 800 }}>{name}</p>
             {profile?.bio && <p style={{ fontSize: 11, color: "#484848", marginTop: 6, lineHeight: 1.5 }}>{profile.bio}</p>}

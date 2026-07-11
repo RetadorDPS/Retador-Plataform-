@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { G, Ic, Spin, getMyConversations, getSB, getUserName, isBlocked, loadMessages, markRead, sendMessage, trackEvent, useAt, useR } from "../shared/index.js";
+import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
+import { Avatar, AvatarUser, G, Ic, Spin, getMyConversations, getSB, getUserName, isBlocked, loadMessages, markRead, sendMessage, trackEvent, useAt, useR } from "../shared/index.js";
 
 export function MessagesScreen({ user, onBack, onChat }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
@@ -38,9 +38,7 @@ export function MessagesScreen({ user, onBack, onChat }) {
                   return (
                     <div key={c.id} className="cd" onClick={() => onChat(c)} style={{ display: "flex", alignItems: "center", gap: 13, padding: "14px 0", borderBottom: `1px solid ${B}` }}>
                       <div style={{ position: "relative", flexShrink: 0 }}>
-                        <div style={{ width: 42, height: 42, borderRadius: "50%", background: `${color}22`, border: `1.5px solid ${color}38`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 900, color }}>
-                          {(c.name || "?")[0].toUpperCase()}
-                        </div>
+                        <Avatar url={c.otherAvatar} name={c.name} size={42} />
                         {(c.unread || 0) > 0 && <div style={{ position: "absolute", top: -2, right: -2, width: 18, height: 18, borderRadius: "50%", background: G, border: `2px solid ${BG}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#000" }}>{c.unread}</div>}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -62,96 +60,102 @@ export function MessagesScreen({ user, onBack, onChat }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // CHAT — Realtime con conversation_id
 // ═════════════════════════════════════════════════════════════════════════════
-export function ChatScreen({ chat, user, onBack, flash }) {
+// Input AISLADO: guarda su propio borrador, así los mensajes que llegan por
+// realtime (que re-renderizan el chat) NO le roban el foco ni borran las letras.
+const ChatInput = memo(function ChatInput({ onSend, blocked, S, B, T1 }) {
+  const [draft, setDraft] = useState("");
+  const send = () => { const t = draft.trim(); if (!t) return; setDraft(""); onSend(t); };
+  if (blocked) return <div style={{ padding: "10px 14px", borderTop: `1px solid ${B}`, flexShrink: 0 }}><p style={{ textAlign: "center", fontSize: 11, color: "#F87171" }}>🚫 No puedes enviar mensajes</p></div>;
+  return (
+    <div style={{ padding: "10px 14px", borderTop: `1px solid ${B}`, display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+      <input value={draft} onChange={e => setDraft(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+        placeholder="Escribe un mensaje..."
+        style={{ flex: 1, background: S, border: `1px solid ${B}`, borderRadius: 50, padding: "11px 16px", color: T1, fontSize: 12, outline: "none" }} />
+      <button onClick={send} disabled={!draft.trim()} className="p"
+        style={{ width: 31, height: 31, background: draft.trim() ? G : "#141414", border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "background .15s" }}>
+        <Ic n="send" c={draft.trim() ? "#000" : "#2a2a2a"} s={17} />
+      </button>
+    </div>
+  );
+});
+
+export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const [convId,    setConvId]    = useState(chat.id || chat.key || null);
   const [msgs,      setMsgs]      = useState([]);
-  const [draft,     setDraft]     = useState("");
-  const [sending,   setSending]   = useState(false);
   const [loading,   setLoading]   = useState(true);
   const [otherName, setOtherName] = useState(chat.otherName || chat.name || null);
   const [blocked,   setBlocked]   = useState(false);
   const [chatOpts,  setChatOpts]  = useState(false);
-  const endRef = useRef(null);
+  const scrollRef = useRef(null);
   const subRef = useRef(null);
+  const convIdRef = useRef(convId);
+
+  // Baja el scroll al final SIN mover el foco del input (no usamos scrollIntoView).
+  const scrollToEnd = useCallback(() => {
+    setTimeout(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, 40);
+  }, []);
+
+  // Nombre real de la otra persona (nunca "Vendedor" genérico).
+  useEffect(() => {
+    if (!otherName && chat.otherId) getUserName(chat.otherId).then(n => n && setOtherName(n)).catch(() => {});
+  }, [chat.otherId]);
+
+  const subscribe = useCallback(async (cid) => {
+    const c = await getSB();
+    if (!c) return;
+    const sub = c.channel(`conv_${cid}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${cid}` }, payload => {
+        setMsgs(prev => prev.find(m => m.id === payload.new.id) ? prev : [...prev, payload.new]);
+        scrollToEnd();
+        if (user?.id) markRead(cid, user.id).catch(() => {});
+      })
+      .subscribe();
+    subRef.current = sub;
+  }, [scrollToEnd, user?.id]);
 
   useEffect(() => {
-    if (!otherName && chat.otherId) getUserName(chat.otherId).then(setOtherName);
-
-    // Comprobar bloqueo
-    if (user?.id && chat.otherId) {
-      isBlocked(user.id, chat.otherId).then(setBlocked).catch(() => {});
-    }
-
-    // Si tenemos convId, cargar mensajes; si no, la primera vez que se mande mensaje se creará
-    const loadAndSubscribe = async (cid) => {
-      if (!cid) { setLoading(false); return; }
-      const data = await loadMessages(cid);
-      setMsgs(data); setLoading(false);
-      setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
-      if (user?.id) markRead(cid, user.id).catch(() => {});
-
-      // Realtime — filtro por conversation_id
-      const c = await getSB();
-      if (!c) return;
-      const sub = c.channel(`conv_${cid}`)
-        .on("postgres_changes", {
-          event: "INSERT", schema: "public", table: "messages",
-          filter: `conversation_id=eq.${cid}`,
-        }, payload => {
-          setMsgs(prev => prev.find(m => m.id === payload.new.id) ? prev : [...prev, payload.new]);
-          setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-        })
-        .subscribe();
-      subRef.current = sub;
-    };
-
-    loadAndSubscribe(convId);
-
-    return () => {
-      if (subRef.current) getSB().then(c => c?.removeChannel(subRef.current)).catch(() => {});
-    };
+    let alive = true;
+    (async () => {
+      if (!convId) { setLoading(false); return; }
+      const data = await loadMessages(convId);
+      if (!alive) return;
+      setMsgs(data); setLoading(false); scrollToEnd();
+      if (user?.id) markRead(convId, user.id).catch(() => {});
+      subscribe(convId);
+    })();
+    return () => { alive = false; if (subRef.current) getSB().then(c => c?.removeChannel(subRef.current)).catch(() => {}); };
   }, [convId]);
 
-  const handleSend = async () => {
-    if (!draft.trim() || !user?.id || blocked) return;
-    const content = draft.trim();
-    setDraft(""); setSending(true);
+  // onSend estable: no depende del borrador (lo maneja ChatInput), así el input
+  // no se recrea. Crea la conversación la primera vez y se suscribe.
+  const handleSend = useCallback(async (text) => {
+    if (!text || !user?.id || blocked) return;
     try {
-      const cid = await sendMessage(user.id, chat.otherId, content, crypto.randomUUID());
-      if (!convId) {
-        setConvId(cid);
-        // Suscribir al nuevo canal
-        const c = await getSB();
-        if (c) {
-          const sub = c.channel(`conv_${cid}`)
-            .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${cid}` }, payload => {
-              setMsgs(prev => prev.find(m => m.id === payload.new.id) ? prev : [...prev, payload.new]);
-              setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-            }).subscribe();
-          subRef.current = sub;
-        }
-      }
+      const cid = await sendMessage(user.id, chat.otherId, text);
+      if (!convIdRef.current) { convIdRef.current = cid; setConvId(cid); }
+      else { loadMessages(cid).then(d => { setMsgs(d); scrollToEnd(); }).catch(() => {}); } // por si el realtime tarda
       trackEvent(user.id, null, "chat").catch(() => {});
     } catch (e) {
-      setDraft(content);
       if (e.message?.includes("blocked")) { setBlocked(true); flash("🚫 No puedes enviar mensajes a este usuario"); }
       else if (e.message?.includes("rate limit")) flash("⚠️ Estás enviando demasiados mensajes");
       else flash("❌ Error al enviar");
-    } finally { setSending(false); }
-  };
+    }
+  }, [user?.id, blocked, chat.otherId, flash]);
 
   const displayName = otherName || "Usuario";
+  const openProfile = () => { if (onViewProfile && chat.otherId) onViewProfile(chat.otherId); };
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "13px 18px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+      <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "11px 16px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
         <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c="#666" s={20} /></button>
-        <div style={{ width: 31, height: 31, borderRadius: "50%", background: `${G}22`, border: `1.5px solid ${G}38`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 900, color: G }}>
-          {displayName[0].toUpperCase()}
-        </div>
-        <div style={{ flex: 1 }}>
-          <p style={{ fontSize: 13, fontWeight: 700 }}>{displayName}</p>
-          <p style={{ fontSize: 10, color: blocked ? "#F87171" : "#22C55E", marginTop: 1 }}>{blocked ? "🚫 Bloqueado" : "● Activo"}</p>
+        <div onClick={openProfile} style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, cursor: onViewProfile && chat.otherId ? "pointer" : "default" }}>
+          <AvatarUser userId={chat.otherId} name={displayName} size={38} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: 13.5, fontWeight: 800, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</p>
+            <p style={{ fontSize: 10, color: onViewProfile && chat.otherId ? G : (blocked ? "#F87171" : "#22C55E"), marginTop: 1, fontWeight: 600 }}>{onViewProfile && chat.otherId ? "Ver perfil ›" : (blocked ? "🚫 Bloqueado" : "● Activo")}</p>
+          </div>
         </div>
         <div style={{ position: "relative" }}>
           <button onClick={() => setChatOpts(o => !o)} style={{ background: "none", border: "none", color: "var(--t2,#8a8a8a)", fontSize: 19, cursor: "pointer", lineHeight: 1 }}>⋯</button>
@@ -165,7 +169,7 @@ export function ChatScreen({ chat, user, onBack, flash }) {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "12px clamp(18px,3vw,48px)", display: "flex", flexDirection: "column", gap: 7 }}>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "12px clamp(18px,3vw,48px)", display: "flex", flexDirection: "column", gap: 7 }}>
         {loading
           ? <div style={{ display: "flex", justifyContent: "center", padding: "24px 0" }}><Spin size={22} /></div>
           : msgs.length === 0
@@ -174,41 +178,22 @@ export function ChatScreen({ chat, user, onBack, flash }) {
               </div>
             : msgs.map(m => {
                 const mine = m.sender_id === user?.id;
-                const showTime = true;
                 return (
                   <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
                     <div style={{ maxWidth: "78%", background: mine ? G : "#171717", border: mine ? "none" : `1px solid ${B}`, borderRadius: mine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "10px 13px" }}>
-                      {m.deleted_at
-                        ? <p style={{ fontSize: 11, color: mine ? "#0008" : "#3e3e3e", fontStyle: "italic" }}>Mensaje eliminado</p>
-                        : <p style={{ fontSize: 12, color: mine ? "#000" : "#ddd", lineHeight: 1.5, wordBreak: "break-word" }}>{m.content}</p>
-                      }
-                      {showTime && <p style={{ fontSize: 9, color: mine ? "#00000055" : "#3e3e3e", marginTop: 4, textAlign: "right" }}>
+                      <p style={{ fontSize: 12, color: mine ? "#000" : "#ddd", lineHeight: 1.5, wordBreak: "break-word" }}>{m.text}</p>
+                      <p style={{ fontSize: 9, color: mine ? "#00000055" : "#3e3e3e", marginTop: 4, textAlign: "right" }}>
                         {new Date(m.created_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
                         {mine && m.read_at && " ✓✓"}
-                      </p>}
+                      </p>
                     </div>
                   </div>
                 );
               })
         }
-        <div ref={endRef} />
       </div>
 
-      <div style={{ padding: "10px 14px", borderTop: `1px solid ${B}`, display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-        {blocked
-          ? <p style={{ flex: 1, textAlign: "center", fontSize: 11, color: "#F87171" }}>🚫 No puedes enviar mensajes</p>
-          : <>
-            <input value={draft} onChange={e => setDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder="Escribe un mensaje..."
-              style={{ flex: 1, background: S, border: `1px solid ${B}`, borderRadius: 50, padding: "11px 16px", color: T1, fontSize: 12, outline: "none" }} />
-            <button onClick={handleSend} disabled={sending || !draft.trim()} className="p"
-              style={{ width: 31, height: 31, background: draft.trim() ? G : "#141414", border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "background .15s" }}>
-              {sending ? <Spin size={16} color={G} /> : <Ic n="send" c={draft.trim() ? "#000" : "#2a2a2a"} s={17} />}
-            </button>
-          </>
-        }
-      </div>
+      <ChatInput onSend={handleSend} blocked={blocked} S={S} B={B} T1={T1} />
     </div>
   );
 }

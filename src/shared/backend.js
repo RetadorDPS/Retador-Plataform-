@@ -136,44 +136,36 @@ export const uploadAvatar = async (file, userId) => {
 };
 
 // ── CHAT REAL (conversations / messages, con realtime) ───────────────────────
-// Obtiene (o crea) la conversación entre el usuario actual y `otherId` usando la
-// función del backend get_or_create_conversation, y devuelve su id.
+// La columna del texto en `messages` es "text" (NO "content").
+// Obtiene (o crea) la conversación con la otra persona y devuelve su id.
 const _getOrCreateConversation = async (otherId) => {
-  // Probamos los nombres de parámetro más comunes por si el SQL usa uno u otro.
-  const names = ["other_user_id", "other_id", "p_other_user_id", "p_other_id"];
-  let lastErr = null;
-  for (const key of names) {
-    const { data, error } = await supabase.rpc("get_or_create_conversation", { [key]: otherId });
-    if (!error) return typeof data === "string" ? data : (data?.id || data);
-    lastErr = error;
-    // Si el error NO es por el nombre del parámetro, no seguimos probando.
-    if (!/parameter|argument|function|does not exist|schema cache/i.test(error.message || "")) break;
-  }
-  throw lastErr || new Error("No se pudo abrir la conversación");
+  const { data, error } = await supabase.rpc("get_or_create_conversation", { p_other: otherId });
+  if (error) throw error;
+  return typeof data === "string" ? data : (data?.id || data);
 };
 // Envía un mensaje: asegura la conversación y lo inserta. Devuelve conversation_id.
 export const sendMessage = async (senderId, otherId, text) => {
   if (!senderId || !otherId || !text || !text.trim()) throw new Error("Faltan datos del mensaje");
   const cid = await _getOrCreateConversation(otherId);
-  const { error } = await supabase.from("messages").insert({ conversation_id: cid, sender_id: senderId, content: text.trim() });
+  const { error } = await supabase.from("messages").insert({ conversation_id: cid, sender_id: senderId, text: text.trim() });
   if (error) throw error;
   return cid;
 };
+// Carga los mensajes NO borrados de una conversación, en orden.
 export const loadMessages = async (convId) => {
   if (!convId) return [];
-  const { data, error } = await supabase.from("messages").select("*").eq("conversation_id", convId).order("created_at", { ascending: true });
+  const { data, error } = await supabase.from("messages").select("*").eq("conversation_id", convId).is("deleted_at", null).order("created_at", { ascending: true });
   if (error) { console.error("loadMessages:", error.message); return []; }
   return data || [];
 };
-// Marca como leídos los mensajes de la conversación que NO son míos.
+// Marca la conversación como leída (read_at) vía la función del backend.
 export const markRead = async (convId, userId) => {
-  if (!convId || !userId) return;
-  try { await supabase.from("messages").update({ read_at: new Date().toISOString() }).eq("conversation_id", convId).neq("sender_id", userId).is("read_at", null); } catch (e) {}
+  if (!convId) return;
+  try { await supabase.rpc("mark_conversation_read", { p_conversation_id: convId }); } catch (e) {}
 };
-// Lista mis conversaciones con el nombre real de la otra persona, último mensaje y
-// no leídos. El RLS del backend ya limita conversations a las MÍAS, así que no
-// dependemos del nombre exacto de las columnas de participante: buscamos en la fila
-// el id que no es el mío (formato uuid) para saber quién es la otra persona.
+// Lista mis conversaciones con el nombre y foto reales de la otra persona, último
+// mensaje y no leídos. El RLS ya limita conversations a las MÍAS, así que buscamos
+// en la fila el id (uuid) que no es el mío para saber quién es la otra persona.
 export const getMyConversations = async (userId) => {
   if (!userId) return [];
   const { data, error } = await supabase.from("conversations").select("*");
@@ -182,11 +174,12 @@ export const getMyConversations = async (userId) => {
   const mine = (data || []).filter(c => Object.values(c).some(v => v === userId));
   const convs = await Promise.all(mine.map(async (c) => {
     const otherId = Object.entries(c).find(([k, v]) => typeof v === "string" && v !== userId && v !== c.id && uuid.test(v))?.[1] || null;
-    const name = otherId ? await getUserName(otherId).catch(() => "Usuario") : "Usuario";
-    const { data: last } = await supabase.from("messages").select("content, created_at").eq("conversation_id", c.id).order("created_at", { ascending: false }).limit(1);
+    const prof = otherId ? await getUserById(otherId).catch(() => null) : null;
+    const { data: last } = await supabase.from("messages").select("text, created_at").eq("conversation_id", c.id).is("deleted_at", null).order("created_at", { ascending: false }).limit(1);
     const lm = last && last[0];
     const { count } = await supabase.from("messages").select("id", { count: "exact", head: true }).eq("conversation_id", c.id).neq("sender_id", userId).is("read_at", null);
-    return { id: c.id, key: String(otherId || c.id), otherId, name, lastMsg: lm?.content || "", lastTime: lm?.created_at || c.created_at || null, unread: count || 0 };
+    const name = prof?.name || "Usuario";
+    return { id: c.id, key: String(otherId || c.id), otherId, name, otherName: name, otherAvatar: prof?.avatar || null, lastMsg: lm?.text || "", lastTime: lm?.created_at || c.created_at || null, unread: count || 0 };
   }));
   return convs.sort((a, b) => new Date(b.lastTime || 0) - new Date(a.lastTime || 0));
 };

@@ -570,6 +570,13 @@ function AppShell({ sessionUser }) {
   const myIds = [user?.id, user?.name, profileData?.name].filter(Boolean);
   const myNotifs = notifs.filter(n => n.to != null && myIds.includes(n.to));
   const unreadNotif = myNotifs.filter(n => !n.read).length;
+  // Barra inferior OCULTA en pantallas de "detalle" (a las que se ENTRA y se sale
+  // con "atrás"): detalle de producto, perfil del vendedor, subastas, y todo el
+  // tab de perfil salvo su raíz (mensajes, chat, pedidos, ajustes, perfil completo).
+  // VISIBLE en las raíces de pestaña: feed de Tienda, Búsqueda, Envíos, Perfil-main.
+  const hideNav = tab === "subastas"
+    || (tab === "market" && (mScr === "product" || mScr === "sellerProfile"))
+    || (tab === "perfil" && pScr !== "main");
   const markNotifRead = id => setNotifs(prev => prev.map(n => id == null ? { ...n, read: true } : (n.id === id ? { ...n, read: true } : n)));
 
   // ── PEDIDOS REALES (Compras/Ventas) — el BACKEND es la ÚNICA fuente ─────────
@@ -919,7 +926,7 @@ function AppShell({ sessionUser }) {
       {buyModal   && <BuyModal product={buyModal} user={user} onClose={() => setBuyModal(null)} flash={flash} onSuccess={(order) => { setBuyModal(null); const eo = addOrder(order); if (eo) { setSelOrderId(eo.id); setTab("perfil"); setPScr("order-detail"); } }} />}
 
       {/* Pantallas */}
-      <div onScrollCapture={handleNavScroll} style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", paddingBottom: rsp.isDesktop ? 0 : "calc(62px + env(safe-area-inset-bottom, 0px))" }}>
+      <div onScrollCapture={handleNavScroll} style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", paddingBottom: (rsp.isDesktop || hideNav) ? 0 : "calc(62px + env(safe-area-inset-bottom, 0px))" }}>
         <>
           {tab === "market" && <>
             {mScr === "home" && (
@@ -1018,7 +1025,7 @@ function AppShell({ sessionUser }) {
 
       {/* Nav inferior – solo móvil/tablet */}
       {!rsp.isDesktop && (
-        <BottomNav tab={tab} unread={unread} hidden={navHidden} onTab={t => {
+        <BottomNav tab={tab} unread={unread} hidden={navHidden || hideNav} onTab={t => {
           setTab(t);
           if (t === "market") setMScr("home");
           if (t === "envios") setEScr("menu");

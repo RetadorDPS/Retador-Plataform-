@@ -7,9 +7,15 @@ export function MessagesScreen({ user, onBack, onChat }) {
   const [convs,   setConvs]   = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const reload = useCallback(() => { if (user?.id) getMyConversations(user.id).then(setConvs).catch(() => {}); }, [user?.id]);
   useEffect(() => {
     if (!user?.id) { setLoading(false); return; }
     getMyConversations(user.id).then(d => { setConvs(d); setLoading(false); });
+    // Al volver a la app / a esta pantalla, refresca los no leídos (no se quedan pegados).
+    const onFocus = () => reload();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); };
   }, [user?.id]);
 
   const totalUnread = convs.reduce((a, c) => a + (c.unread || 0), 0);
@@ -102,6 +108,18 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
   const scrollRef = useRef(null);
   const subRef = useRef(null);
   const convIdRef = useRef(convId);
+  // Altura REAL visible (sin el teclado): con el viewport del teclado (visualViewport)
+  // el chat mide justo el hueco libre, así el input queda pegado encima del teclado.
+  const [vvH, setVvH] = useState(null);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const on = () => { setVvH(Math.round(vv.height)); setTimeout(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, 60); };
+    on();
+    vv.addEventListener("resize", on);
+    vv.addEventListener("scroll", on);
+    return () => { vv.removeEventListener("resize", on); vv.removeEventListener("scroll", on); };
+  }, []);
 
   // Baja el scroll al final SIN mover el foco del input (no usamos scrollIntoView).
   const scrollToEnd = useCallback(() => {
@@ -117,10 +135,18 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
     const c = await getSB();
     if (!c) return;
     const sub = c.channel(`conv_${cid}`)
+      // Mensaje NUEVO: lo agrego y, si NO es mío y el chat está abierto, lo marco
+      // leído al instante (esto dispara un UPDATE que el que envió verá como ✓✓).
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${cid}` }, payload => {
-        setMsgs(prev => prev.find(m => m.id === payload.new.id) ? prev : [...prev, payload.new]);
+        const m = payload.new;
+        setMsgs(prev => prev.find(x => x.id === m.id) ? prev : [...prev, m]);
         scrollToEnd();
-        if (user?.id) markRead(cid, user.id).catch(() => {});
+        if (user?.id && m.sender_id !== user.id) markRead(cid, user.id).catch(() => {});
+      })
+      // UPDATE (p.ej. read_at): actualizo el mensaje → el ✓✓ aparece en tiempo real.
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages", filter: `conversation_id=eq.${cid}` }, payload => {
+        const m = payload.new;
+        setMsgs(prev => prev.map(x => x.id === m.id ? { ...x, ...m } : x));
       })
       .subscribe();
     subRef.current = sub;
@@ -158,7 +184,7 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
   const displayName = otherName || "Usuario";
   const openProfile = () => { if (onViewProfile && chat.otherId) onViewProfile(chat.otherId); };
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ height: vvH ? `${vvH}px` : "100%", flex: vvH ? "none" : 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "11px 16px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
         <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c="#666" s={20} /></button>
         <div onClick={openProfile} style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, cursor: onViewProfile && chat.otherId ? "pointer" : "default" }}>
@@ -192,10 +218,10 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
                 return (
                   <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
                     <div style={{ maxWidth: "78%", background: mine ? G : "#171717", border: mine ? "none" : `1px solid ${B}`, borderRadius: mine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "10px 13px" }}>
-                      <p style={{ fontSize: 12, color: mine ? "#000" : "#ddd", lineHeight: 1.5, wordBreak: "break-word" }}>{m.text}</p>
-                      <p style={{ fontSize: 9, color: mine ? "#00000055" : "#3e3e3e", marginTop: 4, textAlign: "right" }}>
+                      <p style={{ fontSize: 12, color: mine ? "#000" : "#eee", lineHeight: 1.5, wordBreak: "break-word" }}>{m.text}</p>
+                      <p style={{ fontSize: 9, color: mine ? "#00000066" : "rgba(255,255,255,.55)", marginTop: 4, textAlign: "right" }}>
                         {new Date(m.created_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
-                        {mine && m.read_at && " ✓✓"}
+                        {mine && (m.read_at ? " ✓✓" : " ✓")}
                       </p>
                     </div>
                   </div>

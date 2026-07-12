@@ -34,7 +34,7 @@ import {
   CATS, SUBCATS, CatalogContext, CatalogProvider, useCatalog, CatIcon,
   useCSS, Ic, Spin, Logo,
   getPageLayout, liveSlot, LiveBlock, LiveSlot,
-  useScrollDir, consumeBack, pushBackHandler,
+  useScrollDir, consumeBack, pushBackHandler, shouldIgnorePop,
 } from "./shared/index.js";
 import WalletApp from "./screens/Wallet.jsx";
 import ProductToolsApp from "./screens/ProductTools.jsx";
@@ -537,11 +537,9 @@ function AppShell({ sessionUser }) {
     if (typeof window === "undefined" || !window.history) return;
     const onPop = () => {
       if (ignorePopRef.current > 0) { ignorePopRef.current--; return; } // fue un history.back() nuestro (sync)
-      if (consumeBack()) {                     // 1) overlay anidado (visor de fotos, detalle de subasta)
-        // el navegador quitó una entrada; recomponemos una para no perder profundidad.
-        try { window.history.pushState({ rt: stackRef.current.length + 1 }, ""); } catch (e) {}
-        return;
-      }
+      if (shouldIgnorePop()) return;           // 0) retiro de la entrada de una capa cerrada en pantalla
+      if (consumeBack()) return;               // 1) capa abierta (visor, perfil, subasta): este pop consumió
+                                               //    SU PROPIA entrada de historial → solo hay que cerrarla.
       if (stackRef.current.length) {           // 2) deshacer el último paso (pantalla o modal)
         restoringRef.current = true;
         applySnap(stackRef.current.pop().snap);

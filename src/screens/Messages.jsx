@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
 import { Avatar, AvatarUser, G, Ic, Spin, getMyConversations, getSB, getUserName, isBlocked, loadMessages, markRead, sendMessage, trackEvent, useAt, useR } from "../shared/index.js";
 
-export function MessagesScreen({ user, onBack, onChat }) {
+export function MessagesScreen({ user, onBack, onChat, chatOpen = false }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const [convs,   setConvs]   = useState([]);
@@ -17,6 +17,24 @@ export function MessagesScreen({ user, onBack, onChat }) {
     document.addEventListener("visibilitychange", onFocus);
     return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); };
   }, [user?.id]);
+
+  // TIEMPO REAL: cualquier mensaje nuevo (o marcado como leído) refresca la lista
+  // al instante — mirando los chats ves llegar el mensaje sin salir ni recargar.
+  useEffect(() => {
+    if (!user?.id) return;
+    let ch = null, alive = true;
+    getSB().then(c => {
+      if (!c || !alive) return;
+      ch = c.channel("msgs_list")
+        .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => reload())
+        .subscribe();
+    });
+    return () => { alive = false; if (ch) getSB().then(c => c?.removeChannel(ch)).catch(() => {}); };
+  }, [user?.id, reload]);
+
+  // Al VOLVER del chat (se cierra el overlay), refresca al momento: la conversación
+  // que acabas de leer deja de marcar "no leído" sin tener que salir y entrar.
+  useEffect(() => { if (!chatOpen) reload(); }, [chatOpen, reload]);
 
   const totalUnread = convs.reduce((a, c) => a + (c.unread || 0), 0);
 

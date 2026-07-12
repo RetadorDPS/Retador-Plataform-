@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, createContext, useContext, useCallback, us
 import { Edit2, Trash2 } from "lucide-react";
 import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, signOutUser } from "../shared/index.js";
 
-export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProfile, onAdmin, onWallet, onTools, onCourier, isOwner, profileData = {}, ordersBadge = 0 }) {
+export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProfile, onAdmin, onWallet, onTools, onCourier, isOwner, profileData = {}, ordersBadge = 0, messagesBadge = 0 }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const name     = profileData.name || user?.name || "Usuario";
@@ -31,7 +31,7 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
         </div>
 
         {[
-          { ic: "msg",  label: "Mensajes",       sub: "Chats y conversaciones",     action: onMessages, color: G        },
+          { ic: "msg",  label: "Mensajes",       sub: "Chats y conversaciones",     action: onMessages, color: G, badge: messagesBadge },
           { ic: "pkg",  label: "Mis pedidos",     sub: "Compras y ventas",           action: onOrders,   color: "#60A5FA", badge: ordersBadge },
           { ic: "wallet", label: "Mi billetera",  sub: "Enviar, recibir, pagar y convertir", action: onWallet, color: "#22C55E" },
           { ic: "tools", label: "Herramientas",  sub: "Importador inteligente y más", action: onTools, color: "#6EE7B7" },

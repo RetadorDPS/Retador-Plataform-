@@ -163,6 +163,19 @@ export const markRead = async (convId, userId) => {
   if (!convId) return;
   try { await supabase.rpc("mark_conversation_read", { p_conversation_id: convId }); } catch (e) {}
 };
+// Total de mensajes SIN LEER que me enviaron (el RLS ya limita messages a mis
+// conversaciones). Alimenta los avisos del botón "Mensajes" y de la barra inferior.
+export const getUnreadCount = async (userId) => {
+  if (!userId) return 0;
+  const { count, error } = await supabase
+    .from("messages")
+    .select("id", { count: "exact", head: true })
+    .neq("sender_id", userId)
+    .is("read_at", null)
+    .is("deleted_at", null);
+  if (error) { console.error("getUnreadCount:", error.message); return 0; }
+  return count || 0;
+};
 // Lista mis conversaciones con el nombre y foto reales de la otra persona, último
 // mensaje y no leídos. El RLS ya limita conversations a las MÍAS, así que buscamos
 // en la fila el id (uuid) que no es el mío para saber quién es la otra persona.

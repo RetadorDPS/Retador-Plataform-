@@ -24,7 +24,7 @@ import {
   CURRENCIES, CURRENCY_CODES, DEFAULT_CURRENCY, money,
   createOrder, estimateDeliveryFee,
   readRatings, aggRating, systemRating, serviceRating, serviceReviews, ratingForName, systemReviews,
-  getUserOrders, updateOrderStatus,
+  getUserOrders, updateOrderStatus, getUnreadCount,
   ORDER_FLOW, SHIP_LABELS, MODALIDAD_LABELS,
   CONTACT_PATTERNS, maskContacts, CUBA_PROVINCES,
   getUserTrustStats, trackEvent, blockUser, isBlocked, getSB, convKey,
@@ -151,6 +151,25 @@ function AppShell({ sessionUser }) {
   const [pubOpen,    setPubOpen]    = useState(false);
   const [showNotif,  setShowNotif]  = useState(false);
   const [chatOpen,   setChatOpen]   = useState(false);
+  // ── Aviso de MENSAJES NUEVOS en tiempo real (global) ────────────────────────
+  // Cuenta los mensajes sin leer y se actualiza al instante con el realtime de
+  // `messages` (cualquier INSERT/UPDATE de mis conversaciones refresca el número).
+  // Alimenta el badge del botón "Mensajes" del perfil y el de la barra inferior.
+  const [chatUnread, setChatUnread] = useState(0);
+  const reloadChatUnread = useCallback(() => {
+    if (!user?.id) { setChatUnread(0); return; }
+    getUnreadCount(user.id).then(setChatUnread).catch(() => {});
+  }, [user?.id]);
+  useEffect(() => {
+    reloadChatUnread();
+    if (!user?.id) return;
+    const ch = supabase.channel("msgs_global")
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => reloadChatUnread())
+      .subscribe();
+    return () => { try { supabase.removeChannel(ch); } catch (e) {} };
+  }, [user?.id, reloadChatUnread]);
+  // Al cerrar el chat (volver a la lista), refresca al instante: lo leído deja de contar.
+  useEffect(() => { if (!chatOpen) reloadChatUnread(); }, [chatOpen, reloadChatUnread]);
   const [showAdmin,  setShowAdmin]  = useState(false);
   const [showWallet, setShowWallet] = useState(false);
   const [showTools, setShowTools] = useState(false);
@@ -745,8 +764,8 @@ function AppShell({ sessionUser }) {
                   <Ic n={it.ic} c={active ? G : appTk.T3} s={19} />
                 )}
                 <span style={{ fontSize: 8, fontWeight: active ? 700 : 600, color: active ? G : appTk.T3 }}>{it.label}</span>
-                {it.id === "perfil" && unread > 0 && (
-                  <div style={{ marginLeft: "auto", width: 18, height: 18, borderRadius: "50%", background: G, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#000" }}>{unread > 9 ? "9+" : unread}</div>
+                {it.id === "perfil" && (chatUnread + ordersUnseen) > 0 && (
+                  <div style={{ marginLeft: "auto", width: 18, height: 18, borderRadius: "50%", background: G, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#000" }}>{(chatUnread + ordersUnseen) > 9 ? "9+" : (chatUnread + ordersUnseen)}</div>
                 )}
               </button>
             );
@@ -1007,7 +1026,7 @@ function AppShell({ sessionUser }) {
           )}
 
           {tab === "perfil" && <>
-            {pScr === "main"         && <ProfileMain user={user} onMessages={openMessages} onSettings={() => setPScr("settings")} onOrders={() => setPScr("orders")} onViewProfile={() => setPScr("profile-full")} onAdmin={() => setShowAdmin(true)} onWallet={() => setShowWallet(true)} onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} isOwner={isOwner} profileData={profileData} ordersBadge={ordersUnseen} />}
+            {pScr === "main"         && <ProfileMain user={user} onMessages={openMessages} onSettings={() => setPScr("settings")} onOrders={() => setPScr("orders")} onViewProfile={() => setPScr("profile-full")} onAdmin={() => setShowAdmin(true)} onWallet={() => setShowWallet(true)} onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} isOwner={isOwner} profileData={profileData} ordersBadge={ordersUnseen} messagesBadge={chatUnread} />}
             {pScr === "profile-full" && (() => {
               const me = profileData?.name || user?.name;
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
@@ -1015,7 +1034,7 @@ function AppShell({ sessionUser }) {
               const myDebt = Math.max(0, accrued - paid);
               return <FreeProfileScreen onBack={() => setPScr("main")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={(p) => addVerification({ userName: me || "Usuario", ...p })} isVerified={verifiedUsers.includes(me)} onRequestPlan={(plan) => addPlanRequest({ userName: me || "Usuario", plan })} currentPlan={userPlans[me] || "Básico"} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={products.filter(p => p.seller_id === user?.id)} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} />;
             })()}
-            {pScr === "messages" && <MessagesScreen user={user} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
+            {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
             {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}
               profileData={profileData} onProfileUpdate={setProfileData}
               isVerified={verifiedUsers.includes(profileData?.name || user?.name)}
@@ -1031,7 +1050,7 @@ function AppShell({ sessionUser }) {
 
       {/* Nav inferior – solo móvil/tablet */}
       {!rsp.isDesktop && (
-        <BottomNav tab={tab} unread={unread} hidden={navHidden || hideNav} onTab={t => {
+        <BottomNav tab={tab} unread={chatUnread + ordersUnseen} hidden={navHidden || hideNav} onTab={t => {
           setTab(t);
           if (t === "market") setMScr("home");
           if (t === "envios") setEScr("menu");

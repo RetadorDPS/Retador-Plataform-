@@ -163,18 +163,27 @@ export const markRead = async (convId, userId) => {
   if (!convId) return;
   try { await supabase.rpc("mark_conversation_read", { p_conversation_id: convId }); } catch (e) {}
 };
-// Total de mensajes SIN LEER que me enviaron (el RLS ya limita messages a mis
-// conversaciones). Alimenta los avisos del botón "Mensajes" y de la barra inferior.
+// Total de mensajes SIN LEER — usa la RPC OFICIAL del backend (misma fuente de
+// verdad para toda la app). Alimenta el botón "Mensajes" y la barra inferior.
 export const getUnreadCount = async (userId) => {
   if (!userId) return 0;
-  const { count, error } = await supabase
-    .from("messages")
-    .select("id", { count: "exact", head: true })
-    .neq("sender_id", userId)
-    .is("read_at", null)
-    .is("deleted_at", null);
-  if (error) { console.error("getUnreadCount:", error.message); return 0; }
-  return count || 0;
+  const { data, error } = await supabase.rpc("get_unread_total");
+  if (error) { console.error("get_unread_total:", error.message); return 0; }
+  return Number(data) || 0;
+};
+// No leídos POR conversación (RPC oficial). Devuelve { [conversation_id]: n }.
+// Tolerante con el nombre exacto de las columnas que devuelva la función.
+export const getUnreadByConversation = async () => {
+  const { data, error } = await supabase.rpc("get_unread_by_conversation");
+  if (error) { console.error("get_unread_by_conversation:", error.message); return {}; }
+  const map = {};
+  (data || []).forEach(r => {
+    if (!r || typeof r !== "object") return;
+    const id = r.conversation_id ?? r.conv_id ?? r.id;
+    const n = Number(r.unread ?? r.unread_count ?? r.count ?? r.total ?? 0) || 0;
+    if (id) map[id] = n;
+  });
+  return map;
 };
 // Lista mis conversaciones con el nombre y foto reales de la otra persona, último
 // mensaje y no leídos. El RLS ya limita conversations a las MÍAS, así que buscamos
@@ -185,14 +194,15 @@ export const getMyConversations = async (userId) => {
   if (error) { console.error("getMyConversations:", error.message); return []; }
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const mine = (data || []).filter(c => Object.values(c).some(v => v === userId));
+  // No leídos de TODAS las conversaciones en UNA llamada (RPC oficial).
+  const unreadMap = await getUnreadByConversation().catch(() => ({}));
   const convs = await Promise.all(mine.map(async (c) => {
     const otherId = Object.entries(c).find(([k, v]) => typeof v === "string" && v !== userId && v !== c.id && uuid.test(v))?.[1] || null;
     const prof = otherId ? await getUserById(otherId).catch(() => null) : null;
     const { data: last } = await supabase.from("messages").select("text, created_at").eq("conversation_id", c.id).is("deleted_at", null).order("created_at", { ascending: false }).limit(1);
     const lm = last && last[0];
-    const { count } = await supabase.from("messages").select("id", { count: "exact", head: true }).eq("conversation_id", c.id).neq("sender_id", userId).is("read_at", null);
     const name = prof?.name || "Usuario";
-    return { id: c.id, key: String(otherId || c.id), otherId, name, otherName: name, otherAvatar: prof?.avatar || null, lastMsg: lm?.text || "", lastTime: lm?.created_at || c.created_at || null, unread: count || 0 };
+    return { id: c.id, key: String(otherId || c.id), otherId, name, otherName: name, otherAvatar: prof?.avatar || null, lastMsg: lm?.text || "", lastTime: lm?.created_at || c.created_at || null, unread: unreadMap[c.id] || 0 };
   }));
   return convs.sort((a, b) => new Date(b.lastTime || 0) - new Date(a.lastTime || 0));
 };

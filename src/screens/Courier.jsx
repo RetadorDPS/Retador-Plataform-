@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { getAvailableDeliveries, getUserById, getProductById } from "../shared/index.js";
+import { getAvailableDeliveries, getUserById, getProductById, supabase } from "../shared/index.js";
 
 // Chip de PERFIL PÚBLICO: foto + nombre reales (tabla profiles). Al tocarlo abre
 // el perfil público de esa persona. No expone nada privado, solo reputación.
@@ -69,6 +69,16 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
     })));
   }, [demo]);
   useEffect(() => { reloadPool(); }, [reloadPool]);
+  // EN VIVO: cualquier cambio en pedidos refresca el pool solo (una entrega nueva
+  // aparece al instante; una tomada por otro mensajero desaparece). El canal se
+  // limpia al cerrar el modo mensajero.
+  useEffect(() => {
+    if (demo) return;
+    const ch = supabase.channel("rt-courier-pool")
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => reloadPool())
+      .subscribe();
+    return () => { try { supabase.removeChannel(ch); } catch (e) {} };
+  }, [demo, reloadPool]);
 
   // En demo mezclamos los pedidos REALES locales con los de ejemplo, para que el dueño vea su propio pedido aquí.
   const srcOrders = demo ? [...orders.filter(o => (o.shipMode || o.shipType) === "local"), ...demoOrders] : orders;

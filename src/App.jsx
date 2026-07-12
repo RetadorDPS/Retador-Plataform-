@@ -160,16 +160,11 @@ function AppShell({ sessionUser }) {
     if (!user?.id) { setChatUnread(0); return; }
     getUnreadCount(user.id).then(setChatUnread).catch(() => {});
   }, [user?.id]);
-  useEffect(() => {
-    reloadChatUnread();
-    if (!user?.id) return;
-    const ch = supabase.channel("msgs_global")
-      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => reloadChatUnread())
-      .subscribe();
-    return () => { try { supabase.removeChannel(ch); } catch (e) {} };
-  }, [user?.id, reloadChatUnread]);
+  useEffect(() => { reloadChatUnread(); }, [reloadChatUnread]);
   // Al cerrar el chat (volver a la lista), refresca al instante: lo leído deja de contar.
   useEffect(() => { if (!chatOpen) reloadChatUnread(); }, [chatOpen, reloadChatUnread]);
+  // (La suscripción realtime vive más abajo, en el CANAL GLOBAL único rt-global-<uid>,
+  //  junto con la de pedidos — después de declarar loadOrders.)
   const [showAdmin,  setShowAdmin]  = useState(false);
   const [showWallet, setShowWallet] = useState(false);
   const [showTools, setShowTools] = useState(false);
@@ -611,6 +606,21 @@ function AppShell({ sessionUser }) {
   }, [user?.id]);
   useEffect(() => { loadOrders(); }, [loadOrders]);
   useEffect(() => { if (pScr === "orders" || pScr === "order-detail") loadOrders(); }, [pScr, loadOrders]);
+
+  // ── CANAL REALTIME GLOBAL (UNO solo por usuario: rt-global-<uid>) ────────────
+  // · messages → refresca el contador de mensajes sin leer (RPC oficial).
+  // · orders   → recarga los pedidos EN VIVO: el vendedor ve llegar la venta al
+  //   instante (badge de Ventas incluido) y el comprador ve avanzar su pedido
+  //   (confirmado→asignado→recogido→en ruta→entregado) sin recargar.
+  // Se limpia al cerrar sesión o cambiar de usuario (removeChannel).
+  useEffect(() => {
+    if (!user?.id) return;
+    const ch = supabase.channel(`rt-global-${user.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => reloadChatUnread())
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => loadOrders())
+      .subscribe();
+    return () => { try { supabase.removeChannel(ch); } catch (e) {} };
+  }, [user?.id, reloadChatUnread, loadOrders]);
 
   const roleOf = (o) => (((o.buyerId ?? o.buyer_id) === user?.id) ? "compra" : "venta");
   const mergedOrders = orders;

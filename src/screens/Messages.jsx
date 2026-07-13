@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { Avatar, AvatarUser, G, Ic, ORDER_FLOW, Spin, getMyConversations, getSB, getUserName, isBlocked, loadMessages, markRead, sendMessage, supabase, trackEvent, useAt, useR } from "../shared/index.js";
+import { Avatar, AvatarUser, G, Ic, ORDER_FLOW, Spin, getMyConversations, getSB, getUserName, isBlocked, loadMessages, markRead, money, sendMessage, supabase, trackEvent, useAt, useR } from "../shared/index.js";
 
 // ── TARJETA DE PEDIDO EN EL CHAT ─────────────────────────────────────────────
 // Mensaje con meta {type:'order', order_id, title, image}: tarjeta centrada con
@@ -37,13 +37,23 @@ function OrderChatCard({ meta, orders = [], onOpenOrder, B, T1, T3, soft }) {
     </div>
   );
 }
-// Tarjetica de REFERENCIA (producto o pedido) que acompaña a un mensaje con texto.
+// Tarjeta de REFERENCIA (producto o pedido) que acompaña a un mensaje con texto.
+// Grande y clara: foto visible, título a dos líneas y el precio del producto,
+// para que ambas partes sepan de qué se habla. Tocar → abre el detalle.
 function RefChatCard({ meta, onOpen, B, T1, T3, soft }) {
+  const price = meta.price != null && meta.price !== "" ? money(Number(meta.price) || 0, meta.currency || "USD") : null;
   return (
-    <div onClick={onOpen} className="p" style={{ display: "flex", alignItems: "center", gap: 8, background: soft, border: `1px solid ${B}`, borderRadius: 11, padding: "7px 10px", marginBottom: 5, cursor: onOpen ? "pointer" : "default", maxWidth: 240 }}>
-      {meta.image && <img src={meta.image} alt="" style={{ width: 30, height: 30, borderRadius: 7, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />}
-      <p style={{ fontSize: 10.5, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta.type === "order" ? "📦 " : "🛍️ "}{meta.title || ""}</p>
-      <span style={{ fontSize: 12, color: T3, flexShrink: 0 }}>›</span>
+    <div onClick={onOpen} className="p" style={{ display: "flex", alignItems: "center", gap: 11, background: soft, border: `1px solid ${B}`, borderRadius: 13, padding: "9px 11px", marginBottom: 7, cursor: onOpen ? "pointer" : "default", minWidth: 200, maxWidth: 280 }}>
+      {meta.image
+        ? <img src={meta.image} alt="" style={{ width: 56, height: 56, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />
+        : <div style={{ width: 56, height: 56, borderRadius: 10, background: "#8884", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>{meta.type === "order" ? "📦" : "🛍️"}</div>}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontSize: 12.5, fontWeight: 800, color: T1, lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{meta.title || (meta.type === "order" ? "Pedido" : "Producto")}</p>
+        <p style={{ fontSize: 11, color: T3, marginTop: 3, fontWeight: 700 }}>
+          {price ? <span style={{ color: "#22C55E" }}>{price}</span> : (meta.type === "order" ? "Pedido" : "Producto")}
+          <span style={{ fontWeight: 600 }}> · Ver detalle ›</span>
+        </p>
+      </div>
     </div>
   );
 }
@@ -241,8 +251,9 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
   const handleSend = useCallback(async (text) => {
     if (!text || !user?.id || blocked) return;
     try {
-      // El primer mensaje con la franja de contexto lleva la referencia (meta).
-      const meta = ctx ? { type: ctx.type, id: ctx.id, title: ctx.title || "", image: ctx.image || null } : null;
+      // El primer mensaje con la franja de contexto lleva la referencia (meta),
+      // incluyendo el precio del producto para que la tarjeta informe bien.
+      const meta = ctx ? { type: ctx.type, id: ctx.id, title: ctx.title || "", image: ctx.image || null, price: ctx.price ?? null, currency: ctx.currency || null } : null;
       const cid = await sendMessage(user.id, chat.otherId, text, meta);
       if (meta) setCtx(null);
       if (!convIdRef.current) { convIdRef.current = cid; setConvId(cid); }
@@ -320,7 +331,7 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
         <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 14px", borderTop: `1px solid ${B}`, background: isDark ? "#101012" : "#f8fafc", flexShrink: 0 }}>
           {ctx.image && <img src={ctx.image} alt="" style={{ width: 34, height: 34, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: 11.5, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ctx.type === "order" ? "📦 " : "🛍️ "}{ctx.title || ""}</p>
+            <p style={{ fontSize: 11.5, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ctx.type === "order" ? "📦 " : "🛍️ "}{ctx.title || ""}{ctx.price != null && ctx.price !== "" ? <span style={{ color: "#22C55E", fontWeight: 800 }}> · {money(Number(ctx.price) || 0, ctx.currency || "USD")}</span> : null}</p>
             <p style={{ fontSize: 9.5, color: T3, marginTop: 1 }}>Estás consultando sobre esto</p>
           </div>
           <button onClick={() => setCtx(null)} style={{ background: "none", border: "none", color: T3, fontSize: 17, cursor: "pointer", lineHeight: 1, padding: 4 }}>×</button>

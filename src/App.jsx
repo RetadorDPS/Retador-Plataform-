@@ -992,11 +992,14 @@ function AppShell({ sessionUser }) {
       {buyModal   && <BuyModal product={buyModal} user={user} onClose={() => setBuyModal(null)} flash={flash} onSuccess={(order) => { setBuyModal(null); const eo = addOrder(order); if (eo) { setSelOrderId(eo.id); setTab("perfil"); setPScr("order-detail"); } }} />}
 
       {/* Pantallas */}
-      <div onScrollCapture={handleNavScroll} style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", paddingBottom: (rsp.isDesktop || hideNav) ? 0 : "calc(62px + env(safe-area-inset-bottom, 0px))" }}>
+      {/* El contenido usa TODO el alto: la barra inferior flota encima (translúcida
+          con blur), así al esconderse no queda ninguna franja vacía debajo. */}
+      <div onScrollCapture={handleNavScroll} style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <>
           {tab === "market" && <>
             {mScr === "home" && (
               <MarketHome
+                hidden={navHidden}
                 loading={loading} products={marketVisible} filter={filter} setFilter={setFilter}
                 search={search} setSearch={setSearch} activeCat={activeCat} setActiveCat={cat => { setActiveCat(cat); }}
                 onCats={() => setShowCats(true)}

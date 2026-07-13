@@ -24,7 +24,8 @@ import {
   CURRENCIES, CURRENCY_CODES, DEFAULT_CURRENCY, money,
   createOrder, estimateDeliveryFee,
   readRatings, aggRating, systemRating, serviceRating, serviceReviews, ratingForName, systemReviews,
-  getUserOrders, updateOrderStatus, getUnreadCount,
+  getUserOrders, updateOrderStatus, getUnreadCount, getProductById,
+  getPendingCourierApplications, reviewCourierApplication,
   ORDER_FLOW, SHIP_LABELS, MODALIDAD_LABELS,
   CONTACT_PATTERNS, maskContacts, CUBA_PROVINCES,
   getUserTrustStats, trackEvent, blockUser, isBlocked, getSB, convKey,
@@ -166,18 +167,19 @@ function AppShell({ sessionUser }) {
   // (La suscripción realtime vive más abajo, en el CANAL GLOBAL único rt-global-<uid>,
   //  junto con la de pedidos — después de declarar loadOrders.)
   const [showAdmin,  setShowAdmin]  = useState(false);
+  // Solicitudes REALES de mensajero (courier_applications) para el panel admin.
+  const [courierApps, setCourierApps] = useState([]);
+  const reloadCourierApps = useCallback(() => {
+    getPendingCourierApplications().then(setCourierApps).catch(() => {});
+  }, []);
+  useEffect(() => { if (showAdmin && user?.role === "admin") reloadCourierApps(); }, [showAdmin, user?.role, reloadCourierApps]);
   const [showWallet, setShowWallet] = useState(false);
   const [showTools, setShowTools] = useState(false);
   const [toolApp, setToolApp] = useState(false);
   const [showCourier, setShowCourier] = useState(false);
-  // Mensajeros: solicitudes y aprobados (persistente). Cada registro guarda toda la info para verificación/seguridad.
-  const [couriers, setCouriers] = useState(() => { try { return JSON.parse(localStorage.getItem("retador_couriers") || "[]"); } catch { return []; } });
-  useEffect(() => { try { localStorage.setItem("retador_couriers", JSON.stringify(couriers)); } catch {} }, [couriers]);
-  const submitCourierApp = (data) => setCouriers(prev => {
-    const meName = profileData?.name || user?.name || "Usuario";
-    const without = prev.filter(c => c.userName !== meName);
-    return [...without, { id: "cou_" + Date.now(), userName: meName, status: "pending", createdAt: Date.now(), ...data }];
-  });
+  // RETIRADO: el registro local de mensajeros (retador_couriers en localStorage)
+  // ya NO es vía de aprobación. La única vía real es courier_applications en el
+  // backend + review_courier_application del admin (que pone role='courier').
   // El mensajero acepta una entrega disponible — se registra en el backend con RPC
   // segura. Si propone una tarifa mayor a la base, el backend deja el pedido a la
   // espera de que el comprador la apruebe. Nunca tocamos el status a mano.
@@ -215,9 +217,9 @@ function AppShell({ sessionUser }) {
     await loadOrders();
     flash(p_stage === "recogido" ? "✅ Producto recogido — en ruta" : "✅ Entregado — pedido cerrado");
   };
-  // MODO PRUEBA: dueño siempre true para que puedas entrar al panel sin cuentas.
-  // En producción: ligado al correo del dueño (o a un permiso/rol del usuario).
-  const isOwner = true;
+  // Panel de administración: SOLO para cuentas con rol real de admin en el backend
+  // (el dueño ya tiene role='admin' en profiles). Ya no está abierto para todos.
+  const isOwner = user?.role === "admin";
   // Configuración editable de la plataforma (controlada desde el panel admin, persiste)
   const [adminCfg, setAdminCfg] = useState(() => {
     const defaults = {
@@ -458,11 +460,25 @@ function AppShell({ sessionUser }) {
   // misma conversación (nunca duplica ni cae a "Vendedor"). El nombre/foto se
   // derivan del id dentro del chat.
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const openChat = (otherId, otherName) => {
+  // context opcional {type:'product'|'order', id, title, image}: el chat muestra
+  // la franja "estás consultando sobre esto" y el primer mensaje lleva la referencia.
+  const openChat = (otherId, otherName, context = null) => {
     const id = typeof otherId === "string" && UUID_RE.test(otherId) ? otherId : null;
     if (!id) { flash("No se pudo abrir el chat: usuario no identificado"); return; }
-    setSelChat({ otherId: id, otherName });
+    setSelChat({ otherId: id, otherName, context });
     setChatOpen(true);
+  };
+  // Abrir el DETALLE de un pedido/producto desde una tarjeta del chat.
+  const openOrderFromChat = (orderId) => {
+    if (!orderId) return;
+    setChatOpen(false); setSelOrderId(orderId); setTab("perfil"); setPScr("order-detail");
+  };
+  const openProductFromChat = (productId) => {
+    if (!productId) return;
+    const go = (p) => { setChatOpen(false); setSelProd(p); setTab("market"); setMScr("product"); };
+    const local = products.find(x => x.id === productId);
+    if (local) go(local);
+    else getProductById(productId).then(p => { if (p) go(p); else flash("Ese producto ya no está disponible"); }).catch(() => {});
   };
   const openMessages = () => { setSelChat(null); setChatOpen(false); setTab("perfil"); setPScr("messages"); };
 
@@ -656,8 +672,13 @@ function AppShell({ sessionUser }) {
     if (error) { console.error("advance_order:", error.message); flash("⚠️ No se pudo confirmar: " + error.message); return; }
     setOrders(prev => prev.map(x => { if (x.id !== orderId) return x; const idx = (x.flow || []).findIndex(s => s.key === "confirmado"); return { ...x, sellerConfirmed: true, stepIdx: idx >= 0 ? Math.max(x.stepIdx || 0, idx) : (x.stepIdx || 0), status: "confirmado", history: [...(x.history || []), { key: "confirmado", label: "Confirmado por el vendedor", at: Date.now() }] }; }));
     loadOrders();
-    if (o) pushNotif(o.buyer_id || o.buyerId || o.delivery?.name || o.buyerName, "Tu pedido fue confirmado por el vendedor. Buscando mensajero.", orderId);
-    flash("✅ Pedido confirmado — disponible para mensajeros");
+    // Aviso y mensaje según el TIPO de envío (persona/intl no hablan de mensajero).
+    const m = (o?.shipMode || o?.ship_mode || o?.shipType) || "local";
+    const buyerMsg = m === "persona" ? "Tu pedido fue confirmado por el vendedor. Coordinen la entrega por el chat."
+      : m === "intl" ? "Tu pedido fue confirmado. El envío internacional está en proceso."
+      : "Tu pedido fue confirmado por el vendedor. Buscando mensajero.";
+    if (o) pushNotif(o.buyer_id || o.buyerId || o.delivery?.name || o.buyerName, buyerMsg, orderId);
+    flash(m === "persona" ? "✅ Pedido confirmado — coordinen por el chat" : m === "intl" ? "✅ Pedido confirmado" : "✅ Pedido confirmado — disponible para mensajeros");
   };
   const buyerConfirmReceipt = async (orderId) => {
     const o = mergedOrders.find(x => x.id === orderId);
@@ -684,7 +705,7 @@ function AppShell({ sessionUser }) {
     if (o && o.courierName) pushNotif(o.courierName, ok ? "El vendedor confirmó el pago. Entrega cerrada ✅" : "El vendedor reportó que no hubo pago. Devuelve el producto.", orderId);
     flash(ok ? "✅ Pago confirmado — entrega cerrada" : "⚠️ Marcado como sin pago");
   };
-  const requestChat = (sellerId, sellerName) => openChat(sellerId, sellerName); // sin bloqueo
+  const requestChat = (sellerId, sellerName, context) => openChat(sellerId, sellerName, context); // sin bloqueo
 
   // Usuarios bloqueados (persistentes) — los usa Ajustes. El chat en sí ya va por
   // el backend (conversations/messages con realtime); no hay chat local.
@@ -814,7 +835,7 @@ function AppShell({ sessionUser }) {
           estándar) — nada del producto/pantalla de atrás puede asomar. */}
       {chatOpen && selChat && (
         <div style={{ position: "fixed", inset: 0, zIndex: 5100, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
-          <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => setChatOpen(false)} flash={flash} onViewProfile={openPublicProfile} />
+          <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => setChatOpen(false)} flash={flash} onViewProfile={openPublicProfile} orders={mergedOrders} onOpenOrder={openOrderFromChat} onOpenProduct={openProductFromChat} />
         </div>
       )}
       {showWallet && (() => {
@@ -912,12 +933,13 @@ function AppShell({ sessionUser }) {
       })()}
       {showCourier && (() => {
         const meName = profileData?.name || user?.name || "Usuario";
-        // Acceso por ROL real: una cuenta con role="courier" entra al modo mensajero
-        // en cualquier teléfono, sin depender del registro local de solicitudes.
+        // Acceso por ROL real ÚNICAMENTE: role="courier" (lo pone el admin al
+        // aprobar la solicitud en courier_applications). El registro local de
+        // mensajeros quedó RETIRADO como vía de aprobación.
         const myRecord = (user?.role === "courier")
           ? { userName: meName, name: meName, status: "approved" }
-          : (couriers.find(c => c.userName === meName) || null);
-        return <CourierFlow myRecord={myRecord} dark={effectiveTheme === "dark"} onClose={() => setShowCourier(false)} onSubmit={(data) => { submitCourierApp(data); flash("🛵 Solicitud enviada — en revisión"); }}
+          : null;
+        return <CourierFlow myRecord={myRecord} user={user} flash={flash} dark={effectiveTheme === "dark"} onClose={() => setShowCourier(false)}
           meName={meName} meId={user?.id} orders={orders} localBase={adminCfg.localBase || 150}
           onAccept={(id, fee) => { acceptDelivery(id, fee); }}
           onStage={(id, st) => { courierStage(id, st); }}
@@ -952,7 +974,16 @@ function AppShell({ sessionUser }) {
         planRequests, onPlanAction: (id, action) => { setPlanRequests(prev => prev.map(r => { if (r.id === id) { if (action === 'approved') setUserPlans(p => ({ ...p, [r.userName]: r.plan })); return { ...r, state: action }; } return r; })); },
         promoRequests, onPromoAction: (id, action) => setPromoRequests(prev => prev.map(r => r.id === id ? { ...r, state: action } : r)),
         teamMembers, onSaveTeam: setTeamMembers,
-        couriers, onCourierAction: (id, status) => setCouriers(prev => prev.map(c => c.id === id ? { ...c, status, reviewedAt: Date.now() } : c)),
+        // Solicitudes REALES de mensajero: aprobar/rechazar vía la función oficial
+        // review_courier_application (al aprobar pone role='courier' y notifica).
+        couriers: courierApps.map(a => ({ id: a.id, status: a.status || "pending", nombre: a.name, userName: a.name, telefono: a.phone, zona: a.zone, vehiculo: a.vehicle, createdAt: a.created_at })),
+        onCourierAction: async (id, status) => {
+          try {
+            await reviewCourierApplication(id, status === "approved");
+            flash(status === "approved" ? "✅ Mensajero aprobado" : "Solicitud rechazada");
+          } catch (e) { flash("⚠️ No se pudo revisar: " + (e?.message || "error")); }
+          reloadCourierApps();
+        },
         knownUsers: [...new Set(products.map(pr => pr.seller_name).filter(Boolean))].filter(n => n !== (profileData?.name || user?.name)),
         verifications, onVerifyAction: (id, action) => { setVerifications(prev => prev.map(v => { if (v.id === id) { if (action === 'approved' && v.userName) setVerifiedUsers(u => u.includes(v.userName) ? u : [...u, v.userName]); return { ...v, state: action }; } return v; })); },
         payments, onMarkPaid: (sellerName, amount) => setPayments(prev => [{ id: 'pay_' + Date.now(), sellerName, amount, at: Date.now() }, ...prev]),
@@ -1053,7 +1084,7 @@ function AppShell({ sessionUser }) {
               blockedUsers={blockedUsers} onToggleBlock={toggleBlock}
               onOpenWallet={() => setShowWallet(true)} orders={orders.filter(o => (o.buyerId ? o.buyerId === user?.id : true))} />}
             {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { setSelOrderId(o.id); setPScr("order-detail"); }} />}
-            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => { const meSeller = (o.seller_id || o.sellerId) === user?.id; requestChat(meSeller ? (o.buyer_id || o.buyerId) : (o.seller_id || o.sellerId), meSeller ? (o.buyerName || "Comprador") : (o.sellerName || "Vendedor")); }} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
+            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => { const meSeller = (o.seller_id || o.sellerId) === user?.id; requestChat(meSeller ? (o.buyer_id || o.buyerId) : (o.seller_id || o.sellerId), meSeller ? (o.buyerName || "Comprador") : (o.sellerName || "Vendedor"), { type: "order", id: o.id, title: o.title || "Pedido", image: o.image || null }); }} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
           </>}
         </>
       </div>

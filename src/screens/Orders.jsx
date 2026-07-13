@@ -138,8 +138,12 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
           const fullyDone = o.courierStage === "completado" || (o.buyerConfirmed && o.sellerPaid);
           const btn = (txt, fn, kind) => <button key={txt} className="p" onClick={fn} style={{ width: "100%", background: kind === "danger" ? "transparent" : kind === "ghost" ? soft : G, color: kind === "danger" ? "#ef4444" : kind === "ghost" ? T1 : "#000", border: kind === "danger" ? "1px solid #ef444455" : kind === "ghost" ? `1px solid ${B}` : "none", borderRadius: 13, padding: "14px", fontSize: 13, fontWeight: 800, marginBottom: 8 }}>{txt}</button>;
 
+          // Cada tipo de envío tiene SU flujo: local (con mensajero), persona
+          // (coordinan por chat y ambos confirman) e intl (operador). Se gatea
+          // SIEMPRE por ship_mode: persona/intl jamás hablan de mensajero.
+          const mode = (o.shipType || o.shipMode) === "persona" ? "persona" : ((o.shipType || o.shipMode) === "intl" ? "intl" : "local");
           let nudge = null, actions = [];
-          if (o.feeApproval === "pending") {
+          if (mode === "local" && o.feeApproval === "pending") {
             nudge = `Tu mensajero propone un domicilio de ${Math.round(o.proposedFee || 0)} CUP (estimado: ${Math.round(o.baseFee || 0)} CUP). ¿Lo apruebas?`;
             actions.push(btn(`Aprobar — domicilio ${Math.round(o.proposedFee || 0)} CUP`, () => onApproveFee && onApproveFee(true)));
             actions.push(btn("Rechazar y buscar otro mensajero", () => onApproveFee && onApproveFee(false), "danger"));
@@ -147,20 +151,35 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
           else if (o.status === "fallido") nudge = "❌ Entrega marcada como fallida (sin pago). El producto fue devuelto.";
           else if (fullyDone) nudge = "✅ Entrega completada. ¡Gracias!";
           else if (notConfirmed) {
-            nudge = isSeller ? "Confirma el pedido para que un mensajero pueda recogerlo." : "Esperando que el vendedor confirme tu pedido.";
+            nudge = isSeller
+              ? (mode === "persona" ? "Confirma el pedido para coordinar la entrega con el comprador." : "Confirma el pedido para que un mensajero pueda recogerlo.")
+              : "Esperando que el vendedor confirme tu pedido.";
             if (isSeller) actions.push(btn("Confirmar pedido — tengo el producto listo", onSellerConfirm));
+          } else if (mode === "persona") {
+            // EN PERSONA (confirmado): coordinan por el chat y CADA parte cierra lo
+            // suyo — comprador confirma que recibió el producto, vendedor que recibió
+            // el pago. El backend completa y registra la comisión cuando ambos están.
+            if (!o.buyerConfirmed && !o.sellerPaid) nudge = "Pedido confirmado. Coordinen la entrega por el chat: lugar, hora y pago.";
+            else if (!o.buyerConfirmed) nudge = isSeller ? "Ya confirmaste tu pago. Falta que el comprador confirme que recibió el producto." : "El vendedor ya confirmó el pago. Confirma que recibiste el producto para cerrar.";
+            else nudge = isSeller ? "El comprador ya confirmó que recibió. Confirma tu pago para cerrar." : "Ya confirmaste la recepción. Falta que el vendedor confirme el pago.";
+            actions.push(btn("💬 Abrir chat para coordinar", onChat, "ghost"));
+            if (viewerIsBuyer && !isSeller && !o.buyerConfirmed) actions.push(btn("Confirmar que recibí el producto", onBuyerConfirm));
+            if (isSeller && !o.sellerPaid) actions.push(btn("Confirmar que recibí el pago", () => onSellerPayment(true)));
           } else if (delivered) {
             if (!o.buyerConfirmed) {
               // En flujo con mensajero (local) el "Entregué" del mensajero cierra el
-              // pedido: el comprador NO confirma. En "en persona"/coordinado sí lo hace.
-              if (!isSeller && isLocal) { nudge = "Tu mensajero marcó la entrega. ¡Pedido cerrado, gracias!"; }
+              // pedido: el comprador NO confirma. En intl sí confirma recepción.
+              if (!isSeller && mode === "local") { nudge = "Tu mensajero marcó la entrega. ¡Pedido cerrado, gracias!"; }
               else if (!isSeller) { nudge = "Tu pedido fue entregado. Confírmalo para cerrar."; actions.push(btn("Confirmar que recibí el producto", onBuyerConfirm)); }
               else nudge = "Entregado. Esperando que el comprador confirme la recepción.";
             } else if (!o.sellerPaid) {
-              if (isSeller && cash) { nudge = "El mensajero te entregó el efectivo. Confírmalo para cerrar."; actions.push(btn("Confirmar que recibí mi pago", () => onSellerPayment(true))); }
+              if (isSeller && cash) { nudge = mode === "local" ? "El mensajero te entregó el efectivo. Confírmalo para cerrar." : "Confirma que recibiste tu pago para cerrar."; actions.push(btn("Confirmar que recibí mi pago", () => onSellerPayment(true))); }
               else if (isSeller) { nudge = "El comprador recibió el producto. ¿Recibiste la transferencia?"; actions.push(btn("Confirmar que recibí la transferencia", () => onSellerPayment(true))); actions.push(btn("No recibí el pago", () => onSellerPayment(false), "danger")); }
               else nudge = "Recibido. Esperando que el vendedor confirme el pago para cerrar la entrega.";
             }
+          } else if (mode === "intl") {
+            const cur = (o.flow && o.flow[o.stepIdx]) ? o.flow[o.stepIdx].label : "En proceso";
+            nudge = `Envío internacional en curso: ${cur}. Te avisaremos con cada avance.`;
           } else {
             if (o.courierName) nudge = isSeller ? `${o.courierName} está gestionando la entrega.` : `Tu mensajero (${o.courierName}) está en camino.`;
             else nudge = isSeller ? "Pedido confirmado. Esperando que un mensajero acepte la entrega." : "Buscando mensajero para tu entrega.";
@@ -211,7 +230,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button className="p" onClick={onChat} style={{ width: 48, height: 48, borderRadius: "50%", border: `1px solid ${B}`, background: soft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Ic n="msg" c={T2} s={19} /></button>
         </div>
-        <p style={{ fontSize: 9, color: T3, textAlign: "center", marginTop: 10, lineHeight: 1.5 }}>Cada confirmación la marca quien corresponde: el vendedor confirma el pedido, y el mensajero marca cuando recoge y cuando entrega.</p>
+        <p style={{ fontSize: 9, color: T3, textAlign: "center", marginTop: 10, lineHeight: 1.5 }}>Cada confirmación la marca quien corresponde según el tipo de entrega (vendedor, comprador o mensajero).</p>
       </div>
     </div>
   );

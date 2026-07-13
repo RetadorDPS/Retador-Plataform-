@@ -1,5 +1,52 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { Avatar, AvatarUser, G, Ic, Spin, getMyConversations, getSB, getUserName, isBlocked, loadMessages, markRead, sendMessage, trackEvent, useAt, useR } from "../shared/index.js";
+import { Avatar, AvatarUser, G, Ic, ORDER_FLOW, Spin, getMyConversations, getSB, getUserName, isBlocked, loadMessages, markRead, sendMessage, supabase, trackEvent, useAt, useR } from "../shared/index.js";
+
+// ── TARJETA DE PEDIDO EN EL CHAT ─────────────────────────────────────────────
+// Mensaje con meta {type:'order', order_id, title, image}: tarjeta centrada con
+// el ESTADO ACTUAL del pedido EN VIVO (lo busca en los pedidos ya cargados, que
+// el realtime de orders mantiene frescos; si no está, lo trae puntual). Tocarla
+// abre el detalle del pedido.
+function OrderChatCard({ meta, orders = [], onOpenOrder, B, T1, T3, soft }) {
+  const oid = meta.order_id || meta.id;
+  const live = orders.find(o => o.id === oid) || null;
+  const [fetched, setFetched] = useState(null);
+  useEffect(() => {
+    if (live || !oid) return;
+    let a = true;
+    supabase.from("orders").select("id, status, ship_mode").eq("id", oid).single()
+      .then(({ data }) => { if (a && data) setFetched(data); }).catch(() => {});
+    return () => { a = false; };
+  }, [oid, live?.status]);
+  const status = live?.status || fetched?.status || null;
+  const shipMode = live?.shipMode || live?.ship_mode || fetched?.ship_mode || meta.ship_mode || "local";
+  const flow = ORDER_FLOW[shipMode] || ORDER_FLOW.local;
+  const label = status ? ((flow.find(s => s.key === status) || {}).label || status) : "Pedido";
+  const dot = ["entregado", "completado"].includes(status) ? "#22C55E" : ["fallido", "cancelado"].includes(status) ? "#EF4444" : "#FBBF24";
+  return (
+    <div style={{ display: "flex", justifyContent: "center", margin: "6px 0" }}>
+      <div onClick={() => onOpenOrder && onOpenOrder(oid)} className="p"
+        style={{ display: "flex", alignItems: "center", gap: 10, maxWidth: "88%", background: soft, border: `1px solid ${B}`, borderRadius: 14, padding: "10px 13px", cursor: "pointer" }}>
+        {meta.image && <img src={meta.image} alt="" style={{ width: 40, height: 40, borderRadius: 9, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />}
+        <div style={{ minWidth: 0 }}>
+          <p style={{ fontSize: 12, fontWeight: 800, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📦 {meta.title || "Pedido"}</p>
+          <p style={{ fontSize: 10.5, color: T3, marginTop: 2, display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: dot, flexShrink: 0 }} />{label}<span style={{ color: G, fontWeight: 700 }}> · Ver pedido ›</span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+// Tarjetica de REFERENCIA (producto o pedido) que acompaña a un mensaje con texto.
+function RefChatCard({ meta, onOpen, B, T1, T3, soft }) {
+  return (
+    <div onClick={onOpen} className="p" style={{ display: "flex", alignItems: "center", gap: 8, background: soft, border: `1px solid ${B}`, borderRadius: 11, padding: "7px 10px", marginBottom: 5, cursor: onOpen ? "pointer" : "default", maxWidth: 240 }}>
+      {meta.image && <img src={meta.image} alt="" style={{ width: 30, height: 30, borderRadius: 7, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />}
+      <p style={{ fontSize: 10.5, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta.type === "order" ? "📦 " : "🛍️ "}{meta.title || ""}</p>
+      <span style={{ fontSize: 12, color: T3, flexShrink: 0 }}>›</span>
+    </div>
+  );
+}
 
 export function MessagesScreen({ user, onBack, onChat, chatOpen = false }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
@@ -119,7 +166,7 @@ const ChatInput = memo(function ChatInput({ onSend, blocked, S, B, T1 }) {
   );
 });
 
-export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
+export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = [], onOpenOrder, onOpenProduct }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const [convId,    setConvId]    = useState(chat.id || chat.key || null);
   const [msgs,      setMsgs]      = useState([]);
@@ -127,6 +174,10 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
   const [otherName, setOtherName] = useState(chat.otherName || chat.name || null);
   const [blocked,   setBlocked]   = useState(false);
   const [chatOpts,  setChatOpts]  = useState(false);
+  // CONTEXTO (estilo AliExpress): si el chat se abrió desde un producto/pedido,
+  // una franja sobre el input lo recuerda; el PRIMER mensaje enviado lleva esa
+  // referencia (meta) y se pinta como tarjetica tocable. Luego se limpia.
+  const [ctx, setCtx] = useState(chat.context || null);
   const scrollRef = useRef(null);
   const subRef = useRef(null);
   const convIdRef = useRef(convId);
@@ -190,7 +241,10 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
   const handleSend = useCallback(async (text) => {
     if (!text || !user?.id || blocked) return;
     try {
-      const cid = await sendMessage(user.id, chat.otherId, text);
+      // El primer mensaje con la franja de contexto lleva la referencia (meta).
+      const meta = ctx ? { type: ctx.type, id: ctx.id, title: ctx.title || "", image: ctx.image || null } : null;
+      const cid = await sendMessage(user.id, chat.otherId, text, meta);
+      if (meta) setCtx(null);
       if (!convIdRef.current) { convIdRef.current = cid; setConvId(cid); }
       else { loadMessages(cid).then(d => { setMsgs(d); scrollToEnd(); }).catch(() => {}); } // por si el realtime tarda
       trackEvent(user.id, null, "chat").catch(() => {});
@@ -199,7 +253,7 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
       else if (e.message?.includes("rate limit")) flash("⚠️ Estás enviando demasiados mensajes");
       else flash("❌ Error al enviar");
     }
-  }, [user?.id, blocked, chat.otherId, flash]);
+  }, [user?.id, blocked, chat.otherId, flash, ctx]);
 
   const displayName = otherName || "Usuario";
   const openProfile = () => { if (onViewProfile && chat.otherId) onViewProfile(chat.otherId); };
@@ -235,9 +289,20 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
               </div>
             : msgs.map(m => {
                 const mine = m.sender_id === user?.id;
+                const soft = isDark ? "#141417" : "#f1f5f9";
+                const meta = m.meta && typeof m.meta === "object" ? m.meta : null;
+                // Tarjeta de PEDIDO automática (sin texto del usuario): centrada, en vivo.
+                if (meta?.type === "order" && !(m.text || "").trim()) {
+                  return <OrderChatCard key={m.id} meta={meta} orders={orders} onOpenOrder={onOpenOrder} B={B} T1={T1} T3={T3} soft={soft} />;
+                }
+                const openRef = meta ? () => {
+                  if (meta.type === "order") onOpenOrder && onOpenOrder(meta.order_id || meta.id);
+                  else if (meta.type === "product") onOpenProduct && onOpenProduct(meta.id);
+                } : null;
                 return (
                   <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
                     <div style={{ maxWidth: "78%", background: mine ? G : "#171717", border: mine ? "none" : `1px solid ${B}`, borderRadius: mine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "10px 13px" }}>
+                      {meta && (meta.type === "product" || meta.type === "order") && <RefChatCard meta={meta} onOpen={openRef} B={mine ? "#00000022" : B} T1={mine ? "#000" : T1} T3={mine ? "#00000088" : T3} soft={mine ? "#ffffff55" : soft} />}
                       <p style={{ fontSize: 12, color: mine ? "#000" : "#eee", lineHeight: 1.5, wordBreak: "break-word" }}>{m.text}</p>
                       <p style={{ fontSize: 9, color: mine ? "#00000066" : "rgba(255,255,255,.55)", marginTop: 4, textAlign: "right" }}>
                         {new Date(m.created_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
@@ -250,6 +315,17 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile }) {
         }
       </div>
 
+      {/* Franja de contexto: "estás consultando sobre esto" (se limpia al enviar o con la X) */}
+      {ctx && !blocked && (
+        <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 14px", borderTop: `1px solid ${B}`, background: isDark ? "#101012" : "#f8fafc", flexShrink: 0 }}>
+          {ctx.image && <img src={ctx.image} alt="" style={{ width: 34, height: 34, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: 11.5, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ctx.type === "order" ? "📦 " : "🛍️ "}{ctx.title || ""}</p>
+            <p style={{ fontSize: 9.5, color: T3, marginTop: 1 }}>Estás consultando sobre esto</p>
+          </div>
+          <button onClick={() => setCtx(null)} style={{ background: "none", border: "none", color: T3, fontSize: 17, cursor: "pointer", lineHeight: 1, padding: 4 }}>×</button>
+        </div>
+      )}
       <ChatInput onSend={handleSend} blocked={blocked} S={S} B={B} T1={T1} />
     </div>
   );

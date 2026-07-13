@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { getAvailableDeliveries, getUserById, getProductById, supabase } from "../shared/index.js";
+import { getAvailableDeliveries, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase } from "../shared/index.js";
 
 // Chip de PERFIL PÚBLICO: foto + nombre reales (tabla profiles). Al tocarlo abre
 // el perfil público de esa persona. No expone nada privado, solo reputación.
@@ -382,33 +382,56 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   </div>;
 }
 
-export function CourierFlow({ myRecord, onSubmit, onClose, dark, meName, meId, orders = [], localBase = 150, onAccept, onStage, onCancel, onReport, onViewProfile, onChat }) {
+export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId, orders = [], localBase = 150, onAccept, onStage, onCancel, onReport, onViewProfile, onChat }) {
   const bg = dark ? "#0a0a0a" : "#f1f5f9", card = dark ? "#141417" : "#fff", t1 = dark ? "#f0f0f2" : "#0f172a", t2 = dark ? "#9aa0aa" : "#64748b", t3 = dark ? "#6b7280" : "#94a3b8", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)", AC = "#6366F1";
   const [started, setStarted] = useState(false);
   const [preview, setPreview] = useState(false);
-  const [f, setF] = useState({ nombre: "", telefono: "", direccion: "", zona: "", experiencia: "", docTipo: "Carnet de identidad", docNumero: "", docFront: null, docBack: null, selfie: null, vehiculo: "Moto", licNumero: "", licFoto: null, chapa: "", acepta: false });
+  // Solicitud REAL en courier_applications: undefined = cargando, null = no tiene.
+  const [app, setApp] = useState(undefined);
+  const [f, setF] = useState({ nombre: meName || "", telefono: "", zona: "", vehiculo: "A pie", acepta: false });
   const [err, setErr] = useState("");
+  const [sending, setSending] = useState(false);
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
-  const readImg = (file, k) => { if (!file) return; const r = new FileReader(); r.onload = () => set(k, r.result); r.readAsDataURL(file); };
-  const needsLicense = f.vehiculo === "Moto" || f.vehiculo === "Auto";
+  const approved = myRecord?.status === "approved";
+  useEffect(() => {
+    if (approved || !user?.id) { setApp(null); return; }
+    let a = true;
+    // Red lenta o sin respuesta: a los 6s mostramos el formulario igual (si ya
+    // tenía solicitud, el propio insert único lo detecta y muestra su estado).
+    const t = setTimeout(() => { if (a) setApp(cur => cur === undefined ? null : cur); }, 6000);
+    getMyCourierApplication(user.id).then(d => { if (a) setApp(d); }).catch(() => { if (a) setApp(null); });
+    return () => { a = false; clearTimeout(t); };
+  }, [user?.id, approved]);
+
   if (preview) return <CourierDashboard demo meName={meName || "Mensajero"} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onChat={onChat} onClose={() => setPreview(false)} dark={dark} record={{ nombre: meName }} />;
+  if (approved) return <CourierDashboard meName={meName} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onChat={onChat} onClose={onClose} dark={dark} record={myRecord} />;
 
   const wrap = (children) => <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 4000, overflowY: "auto", WebkitOverflowScrolling: "touch", background: bg }}>{children}</div>;
   const backBtn = <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${bd}`, color: t2, borderRadius: 9, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 16 }}>‹ Volver a RETADOR</button>;
 
-  // Estado: en revisión
-  if (myRecord?.status === "pending") return wrap(
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 16px 40px" }}>
-      {backBtn}
-      <div style={{ textAlign: "center", padding: "40px 16px" }}>
-        <div style={{ width: 72, height: 72, borderRadius: 20, background: AC + "22", border: `1px solid ${AC}55`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34, margin: "0 auto 18px" }}>🛵</div>
-        <h1 style={{ fontSize: 21, fontWeight: 800, color: t1, marginBottom: 8 }}>Solicitud en revisión</h1>
-        <p style={{ fontSize: 13.5, color: t2, lineHeight: 1.55, maxWidth: 340, margin: "0 auto" }}>Recibimos tu solicitud para ser mensajero de RETADOR. La estamos revisando — te avisaremos cuando esté aprobada. Gracias por querer formar parte del equipo.</p>
-        <button onClick={() => setPreview(true)} style={{ marginTop: 22, height: 42, padding: "0 18px", borderRadius: 12, border: `1px solid ${bd}`, background: "transparent", color: t2, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>👁 Ver el tablero (demo)</button>
-      </div>
-    </div>
+  // Cargando su solicitud
+  if (app === undefined) return wrap(
+    <div style={{ maxWidth: 480, margin: "0 auto", padding: "60px 16px", textAlign: "center", color: t2, fontSize: 13 }}>Cargando…</div>
   );
-  if (myRecord?.status === "approved") return <CourierDashboard meName={meName} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onChat={onChat} onClose={onClose} dark={dark} record={myRecord} />;
+  // Ya tiene solicitud: mostrar su ESTADO (la tabla es única por usuario).
+  if (app && app.status !== "approved") {
+    const rejected = app.status === "rejected";
+    return wrap(
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 16px 40px" }}>
+        {backBtn}
+        <div style={{ textAlign: "center", padding: "40px 16px" }}>
+          <div style={{ width: 72, height: 72, borderRadius: 20, background: (rejected ? "#ef4444" : AC) + "22", border: `1px solid ${(rejected ? "#ef4444" : AC)}55`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34, margin: "0 auto 18px" }}>{rejected ? "😕" : "🛵"}</div>
+          <h1 style={{ fontSize: 21, fontWeight: 800, color: t1, marginBottom: 8 }}>{rejected ? "Solicitud rechazada" : "Pendiente de revisión"}</h1>
+          <p style={{ fontSize: 13.5, color: t2, lineHeight: 1.55, maxWidth: 340, margin: "0 auto" }}>
+            {rejected
+              ? "Tu solicitud para ser mensajero no fue aprobada esta vez. Si crees que fue un error, contacta al equipo de RETADOR."
+              : "Recibimos tu solicitud para ser mensajero de RETADOR. La estamos revisando — te avisaremos cuando esté aprobada."}
+          </p>
+          <button onClick={() => setPreview(true)} style={{ marginTop: 22, height: 42, padding: "0 18px", borderRadius: 12, border: `1px solid ${bd}`, background: "transparent", color: t2, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>👁 Ver el tablero (demo)</button>
+        </div>
+      </div>
+    );
+  }
 
   // Intro
   if (!started) return wrap(
@@ -417,97 +440,65 @@ export function CourierFlow({ myRecord, onSubmit, onClose, dark, meName, meId, o
       <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 20, overflow: "hidden" }}>
         <div style={{ height: 120, background: `linear-gradient(135deg,#4F46E5,#7C3AED)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 52 }}>🛵</div>
         <div style={{ padding: "20px 18px 22px" }}>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: t1, marginBottom: 8, letterSpacing: "-.02em" }}>¿Quieres trabajar con nosotros?</h1>
-          <p style={{ fontSize: 13.5, color: t2, lineHeight: 1.6, marginBottom: 16 }}>Conviértete en mensajero de RETADOR y gana dinero repartiendo pedidos en tu zona. Tú pones el ritmo. Solo necesitamos verificar tu identidad para que vendedores y compradores confíen en ti.</p>
-          {[["💸", "Gana por cada entrega", "Cobras tu tarifa de mensajería en cada pedido."], ["📍", "Trabaja en tu zona", "Recibes los pedidos cerca de ti."], ["🛡️", "Identidad verificada", "Construyes confianza con cada cliente."]].map(([ic, tt, ds]) => (
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: t1, marginBottom: 8, letterSpacing: "-.02em" }}>¿Quieres ser mensajero?</h1>
+          <p style={{ fontSize: 13.5, color: t2, lineHeight: 1.6, marginBottom: 16 }}>Gana dinero repartiendo pedidos en tu zona. Tú pones el ritmo. Envía tu solicitud y el equipo de RETADOR la revisa; al aprobarla, tu cuenta entra al modo mensajero.</p>
+          {[["💸", "Gana por cada entrega", "Cobras tu tarifa de mensajería en cada pedido."], ["📍", "Trabaja en tu zona", "Recibes los pedidos cerca de ti."], ["🛡️", "Cuenta aprobada", "El equipo revisa cada solicitud para que todos confíen."]].map(([ic, tt, ds]) => (
             <div key={tt} style={{ display: "flex", gap: 11, alignItems: "flex-start", marginBottom: 12 }}>
               <span style={{ fontSize: 19 }}>{ic}</span>
               <div><div style={{ fontSize: 13.5, fontWeight: 700, color: t1 }}>{tt}</div><div style={{ fontSize: 12, color: t3 }}>{ds}</div></div>
             </div>
           ))}
-          <button onClick={() => setStarted(true)} style={{ width: "100%", height: 48, borderRadius: 13, border: "none", background: AC, color: "#fff", fontSize: 14.5, fontWeight: 800, cursor: "pointer", marginTop: 8 }}>Empezar mi solicitud →</button>
+          <button onClick={() => setStarted(true)} style={{ width: "100%", height: 48, borderRadius: 13, border: "none", background: AC, color: "#fff", fontSize: 14.5, fontWeight: 800, cursor: "pointer", marginTop: 8 }}>Quiero ser mensajero →</button>
           <button onClick={() => setPreview(true)} style={{ width: "100%", height: 42, borderRadius: 12, border: `1px solid ${bd}`, background: "transparent", color: t2, fontSize: 12.5, fontWeight: 700, cursor: "pointer", marginTop: 9 }}>👁 Ver el tablero (demo)</button>
         </div>
       </div>
     </div>
   );
 
-  // Formulario
+  // Formulario LIMPIO — se guarda de verdad en courier_applications.
   const lbl = { fontSize: 11.5, fontWeight: 700, color: t2, marginBottom: 6, display: "block" };
   const inp = { width: "100%", background: dark ? "#1c1c20" : "#f5f5f7", color: t1, border: `1px solid ${bd}`, borderRadius: 11, padding: "11px 13px", fontSize: 14, outline: "none", fontFamily: "inherit", marginBottom: 14, boxSizing: "border-box" };
-  const sectionTtl = (n, txt) => <div style={{ display: "flex", alignItems: "center", gap: 9, margin: "22px 0 14px" }}><span style={{ width: 24, height: 24, borderRadius: 8, background: AC + "22", color: AC, fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{n}</span><span style={{ fontSize: 14.5, fontWeight: 800, color: t1 }}>{txt}</span></div>;
-  const photoField = (label, k) => (
-    <div style={{ marginBottom: 14 }}>
-      <label style={lbl}>{label}</label>
-      <label style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", border: `1.5px dashed ${f[k] ? AC : bd}`, borderRadius: 11, cursor: "pointer", background: f[k] ? AC + "0f" : "transparent" }}>
-        {f[k] ? <img src={f[k]} alt="" style={{ width: 46, height: 46, borderRadius: 8, objectFit: "cover" }} /> : <span style={{ fontSize: 24 }}>📷</span>}
-        <span style={{ fontSize: 12.5, color: f[k] ? t1 : t2, fontWeight: 600 }}>{f[k] ? "Foto cargada · tocar para cambiar" : "Tocar para tomar/subir foto"}</span>
-        <input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={e => readImg(e.target.files?.[0], k)} />
-      </label>
-    </div>
-  );
-
-  const submit = () => {
-    if (!f.nombre.trim() || !f.telefono.trim() || !f.direccion.trim() || !f.zona.trim()) return setErr("Completa tus datos personales.");
-    if (!f.docNumero.trim() || !f.docFront || !f.docBack || !f.selfie) return setErr("Falta tu documento (número, frente, reverso) o tu selfie de verificación.");
-    if (needsLicense && (!f.licNumero.trim() || !f.chapa.trim())) return setErr("Para moto/auto necesitas número de licencia y número de chapa.");
+  const submit = async () => {
+    if (!f.nombre.trim() || !f.telefono.trim() || !f.zona.trim()) return setErr("Completa tu nombre, teléfono y zona.");
     if (!f.acepta) return setErr("Debes aceptar la cláusula de responsabilidad.");
-    setErr(""); onSubmit(f);
+    setErr(""); setSending(true);
+    try {
+      await submitCourierApplication({ userId: user?.id, name: f.nombre.trim(), phone: f.telefono.trim(), zone: f.zona.trim(), vehicle: f.vehiculo });
+      setApp({ status: "pending" });
+      flash && flash("🛵 Solicitud enviada — en revisión");
+    } catch (e) {
+      // Si ya existe una (única por usuario), traemos su estado en vez de fallar.
+      if (/duplicate|unique/i.test(e?.message || "")) {
+        const d = await getMyCourierApplication(user?.id).catch(() => null);
+        setApp(d || { status: "pending" });
+      } else setErr("No se pudo enviar: " + (e?.message || "intenta de nuevo"));
+    } finally { setSending(false); }
   };
 
   return wrap(
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 16px 44px" }}>
       <button onClick={() => setStarted(false)} style={{ background: "transparent", border: `1px solid ${bd}`, color: t2, borderRadius: 9, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 16 }}>‹ Atrás</button>
-      <h1 style={{ fontSize: 21, fontWeight: 800, color: t1, marginBottom: 4 }}>Solicitud de mensajero</h1>
-      <p style={{ fontSize: 12.5, color: t3, marginBottom: 4 }}>Todos los datos son verificados. Sé honesto y preciso.</p>
+      <h1 style={{ fontSize: 21, fontWeight: 800, color: t1, marginBottom: 4 }}>Quiero ser mensajero</h1>
+      <p style={{ fontSize: 12.5, color: t3, marginBottom: 18 }}>El equipo de RETADOR revisa cada solicitud. Te avisamos al aprobarla.</p>
 
-      {sectionTtl(1, "Datos personales")}
       <label style={lbl}>Nombre completo *</label>
       <input style={inp} value={f.nombre} onChange={e => set("nombre", e.target.value)} placeholder="Nombre y apellidos" />
       <label style={lbl}>Teléfono *</label>
       <input style={inp} value={f.telefono} onChange={e => set("telefono", e.target.value)} placeholder="+53 …" />
-      <label style={lbl}>Dirección personal *</label>
-      <input style={inp} value={f.direccion} onChange={e => set("direccion", e.target.value)} placeholder="Calle, número, municipio" />
-      <label style={lbl}>Zona donde trabajas *</label>
+      <label style={lbl}>Zona donde repartes *</label>
       <input style={inp} value={f.zona} onChange={e => set("zona", e.target.value)} placeholder="Ej: Vedado, Centro Habana…" />
-      <label style={lbl}>Experiencia (opcional)</label>
-      <textarea style={{ ...inp, resize: "none" }} rows={2} value={f.experiencia} onChange={e => set("experiencia", e.target.value)} placeholder="¿Has hecho mensajería antes? Cuéntanos." />
-
-      {sectionTtl(2, "Identidad")}
-      <label style={lbl}>Tipo de documento *</label>
-      <select style={inp} value={f.docTipo} onChange={e => set("docTipo", e.target.value)}>
-        <option>Carnet de identidad</option><option>Pasaporte</option><option>Licencia de conducir</option>
-      </select>
-      <label style={lbl}>Número de documento *</label>
-      <input style={inp} value={f.docNumero} onChange={e => set("docNumero", e.target.value)} placeholder="Número" />
-      {photoField("Foto del documento — frente *", "docFront")}
-      {photoField("Foto del documento — reverso *", "docBack")}
-      {photoField("Selfie de verificación * (tu cara, buena luz)", "selfie")}
-      <div style={{ fontSize: 11, color: t3, background: dark ? "#1c1c20" : "#f1f5f9", borderRadius: 10, padding: "10px 12px", marginBottom: 4, lineHeight: 1.5 }}>🔒 Tu selfie se compara con tu documento para confirmar que eres tú. La revisión final la hace el equipo de RETADOR.</div>
-
-      {sectionTtl(3, "Transporte")}
-      <label style={lbl}>Medio de transporte *</label>
+      <label style={lbl}>Vehículo *</label>
       <select style={inp} value={f.vehiculo} onChange={e => set("vehiculo", e.target.value)}>
-        <option>A pie</option><option>Bicicleta</option><option>Moto</option><option>Auto</option>
+        <option>A pie</option><option>Bicicleta</option><option>Moto</option><option>Carro</option>
       </select>
-      {needsLicense && (
-        <>
-          <label style={lbl}>Número de licencia de conducir *</label>
-          <input style={inp} value={f.licNumero} onChange={e => set("licNumero", e.target.value)} placeholder="Número de licencia" />
-          {photoField("Foto de la licencia", "licFoto")}
-          <label style={lbl}>Número de chapa (matrícula del vehículo) *</label>
-          <input style={inp} value={f.chapa} onChange={e => set("chapa", e.target.value)} placeholder="Chapa / matrícula" />
-        </>
-      )}
 
-      {sectionTtl(4, "Responsabilidad")}
       <label style={{ display: "flex", gap: 11, alignItems: "flex-start", padding: "13px", border: `1px solid ${f.acepta ? AC : bd}`, borderRadius: 12, cursor: "pointer", background: f.acepta ? AC + "0f" : "transparent" }}>
         <input type="checkbox" checked={f.acepta} onChange={e => set("acepta", e.target.checked)} style={{ marginTop: 2, width: 18, height: 18, accentColor: AC, flexShrink: 0 }} />
         <span style={{ fontSize: 12, color: t1, lineHeight: 1.55 }}>Declaro que la información es verídica y acepto ser <b>totalmente responsable</b> de los bienes del comprador y del vendedor durante cada entrega, incluyendo el dinero cobrado en efectivo, hasta entregarlo a quien corresponde.</span>
       </label>
 
       {err && <div style={{ fontSize: 12.5, color: "#fff", background: "#ef4444", borderRadius: 10, padding: "10px 13px", marginTop: 14, fontWeight: 600 }}>{err}</div>}
-      <button onClick={submit} style={{ width: "100%", height: 50, borderRadius: 14, border: "none", background: AC, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer", marginTop: 18 }}>Enviar solicitud</button>
+      <button onClick={submit} disabled={sending} style={{ width: "100%", height: 50, borderRadius: 14, border: "none", background: sending ? (dark ? "#26262b" : "#e2e8f0") : AC, color: sending ? t3 : "#fff", fontSize: 15, fontWeight: 800, cursor: sending ? "default" : "pointer", marginTop: 18 }}>{sending ? "Enviando…" : "Enviar solicitud"}</button>
       <p style={{ fontSize: 10.5, color: t3, textAlign: "center", marginTop: 10 }}>Tu solicitud quedará en revisión hasta que el equipo de RETADOR la apruebe.</p>
     </div>
   );

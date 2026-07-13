@@ -144,10 +144,14 @@ const _getOrCreateConversation = async (otherId) => {
   return typeof data === "string" ? data : (data?.id || data);
 };
 // Envía un mensaje: asegura la conversación y lo inserta. Devuelve conversation_id.
-export const sendMessage = async (senderId, otherId, text) => {
+// `meta` opcional: referencia a un producto/pedido ({type,id,title,image}) que el
+// chat pinta como tarjetica tocable junto al texto.
+export const sendMessage = async (senderId, otherId, text, meta = null) => {
   if (!senderId || !otherId || !text || !text.trim()) throw new Error("Faltan datos del mensaje");
   const cid = await _getOrCreateConversation(otherId);
-  const { error } = await supabase.from("messages").insert({ conversation_id: cid, sender_id: senderId, text: text.trim() });
+  const row = { conversation_id: cid, sender_id: senderId, text: text.trim() };
+  if (meta) row.meta = meta;
+  const { error } = await supabase.from("messages").insert(row);
   if (error) throw error;
   return cid;
 };
@@ -313,6 +317,29 @@ export const getUserOrders = async (userId) => {
     };
   });
 };
+// ── REGISTRO DE MENSAJEROS (courier_applications) ────────────────────────────
+// Cada usuario inserta/ve SU solicitud (RLS); el admin las ve todas y las revisa
+// con la función oficial review_courier_application (al aprobar pone role=courier).
+export const getMyCourierApplication = async (userId) => {
+  if (!userId) return null;
+  const { data, error } = await supabase.from("courier_applications").select("*").eq("user_id", userId).maybeSingle();
+  if (error) { console.error("getMyCourierApplication:", error.message); return null; }
+  return data || null;
+};
+export const submitCourierApplication = async ({ userId, name, phone, zone, vehicle }) => {
+  const { error } = await supabase.from("courier_applications").insert({ user_id: userId, name, phone, zone, vehicle });
+  if (error) throw error;
+};
+export const getPendingCourierApplications = async () => {
+  const { data, error } = await supabase.from("courier_applications").select("*").eq("status", "pending").order("created_at", { ascending: true });
+  if (error) { console.error("getPendingCourierApplications:", error.message); return []; }
+  return data || [];
+};
+export const reviewCourierApplication = async (applicationId, approve) => {
+  const { error } = await supabase.rpc("review_courier_application", { p_application_id: applicationId, p_approve: !!approve });
+  if (error) throw error;
+};
+
 // Pool PÚBLICO de entregas disponibles para el mensajero (el backend decide qué
 // exponer: categoría, tarifa, ids de comprador/vendedor — NUNCA monto ni ganancia).
 export const getAvailableDeliveries = async () => {
@@ -346,11 +373,12 @@ export const ORDER_FLOW = {
     { key: "en_reparto", label: "En reparto",                  actor: "mensajero" },
     { key: "entregado",  label: "Entregado",                   actor: "mensajero" },
   ],
+  // En persona: SIN paso "coordinado" (nadie marca "ya coordinamos"; eso se habla
+  // por el chat). Tres pasos visuales: creada → confirmado → entregado.
   persona: [
     { key: "creada",     label: "Pedido creado",               actor: "comprador" },
     { key: "confirmado", label: "Confirmado por el vendedor",   actor: "vendedor" },
-    { key: "coordinado", label: "Encuentro coordinado",        actor: "ambos" },
-    { key: "entregado",  label: "Entregado en persona",        actor: "vendedor" },
+    { key: "entregado",  label: "Entregado en persona",        actor: "ambos" },
   ],
 };
 export const SHIP_LABELS = {

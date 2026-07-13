@@ -1381,7 +1381,8 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
         </button>
         <button className={`btn ${isDark ? "btn-dark" : "btn-light"}`} onClick={() => requireAuth(() => {
           if (p.seller_id) {
-            onChat(p.seller_id, sellerName || p.seller_name || "Vendedor");
+            // Abre el chat CON CONTEXTO del producto (franja "estás consultando sobre esto").
+            onChat(p.seller_id, sellerName || p.seller_name || "Vendedor", { type: "product", id: p.id, title: p.title || "", image: p.image || null });
             trackEvent(user?.id, p.id, "chat").catch(() => {});
           } else flash("ℹ️ Vendedor no disponible");
         })} title="Chatear con el vendedor"

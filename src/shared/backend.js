@@ -317,6 +317,32 @@ export const getUserOrders = async (userId) => {
     };
   });
 };
+// ── NOTIFICACIONES REALES (tabla public.notifications) ──────────────────────
+// El backend escribe aquí cada aviso (pedidos, tarifas, aprobaciones…). El RLS
+// limita a las MÍAS. El frontend las carga al abrir y las escucha por realtime.
+export const getNotifications = async (userId) => {
+  if (!userId) return [];
+  const { data, error } = await supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(80);
+  if (error) { console.error("getNotifications:", error.message); return []; }
+  return data || [];
+};
+export const markNotificationsRead = async (userId, id = null) => {
+  if (!userId) return;
+  try {
+    let q = supabase.from("notifications").update({ read: true }).eq("read", false);
+    if (id != null) q = q.eq("id", id);
+    await q;
+  } catch (e) {}
+};
+// Refresca el rol/nombre/foto del usuario en sesión (p.ej. al ser aprobado como
+// mensajero, para que el modo se desbloquee SIN cerrar la app).
+export const refreshSessionProfile = async (userId) => {
+  if (!userId) return null;
+  const { data, error } = await supabase.from("profiles").select("role, full_name, avatar_url").eq("id", userId).single();
+  if (error || !data) return null;
+  return { role: data.role || "user", name: data.full_name || null, avatar: data.avatar_url || null };
+};
+
 // ── REGISTRO DE MENSAJEROS (courier_applications) ────────────────────────────
 // Cada usuario inserta/ve SU solicitud (RLS); el admin las ve todas y las revisa
 // con la función oficial review_courier_application (al aprobar pone role=courier).

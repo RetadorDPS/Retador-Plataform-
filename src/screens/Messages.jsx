@@ -212,6 +212,22 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     if (!otherName && chat.otherId) getUserName(chat.otherId).then(n => n && setOtherName(n)).catch(() => {});
   }, [chat.otherId]);
 
+  // HISTORIAL SIEMPRE: si el chat se abrió sin id de conversación (desde un
+  // producto, una entrega…), resolvemos la conversación por la otra persona
+  // (get_or_create_conversation devuelve la existente si ya hay) y cargamos los
+  // mensajes DE INMEDIATO — nunca un chat "en blanco" si ya había conversación.
+  useEffect(() => {
+    if (convId || !chat.otherId || !user?.id) { if (!convId) setLoading(false); return; }
+    let a = true;
+    supabase.rpc("get_or_create_conversation", { p_other: chat.otherId }).then(({ data, error }) => {
+      if (!a) return;
+      if (error || !data) { setLoading(false); return; }
+      const cid = typeof data === "string" ? data : (data?.id || data);
+      convIdRef.current = cid; setConvId(cid);
+    }).catch(() => { if (a) setLoading(false); });
+    return () => { a = false; };
+  }, []);
+
   const subscribe = useCallback(async (cid) => {
     const c = await getSB();
     if (!c) return;

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, createContext, useContext, useCallback, us
 import { Edit2, Trash2 } from "lucide-react";
 import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, signOutUser } from "../shared/index.js";
 
-export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProfile, onAdmin, onWallet, onTools, onCourier, isOwner, profileData = {}, ordersBadge = 0, messagesBadge = 0 }) {
+export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProfile, onAdmin, onWallet, onTools, onCourier, isOwner, profileData = {}, ordersBadge = 0, messagesBadge = 0, adminBadge = 0 }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const name     = profileData.name || user?.name || "Usuario";
@@ -37,7 +37,7 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
           { ic: "tools", label: "Herramientas",  sub: "Importador inteligente y más", action: onTools, color: "#6EE7B7" },
           { ic: "moto", label: "Modo Mensajero",  sub: "Gana dinero repartiendo pedidos", action: onCourier, color: "#6366F1" },
           { ic: "cog",  label: "Configuración",   sub: "Cuenta, privacidad, nombre", action: onSettings, color: "#94A3B8" },
-          ...(isOwner ? [{ ic: "shield", label: "Panel de administración", sub: "Control total de la plataforma", action: onAdmin, color: "#F5A623" }] : []),
+          ...(isOwner ? [{ ic: "shield", label: "Panel de administración", sub: "Control total de la plataforma", action: onAdmin, color: "#F5A623", badge: adminBadge }] : []),
         ].map((it, i) => (
           <div key={i} className={it.action ? "cd" : ""} onClick={it.action || undefined}
             style={{ display: "flex", alignItems: "center", gap: 13, padding: "12px 14px", marginBottom: 7,

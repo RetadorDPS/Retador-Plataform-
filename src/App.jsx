@@ -26,6 +26,7 @@ import {
   readRatings, aggRating, systemRating, serviceRating, serviceReviews, ratingForName, systemReviews,
   getUserOrders, updateOrderStatus, getUnreadCount, getProductById,
   getPendingCourierApplications, reviewCourierApplication,
+  getNotifications, markNotificationsRead, refreshSessionProfile,
   ORDER_FLOW, SHIP_LABELS, MODALIDAD_LABELS,
   CONTACT_PATTERNS, maskContacts, CUBA_PROVINCES,
   getUserTrustStats, trackEvent, blockUser, isBlocked, getSB, convKey,
@@ -140,6 +141,14 @@ function AppShell({ sessionUser }) {
   // historial privado ni los números de negocio de esa persona.
   const [viewProfileId, setViewProfileId] = useState(null);
   const openPublicProfile = (id) => { if (id) setViewProfileId(id); };
+  // Producto abierto como CAPA (desde un perfil público, incluido el modo
+  // mensajero): se muestra encima de todo y el atrás lo cierra por capas.
+  const [viewProdOverlay, setViewProdOverlay] = useState(null);
+  const marketScrollRef = useRef(0); // posición del feed (se restaura al volver de un producto)
+  useEffect(() => {
+    if (!viewProdOverlay) return;
+    return pushBackHandler(() => setViewProdOverlay(null));
+  }, [viewProdOverlay]);
   // El perfil flotante es una capa: el botón ATRÁS del teléfono la cierra (vuelve
   // al chat/pantalla de abajo), nunca cierra la app. Una capa = un atrás.
   useEffect(() => {
@@ -172,6 +181,7 @@ function AppShell({ sessionUser }) {
   const reloadCourierApps = useCallback(() => {
     getPendingCourierApplications().then(setCourierApps).catch(() => {});
   }, []);
+  useEffect(() => { if (user?.role === "admin") reloadCourierApps(); }, [user?.role, reloadCourierApps]);
   useEffect(() => { if (showAdmin && user?.role === "admin") reloadCourierApps(); }, [showAdmin, user?.role, reloadCourierApps]);
   const [showWallet, setShowWallet] = useState(false);
   const [showTools, setShowTools] = useState(false);
@@ -602,7 +612,20 @@ function AppShell({ sessionUser }) {
   const pushNotif = (to, text, orderId) => setNotifs(prev => [{ id: "n" + Date.now() + Math.random().toString(36).slice(2, 6), to, text, orderId, at: Date.now(), read: false }, ...prev].slice(0, 120));
   useEffect(() => { try { localStorage.setItem("retador_notifs", JSON.stringify(notifs)); } catch (e) {} }, [notifs]);
   const myIds = [user?.id, user?.name, profileData?.name].filter(Boolean);
-  const myNotifs = notifs.filter(n => n.to != null && myIds.includes(n.to));
+  const myLocalNotifs = notifs.filter(n => n.to != null && myIds.includes(n.to));
+  // ── NOTIFICACIONES REALES del backend (tabla notifications) ────────────────
+  // Se cargan al abrir y llegan EN VIVO por el canal realtime global. Se mezclan
+  // con las locales en el mismo panel de la campanita.
+  const [bkNotifs, setBkNotifs] = useState([]);
+  const reloadBkNotifs = useCallback(() => {
+    if (!user?.id) { setBkNotifs([]); return; }
+    getNotifications(user.id).then(setBkNotifs).catch(() => {});
+  }, [user?.id]);
+  useEffect(() => { reloadBkNotifs(); }, [reloadBkNotifs]);
+  const myNotifs = [
+    ...bkNotifs.map(n => ({ id: "bk" + n.id, text: n.text, orderId: n.kind === "order" ? n.ref_id : null, read: !!n.read, at: n.created_at ? new Date(n.created_at).getTime() : Date.now(), _bk: n.id })),
+    ...myLocalNotifs,
+  ].sort((a, b) => (b.at || 0) - (a.at || 0));
   const unreadNotif = myNotifs.filter(n => !n.read).length;
   // Barra inferior OCULTA en pantallas de "detalle" (a las que se ENTRA y se sale
   // con "atrás"): detalle de producto, perfil del vendedor, subastas, y todo el
@@ -611,7 +634,18 @@ function AppShell({ sessionUser }) {
   const hideNav = tab === "subastas"
     || (tab === "market" && (mScr === "product" || mScr === "sellerProfile"))
     || (tab === "perfil" && pScr !== "main");
-  const markNotifRead = id => setNotifs(prev => prev.map(n => id == null ? { ...n, read: true } : (n.id === id ? { ...n, read: true } : n)));
+  // Marca leídas las locales Y las del backend (read=true en la tabla).
+  const markNotifRead = (id) => {
+    setNotifs(prev => prev.map(n => id == null ? { ...n, read: true } : (n.id === id ? { ...n, read: true } : n)));
+    if (id == null) {
+      setBkNotifs(prev => prev.map(n => ({ ...n, read: true })));
+      if (user?.id) markNotificationsRead(user.id).catch(() => {});
+    } else if (String(id).startsWith("bk")) {
+      const raw = myNotifs.find(n => n.id === id)?._bk;
+      setBkNotifs(prev => prev.map(n => ("bk" + n.id) === id ? { ...n, read: true } : n));
+      if (user?.id && raw != null) markNotificationsRead(user.id, raw).catch(() => {});
+    }
+  };
 
   // ── PEDIDOS REALES (Compras/Ventas) — el BACKEND es la ÚNICA fuente ─────────
   // loadOrders recarga desde Supabase y reemplaza el estado local, para que las
@@ -634,9 +668,26 @@ function AppShell({ sessionUser }) {
     const ch = supabase.channel(`rt-global-${user.id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => reloadChatUnread())
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => loadOrders())
+      // NOTIFICACIONES del backend EN VIVO: toast + campanita + reacciones por tipo.
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` }, (payload) => {
+        const n = payload.new || {};
+        setBkNotifs(prev => prev.find(x => x.id === n.id) ? prev : [n, ...prev]);
+        if (n.text) flash("🔔 " + n.text);
+        // Aprobación de mensajero: refresca el rol en sesión → el modo mensajero
+        // se desbloquea AL INSTANTE, sin cerrar la app.
+        if (n.kind === "courier") {
+          refreshSessionProfile(user.id).then(p => { if (p) setUser(prev => prev ? { ...prev, role: p.role } : prev); }).catch(() => {});
+        }
+        // Nueva solicitud de mensajero (para el admin): refresca lista y badge.
+        if (n.kind === "courier_app" && user.role === "admin") reloadCourierApps();
+      })
+      // Solicitudes de mensajero EN VIVO (lista y badge del panel admin).
+      .on("postgres_changes", { event: "*", schema: "public", table: "courier_applications" }, () => {
+        if (user.role === "admin") reloadCourierApps();
+      })
       .subscribe();
     return () => { try { supabase.removeChannel(ch); } catch (e) {} };
-  }, [user?.id, reloadChatUnread, loadOrders]);
+  }, [user?.id, user?.role, reloadChatUnread, loadOrders, reloadCourierApps]);
 
   const roleOf = (o) => (((o.buyerId ?? o.buyer_id) === user?.id) ? "compra" : "venta");
   const mergedOrders = orders;
@@ -961,7 +1012,23 @@ function AppShell({ sessionUser }) {
             isVerified={verifiedUsers.includes(viewProfileId)}
             onReport={(p) => addReport({ targetName: p.targetName, reason: p.reason, detail: p.detail, reporterName: user?.name || "Usuario" })}
             userProducts={products.filter(p => p.seller_id === viewProfileId)}
-            onProduct={p => { setViewProfileId(null); setSelProd(p); setTab("market"); setMScr("product"); }}
+            onProduct={p => setViewProdOverlay(p)}
+          />
+        </div>
+      )}
+      {/* Producto como CAPA (desde perfil público / modo mensajero): encima de todo,
+          con su entrada de historial — atrás lo cierra y vuelve a la capa anterior. */}
+      {viewProdOverlay && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 5300, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+          <ProductDetail
+            product={viewProdOverlay}
+            onBack={() => setViewProdOverlay(null)}
+            onDelivery={() => { setViewProdOverlay(null); setViewProfileId(null); setChatOpen(false); setShowCourier(false); setTab("envios"); setEScr("local"); }}
+            onChat={requestChat} onViewProfile={openPublicProfile}
+            onBuy={(p) => { setViewProdOverlay(null); setViewProfileId(null); setChatOpen(false); setShowCourier(false); handleBuy(p); }}
+            onFav={toggleFav} isFav={favorites.has(viewProdOverlay.id)} canChat={hasOrderWith(viewProdOverlay.seller_id)}
+            onDelete={null} onEdit={null}
+            flash={flash} requireAuth={requireAuth} user={user}
           />
         </div>
       )}
@@ -1000,6 +1067,7 @@ function AppShell({ sessionUser }) {
             {mScr === "home" && (
               <MarketHome
                 hidden={navHidden}
+                scrollKeeper={marketScrollRef}
                 loading={loading} products={marketVisible} filter={filter} setFilter={setFilter}
                 search={search} setSearch={setSearch} activeCat={activeCat} setActiveCat={cat => { setActiveCat(cat); }}
                 onCats={() => setShowCats(true)}
@@ -1070,7 +1138,7 @@ function AppShell({ sessionUser }) {
           )}
 
           {tab === "perfil" && <>
-            {pScr === "main"         && <ProfileMain user={user} onMessages={openMessages} onSettings={() => setPScr("settings")} onOrders={() => setPScr("orders")} onViewProfile={() => setPScr("profile-full")} onAdmin={() => setShowAdmin(true)} onWallet={() => setShowWallet(true)} onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} isOwner={isOwner} profileData={profileData} ordersBadge={ordersUnseen} messagesBadge={chatUnread} />}
+            {pScr === "main"         && <ProfileMain user={user} onMessages={openMessages} onSettings={() => setPScr("settings")} onOrders={() => setPScr("orders")} onViewProfile={() => setPScr("profile-full")} onAdmin={() => setShowAdmin(true)} onWallet={() => setShowWallet(true)} onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} isOwner={isOwner} profileData={profileData} ordersBadge={ordersUnseen} messagesBadge={chatUnread} adminBadge={courierApps.length} />}
             {pScr === "profile-full" && (() => {
               const me = profileData?.name || user?.name;
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);

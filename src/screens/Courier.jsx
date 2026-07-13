@@ -22,306 +22,278 @@ function ProfileChip({ id, fallback = "Usuario", role, onOpen, dark }) {
   );
 }
 
-function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, onCancel, onReport, onClose, dark, record, demo, onViewProfile, onChat }) {
+// ═════════════════════════════════════════════════════════════════════════════
+// TABLERO DEL MENSAJERO — solo datos REALES (sin demo).
+// · Disponibles: pool del backend (get_available_deliveries) con la información
+//   COMPLETA para decidir (el pool solo lo ven mensajeros aprobados).
+// · Mi entrega: SOLO entregas donde yo soy el mensajero (courier_id), con
+//   progreso Aceptada → Recogido → En reparto → Entregado y los 2 botones reales.
+// · Historial: mis entregas terminadas.
+// ═════════════════════════════════════════════════════════════════════════════
+function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, onCancel, onReport, onClose, dark, record, onViewProfile, onChat }) {
   const bg = dark ? "#0a0a0a" : "#f1f5f9", card = dark ? "#141417" : "#fff", t1 = dark ? "#f0f0f2" : "#0f172a", t2 = dark ? "#9aa0aa" : "#64748b", t3 = dark ? "#6b7280" : "#94a3b8", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)", AC = "#6366F1";
   const [tab, setTab] = useState("disp");
   const [online, setOnline] = useState(true);
-  const [detail, setDetail] = useState(null);
-  // Producto del pedido abierto en detalle: de ahí salen la dirección y el teléfono
-  // de RECOGIDA que escribió el vendedor. Se busca por product_id cuando hace falta.
-  const [detailProduct, setDetailProduct] = useState(null);
-  useEffect(() => {
-    setDetailProduct(null);
-    const pid = detail && (detail.product_id || detail.productId);
-    if (!pid || String(detail.id).startsWith("demo")) return;
-    let a = true; getProductById(pid).then(p => { if (a) setDetailProduct(p); }).catch(() => {});
-    return () => { a = false; };
-  }, [detail]);
-  const [reportFor, setReportFor] = useState(null);
-  const [reportSent, setReportSent] = useState({});
   const [adjustFor, setAdjustFor] = useState(null);
   const [adjustVal, setAdjustVal] = useState("");
-  const [actionMode, setActionMode] = useState(null);
+  const [activaSeen, setActivaSeen] = useState(false);
+  const [reportFor, setReportFor] = useState(null);   // pedido que se está reportando
   const [reportTarget, setReportTarget] = useState("");
-  const [reportOther, setReportOther] = useState(false);
   const [reportText, setReportText] = useState("");
-  const [demoOrders, setDemoOrders] = useState([
-    { id: "demo1", shipMode: "local", title: "Auriculares TWS Baseus", amount: 600, deliveryCost: 400, payMethod: "efectivo", sellerName: "Tienda TechHabana", delivery: { pickup: "Tienda TechHabana", pickupAddress: "Calle Línea #58 e/ M y N, Vedado", pickupPhone: "+53 5 111 2233", address: "Calle 23 #456 e/ G y H, Vedado", name: "Laura Pérez", phone: "+53 5 234 5678", ref: "Edificio azul de la esquina, apto 4B. Tocar al portero." }, status: "confirmado" },
-    { id: "demo2", shipMode: "local", title: "Perfume 100ml", amount: 1200, deliveryCost: 350, payMethod: "transferencia", sellerName: "Boutique Lux", delivery: { pickup: "Boutique Lux", pickupAddress: "San Rafael #112 e/ Industria y Consulado, Centro Habana", pickupPhone: "+53 5 444 5566", address: "Ave. Salvador Allende #210, Centro Habana", name: "Carlos M.", phone: "+53 5 876 1234", ref: "Casa con reja blanca, entre Belascoaín y Lucena." }, status: "confirmado" },
-  ]);
-  const demoAccept = (id, fee) => setDemoOrders(prev => prev.map(o => { if (o.id !== id) return o; const base = o.deliveryCost || o.shipPrice || localBase; const nf = (fee != null && fee > 0) ? Math.round(fee) : base; if (nf > base) return { ...o, courierName: meName, courierStage: "propuesta", proposedFee: nf, baseFee: base, feeApproval: "pending" }; return { ...o, courierName: meName, courierStage: "aceptado", deliveryCost: nf }; }));
-  const demoStage = (id, st) => { const cs = st === "entregado" ? "completado" : st; setDemoOrders(prev => prev.map(o => o.id === id ? { ...o, courierStage: cs, status: cs === "completado" ? "entregado" : o.status } : o)); };
-  // POOL de entregas disponibles: viene del backend (get_available_deliveries),
-  // que solo expone categoría, tarifa e ids de comprador/vendedor. En demo usamos
-  // los pedidos de ejemplo. Se recarga al abrir y tras aceptar/liberar.
+  const [reportOther, setReportOther] = useState(false);
+  const [reportSent, setReportSent] = useState({});
+
+  // POOL de entregas disponibles: viene del backend con TODO (título, foto,
+  // recogida, entrega, tarifa, pago). Se refresca en vivo con el realtime.
   const [pool, setPool] = useState([]);
   const reloadPool = useCallback(async () => {
-    if (demo) return;
     const rows = await getAvailableDeliveries();
     setPool((rows || []).map(r => ({
       ...r,
-      shipPrice: r.ship_price ?? r.shipPrice ?? 0,
-      deliveryCost: r.ship_price ?? r.shipPrice ?? 0,
-      buyerId: r.buyer_id ?? r.buyerId ?? null,
-      sellerId: r.seller_id ?? r.sellerId ?? null,
-      cat: r.cat ?? r.category ?? r.categoria ?? null,
+      shipPrice: r.ship_price ?? 0,
+      deliveryCost: r.ship_price ?? 0,
+      buyerId: r.buyer_id ?? null,
+      sellerId: r.seller_id ?? null,
+      payMethod: r.payment_method || r.pay_method || "efectivo",
+      createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
       shipMode: "local", status: "confirmado", __pool: true,
     })));
-  }, [demo]);
+  }, []);
   useEffect(() => { reloadPool(); }, [reloadPool]);
-  // EN VIVO: cualquier cambio en pedidos refresca el pool solo (una entrega nueva
-  // aparece al instante; una tomada por otro mensajero desaparece). El canal se
-  // limpia al cerrar el modo mensajero.
   useEffect(() => {
-    if (demo) return;
     const ch = supabase.channel("rt-courier-pool")
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => reloadPool())
       .subscribe();
     return () => { try { supabase.removeChannel(ch); } catch (e) {} };
-  }, [demo, reloadPool]);
+  }, [reloadPool]);
 
-  // En demo mezclamos los pedidos REALES locales con los de ejemplo, para que el dueño vea su propio pedido aquí.
-  const srcOrders = demo ? [...orders.filter(o => (o.shipMode || o.shipType) === "local"), ...demoOrders] : orders;
-  const isMineOrder = o => o.courierName === meName || (meId && (o.courierId === meId || o.courier_id === meId));
-  const acceptFn = (id, fee) => { if (String(id).startsWith("demo")) demoAccept(id, fee); else { onAccept && onAccept(id, fee); setTimeout(reloadPool, 800); } };
-  const cancelFn = id => { if (String(id).startsWith("demo")) setDemoOrders(prev => prev.map(o => o.id === id ? { ...o, courierName: null, courierStage: null, proposedFee: null, feeApproval: null } : o)); else { onCancel && onCancel(id); setTimeout(reloadPool, 800); } setDetail(null); setTab("disp"); };
-  const stageFn = (id, st) => { if (String(id).startsWith("demo")) demoStage(id, st); else onStage && onStage(id, st); };
+  // MIS entregas: solo donde yo soy el mensajero (courier_id real).
+  const mine = (orders || []).filter(o => meId && (o.courierId === meId || o.courier_id === meId));
+  const actives = mine.filter(o => !["entregado", "completado", "fallido", "cancelado"].includes(o.status));
+  const done = mine.filter(o => ["entregado", "completado"].includes(o.status));
+  useEffect(() => { if (tab === "activa") setActivaSeen(true); }, [tab]);
+  useEffect(() => { setActivaSeen(false); }, [actives.length]);
+
   const money = n => Math.round(n || 0).toLocaleString() + " CUP";
-  const mine = srcOrders.filter(isMineOrder);
-  const active = mine.find(o => o.courierStage && o.courierStage !== "completado" && o.courierStage !== "fallido");
-  const done = mine.filter(o => o.courierStage === "completado" || o.status === "entregado" || o.status === "completado");
-  // Entregas disponibles: en demo, los de ejemplo sin mensajero; en real, el pool del backend.
-  const available = demo
-    ? demoOrders.filter(o => o.shipMode === "local" && !o.courierName && o.status === "confirmado")
-    : pool;
-  const baseFeeOf = o => o.deliveryCost || o.shipCost || o.shipPrice || localBase;
   const surgeCfg = (() => { try { const r = localStorage.getItem("retador_admincfg"); if (r) { const c = JSON.parse(r); return { on: c.surgeActive === true, every: Number(c.surgeIntervalMin) || 30, step: Number(c.surgeStepPct) || 15, cap: Number(c.surgeCapPct) || 60 }; } } catch (e) {} return { on: false, every: 30, step: 15, cap: 60 }; })();
-  const surgePct = o => { if (!surgeCfg.on || o.courierName) return 0; const mins = (Date.now() - (o.createdAt || o.created_at || Date.now())) / 60000; const steps = Math.floor(mins / surgeCfg.every); return Math.min(surgeCfg.cap, steps * surgeCfg.step); };
-  const feeOf = o => { const b = baseFeeOf(o); const p = surgePct(o); return Math.round(b * (1 + p / 100)); };
-  const isCash = o => (o.payMethod || o.payment || "efectivo").toString().toLowerCase().includes("efect") || (o.payMethod || "").toLowerCase() === "cash" || !o.payMethod;
+  const baseFeeOf = o => o.deliveryCost || o.shipPrice || o.ship_price || localBase;
+  const surgePct = o => { if (!surgeCfg.on || o.courierId || o.courier_id) return 0; const mins = (Date.now() - (o.createdAt || 0)) / 60000; const steps = Math.floor(mins / surgeCfg.every); return Math.min(surgeCfg.cap, steps * surgeCfg.step); };
+  const feeOf = o => { const b = baseFeeOf(o); return Math.round(b * (1 + surgePct(o) / 100)); };
+  const isCash = o => (o.payMethod || o.payment_method || "efectivo").toString().toLowerCase().includes("efect") || !(o.payMethod || o.payment_method);
   const earnedTotal = done.reduce((s, o) => s + feeOf(o), 0);
-  const pickupOf = o => o.delivery?.pickup || o.sellerName || "Vendedor";
-  const pickupAddrOf = o => o.delivery?.pickupAddress || "";
-  const pickupPhoneOf = o => o.delivery?.pickupPhone || "";
-  const etaOf = o => { const n = Math.abs(String(o.id).split("").reduce((a, c) => a + c.charCodeAt(0), 0)); const km = (1 + (n % 80) / 10).toFixed(1); const min = 6 + (n % 22); return { km, min }; };
-  const dropOf = o => o.delivery?.address || o.address || "Dirección del comprador";
+  const dropOf = o => o.delivery?.address || o.ship_to || o.shipTo || "";
   const dropNameOf = o => o.delivery?.name || o.buyerName || "Comprador";
-  const buyerOf = o => o.delivery?.name || o.buyerName || "Comprador";
-  const phoneOf = o => o.delivery?.phone || o.buyerPhone || "";
-  const refOf = o => o.delivery?.ref || o.delivery?.note || o.reference || "";
-  // El mensajero SIEMPRE cobra su tarifa en EFECTIVO. El producto puede ir por transferencia (en ese caso el mensajero solo cobra su tarifa).
-  const prodCashOf = o => isCash(o) ? (o.amount || 0) : 0;
-  const collectOf = o => feeOf(o) + prodCashOf(o);
-  const stageOf = o => {
-    if (!o.courierName) return "available";
-    if (o.courierStage === "completado") return "done";
-    return "active";
-  };
+  const dropPhoneOf = o => o.delivery?.phone || "";
+  const refOf = o => o.delivery?.ref || o.delivery?.note || "";
+  const fmtDate = t => t ? new Date(t).toLocaleDateString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
   const Card = ({ children, style }) => <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 16, padding: 15, ...style }}>{children}</div>;
-  const addrRow = (icon, label, val, sub) => (
-    <div style={{ display: "flex", gap: 11, alignItems: "flex-start", padding: "9px 0" }}>
-      <div style={{ width: 30, height: 30, borderRadius: 9, background: AC + "1a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>{icon}</div>
+  const row = (icon, label, val, sub) => (
+    <div style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "7px 0" }}>
+      <div style={{ width: 28, height: 28, borderRadius: 8, background: AC + "1a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 }}>{icon}</div>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 10, color: t3, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>{label}</div>
-        <div style={{ fontSize: 13, color: t1, fontWeight: 600 }}>{val}</div>
-        {sub && <div style={{ fontSize: 11, color: t2 }}>{sub}</div>}
+        <div style={{ fontSize: 9.5, color: t3, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>{label}</div>
+        <div style={{ fontSize: 12.5, color: t1, fontWeight: 600, lineHeight: 1.4 }}>{val || "—"}</div>
+        {sub && <div style={{ fontSize: 11, color: t2, marginTop: 1 }}>{sub}</div>}
       </div>
     </div>
   );
+  const payBadge = o => {
+    const cash = isCash(o);
+    return <span style={{ fontSize: 10, fontWeight: 700, color: cash ? "#F59E0B" : AC, background: (cash ? "#F59E0B" : AC) + "1a", borderRadius: 100, padding: "3px 9px" }}>{cash ? "💵 Efectivo" : "💳 Transferencia"}</span>;
+  };
 
-  // Solo 2 toques esenciales para el mensajero
-  const STAGES = [
-    { key: "aceptado", label: "Aceptada", action: "Recogí el producto", next: "recogido" },
-    { key: "recogido", label: "En camino", action: "Entregué y cobré", next: "completado" },
-  ];
-  const payCard = o => {
-    const fee = feeOf(o), cash = isCash(o), prod = o.amount || 0;
-    const sym = { EUR: "€", USD: "$" };
-    const c = o.currency || "USD";
-    const pmoney = n => (sym[c] || "") + Math.round(n || 0).toLocaleString() + (sym[c] ? "" : " " + c);
-    return <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: t3, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 9 }}>Dinero</div>
-      {cash
-        ? <>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: t2, padding: "4px 0" }}><span>Valor del producto · cobras al comprador</span><span style={{ color: t1, fontWeight: 700 }}>{pmoney(prod)}</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: t2, padding: "4px 0" }}><span>Se lo entregas al vendedor</span><span style={{ color: t1, fontWeight: 700 }}>{pmoney(prod)}</span></div>
-          </>
-        : <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: t2, padding: "4px 0" }}><span>El producto lo paga el comprador por transferencia al vendedor</span><span style={{ color: t3, fontWeight: 700 }}>—</span></div>}
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "8px 0 0", marginTop: 4, borderTop: `1px solid ${bd}` }}><span style={{ color: "#22C55E", fontWeight: 800 }}>Tu tarifa de entrega (efectivo)</span><span style={{ color: "#22C55E", fontWeight: 800 }}>{money(fee)}</span></div>
-      <div style={{ fontSize: 10.5, color: t3, marginTop: 8, lineHeight: 1.45 }}>{cash
-        ? <>Cobras al comprador <b>{pmoney(prod)}</b> del producto (se lo entregas al vendedor) <b>más tu tarifa de {money(fee)} en efectivo</b>, que es tuya.</>
-        : <>El producto lo paga el comprador por transferencia al vendedor. Tú solo cobras <b>tu tarifa de {money(fee)} en efectivo</b>. La entrega se cierra cuando el vendedor confirme la transferencia.</>}</div>
-    </div>;
-  };
-  const actionBtn = o => {
-    const cash = isCash(o);
-    if (o.courierStage === "completado") return <div style={{ textAlign: "center", color: "#22C55E", fontWeight: 700, fontSize: 14, padding: "12px" }}>✅ Entrega completada</div>;
-    if (stageOf(o) === "available") return <button onClick={() => { const ord = o; setDetail(null); setAdjustVal(String(feeOf(ord))); setAdjustFor(ord); }} disabled={!online} style={{ width: "100%", height: 50, borderRadius: 13, border: "none", background: !online ? (dark ? "#26262b" : "#e2e8f0") : AC, color: !online ? t3 : "#fff", fontSize: 14.5, fontWeight: 800, cursor: !online ? "default" : "pointer" }}>{!online ? "Conéctate para aceptar" : "Aceptar entrega"}</button>;
-    if (o.courierStage === "propuesta") return <div style={{ width: "100%", padding: "13px", borderRadius: 13, background: AC + "12", border: `1px solid ${AC}30`, textAlign: "center", fontSize: 12.5, fontWeight: 700, color: AC }}>Esperando que el comprador apruebe tu tarifa de {money(o.proposedFee || feeOf(o))}…</div>;
-    if (o.courierStage === "esperando_pago") return <div>
-      <div style={{ background: "#F59E0B14", border: "1px solid #F59E0B55", borderRadius: 12, padding: "12px 13px", textAlign: "center" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#F59E0B", marginBottom: 3 }}>⏳ Entregado · esperando pago</div>
-        <div style={{ fontSize: 11.5, color: t2, lineHeight: 1.5 }}>La entrega se cierra cuando el <b>vendedor confirme</b> que recibió la transferencia. Si no hay pago, no te retires con el producto entregado: el vendedor marcará la entrega como fallida y devuelves el producto.</div>
-      </div>
-      {demo && <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-        <button onClick={() => stageFn(o.id, "fallido")} style={{ flex: 1, height: 44, borderRadius: 12, border: `1px solid ${bd}`, background: "transparent", color: t2, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>(Demo) Sin pago</button>
-        <button onClick={() => stageFn(o.id, "completado")} style={{ flex: 1.4, height: 44, borderRadius: 12, border: "none", background: "#22C55E", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>(Demo) Vendedor confirmó</button>
-      </div>}
-    </div>;
-    if (o.courierStage === "fallido") return <div style={{ textAlign: "center", color: "#ef4444", fontWeight: 700, fontSize: 13.5, padding: "12px", background: "#ef444414", borderRadius: 12 }}>❌ Sin pago · producto devuelto al vendedor</div>;
-    if (o.courierStage === "recogido" || o.status === "en_ruta") {
-      // "Entregué" cierra el pedido (el backend marca entregado y termina).
-      return <button onClick={() => { stageFn(o.id, "entregado"); setDetail(null); }} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: AC, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>Entregué</button>;
-    }
-    return <button onClick={() => stageFn(o.id, "recogido")} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: AC, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>Recogí</button>;
-  };
-  const miniCard = o => {
-    const cash = isCash(o);
-    return <div key={o.id} onClick={() => setDetail(o)} style={{ background: card, border: `1px solid ${bd}`, borderRadius: 16, padding: 14, marginBottom: 11, cursor: "pointer" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-        <span style={{ fontSize: 14, fontWeight: 800, color: t1, flex: 1, minWidth: 0 }}>{o.title || "Pedido"}</span>
-        <span style={{ fontSize: 15, fontWeight: 800, color: "#22C55E", whiteSpace: "nowrap", marginLeft: 8 }}>+{money(feeOf(o))}</span>
-      </div>
-      <div style={{ borderTop: `1px solid ${bd}`, marginTop: 4 }}>
-        {addrRow("🏪", "Recoger", pickupOf(o))}
-        {addrRow("📍", "Entregar", dropOf(o))}
-      </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
-        <span style={{ fontSize: 10, fontWeight: 700, color: cash ? "#F59E0B" : AC, background: (cash ? "#F59E0B" : AC) + "1a", borderRadius: 100, padding: "3px 9px" }}>{cash ? "💵 Producto en efectivo" : "💳 Producto por transferencia"}</span>
-        <span style={{ fontSize: 11, color: AC, fontWeight: 700 }}>Ver detalle ›</span>
-      </div>
-    </div>;
-  };
-  // Tarjeta del POOL (ANTES de aceptar): solo categoría + tarifa + perfiles públicos
-  // tocables del comprador y del vendedor. Sin monto, sin ganancia, sin dirección.
+  // ── Tarjeta del POOL: información COMPLETA para decidir ──────────────────────
   const poolCard = o => (
-    <div key={o.id} style={{ background: card, border: `1px solid ${bd}`, borderRadius: 16, padding: 14, marginBottom: 11 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <span style={{ fontSize: 11, fontWeight: 800, color: AC, background: AC + "16", borderRadius: 100, padding: "4px 11px" }}>{o.cat || o.category || o.title || "Pedido"}</span>
+    <Card key={o.id} style={{ marginBottom: 12, padding: 14 }}>
+      <div style={{ display: "flex", gap: 11, alignItems: "center", marginBottom: 10 }}>
+        {o.image
+          ? <img src={o.image} alt="" style={{ width: 52, height: 52, borderRadius: 11, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />
+          : <div style={{ width: 52, height: 52, borderRadius: 11, background: AC + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>📦</div>}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.title || "Pedido"}{o.qty > 1 ? ` ×${o.qty}` : ""}</div>
+          <div style={{ fontSize: 10.5, color: t3, marginTop: 2 }}>{o.cat || "Producto"} · {fmtDate(o.createdAt)}</div>
+        </div>
         <span style={{ fontSize: 16, fontWeight: 900, color: "#22C55E", whiteSpace: "nowrap" }}>+{money(feeOf(o))}</span>
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <ProfileChip id={o.buyerId} fallback="Comprador" role="Comprador" onOpen={onViewProfile} dark={dark} />
+      <div style={{ borderTop: `1px solid ${bd}`, borderBottom: `1px solid ${bd}`, margin: "2px 0 10px" }}>
+        {row("🏪", "Recoger en", o.pickup_address || "Coordinar con el vendedor", o.pickup_phone ? "Tel: " + o.pickup_phone : null)}
+        <div style={{ height: 1, background: bd }} />
+        {row("📍", "Entregar en", dropOf(o) || "Ver con el comprador", dropNameOf(o))}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 11 }}>
         <ProfileChip id={o.sellerId} fallback="Vendedor" role="Vendedor" onOpen={onViewProfile} dark={dark} />
+        <ProfileChip id={o.buyerId} fallback="Comprador" role="Comprador" onOpen={onViewProfile} dark={dark} />
+        <span style={{ marginLeft: "auto" }}>{payBadge(o)}</span>
       </div>
       <button onClick={() => { setAdjustVal(String(feeOf(o))); setAdjustFor(o); }} disabled={!online} style={{ width: "100%", height: 46, borderRadius: 12, border: "none", background: !online ? (dark ? "#26262b" : "#e2e8f0") : AC, color: !online ? t3 : "#fff", fontSize: 14, fontWeight: 800, cursor: !online ? "default" : "pointer" }}>{!online ? "Conéctate para aceptar" : "Aceptar entrega"}</button>
-      <div style={{ fontSize: 10, color: t3, textAlign: "center", marginTop: 8, lineHeight: 1.4 }}>Al aceptar verás las direcciones exactas de recogida y entrega y los contactos.</div>
-    </div>
+    </Card>
   );
 
-  const activeView = () => {
-    const actives = mine.filter(o => o.courierStage && o.courierStage !== "completado" && o.courierStage !== "fallido");
-    if (!actives.length) return <Card style={{ textAlign: "center", padding: "34px 16px" }}>
-      <div style={{ fontSize: 30, marginBottom: 8, opacity: .6 }}>🛵</div>
-      <div style={{ fontSize: 13.5, color: t2 }}>No tienes ninguna entrega activa.</div>
-      <div style={{ fontSize: 12, color: t3, marginTop: 4 }}>Acepta una de "Disponibles" para empezar. Puedes llevar varias a la vez.</div>
-    </Card>;
-    return <>
-      <div style={{ fontSize: 11.5, color: t3, fontWeight: 600, margin: "0 4px 10px" }}>{actives.length === 1 ? "Tu entrega activa · tócala para gestionarla" : `${actives.length} entregas activas · tócalas para gestionarlas`}</div>
-      {actives.map(o => miniCard(o))}
-    </>;
+  // ── MI ENTREGA: tarjeta completa con progreso y acciones reales ─────────────
+  const STEPS = [
+    { key: "asignado", label: "Aceptada" },
+    { key: "recogido", label: "Recogido" },
+    { key: "en_ruta", label: "En reparto" },
+    { key: "entregado", label: "Entregado" },
+  ];
+  const stepIdxOf = o => {
+    const i = STEPS.findIndex(s => s.key === o.status);
+    if (i >= 0) return i;
+    if (["entregado", "completado"].includes(o.status)) return 3;
+    return 0;
   };
+  const [prodCache, setProdCache] = useState({});
+  useEffect(() => {
+    actives.forEach(o => {
+      const pid = o.product_id || o.productId;
+      if (!pid || prodCache[pid] !== undefined) return;
+      setProdCache(prev => ({ ...prev, [pid]: null }));
+      getProductById(pid).then(p => setProdCache(prev => ({ ...prev, [pid]: p }))).catch(() => {});
+    });
+  }, [actives.map(o => o.product_id || o.productId).join("|")]);
 
-  const dispView = () => available.length === 0
-    ? <Card style={{ textAlign: "center", padding: "34px 16px" }}><div style={{ fontSize: 30, marginBottom: 8, opacity: .6 }}>📭</div><div style={{ fontSize: 13.5, color: t2 }}>No hay entregas disponibles ahora.</div><div style={{ fontSize: 12, color: t3, marginTop: 4 }}>Te avisaremos cuando haya pedidos en tu zona.</div></Card>
-    : <>
-        {online && <div style={{ display: "flex", alignItems: "center", gap: 9, background: "#22C55E14", border: "1px solid #22C55E40", borderRadius: 13, padding: "11px 14px", marginBottom: 12 }}>
-          <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#22C55E", flexShrink: 0 }} />
-          <span style={{ fontSize: 12.5, fontWeight: 800, color: "#16a34a" }}>{available.length === 1 ? "¡Tienes 1 entrega disponible!" : `¡Tienes ${available.length} entregas disponibles!`}</span>
-        </div>}
-        {!online && <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 13, padding: "11px 14px", marginBottom: 12, fontSize: 12, color: t3, fontWeight: 600 }}>Estás desconectado. Ponte <b style={{ color: t2 }}>En línea</b> arriba para recibir entregas.</div>}
-        {available.map(o => poolCard(o))}
-      </>;
-
-  const histView = () => done.length === 0
-    ? <Card style={{ textAlign: "center", padding: "30px 16px" }}><div style={{ fontSize: 13.5, color: t2 }}>Aún no has completado entregas.</div></Card>
-    : done.map(o => miniCard(o));
-
-  const detailModal = () => {
-    if (!detail) return null;
-    const base = srcOrders.find(x => x.id === detail.id) || detail;
-    // Al aceptar, el mensajero SÍ ve los datos exactos para cumplir: recogida (del
-    // producto), entrega (del pedido) y contactos. Los números del negocio no.
-    const o = { ...base,
-      delivery: { ...(base.delivery || {}),
-        pickupAddress: base.delivery?.pickupAddress || detailProduct?.pickupAddress || "",
-        pickupPhone: base.delivery?.pickupPhone || detailProduct?.pickupPhone || "",
-        address: base.delivery?.address || base.ship_to || base.shipTo || "",
-        name: base.delivery?.name || base.buyerName || "",
-      },
-      sellerName: base.sellerName || detailProduct?.seller_name || "",
-    };
+  const activeCard = o => {
+    const pid = o.product_id || o.productId;
+    const prod = prodCache[pid] || null;
+    const pickupAddr = o.delivery?.pickupAddress || prod?.pickupAddress || "";
+    const pickupPhone = o.delivery?.pickupPhone || prod?.pickupPhone || "";
+    const idx = stepIdxOf(o);
+    const feePending = o.feeApproval === "pending" || (o.status === "confirmado" && o.proposedFee);
     const cash = isCash(o);
-    const buyerId = o.buyerId || o.buyer_id || null, sellerId = o.sellerId || o.seller_id || null;
-    return <div onClick={() => setDetail(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 4200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: bg, width: "100%", maxWidth: 480, borderRadius: "20px 20px 0 0", padding: "8px 16px 28px", maxHeight: "92vh", overflowY: "auto" }}>
-        <div style={{ width: 40, height: 4, borderRadius: 2, background: bd, margin: "8px auto 14px" }} />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 10 }}>
-          <span style={{ fontSize: 17, fontWeight: 800, color: t1 }}>{o.title || "Pedido"}</span>
-          <span style={{ fontSize: 17, fontWeight: 800, color: "#22C55E", whiteSpace: "nowrap" }}>+{money(feeOf(o))}</span>
+    const canPickup = o.status === "asignado";
+    const canDeliver = o.status === "recogido" || o.status === "en_ruta";
+    const mapUrl = a => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a || "")}`;
+    return (
+      <Card key={o.id} style={{ marginBottom: 14, padding: 14 }}>
+        {/* Producto */}
+        <div style={{ display: "flex", gap: 11, alignItems: "center", marginBottom: 10 }}>
+          {(o.image || prod?.image)
+            ? <img src={o.image || prod?.image} alt="" style={{ width: 52, height: 52, borderRadius: 11, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />
+            : <div style={{ width: 52, height: 52, borderRadius: 11, background: AC + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>📦</div>}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.title || prod?.title || "Pedido"}{o.qty > 1 ? ` ×${o.qty}` : ""}</div>
+            <div style={{ fontSize: 10.5, color: t3, marginTop: 2 }}>{fmtDate(o.createdAt)}</div>
+          </div>
+          <span style={{ fontSize: 16, fontWeight: 900, color: "#22C55E", whiteSpace: "nowrap" }}>+{money(feeOf(o))}</span>
         </div>
-        {(buyerId || sellerId) && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-          {sellerId && <ProfileChip id={sellerId} fallback={o.sellerName || "Vendedor"} role="Vendedor" onOpen={onViewProfile} dark={dark} />}
-          {buyerId && <ProfileChip id={buyerId} fallback={o.delivery?.name || "Comprador"} role="Comprador" onOpen={onViewProfile} dark={dark} />}
-        </div>}
-        <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 14, padding: "2px 14px", marginBottom: 12 }}>
-          {addrRow("🏪", "Recoger en", pickupAddrOf(o) || pickupOf(o), pickupAddrOf(o) ? (pickupOf(o) + (pickupPhoneOf(o) ? " · " + pickupPhoneOf(o) : "")) : "Dirección exacta: coordínala con el vendedor")}
+
+        {/* Progreso del mensajero */}
+        <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "4px 0 12px" }}>
+          {STEPS.map((s, i) => (
+            <div key={s.key} style={{ flex: 1, textAlign: "center" }}>
+              <div style={{ height: 4, borderRadius: 2, background: i <= idx ? "#22C55E" : (dark ? "#26262b" : "#e2e8f0"), marginBottom: 4 }} />
+              <span style={{ fontSize: 8.5, fontWeight: 700, color: i <= idx ? "#22C55E" : t3, textTransform: "uppercase", letterSpacing: ".02em" }}>{s.label}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Recogida y entrega con perfiles tocables */}
+        <div style={{ borderTop: `1px solid ${bd}`, borderBottom: `1px solid ${bd}`, marginBottom: 10 }}>
+          {row("🏪", "Recoger en", pickupAddr || "Coordinar con el vendedor", pickupPhone ? "Tel: " + pickupPhone : null)}
+          <div style={{ display: "flex", gap: 8, padding: "0 0 8px 38px" }}>
+            <ProfileChip id={o.sellerId || o.seller_id} fallback={o.sellerName || "Vendedor"} role="Vendedor" onOpen={onViewProfile} dark={dark} />
+          </div>
           <div style={{ height: 1, background: bd }} />
-          {addrRow("📍", "Entregar a", dropOf(o), buyerOf(o))}
-          {phoneOf(o) && <><div style={{ height: 1, background: bd }} />{addrRow("📞", "Contacto", phoneOf(o))}</>}
-          {refOf(o) && <><div style={{ height: 1, background: bd }} />{addrRow("📝", "Referencia / indicaciones", refOf(o))}</>}
+          {row("📍", "Entregar en", dropOf(o) || "Ver con el comprador", dropNameOf(o) + (dropPhoneOf(o) ? " · " + dropPhoneOf(o) : ""))}
+          {refOf(o) && row("📝", "Referencia", refOf(o))}
+          <div style={{ display: "flex", gap: 8, padding: "0 0 10px 38px" }}>
+            <ProfileChip id={o.buyerId || o.buyer_id} fallback={dropNameOf(o)} role="Comprador" onOpen={onViewProfile} dark={dark} />
+          </div>
         </div>
-        {(() => { const e = etaOf(o); return <div style={{ display: "flex", alignItems: "center", gap: 8, background: AC + "12", border: `1px solid ${AC}30`, borderRadius: 12, padding: "9px 13px", marginBottom: 12 }}><span style={{ fontSize: 15 }}>🛵</span><span style={{ fontSize: 12.5, color: t1, fontWeight: 700 }}>~{e.km} km · ~{e.min} min</span><span style={{ fontSize: 10.5, color: t3 }}>estimado hasta la entrega</span></div>; })()}
-        <div style={{ display: "flex", gap: 8, marginBottom: actionMode ? 8 : 12 }}>
-          <button onClick={() => setActionMode(actionMode === "call" ? null : "call")} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: actionMode === "call" ? "#22C55E22" : "#22C55E18", border: "1px solid #22C55E45", color: "#16a34a", borderRadius: 12, padding: "11px", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>📞 Llamar</button>
-          <button onClick={() => setActionMode(actionMode === "map" ? null : "map")} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: actionMode === "map" ? AC + "1e" : card, border: `1px solid ${actionMode === "map" ? AC + "55" : bd}`, color: t1, borderRadius: 12, padding: "11px", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🗺️ Mapa</button>
-          {!demo && buyerId && onChat && <button onClick={() => onChat(buyerId, o.delivery?.name || o.buyerName || "Comprador")} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: card, border: `1px solid ${bd}`, color: t1, borderRadius: 12, padding: "11px", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>💬 Mensaje</button>}
-          <button onClick={() => { setActionMode(actionMode === "report" ? null : "report"); setReportTarget(""); }} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: actionMode === "report" ? "#ef444418" : card, border: `1px solid ${actionMode === "report" ? "#ef444455" : bd}`, color: actionMode === "report" ? "#ef4444" : t1, borderRadius: 12, padding: "11px", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>⚠️ Reportar</button>
+
+        {/* Dinero */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 11 }}>
+          {payBadge(o)}
+          <span style={{ fontSize: 11, color: t2, fontWeight: 600 }}>{cash ? <>Cobras <b style={{ color: t1 }}>{money((o.amount || 0) + feeOf(o))}</b> (producto + tu tarifa)</> : <>Solo cobras <b style={{ color: "#22C55E" }}>{money(feeOf(o))}</b> en efectivo</>}</span>
         </div>
-        {actionMode === "call" && <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <a href={`tel:${(phoneOf(o) || "").replace(/\s/g, "")}`} onClick={e => { if (!phoneOf(o)) e.preventDefault(); }} style={{ flex: 1, textAlign: "center", textDecoration: "none", background: phoneOf(o) ? "#22C55E18" : (dark ? "#1a1a1e" : "#f1f5f9"), border: `1px solid ${phoneOf(o) ? "#22C55E45" : bd}`, color: phoneOf(o) ? "#16a34a" : t3, borderRadius: 11, padding: "10px 8px", fontSize: 12, fontWeight: 700 }}>📞 Comprador<br /><span style={{ fontSize: 11, fontWeight: 600 }}>{phoneOf(o) || "sin teléfono"}</span></a>
-          <a href={`tel:${(pickupPhoneOf(o) || "").replace(/\s/g, "")}`} onClick={e => { if (!pickupPhoneOf(o)) e.preventDefault(); }} style={{ flex: 1, textAlign: "center", textDecoration: "none", background: pickupPhoneOf(o) ? "#22C55E18" : (dark ? "#1a1a1e" : "#f1f5f9"), border: `1px solid ${pickupPhoneOf(o) ? "#22C55E45" : bd}`, color: pickupPhoneOf(o) ? "#16a34a" : t3, borderRadius: 11, padding: "10px 8px", fontSize: 12, fontWeight: 700 }}>📞 Vendedor<br /><span style={{ fontSize: 11, fontWeight: 600 }}>{pickupPhoneOf(o) || "sin teléfono"}</span></a>
-        </div>}
-        {actionMode === "map" && <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pickupAddrOf(o) || pickupOf(o) || "")}`} target="_blank" rel="noopener noreferrer" style={{ flex: 1, textAlign: "center", textDecoration: "none", background: card, border: `1px solid ${bd}`, color: t1, borderRadius: 11, padding: "10px 8px", fontSize: 12, fontWeight: 700 }}>🏪 Recogida<br /><span style={{ fontSize: 10, fontWeight: 500, color: t3 }}>{pickupAddrOf(o) || pickupOf(o) || "—"}</span></a>
-          <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(dropOf(o) || "")}`} target="_blank" rel="noopener noreferrer" style={{ flex: 1, textAlign: "center", textDecoration: "none", background: card, border: `1px solid ${bd}`, color: t1, borderRadius: 11, padding: "10px 8px", fontSize: 12, fontWeight: 700 }}>📍 Entrega<br /><span style={{ fontSize: 10, fontWeight: 500, color: t3 }}>{dropOf(o) || "—"}</span></a>
-        </div>}
-        {actionMode === "report" && !reportSent[o.id] && <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 14, padding: 13, marginBottom: 12 }}>
-          {!reportTarget
-            ? <><div style={{ fontSize: 11.5, fontWeight: 800, color: t2, marginBottom: 9 }}>¿A quién quieres reportar?</div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => setReportTarget("comprador")} style={{ flex: 1, background: "transparent", border: `1px solid ${bd}`, color: t1, borderRadius: 10, padding: "11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Al comprador</button>
-                  <button onClick={() => setReportTarget("vendedor")} style={{ flex: 1, background: "transparent", border: `1px solid ${bd}`, color: t1, borderRadius: 10, padding: "11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Al vendedor</button>
-                </div></>
-            : <><div style={{ fontSize: 11.5, fontWeight: 800, color: t2, marginBottom: 9 }}>Reportar al {reportTarget} · ¿qué pasó?</div>
-                {(() => {
-                  const targetName = reportTarget === "comprador" ? (dropNameOf(o) || "Comprador") : (o.sellerName || pickupOf(o) || "Vendedor");
-                  const targetId = reportTarget === "comprador" ? (o.buyerId || o.delivery?.buyerId || null) : (o.sellerId || null);
+
+        {/* Acciones: llamar / mapa / chat */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 11 }}>
+          <a href={`tel:${(dropPhoneOf(o) || pickupPhone || "").replace(/\\s/g, "")}`} onClick={e => { if (!dropPhoneOf(o) && !pickupPhone) e.preventDefault(); }} style={{ flex: 1, textAlign: "center", textDecoration: "none", background: "#22C55E18", border: "1px solid #22C55E45", color: "#16a34a", borderRadius: 11, padding: "10px 6px", fontSize: 12, fontWeight: 800 }}>📞 Llamar</a>
+          <a href={mapUrl(canPickup ? (pickupAddr || dropOf(o)) : dropOf(o))} target="_blank" rel="noopener noreferrer" style={{ flex: 1, textAlign: "center", textDecoration: "none", background: card, border: `1px solid ${bd}`, color: t1, borderRadius: 11, padding: "10px 6px", fontSize: 12, fontWeight: 800 }}>🗺️ Mapa</a>
+          {onChat && (o.buyerId || o.buyer_id) && <button onClick={() => onChat(o.buyerId || o.buyer_id, dropNameOf(o), { type: "order", id: o.id, title: o.title || "Pedido", image: o.image || prod?.image || null })} style={{ flex: 1, background: card, border: `1px solid ${bd}`, color: t1, borderRadius: 11, padding: "10px 6px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>💬 Mensaje</button>}
+        </div>
+
+        {/* Reporte compacto */}
+        {reportFor === o.id && !reportSent[o.id] && (
+          <div style={{ background: dark ? "#1a1a1e" : "#f8fafc", border: `1px solid ${bd}`, borderRadius: 12, padding: 12, marginBottom: 11 }}>
+            {!reportTarget
+              ? <><div style={{ fontSize: 11.5, fontWeight: 800, color: t2, marginBottom: 8 }}>¿A quién quieres reportar?</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setReportTarget("comprador")} style={{ flex: 1, background: "transparent", border: `1px solid ${bd}`, color: t1, borderRadius: 10, padding: "10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Al comprador</button>
+                    <button onClick={() => setReportTarget("vendedor")} style={{ flex: 1, background: "transparent", border: `1px solid ${bd}`, color: t1, borderRadius: 10, padding: "10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Al vendedor</button>
+                  </div></>
+              : (() => {
+                  const targetName = reportTarget === "comprador" ? dropNameOf(o) : (o.sellerName || "Vendedor");
+                  const targetId = reportTarget === "comprador" ? (o.buyerId || o.buyer_id || null) : (o.sellerId || o.seller_id || null);
                   const send = (reasonText) => {
-                    onReport && onReport({ targetName, targetId, targetRole: reportTarget, reason: reasonText, detail: `Reportado por el mensajero durante la entrega de "${o.title || "pedido"}".`, reporterName: meName, reporterId: record?.id || record?.userId || meName, orderId: o.id });
-                    setReportSent(s => ({ ...s, [o.id]: `${reportTarget}: ${reasonText}` })); setActionMode(null); setReportTarget(""); setReportOther(false); setReportText("");
+                    onReport && onReport({ targetName, targetId, targetRole: reportTarget, reason: reasonText, detail: `Reportado por el mensajero durante la entrega de "${o.title || "pedido"}".`, reporterName: meName, reporterId: meId, orderId: o.id });
+                    setReportSent(s => ({ ...s, [o.id]: `${reportTarget}: ${reasonText}` })); setReportFor(null); setReportTarget(""); setReportOther(false); setReportText("");
                   };
                   if (reportOther) return <>
-                    <textarea value={reportText} maxLength={150} onChange={e => setReportText(e.target.value)} placeholder="Describe qué pasó (máx. 150 caracteres)…" autoFocus style={{ width: "100%", background: dark ? "#1a1a1e" : "#fff", border: `1px solid ${bd}`, borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: t1, minHeight: 64, resize: "vertical", fontFamily: "inherit", marginBottom: 6 }} />
-                    <div style={{ fontSize: 10, color: t3, textAlign: "right", marginBottom: 8 }}>{reportText.length}/150</div>
+                    <textarea value={reportText} maxLength={150} onChange={e => setReportText(e.target.value)} placeholder="Describe qué pasó (máx. 150 caracteres)…" autoFocus style={{ width: "100%", background: dark ? "#111" : "#fff", border: `1px solid ${bd}`, borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: t1, minHeight: 60, resize: "vertical", fontFamily: "inherit", marginBottom: 8, boxSizing: "border-box" }} />
                     <div style={{ display: "flex", gap: 8 }}>
                       <button onClick={() => { setReportOther(false); setReportText(""); }} style={{ flex: 1, background: "transparent", border: `1px solid ${bd}`, color: t2, borderRadius: 10, padding: "10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Atrás</button>
                       <button disabled={!reportText.trim()} onClick={() => send(reportText.trim())} style={{ flex: 2, background: reportText.trim() ? "#ef4444" : (dark ? "#26262b" : "#e2e8f0"), border: "none", color: reportText.trim() ? "#fff" : t3, borderRadius: 10, padding: "10px", fontSize: 12, fontWeight: 800, cursor: reportText.trim() ? "pointer" : "default" }}>Enviar reporte</button>
                     </div>
                   </>;
-                  return ["No encuentro la dirección", "No responde / no aparece", "Producto dañado o incorrecto", "No me dejaron cobrar", "Trato irrespetuoso", "Otro (escribir)"].map(r => <button key={r} onClick={() => { if (r === "Otro (escribir)") setReportOther(true); else send(r); }} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: `1px solid ${bd}`, color: t1, borderRadius: 10, padding: "10px 12px", fontSize: 12, fontWeight: 600, marginBottom: 7, cursor: "pointer" }}>{r}</button>);
-                })()}</>}
-        </div>}
-        {reportSent[o.id] && <div style={{ background: "#22C55E14", border: "1px solid #22C55E40", borderRadius: 12, padding: "11px 13px", marginBottom: 12, fontSize: 12, color: "#16a34a", fontWeight: 700 }}>✓ Reporte enviado ({reportSent[o.id]}). El equipo de RETADOR lo revisará.</div>}
-        {payCard(o)}
-        {actionBtn(o)}
-        {o.courierName === meName && o.courierStage && ["propuesta", "aceptado", "recogido"].includes(o.courierStage) && <button onClick={() => cancelFn(o.id)} style={{ width: "100%", marginTop: 8, background: "transparent", border: `1px solid #ef444455`, color: "#ef4444", borderRadius: 13, padding: "12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Liberar esta entrega (que la tome otro)</button>}
-      </div>
-    </div>;
+                  return ["No encuentro la dirección", "No responde / no aparece", "Producto dañado o incorrecto", "No me dejaron cobrar", "Trato irrespetuoso", "Otro (escribir)"].map(r => <button key={r} onClick={() => { if (r === "Otro (escribir)") setReportOther(true); else send(r); }} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: `1px solid ${bd}`, color: t1, borderRadius: 10, padding: "9px 12px", fontSize: 12, fontWeight: 600, marginBottom: 6, cursor: "pointer" }}>{r}</button>);
+                })()}
+          </div>
+        )}
+        {reportSent[o.id] && <div style={{ background: "#22C55E14", border: "1px solid #22C55E40", borderRadius: 12, padding: "10px 12px", marginBottom: 11, fontSize: 11.5, color: "#16a34a", fontWeight: 700 }}>✓ Reporte enviado ({reportSent[o.id]}).</div>}
+
+        {/* Estado / botones reales */}
+        {feePending
+          ? <div style={{ width: "100%", padding: "13px", borderRadius: 13, background: AC + "12", border: `1px solid ${AC}30`, textAlign: "center", fontSize: 12.5, fontWeight: 700, color: AC }}>Esperando que el comprador apruebe tu tarifa de {money(o.proposedFee || feeOf(o))}…</div>
+          : canPickup
+            ? <button onClick={() => onStage(o.id, "recogido")} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: AC, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>📦 Recogí el pedido</button>
+            : canDeliver
+              ? <button onClick={() => onStage(o.id, "entregado")} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: "#22C55E", color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>✅ Entregué</button>
+              : <div style={{ textAlign: "center", color: t2, fontSize: 12.5, fontWeight: 700, padding: "10px" }}>Estado: {o.status}</div>}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 9 }}>
+          {!reportSent[o.id] && <button onClick={() => { setReportFor(reportFor === o.id ? null : o.id); setReportTarget(""); setReportOther(false); }} style={{ flex: 1, background: "transparent", border: `1px solid ${bd}`, color: t2, borderRadius: 11, padding: "10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>⚠️ Reportar</button>}
+          {["asignado", "recogido"].includes(o.status) && <button onClick={() => onCancel(o.id)} style={{ flex: 1, background: "transparent", border: "1px solid #ef444455", color: "#ef4444", borderRadius: 11, padding: "10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Liberar entrega</button>}
+        </div>
+      </Card>
+    );
   };
 
-  return <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 4000, overflowY: "auto", WebkitOverflowScrolling: "touch", background: bg }}>
+  const dispView = () => pool.length === 0
+    ? <Card style={{ textAlign: "center", padding: "34px 16px" }}><div style={{ fontSize: 30, marginBottom: 8, opacity: .6 }}>📭</div><div style={{ fontSize: 13.5, color: t2 }}>No hay entregas disponibles ahora.</div><div style={{ fontSize: 12, color: t3, marginTop: 4 }}>Te avisaremos cuando haya pedidos en tu zona.</div></Card>
+    : <>
+        {online && <div style={{ display: "flex", alignItems: "center", gap: 9, background: "#22C55E14", border: "1px solid #22C55E40", borderRadius: 13, padding: "11px 14px", marginBottom: 12 }}>
+          <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#22C55E", flexShrink: 0 }} />
+          <span style={{ fontSize: 12.5, fontWeight: 800, color: "#16a34a" }}>{pool.length === 1 ? "¡Tienes 1 entrega disponible!" : `¡Tienes ${pool.length} entregas disponibles!`}</span>
+        </div>}
+        {!online && <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 13, padding: "11px 14px", marginBottom: 12, fontSize: 12, color: t3, fontWeight: 600 }}>Estás desconectado. Ponte <b style={{ color: t2 }}>En línea</b> arriba para recibir entregas.</div>}
+        {pool.map(o => poolCard(o))}
+      </>;
+
+  const activeView = () => actives.length === 0
+    ? <Card style={{ textAlign: "center", padding: "34px 16px" }}>
+        <div style={{ fontSize: 30, marginBottom: 8, opacity: .6 }}>🛵</div>
+        <div style={{ fontSize: 13.5, color: t2 }}>No tienes ninguna entrega activa.</div>
+        <div style={{ fontSize: 12, color: t3, marginTop: 4 }}>Acepta una de "Disponibles" para empezar.</div>
+      </Card>
+    : <>{actives.map(o => activeCard(o))}</>;
+
+  const histView = () => done.length === 0
+    ? <Card style={{ textAlign: "center", padding: "30px 16px" }}><div style={{ fontSize: 13.5, color: t2 }}>Aún no has completado entregas.</div></Card>
+    : done.map(o => (
+        <Card key={o.id} style={{ marginBottom: 10, padding: 13, display: "flex", alignItems: "center", gap: 11 }}>
+          {o.image ? <img src={o.image} alt="" style={{ width: 40, height: 40, borderRadius: 9, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} /> : <span style={{ fontSize: 20 }}>✅</span>}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.title || "Pedido"}</div>
+            <div style={{ fontSize: 10, color: t3 }}>{fmtDate(o.createdAt)}</div>
+          </div>
+          <span style={{ fontSize: 13, fontWeight: 800, color: "#22C55E" }}>+{money(feeOf(o))}</span>
+        </Card>
+      ));
+
+  return <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 4000, overflowY: "auto", WebkitOverflowScrolling: "touch", background: bg, paddingTop: "env(safe-area-inset-top, 0px)" }}>
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "16px 16px 44px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${bd}`, color: t2, borderRadius: 9, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>‹ Volver a RETADOR</button>
@@ -337,14 +309,14 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
         <div style={{ fontSize: 30, fontWeight: 800, marginTop: 2 }}>{money(earnedTotal)}</div>
         <div style={{ display: "flex", gap: 18, marginTop: 10, fontSize: 12 }}>
           <div><b style={{ fontSize: 16 }}>{done.length}</b> <span style={{ opacity: .8 }}>completadas</span></div>
-          <div><b style={{ fontSize: 16 }}>{available.length}</b> <span style={{ opacity: .8 }}>disponibles</span></div>
+          <div><b style={{ fontSize: 16 }}>{pool.length}</b> <span style={{ opacity: .8 }}>disponibles</span></div>
         </div>
       </div>
 
       <div style={{ display: "flex", background: dark ? "#141417" : "#fff", border: `1px solid ${bd}`, borderRadius: 12, padding: 3, marginBottom: 16 }}>
         {[["disp", "Disponibles"], ["activa", "Mi entrega"], ["hist", "Historial"]].map(([k, lb]) => (
           <button key={k} onClick={() => setTab(k)} style={{ flex: 1, height: 38, borderRadius: 9, border: "none", background: tab === k ? AC : "transparent", color: tab === k ? "#fff" : t2, fontSize: 12.5, fontWeight: 700, cursor: "pointer", position: "relative" }}>
-            {lb}{k === "activa" && active && <span style={{ position: "absolute", top: 5, right: 8, width: 7, height: 7, borderRadius: "50%", background: tab === k ? "#fff" : "#22C55E" }} />}
+            {lb}{k === "activa" && actives.length > 0 && !activaSeen && tab !== "activa" && <span style={{ position: "absolute", top: 5, right: 8, width: 7, height: 7, borderRadius: "50%", background: "#22C55E" }} />}
           </button>
         ))}
       </div>
@@ -353,7 +325,8 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
       {tab === "activa" && activeView()}
       {tab === "hist" && histView()}
     </div>
-    {detailModal()}
+
+    {/* Aceptar con opción de proponer tarifa mayor */}
     {adjustFor && (() => {
       const o = adjustFor, base = feeOf(o);
       const soft = dark ? "#1a1a1e" : "#f1f5f9";
@@ -361,10 +334,10 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
       const raised = val > base;
       const stepBtn = { width: 46, height: 46, borderRadius: 13, border: `1px solid ${bd}`, background: soft, color: t1, fontSize: 22, fontWeight: 800, cursor: "pointer", flexShrink: 0 };
       return <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 4300 }} onClick={() => setAdjustFor(null)}>
-        <div onClick={e => e.stopPropagation()} style={{ background: card, width: "100%", maxWidth: 480, borderRadius: "20px 20px 0 0", padding: "20px 18px 26px" }}>
+        <div onClick={e => e.stopPropagation()} style={{ background: card, width: "100%", maxWidth: 480, borderRadius: "20px 20px 0 0", padding: "20px 18px calc(26px + env(safe-area-inset-bottom, 0px))" }}>
           <div style={{ width: 38, height: 4, borderRadius: 4, background: bd, margin: "0 auto 16px" }} />
           <p style={{ fontSize: 16, fontWeight: 900, color: t1, marginBottom: 4 }}>Tu tarifa de entrega</p>
-          <p style={{ fontSize: 11.5, color: t3, marginBottom: 16, lineHeight: 1.5 }}>Estimada por distancia: <b style={{ color: t2 }}>{money(base)}</b>. Pon el precio que quieras según la distancia real. Si te pasas, el comprador puede rechazarlo.</p>
+          <p style={{ fontSize: 11.5, color: t3, marginBottom: 16, lineHeight: 1.5 }}>Estimada: <b style={{ color: t2 }}>{money(base)}</b>. Puedes ajustarla según la distancia real. Si la subes, el comprador debe aprobarla.</p>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
             <button onClick={() => setAdjustVal(String(Math.max(0, val - 25)))} style={stepBtn}>−</button>
             <div style={{ flex: 1, display: "flex", alignItems: "baseline", justifyContent: "center", gap: 5, background: soft, border: `1px solid ${bd}`, borderRadius: 13, padding: "8px 12px" }}>
@@ -374,7 +347,7 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
             <button onClick={() => setAdjustVal(String(val + 25))} style={stepBtn}>+</button>
           </div>
           {raised && <div style={{ fontSize: 11, color: "#b45309", background: "#f59e0b18", border: "1px solid #f59e0b40", borderRadius: 11, padding: "10px 12px", marginBottom: 12, lineHeight: 1.45 }}>Subiste la tarifa (+{money(val - base)}). El comprador deberá <b>aprobar</b> el nuevo total antes de que puedas recoger.</div>}
-          <button disabled={val <= 0} onClick={() => { acceptFn(o.id, val); setAdjustFor(null); setDetail(null); setTab("activa"); }} style={{ width: "100%", height: 50, borderRadius: 13, border: "none", background: val <= 0 ? soft : AC, color: val <= 0 ? t3 : "#fff", fontSize: 14.5, fontWeight: 800, cursor: val <= 0 ? "default" : "pointer" }}>{raised ? "Proponer tarifa y aceptar" : "Aceptar a la tarifa estimada"}</button>
+          <button disabled={val <= 0} onClick={() => { onAccept(o.id, val); setAdjustFor(null); setTab("activa"); }} style={{ width: "100%", height: 50, borderRadius: 13, border: "none", background: val <= 0 ? soft : AC, color: val <= 0 ? t3 : "#fff", fontSize: 14.5, fontWeight: 800, cursor: val <= 0 ? "default" : "pointer" }}>{raised ? "Proponer tarifa y aceptar" : "Aceptar a la tarifa estimada"}</button>
           <button onClick={() => setAdjustFor(null)} style={{ width: "100%", marginTop: 8, background: "transparent", border: "none", color: t3, fontSize: 12.5, fontWeight: 600, padding: "8px", cursor: "pointer" }}>Cancelar</button>
         </div>
       </div>;
@@ -385,29 +358,47 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
 export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId, orders = [], localBase = 150, onAccept, onStage, onCancel, onReport, onViewProfile, onChat }) {
   const bg = dark ? "#0a0a0a" : "#f1f5f9", card = dark ? "#141417" : "#fff", t1 = dark ? "#f0f0f2" : "#0f172a", t2 = dark ? "#9aa0aa" : "#64748b", t3 = dark ? "#6b7280" : "#94a3b8", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)", AC = "#6366F1";
   const [started, setStarted] = useState(false);
-  const [preview, setPreview] = useState(false);
-  // Solicitud REAL en courier_applications: undefined = cargando, null = no tiene.
-  const [app, setApp] = useState(undefined);
+  const [app, setApp] = useState(undefined); // undefined = cargando
   const [f, setF] = useState({ nombre: meName || "", telefono: "", zona: "", vehiculo: "A pie", acepta: false });
   const [err, setErr] = useState("");
   const [sending, setSending] = useState(false);
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const approved = myRecord?.status === "approved";
+  // BIENVENIDA: la primera vez que un aprobado entra, breve explicación y
+  // responsabilidades (se guarda visto por usuario en localStorage).
+  const welcomeKey = "retador_courier_welcome_" + (user?.id || "x");
+  const [welcomed, setWelcomed] = useState(() => { try { return localStorage.getItem(welcomeKey) === "1"; } catch (e) { return true; } });
   useEffect(() => {
     if (approved || !user?.id) { setApp(null); return; }
     let a = true;
-    // Red lenta o sin respuesta: a los 6s mostramos el formulario igual (si ya
-    // tenía solicitud, el propio insert único lo detecta y muestra su estado).
     const t = setTimeout(() => { if (a) setApp(cur => cur === undefined ? null : cur); }, 6000);
     getMyCourierApplication(user.id).then(d => { if (a) setApp(d); }).catch(() => { if (a) setApp(null); });
     return () => { a = false; clearTimeout(t); };
   }, [user?.id, approved]);
 
-  if (preview) return <CourierDashboard demo meName={meName || "Mensajero"} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onChat={onChat} onClose={() => setPreview(false)} dark={dark} record={{ nombre: meName }} />;
-  if (approved) return <CourierDashboard meName={meName} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onChat={onChat} onClose={onClose} dark={dark} record={myRecord} />;
-
-  const wrap = (children) => <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 4000, overflowY: "auto", WebkitOverflowScrolling: "touch", background: bg }}>{children}</div>;
+  const wrap = (children) => <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 4000, overflowY: "auto", WebkitOverflowScrolling: "touch", background: bg, paddingTop: "env(safe-area-inset-top, 0px)" }}>{children}</div>;
   const backBtn = <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${bd}`, color: t2, borderRadius: 9, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 16 }}>‹ Volver a RETADOR</button>;
+
+  if (approved && !welcomed) return wrap(
+    <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 16px 40px" }}>
+      {backBtn}
+      <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 20, overflow: "hidden" }}>
+        <div style={{ height: 110, background: `linear-gradient(135deg,#16a34a,#22C55E)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 46 }}>🎉</div>
+        <div style={{ padding: "20px 18px 22px" }}>
+          <h1 style={{ fontSize: 21, fontWeight: 800, color: t1, marginBottom: 8 }}>¡Bienvenido al equipo de mensajeros!</h1>
+          <p style={{ fontSize: 13, color: t2, lineHeight: 1.6, marginBottom: 14 }}>Así funciona: en <b>Disponibles</b> ves las entregas con toda la información; aceptas una y pasa a <b>Mi entrega</b>, donde marcas <b>Recogí</b> al recoger y <b>Entregué</b> al entregar de verdad.</p>
+          {[["📦", "Recoge con cuidado", "Eres responsable del producto (y del efectivo) hasta entregarlo."], ["✅", "Confirma solo al entregar", "Marca 'Entregué' únicamente cuando el comprador tenga el producto."], ["🤝", "Trato respetuoso", "Representas a RETADOR: puntualidad y respeto con todos."]].map(([ic, tt, ds]) => (
+            <div key={tt} style={{ display: "flex", gap: 11, alignItems: "flex-start", marginBottom: 11 }}>
+              <span style={{ fontSize: 19 }}>{ic}</span>
+              <div><div style={{ fontSize: 13, fontWeight: 700, color: t1 }}>{tt}</div><div style={{ fontSize: 11.5, color: t3 }}>{ds}</div></div>
+            </div>
+          ))}
+          <button onClick={() => { try { localStorage.setItem(welcomeKey, "1"); } catch (e) {} setWelcomed(true); }} style={{ width: "100%", height: 48, borderRadius: 13, border: "none", background: "#22C55E", color: "#fff", fontSize: 14.5, fontWeight: 800, cursor: "pointer", marginTop: 6 }}>Entendido, empezar →</button>
+        </div>
+      </div>
+    </div>
+  );
+  if (approved) return <CourierDashboard meName={meName} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onChat={onChat} onClose={onClose} dark={dark} record={myRecord} />;
 
   // Cargando su solicitud
   if (app === undefined) return wrap(
@@ -427,7 +418,6 @@ export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId
               ? "Tu solicitud para ser mensajero no fue aprobada esta vez. Si crees que fue un error, contacta al equipo de RETADOR."
               : "Recibimos tu solicitud para ser mensajero de RETADOR. La estamos revisando — te avisaremos cuando esté aprobada."}
           </p>
-          <button onClick={() => setPreview(true)} style={{ marginTop: 22, height: 42, padding: "0 18px", borderRadius: 12, border: `1px solid ${bd}`, background: "transparent", color: t2, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>👁 Ver el tablero (demo)</button>
         </div>
       </div>
     );
@@ -449,7 +439,6 @@ export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId
             </div>
           ))}
           <button onClick={() => setStarted(true)} style={{ width: "100%", height: 48, borderRadius: 13, border: "none", background: AC, color: "#fff", fontSize: 14.5, fontWeight: 800, cursor: "pointer", marginTop: 8 }}>Quiero ser mensajero →</button>
-          <button onClick={() => setPreview(true)} style={{ width: "100%", height: 42, borderRadius: 12, border: `1px solid ${bd}`, background: "transparent", color: t2, fontSize: 12.5, fontWeight: 700, cursor: "pointer", marginTop: 9 }}>👁 Ver el tablero (demo)</button>
         </div>
       </div>
     </div>
@@ -467,7 +456,6 @@ export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId
       setApp({ status: "pending" });
       flash && flash("🛵 Solicitud enviada — en revisión");
     } catch (e) {
-      // Si ya existe una (única por usuario), traemos su estado en vez de fallar.
       if (/duplicate|unique/i.test(e?.message || "")) {
         const d = await getMyCourierApplication(user?.id).catch(() => null);
         setApp(d || { status: "pending" });

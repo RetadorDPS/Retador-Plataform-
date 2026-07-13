@@ -889,15 +889,21 @@ export function ChatsModal({ onClose, initial, orders = [], chatMsgs = {}, chatP
    reales RESPETANDO la posición: cada anuncio se renderiza en el tramo donde el
    usuario lo colocó, entre las partes fijas del sistema. Botones que navegan. */
 
-export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, banners, onNav, hidden = false }) {
+export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, banners, onNav, hidden = false, scrollKeeper = null }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { cats } = useCatalog();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const { tokens: dt, mode: dMode } = useDensity();
   const plusBtnRef = useRef(null);
+  // Conserva la posición del scroll del feed: se guarda al scrollear y se
+  // restaura al volver (entrar a un producto y regresar no salta al inicio).
+  const feedRef = useRef(null);
+  useEffect(() => {
+    if (feedRef.current && scrollKeeper && scrollKeeper.current > 0) feedRef.current.scrollTop = scrollKeeper.current;
+  }, []);
 
   return (
-    <div style={{ flex: 1, overflowY: "auto" }}>
+    <div ref={feedRef} onScroll={e => { if (scrollKeeper) scrollKeeper.current = e.currentTarget.scrollTop; }} style={{ flex: 1, overflowY: "auto" }}>
       {/* Header */}
       <div style={{ position: "sticky", top: 0, zIndex: 52, background: isDark ? "rgba(8,8,8,.78)" : "rgba(255,255,255,.8)", backdropFilter: "blur(14px) saturate(1.4)", WebkitBackdropFilter: "blur(14px) saturate(1.4)", borderBottom: "none", padding: isDesktop ? "8px 36px" : "8px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, transform: hidden ? "translateY(-115%)" : "translateY(0)", transition: "transform .28s cubic-bezier(.4,0,.2,1)", willChange: "transform" }}>
         {!isDesktop && <Logo size={19} />}

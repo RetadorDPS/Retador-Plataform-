@@ -144,9 +144,15 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
           const mode = (o.shipType || o.shipMode) === "persona" ? "persona" : ((o.shipType || o.shipMode) === "intl" ? "intl" : "local");
           let nudge = null, actions = [];
           if (mode === "local" && o.feeApproval === "pending") {
-            nudge = `Tu mensajero propone un domicilio de ${Math.round(o.proposedFee || 0)} CUP (estimado: ${Math.round(o.baseFee || 0)} CUP). ¿Lo apruebas?`;
-            actions.push(btn(`Aprobar — domicilio ${Math.round(o.proposedFee || 0)} CUP`, () => onApproveFee && onApproveFee(true)));
-            actions.push(btn("Rechazar y buscar otro mensajero", () => onApproveFee && onApproveFee(false), "danger"));
+            // El COMPRADOR ve la propuesta y decide; el vendedor solo se entera.
+            const prop = Math.round(o.proposedFee || 0), orig = Math.round(o.deliveryCost || o.baseFee || o.shipPrice || 0);
+            if (!isSeller) {
+              nudge = `🛵 Un mensajero propone llevar tu pedido por ${prop} CUP (tarifa original: ${orig} CUP). ¿Lo apruebas?`;
+              actions.push(btn(`Aprobar — domicilio ${prop} CUP`, () => onApproveFee && onApproveFee(true)));
+              actions.push(btn("Rechazar y buscar otro mensajero", () => onApproveFee && onApproveFee(false), "danger"));
+            } else {
+              nudge = `🛵 Un mensajero propuso ${prop} CUP de domicilio (original: ${orig} CUP). Esperando que el comprador responda.`;
+            }
           }
           else if (o.status === "fallido") nudge = "❌ Entrega marcada como fallida (sin pago). El producto fue devuelto.";
           else if (fullyDone) nudge = "✅ Entrega completada. ¡Gracias!";

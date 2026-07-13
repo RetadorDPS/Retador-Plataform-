@@ -332,12 +332,15 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
       const soft = dark ? "#1a1a1e" : "#f1f5f9";
       const val = Math.max(0, Number(adjustVal) || 0);
       const raised = val > base;
+      // El backend valida el TOPE: máximo el DOBLE de la base (si base=0, libre).
+      const maxFee = base > 0 ? base * 2 : Infinity;
+      const overMax = val > maxFee;
       const stepBtn = { width: 46, height: 46, borderRadius: 13, border: `1px solid ${bd}`, background: soft, color: t1, fontSize: 22, fontWeight: 800, cursor: "pointer", flexShrink: 0 };
       return <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 4300 }} onClick={() => setAdjustFor(null)}>
         <div onClick={e => e.stopPropagation()} style={{ background: card, width: "100%", maxWidth: 480, borderRadius: "20px 20px 0 0", padding: "20px 18px calc(26px + env(safe-area-inset-bottom, 0px))" }}>
           <div style={{ width: 38, height: 4, borderRadius: 4, background: bd, margin: "0 auto 16px" }} />
           <p style={{ fontSize: 16, fontWeight: 900, color: t1, marginBottom: 4 }}>Tu tarifa de entrega</p>
-          <p style={{ fontSize: 11.5, color: t3, marginBottom: 16, lineHeight: 1.5 }}>Estimada: <b style={{ color: t2 }}>{money(base)}</b>. Puedes ajustarla según la distancia real. Si la subes, el comprador debe aprobarla.</p>
+          <p style={{ fontSize: 11.5, color: t3, marginBottom: 16, lineHeight: 1.5 }}>Estimada: <b style={{ color: t2 }}>{money(base)}</b>{base > 0 && <> · Máximo: <b style={{ color: t2 }}>{money(maxFee)}</b></>}. Puedes ajustarla según la distancia real. Si la subes, el comprador debe aprobarla.</p>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
             <button onClick={() => setAdjustVal(String(Math.max(0, val - 25)))} style={stepBtn}>−</button>
             <div style={{ flex: 1, display: "flex", alignItems: "baseline", justifyContent: "center", gap: 5, background: soft, border: `1px solid ${bd}`, borderRadius: 13, padding: "8px 12px" }}>
@@ -346,8 +349,9 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
             </div>
             <button onClick={() => setAdjustVal(String(val + 25))} style={stepBtn}>+</button>
           </div>
-          {raised && <div style={{ fontSize: 11, color: "#b45309", background: "#f59e0b18", border: "1px solid #f59e0b40", borderRadius: 11, padding: "10px 12px", marginBottom: 12, lineHeight: 1.45 }}>Subiste la tarifa (+{money(val - base)}). El comprador deberá <b>aprobar</b> el nuevo total antes de que puedas recoger.</div>}
-          <button disabled={val <= 0} onClick={() => { onAccept(o.id, val); setAdjustFor(null); setTab("activa"); }} style={{ width: "100%", height: 50, borderRadius: 13, border: "none", background: val <= 0 ? soft : AC, color: val <= 0 ? t3 : "#fff", fontSize: 14.5, fontWeight: 800, cursor: val <= 0 ? "default" : "pointer" }}>{raised ? "Proponer tarifa y aceptar" : "Aceptar a la tarifa estimada"}</button>
+          {raised && !overMax && <div style={{ fontSize: 11, color: "#b45309", background: "#f59e0b18", border: "1px solid #f59e0b40", borderRadius: 11, padding: "10px 12px", marginBottom: 12, lineHeight: 1.45 }}>Subiste la tarifa (+{money(val - base)}). El comprador deberá <b>aprobar</b> el nuevo total antes de que puedas recoger.</div>}
+          {overMax && <div style={{ fontSize: 11, color: "#fff", background: "#ef4444", borderRadius: 11, padding: "10px 12px", marginBottom: 12, lineHeight: 1.45 }}>El máximo permitido es <b>{money(maxFee)}</b> (el doble de la tarifa base). Baja tu propuesta para poder aceptar.</div>}
+          <button disabled={val <= 0 || overMax} onClick={() => { onAccept(o.id, val); setAdjustFor(null); setTab("activa"); }} style={{ width: "100%", height: 50, borderRadius: 13, border: "none", background: (val <= 0 || overMax) ? soft : AC, color: (val <= 0 || overMax) ? t3 : "#fff", fontSize: 14.5, fontWeight: 800, cursor: (val <= 0 || overMax) ? "default" : "pointer" }}>{raised ? "Proponer tarifa y aceptar" : "Aceptar a la tarifa estimada"}</button>
           <button onClick={() => setAdjustFor(null)} style={{ width: "100%", marginTop: 8, background: "transparent", border: "none", color: t3, fontSize: 12.5, fontWeight: 600, padding: "8px", cursor: "pointer" }}>Cancelar</button>
         </div>
       </div>;

@@ -308,6 +308,21 @@ export const getUserOrders = async (userId) => {
       unitPrice: o.unit_price, shipMode, shipType: shipMode, shipPrice: o.ship_price ?? 0, shipTo: o.ship_to,
       flow, stepIdx,
       status: o.status || (flow[0] && flow[0].key),
+      // ── MAPEO COMPLETO snake_case → camelCase (TODO lo que usa la UI) ──────
+      // Este desajuste ya causó varios bugs (tarifa invisible, botones que no
+      // salen): aquí se traduce TODO de una vez. Si añades una columna nueva a
+      // orders y la UI la usa en camelCase, AGREGA SU ALIAS AQUÍ.
+      feeApproval: o.fee_approval ?? null,
+      proposedFee: o.proposed_fee ?? null,
+      baseFee: o.base_fee ?? o.delivery_cost ?? o.ship_price ?? null,
+      deliveryCost: o.delivery_cost ?? o.ship_price ?? null,
+      paymentMethod: o.payment_method ?? null,
+      payMethod: o.payment_method ?? null,
+      heldAmount: o.held_amount ?? null,
+      walletPaid: o.wallet_paid ?? null,
+      buyerName: o.delivery?.name || o.buyer_name || null,
+      sellerName: o.seller_name || null,
+      courierName: o.courier_name || null,
       buyerConfirmed: o.buyer_confirmed, sellerPaid: o.seller_paid,
       sellerConfirmed: o.status !== "creada",
       courierStage: o.courier_stage, commissionPct: o.commission_pct,

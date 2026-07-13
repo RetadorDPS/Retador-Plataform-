@@ -128,6 +128,12 @@ function AppShell({ sessionUser }) {
     if (changes.cat         !== undefined) upd.cat         = changes.cat || null;
     if (changes.subcat      !== undefined) upd.subcat      = changes.subcat || null;
     if (changes.images      !== undefined) upd.images      = Array.isArray(changes.images) ? changes.images : [];
+    // Formas de entrega y sus datos (mismas columnas que usa handlePublish).
+    if (changes.shipModes     !== undefined) upd.ship_modes     = changes.shipModes;
+    if (changes.shippingPrice !== undefined) upd.ship_price     = Number(changes.shippingPrice) || 0;
+    if (changes.pickupAddress !== undefined) upd.pickup_address = changes.pickupAddress || null;
+    if (changes.pickupPhone   !== undefined) upd.pickup_phone   = changes.pickupPhone || null;
+    if (changes.location      !== undefined) upd.location       = changes.location || null;
     const { data, error } = await supabase.from("products").update(upd).eq("id", id).select().single();
     if (error) { flash("⚠️ " + (error.message || "No se pudo editar")); return; }
     setProducts(prev => prev.map(p => p.id === id ? mapProduct(data) : p));

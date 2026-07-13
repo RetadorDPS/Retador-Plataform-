@@ -1070,11 +1070,27 @@ export function EditProductModal({ product, onClose, onSave, flash }) {
   const [catLabel, setCatLabel] = useState(catObj ? (product.subcat ? `${catObj.name} / ${product.subcat}` : catObj.name) : "");
   const options = []; cats.forEach(c => { const sc = subs[c.id] || []; if (sc.length) sc.forEach(s => options.push(`${c.name} / ${s}`)); else options.push(c.name); });
   const addImgs = (files) => { Array.from(files || []).slice(0, 8).forEach(f => { const r = new FileReader(); r.onload = () => setImgs(prev => prev.length >= 8 ? prev : [...prev, r.result]); r.readAsDataURL(f); }); };
+  // FORMAS DE ENTREGA — mismas opciones que al publicar, precargadas con lo que
+  // el producto ya tiene (ship_modes + recogida + precio de envío intl).
+  const [shipModes, setShipModes] = useState(() => ({ local: false, persona: false, intl: false, ...(product.shipModes || product.ship_modes || { local: true }) }));
+  const toggleMode = (k) => setShipModes(m => ({ ...m, [k]: !m[k] }));
+  const [pickupAddress, setPickupAddress] = useState(product.pickupAddress || product.pickup_address || "");
+  const [pickupPhone, setPickupPhone] = useState(product.pickupPhone || product.pickup_phone || "");
+  const [shipPrice, setShipPrice] = useState(product.shippingPrice ?? product.ship_price ?? "");
+  const [location, setLocation] = useState(product.location || "");
   const save = () => {
     if (!title.trim()) { flash && flash("Ponle un título"); return; }
+    if (!shipModes.local && !shipModes.persona && !shipModes.intl) { flash && flash("⚠️ Marca al menos una forma de entrega"); return; }
+    if (shipModes.intl && !Number(shipPrice)) { flash && flash("⚠️ Define el precio del envío internacional"); return; }
     const parts = catLabel.split("/").map(s => s.trim());
     const found = cats.find(c => (c.name || "").toLowerCase() === (parts[0] || "").toLowerCase());
-    onSave({ title: title.trim(), price: Number(price) || 0, description: desc, cat: found ? found.id : product.cat, subcat: parts[1] || undefined, image: imgs[0] || product.image, images: imgs });
+    onSave({
+      title: title.trim(), price: Number(price) || 0, description: desc,
+      cat: found ? found.id : product.cat, subcat: parts[1] || undefined,
+      image: imgs[0] || product.image, images: imgs,
+      shipModes, shippingPrice: Number(shipPrice) || 0,
+      pickupAddress, pickupPhone, location,
+    });
     flash && flash("✅ Producto actualizado");
   };
   const lbl = { fontSize: 11, fontWeight: 700, color: T2, marginBottom: 5, display: "block" };
@@ -1116,7 +1132,43 @@ export function EditProductModal({ product, onClose, onSave, flash }) {
         <label style={lbl}>Descripción</label>
         <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4} style={{ ...inp, resize: "none", marginBottom: 18 }} />
 
-        <div style={{ display: "flex", gap: 10 }}>
+        {/* FORMAS DE ENTREGA (combinables) — igual que al publicar */}
+        <label style={lbl}>Formas de entrega</label>
+        {[
+          { k: "local",   ic: "🛵", t: "Delivery local",       d: "Un mensajero lo recoge y lo entrega" },
+          { k: "persona", ic: "🤝", t: "Entrega en persona",   d: "Coordinan el encuentro por el chat" },
+          { k: "intl",    ic: "✈️", t: "Envío internacional",  d: "Con transportista, precio de envío aparte" },
+        ].map(m => (
+          <div key={m.k} onClick={() => toggleMode(m.k)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 11, border: `1.5px solid ${shipModes[m.k] ? G : B}`, background: shipModes[m.k] ? (isDark ? "#1a160a" : "#fdf6e3") : "transparent", marginBottom: 8, cursor: "pointer" }}>
+            <span style={{ fontSize: 18 }}>{m.ic}</span>
+            <div style={{ flex: 1 }}>
+              <p style={{ fontSize: 12.5, fontWeight: 700, color: T1 }}>{m.t}</p>
+              <p style={{ fontSize: 10, color: T3 }}>{m.d}</p>
+            </div>
+            <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${shipModes[m.k] ? G : B}`, background: shipModes[m.k] ? G : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#000", fontSize: 12, fontWeight: 900, flexShrink: 0 }}>{shipModes[m.k] ? "✓" : ""}</div>
+          </div>
+        ))}
+        {shipModes.local && (
+          <div style={{ marginTop: 4, marginBottom: 8 }}>
+            <label style={lbl}>Dirección de recogida (para el mensajero)</label>
+            <input value={pickupAddress} onChange={e => setPickupAddress(e.target.value)} placeholder="Calle, número, entre calles, municipio" style={{ ...inp, marginBottom: 8 }} />
+            <input value={pickupPhone} onChange={e => setPickupPhone(e.target.value)} placeholder="Teléfono de contacto para la recogida" style={inp} />
+          </div>
+        )}
+        {(shipModes.local || shipModes.persona) && (
+          <div style={{ marginTop: 4, marginBottom: 8 }}>
+            <label style={lbl}>Ubicación / zona</label>
+            <input value={location} onChange={e => setLocation(e.target.value)} placeholder="Ej: Vedado, La Habana" style={inp} />
+          </div>
+        )}
+        {shipModes.intl && (
+          <div style={{ marginTop: 4, marginBottom: 8 }}>
+            <label style={lbl}>Precio del envío internacional</label>
+            <input type="number" value={shipPrice} onChange={e => setShipPrice(e.target.value)} placeholder="Precio del envío" style={inp} />
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
           <button onClick={onClose} style={{ flex: 1, height: 46, borderRadius: 12, border: `1px solid ${B}`, background: "transparent", color: T1, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
           <button onClick={save} style={{ flex: 1, height: 46, borderRadius: 12, border: "none", background: G, color: "#000", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>Guardar cambios</button>
         </div>

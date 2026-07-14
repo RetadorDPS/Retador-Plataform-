@@ -187,8 +187,18 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
             const cur = (o.flow && o.flow[o.stepIdx]) ? o.flow[o.stepIdx].label : "En proceso";
             nudge = `Envío internacional en curso: ${cur}. Te avisaremos con cada avance.`;
           } else {
-            if (o.courierName) nudge = isSeller ? `${o.courierName} está gestionando la entrega.` : `Tu mensajero (${o.courierName}) está en camino.`;
-            else nudge = isSeller ? "Pedido confirmado. Esperando que un mensajero acepte la entrega." : "Buscando mensajero para tu entrega.";
+            // FLUJO LOCAL en curso: ¿YA hay mensajero? Se decide por courier_id
+            // (uuid REAL), NUNCA por courierName (esa columna no existe → daba
+            // undefined y se quedaba "buscando mensajero" para siempre).
+            const hasCourier = !!(o.courierId || o.courier_id);
+            if (hasCourier) {
+              const label = o.status === "asignado" ? "Mensajero asignado — recogerá el pedido pronto"
+                : (o.status === "recogido" || o.status === "en_ruta") ? "📦 En reparto hacia el comprador"
+                : "Tu mensajero está gestionando la entrega";
+              nudge = isSeller ? `Un mensajero tomó tu venta. ${label}.` : label + ".";
+            } else {
+              nudge = isSeller ? "Pedido confirmado. Esperando que un mensajero acepte la entrega." : "Buscando mensajero para tu entrega.";
+            }
           }
 
           return <>
@@ -215,8 +225,8 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
                 {rate.sys > 0 && <textarea value={rateMsg.sys} onChange={e => setRateMsg(m => ({ ...m, sys: e.target.value }))} placeholder="Cuéntale a otros cómo fue el servicio de entrega en general (opcional)…" style={{ width: "100%", marginTop: 10, background: soft, border: `1px solid ${B}`, borderRadius: 10, padding: "9px 11px", fontSize: 12, color: T1, minHeight: 48, resize: "vertical", fontFamily: "inherit" }} />}
               </div>
 
-              {o.courierName && <div style={{ borderTop: `1px solid ${B}`, paddingTop: 12, marginBottom: 11 }}>
-                <p style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>Tu mensajero · {o.courierName}</p>
+              {(o.courierId || o.courier_id) && <div style={{ borderTop: `1px solid ${B}`, paddingTop: 12, marginBottom: 11 }}>
+                <p style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>Tu mensajero{o.courierName ? ` · ${o.courierName}` : ""}</p>
                 <p style={{ fontSize: 10.5, color: T3, marginBottom: 9 }}>¿Qué tal la entrega?</p>
                 {stars(rate.courier, n => setRate(r => ({ ...r, courier: n })))}
                 {rate.courier > 0 && <textarea value={rateMsg.courier} onChange={e => setRateMsg(m => ({ ...m, courier: e.target.value }))} placeholder="Cuéntale a otros cómo fue el servicio del mensajero: ¿rápido?, ¿buen trato?, ¿cuidó el producto?…" style={{ width: "100%", marginTop: 10, background: soft, border: `1px solid ${B}`, borderRadius: 10, padding: "9px 11px", fontSize: 12, color: T1, minHeight: 48, resize: "vertical", fontFamily: "inherit" }} />}

@@ -27,9 +27,9 @@ export const getUserById = async (id) => {
   if (!id) return null;
   if (_profileCache.has(id)) return _profileCache.get(id);
   try {
-    const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url").eq("id", id).single();
+    const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url, bio").eq("id", id).single();
     if (error || !data) { _profileCache.set(id, null); return null; }
-    const p = { id: data.id, name: data.full_name || "Usuario", avatar: data.avatar_url || null };
+    const p = { id: data.id, name: data.full_name || "Usuario", avatar: data.avatar_url || null, bio: data.bio || "" };
     _profileCache.set(id, p);
     return p;
   } catch (e) { return null; }
@@ -353,9 +353,9 @@ export const markNotificationsRead = async (userId, id = null) => {
 // mensajero, para que el modo se desbloquee SIN cerrar la app).
 export const refreshSessionProfile = async (userId) => {
   if (!userId) return null;
-  const { data, error } = await supabase.from("profiles").select("role, full_name, avatar_url").eq("id", userId).single();
+  const { data, error } = await supabase.from("profiles").select("role, full_name, avatar_url, bio").eq("id", userId).single();
   if (error || !data) return null;
-  return { role: data.role || "user", name: data.full_name || null, avatar: data.avatar_url || null };
+  return { role: data.role || "user", name: data.full_name || null, avatar: data.avatar_url || null, bio: data.bio || "" };
 };
 
 // ── REGISTRO DE MENSAJEROS (courier_applications) ────────────────────────────

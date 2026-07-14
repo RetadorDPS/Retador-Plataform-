@@ -270,9 +270,18 @@ function AppShell({ sessionUser }) {
     name: sessionUser?.name || "Usuario",
     username: (sessionUser?.email ? sessionUser.email.split("@")[0] : (sessionUser?.name || "usuario")).toLowerCase().replace(/[^a-z0-9._]/g, ""),
     email: sessionUser?.email || "",
+    bio: "",
     rating: 0,
     sales: 0,
   });
+  // Carga la BIOGRAFÍA (y refresca rol/nombre/foto) reales del perfil al iniciar.
+  useEffect(() => {
+    if (!sessionUser?.id) return;
+    refreshSessionProfile(sessionUser.id).then(p => {
+      if (!p) return;
+      setProfileData(prev => ({ ...prev, bio: p.bio || prev.bio || "", name: p.name || prev.name, avatar: p.avatar ? { type: "image", value: p.avatar } : prev.avatar }));
+    }).catch(() => {});
+  }, [sessionUser?.id]);
 
   // Productos y búsqueda - Productos ya cargados
   const [products,  setProducts]  = useState([]); // productos REALES del backend
@@ -669,31 +678,74 @@ function AppShell({ sessionUser }) {
   //   instante (badge de Ventas incluido) y el comprador ve avanzar su pedido
   //   (confirmado→asignado→recogido→en ruta→entregado) sin recargar.
   // Se limpia al cerrar sesión o cambiar de usuario (removeChannel).
+  // Red de seguridad: recarga TODO lo vivo de una (pedidos, notifs, no leídos).
+  const refreshAllLive = useCallback(() => {
+    loadOrders(); reloadBkNotifs(); reloadChatUnread();
+    if (user?.role === "admin") reloadCourierApps();
+  }, [loadOrders, reloadBkNotifs, reloadChatUnread, user?.role, reloadCourierApps]);
+
   useEffect(() => {
     if (!user?.id) return;
-    const ch = supabase.channel(`rt-global-${user.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => reloadChatUnread())
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => loadOrders())
-      // NOTIFICACIONES del backend EN VIVO: toast + campanita + reacciones por tipo.
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` }, (payload) => {
-        const n = payload.new || {};
-        setBkNotifs(prev => prev.find(x => x.id === n.id) ? prev : [n, ...prev]);
-        if (n.text) flash("🔔 " + n.text);
-        // Aprobación de mensajero: refresca el rol en sesión → el modo mensajero
-        // se desbloquea AL INSTANTE, sin cerrar la app.
-        if (n.kind === "courier") {
-          refreshSessionProfile(user.id).then(p => { if (p) setUser(prev => prev ? { ...prev, role: p.role } : prev); }).catch(() => {});
-        }
-        // Nueva solicitud de mensajero (para el admin): refresca lista y badge.
-        if (n.kind === "courier_app" && user.role === "admin") reloadCourierApps();
-      })
-      // Solicitudes de mensajero EN VIVO (lista y badge del panel admin).
-      .on("postgres_changes", { event: "*", schema: "public", table: "courier_applications" }, () => {
-        if (user.role === "admin") reloadCourierApps();
-      })
-      .subscribe();
-    return () => { try { supabase.removeChannel(ch); } catch (e) {} };
-  }, [user?.id, user?.role, reloadChatUnread, loadOrders, reloadCourierApps]);
+    let chan = null, retry = 0, retryTimer = null, cancelled = false;
+    const connect = () => {
+      if (cancelled) return;
+      // Nombre ÚNICO por intento: supabase.channel() reutiliza el canal si el
+      // nombre se repite (y al re-suscribir revienta). Un sufijo distinto por
+      // intento garantiza un canal nuevo y limpio en cada reconexión.
+      chan = supabase.channel(`rt-global-${user.id}-${Date.now()}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => reloadChatUnread())
+        .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => loadOrders())
+        // NOTIFICACIONES del backend EN VIVO: toast + campanita + reacciones por tipo.
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` }, (payload) => {
+          const n = payload.new || {};
+          setBkNotifs(prev => prev.find(x => x.id === n.id) ? prev : [n, ...prev]);
+          if (n.text) flash("🔔 " + n.text);
+          if (n.kind === "courier") {
+            refreshSessionProfile(user.id).then(p => { if (p) setUser(prev => prev ? { ...prev, role: p.role } : prev); }).catch(() => {});
+          }
+          if (n.kind === "courier_app" && user.role === "admin") reloadCourierApps();
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "courier_applications" }, () => {
+          if (user.role === "admin") reloadCourierApps();
+        })
+        // RESILIENCIA: si el canal se cae (red intermitente tipo Cuba), reintenta
+        // suscribirse con backoff y, al reconectar, recarga todo por si perdimos algo.
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") { retry = 0; refreshAllLive(); return; }
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            if (cancelled || retry >= 8) return;   // tope: los listeners de foco/online son la otra red de seguridad
+            const dead = chan; chan = null;
+            try { Promise.resolve(supabase.removeChannel(dead)).catch(() => {}); } catch (e) {}
+            const wait = Math.min(2000 * 2 ** retry, 30000); retry++;
+            if (retryTimer) clearTimeout(retryTimer);
+            retryTimer = setTimeout(connect, wait);
+          }
+        });
+    };
+    connect();
+    return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); try { if (chan) Promise.resolve(supabase.removeChannel(chan)).catch(() => {}); } catch (e) {} };
+  }, [user?.id, user?.role, reloadChatUnread, loadOrders, reloadCourierApps, refreshAllLive]);
+
+  // Red de seguridad para redes intermitentes: al VOLVER a la app (foco/visible)
+  // o al RECUPERAR internet, recarga todo lo vivo — nadie se queda atascado.
+  useEffect(() => {
+    if (!user?.id) return;
+    const onWake = () => { if (document.visibilityState !== "hidden") refreshAllLive(); };
+    window.addEventListener("focus", onWake);
+    window.addEventListener("online", onWake);
+    document.addEventListener("visibilitychange", onWake);
+    return () => { window.removeEventListener("focus", onWake); window.removeEventListener("online", onWake); document.removeEventListener("visibilitychange", onWake); };
+  }, [user?.id, refreshAllLive]);
+
+  // Polling SUAVE: solo mientras hay un pedido activo abierto (detalle de pedido o
+  // modo mensajero). Refuerzo para redes muy lentas, además del realtime.
+  useEffect(() => {
+    if (!user?.id) return;
+    const activoAbierto = pScr === "order-detail" || showCourier;
+    if (!activoAbierto) return;
+    const iv = setInterval(() => { if (document.visibilityState !== "hidden") loadOrders(); }, 15000);
+    return () => clearInterval(iv);
+  }, [user?.id, pScr, showCourier, loadOrders]);
 
   const roleOf = (o) => (((o.buyerId ?? o.buyer_id) === user?.id) ? "compra" : "venta");
   const mergedOrders = orders;

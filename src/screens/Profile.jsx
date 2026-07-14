@@ -6,8 +6,9 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const name     = profileData.name || user?.name || "Usuario";
-  const rating   = profileData.rating || 4.9;
-  const sales    = profileData.sales || 0;
+  // Datos REALES: nada inventado. Sin reputación aún → "Nuevo", 0 ventas.
+  const rating   = Number(profileData.rating) || 0;
+  const sales    = Number(profileData.sales) || 0;
   // Foto de perfil real: del avatar guardado (objeto) o de user.avatar (URL de
   // Google/Supabase). Si no hay, la inicial del nombre. Nunca emoji.
   const avatarSrc = avatarUrlOf(profileData.avatar) || avatarUrlOf(user?.avatar);
@@ -24,7 +25,7 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
             <p style={{ fontSize: 10 * ts, color: T2, marginTop: 2 }}>{user?.email || "Ver perfil completo"}</p>
             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
               <span style={{ fontSize: 9 * ts, fontWeight: 700, color: "#9A7C2A", background: "#9A7C2A18", border: "1px solid #9A7C2A30", borderRadius: 4, padding: "2px 7px" }}>FREE</span>
-              <span style={{ fontSize: 9 * ts, color: T3 }}>⭐ {rating} · {sales} ventas</span>
+              <span style={{ fontSize: 9 * ts, color: T3 }}>{rating > 0 ? `⭐ ${rating}` : "⭐ Nuevo"} · {sales} {sales === 1 ? "venta" : "ventas"}</span>
             </div>
           </div>
           <span style={{ color: T3, fontSize: 18 }}>›</span>
@@ -1285,17 +1286,18 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
     getUserById(sellerId).then(p => {
       if (!alive || !p?.name) return;
       const uname = String(p.name).toLowerCase().replace(/[^a-z0-9._]/g, "");
-      setProfile(prev => ({ ...prev, name: p.name, username: uname, avatar: p.avatar ? { type: "photo", url: p.avatar } : prev.avatar }));
-      setPd(prev => ({ ...prev, name: p.name, username: uname }));
+      setProfile(prev => ({ ...prev, name: p.name, username: uname, bio: p.bio || "", avatar: p.avatar ? { type: "photo", url: p.avatar } : prev.avatar }));
+      setPd(prev => ({ ...prev, name: p.name, username: uname, bio: p.bio || "" }));
     }).catch(() => {});
     return () => { alive = false; };
   }, [sellerId, isOwner]);
 
+  // Sin datos inventados: todo vacío hasta que la persona lo llene de verdad.
   const [about, setAbout] = useState({
-    city:"Guadalajara", state:"Jalisco", country:"México",
-    responseTime:"Aprox. 2 horas", shipping:"1–3 días hábiles",
+    city:"", state:"", country:"",
+    responseTime:"", shipping:"",
     instagram:"", facebook:"", tiktok:"",
-    acceptsOffers:true, shipsNational:true, shipsLocal:false,
+    acceptsOffers:false, shipsNational:false, shipsLocal:false,
   });
   const [ad, setAd] = useState({ ...about });
 
@@ -1313,11 +1315,11 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
     setProfile(updated);
     setEditProfile(false);
     toast_("Perfil actualizado");
-    onProfileUpdate?.({ avatar: updated.avatar, name: updated.name, username: updated.username, email: updated.email, rating: 0, sales: 0 });
-    // Guarda en el backend (nombre y, si es foto, la URL del avatar). Así el cambio
-    // se refleja en TODOS lados y en el otro teléfono.
+    onProfileUpdate?.({ avatar: updated.avatar, name: updated.name, username: updated.username, email: updated.email, bio: updated.bio || "" });
+    // Guarda en el backend (nombre, foto y BIOGRAFÍA). Así se refleja en TODOS
+    // lados (perfil propio y público) y en el otro teléfono.
     if (isOwner && user?.id) {
-      const patch = { full_name: updated.name };
+      const patch = { full_name: updated.name, bio: updated.bio || "" };
       const url = avatarUrlOf(updated.avatar);
       if (updated.avatar?.type === "image" && url) patch.avatar_url = url;
       try { await supabase.from("profiles").update(patch).eq("id", user.id); } catch (e) { console.error("saveProfile:", e?.message || e); }
@@ -1458,10 +1460,12 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
             </span>
           </div>
 
-          {/* Bio */}
-          <div style={{ fontSize:13, color:FP_C.textSecondary, lineHeight:1.6, marginBottom:16 }}>
-            {profile.bio}
-          </div>
+          {/* Bio (solo si hay; para el dueño, invita a escribirla) */}
+          {(profile.bio || isOwner) && (
+            <div style={{ fontSize:13, color:FP_C.textSecondary, lineHeight:1.6, marginBottom:16, fontStyle: profile.bio ? "normal" : "italic", opacity: profile.bio ? 1 : .7 }}>
+              {profile.bio || (isOwner ? "Añade una biografía para que los compradores te conozcan." : "")}
+            </div>
+          )}
 
           {/* Acciones (visitante): seguir + mensaje, a lo ancho */}
           {!isOwner && (
@@ -1839,11 +1843,10 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
                   </FP_Row>
 
                   {[
-                    { icon:FP_Icons.globe,    text:`${about.city}, ${about.state} · ${about.country}` },
-                    { icon:FP_Icons.calendar, text:"Miembro desde enero 2024" },
-                    { icon:FP_Icons.zap,      text:`Respuesta: ${about.responseTime}` },
-                    { icon:FP_Icons.truck,    text:`Envío en ${about.shipping}` },
-                  ].map((row, i, arr) => (
+                    (about.city || about.country) && { icon:FP_Icons.globe, text:[about.city, about.state, about.country].filter(Boolean).join(", ") },
+                    about.responseTime && { icon:FP_Icons.zap,   text:`Respuesta: ${about.responseTime}` },
+                    about.shipping     && { icon:FP_Icons.truck, text:`Envío en ${about.shipping}` },
+                  ].filter(Boolean).map((row, i, arr) => (
                     <FP_Row key={i} border={i < arr.length-1} style={{ gap:12 }}>
                       <div style={{ display:"flex", alignItems:"center", gap:12 }}>
                         <FP_Icon d={row.icon} size={15} color={FP_C.textSecondary}/>

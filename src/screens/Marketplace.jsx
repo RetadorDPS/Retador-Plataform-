@@ -491,7 +491,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // ADVANCED SEARCH
 // ═════════════════════════════════════════════════════════════════════════════
-export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav }) {
+export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, view = "grid" }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const { tokens: dt, mode: dMode } = useDensity();
@@ -504,16 +504,22 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav })
   const cat = selectedCat ? cats.find(c => c.id === selectedCat) : null;
   const subcats = selectedCat ? (allSubs[selectedCat] || []) : [];
 
-  const filtered = products.filter(p => {
-    const matchCat = !selectedCat || p.cat === selectedCat;
+  const _disc = p => p.orig_price && parseFloat(p.orig_price) > parseFloat(p.price || 0);
+  const _sold = p => Number(p.sold_count ?? p.soldCount) || 0;
+  const _created = p => p.created_at ? new Date(p.created_at).getTime() : 0;
+  let filtered = products.filter(p => {
+    const matchCat = (!selectedCat || p.cat === selectedCat) && (!selectedSubcat || p.subcat === selectedSubcat);
     const matchSearch = !searchText || p.title.toLowerCase().includes(searchText.toLowerCase()) || p.description?.toLowerCase().includes(searchText.toLowerCase());
     const matchQuick = quickFilter === "TODOS"
-      || (quickFilter === "OFERTAS"     && p.orig_price)
-      || (quickFilter === "NUEVO"       && p.badge === "NUEVO")
-      || (quickFilter === "RECOMENDADO" && p.badge === "RECOMENDADO")
-      || (quickFilter === "MAS_VENDIDO" && !p.badge);
+      || (quickFilter === "OFERTAS"     && _disc(p))
+      || (quickFilter === "NUEVO"       && (p.badge === "NUEVO" || !!p.created_at))
+      || (quickFilter === "RECOMENDADO" && (p.promoted || p.featured || p.badge === "RECOMENDADO"))
+      || (quickFilter === "MAS_VENDIDO" && _sold(p) > 0);
     return matchCat && matchSearch && matchQuick;
   });
+  if (quickFilter === "NUEVO")            filtered = [...filtered].sort((a, b) => _created(b) - _created(a));
+  else if (quickFilter === "MAS_VENDIDO") filtered = [...filtered].sort((a, b) => _sold(b) - _sold(a));
+  else if (quickFilter === "OFERTAS")     filtered = [...filtered].sort((a, b) => (parseFloat(b.orig_price || 0) - parseFloat(b.price || 0)) - (parseFloat(a.orig_price || 0) - parseFloat(a.price || 0)));
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -587,14 +593,14 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav })
           {/* QUICK FILTERS */}
           <div style={{ padding: "10px 14px 8px", borderBottom: `1px solid ${B}`, display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
             {[
-              { id: "TODOS",      label: "Todos"       },
-              { id: "OFERTAS",    label: "🔥 Ofertas"  },
-              { id: "NUEVO",      label: "✨ Nuevo"    },
-              { id: "RECOMENDADO",label: "⭐ Destac."  },
-              { id: "MAS_VENDIDO",label: "🏆 + Vendido"},
+              { id: "TODOS",      label: "🏷️ Todos"      },
+              { id: "OFERTAS",    label: "🔥 Ofertas"    },
+              { id: "NUEVO",      label: "✨ Nuevo"      },
+              { id: "RECOMENDADO",label: "⭐ Destacado"  },
+              { id: "MAS_VENDIDO",label: "🏆 Más vendido"},
             ].map(f => (
               <button key={f.id} onClick={() => setQuickFilter(f.id)} className={`chip ${isDark ? "" : "chip-light"}`}
-                style={{ flexShrink: 0, background: quickFilter === f.id ? G : isDark ? "#111" : S, color: quickFilter === f.id ? "#000" : T2, border: `1px solid ${quickFilter === f.id ? G : B}`, padding: "5px 10px", fontSize: 9, fontWeight: 700 }}>
+                style={{ flexShrink: 0, background: quickFilter === f.id ? G : isDark ? "#111" : S, color: quickFilter === f.id ? "#000" : T2, border: `1px solid ${quickFilter === f.id ? G : B}`, borderRadius: 999, padding: "6px 12px", fontSize: 9.5, fontWeight: 700, whiteSpace: "nowrap" }}>
                 {f.label}
               </button>
             ))}
@@ -617,9 +623,13 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav })
                 <p style={{ fontSize: 11 }}>No se encontraron productos</p>
               </div>
             ) : (
-              <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
-                {filtered.map(p => <PCard key={p.id} p={p} onClick={() => onProduct(p)} isFav={favorites.has(p.id)} onFav={onFav} />)}
-              </div>
+              view === "muro"
+                ? <div style={{ columnCount: densityCols(dMode, isDesktop, isTablet), columnGap: dt.grid.gap }}>
+                    {filtered.map(p => <PCard key={p.id} p={p} view="muro" onClick={() => onProduct(p)} isFav={favorites.has(p.id)} onFav={onFav} />)}
+                  </div>
+                : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
+                    {filtered.map(p => <PCard key={p.id} p={p} view="grid" onClick={() => onProduct(p)} isFav={favorites.has(p.id)} onFav={onFav} />)}
+                  </div>
             )}
             {/* Tramo: anuncios después de los resultados */}
             <LiveSlot page="busqueda" from="bq_p" to={null} onNav={onNav} pad="14px 0 0" />
@@ -889,7 +899,7 @@ export function ChatsModal({ onClose, initial, orders = [], chatMsgs = {}, chatP
    reales RESPETANDO la posición: cada anuncio se renderiza en el tramo donde el
    usuario lo colocó, entre las partes fijas del sistema. Botones que navegan. */
 
-export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, banners, onNav, hidden = false, scrollKeeper = null }) {
+export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, banners, onNav, hidden = false, scrollKeeper = null, view = "grid" }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { cats } = useCatalog();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
@@ -979,8 +989,8 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
 
       {/* Filtros - Ahora con sticky */}
       <div style={{ position: "sticky", top: hidden ? 0 : 45, zIndex: 50, background: isDark ? BG : "#fff", borderBottom: "none", padding: "12px clamp(18px,3vw,48px)", display: "flex", gap: 7, overflowX: "auto", transition: "top .28s cubic-bezier(.4,0,.2,1)" }}>
-        {[["TODOS", "🏷️"], ["OFERTAS", "🔥"], ["NUEVO", "✨"], ["RECOMENDADO", "⭐"], ["FAVORITOS", "❤️"]].map(([f, ic]) => (
-          <button key={f} onClick={() => setFilter(f)} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: filter === f ? G : isDark ? "#0e0e0e" : S, color: filter === f ? "#000" : T3, border: `1.5px solid ${filter === f ? G : B}`, padding: "7px 12px", fontSize: 10 * ts, fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>{ic} {f}</button>
+        {[["TODOS", "🏷️", "Todos"], ["OFERTAS", "🔥", "Ofertas"], ["NUEVO", "✨", "Nuevo"], ["RECOMENDADO", "⭐", "Destacado"], ["MAS_VENDIDO", "🏆", "Más vendido"]].map(([f, ic, lbl]) => (
+          <button key={f} onClick={() => setFilter(f)} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: filter === f ? G : isDark ? "#0e0e0e" : S, color: filter === f ? "#000" : T3, border: `1.5px solid ${filter === f ? G : B}`, borderRadius: 999, padding: "7px 13px", fontSize: 10 * ts, fontWeight: 700, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>{ic} {lbl}</button>
         ))}
       </div>
 
@@ -1005,9 +1015,13 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
                 <div style={{ fontSize: 36, marginBottom: 10 }}>{filter === "FAVORITOS" ? "❤️" : "🔍"}</div>
                 <p style={{ fontSize: 12 }}>{filter === "FAVORITOS" ? "Aún no tienes favoritos" : "No se encontraron productos"}</p>
               </div>
-            : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
-              {products.map(p => <PCard key={p.id} p={p} onClick={() => onProduct(p)} isFav={favorites.has(p.id)} onFav={onFav} />)}
-            </div>
+            : view === "muro"
+              ? <div style={{ columnCount: densityCols(dMode, isDesktop, isTablet), columnGap: dt.grid.gap }}>
+                  {products.map(p => <PCard key={p.id} p={p} view="muro" onClick={() => onProduct(p)} isFav={favorites.has(p.id)} onFav={onFav} />)}
+                </div>
+              : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
+                  {products.map(p => <PCard key={p.id} p={p} view="grid" onClick={() => onProduct(p)} isFav={favorites.has(p.id)} onFav={onFav} />)}
+                </div>
         }
       </div>
 
@@ -1020,34 +1034,48 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
 // ═════════════════════════════════════════════════════════════════════════════
 // PRODUCT CARD
 // ═════════════════════════════════════════════════════════════════════════════
-function PCard({ p, onClick, isFav, onFav }) {
-  const { S, B, T1, T2, ts } = useAt();
-  const { cats } = useCatalog();
-  const bc  = BC[p.badge] || {};
-  const cat = cats.find(c => c.id === p.cat);
+// Bandera/emoji de origen a partir del país (si existe). Sin país → nada.
+const ORIGIN_FLAG = { cuba: "🇨🇺", "estados unidos": "🇺🇸", usa: "🇺🇸", eeuu: "🇺🇸", "españa": "🇪🇸", espana: "🇪🇸", china: "🇨🇳", méxico: "🇲🇽", mexico: "🇲🇽", panamá: "🇵🇦", panama: "🇵🇦", colombia: "🇨🇴", rusia: "🇷🇺" };
+const flagOf = (o) => { if (!o) return null; const k = String(o).trim().toLowerCase(); return ORIGIN_FLAG[k] || (k.length ? "🌍" : null); };
+
+// TARJETA DE PRODUCTO estilo AliExpress con la identidad RETADOR (dorado/gris/negro).
+// view: "grid" (foto cuadrada, alturas parejas) | "muro" (foto en su proporción real).
+// SIN nombre ni ubicación del vendedor (privacidad): eso vive en el detalle.
+function PCard({ p, onClick, isFav, onFav, view = "grid", verified = false }) {
+  const { S, B, T1, T2, T3, ts } = useAt();
+  const img = p.img || p.image || (p.images && p.images[0]) || "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400";
   const hasDisc = p.orig_price && parseFloat(p.orig_price) > parseFloat(p.price || 0);
   const disc = hasDisc ? Math.round((1 - parseFloat(p.price) / parseFloat(p.orig_price)) * 100) : 0;
+  const rating = Number(p.rating) || 0;
+  const sold = Number(p.sold_count ?? p.soldCount) || 0;
+  const stock = (p.stock ?? p.qty_available);
+  const lowStock = stock != null && Number(stock) > 0 && Number(stock) <= 5;
+  const flag = flagOf(p.origin || p.country);
+  const isVerified = verified || p.seller_verified || p.verified;
 
   return (
-    <div className="cd" onClick={onClick} style={{ background: S, borderRadius: 15, overflow: "hidden", border: `1px solid ${B}` }}>
-      <div style={{ position: "relative", aspectRatio: "4 / 3", background: "#161616", overflow: "hidden" }}>
-        <img src={p.img || p.image || (p.images && p.images[0]) || "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400"} alt={p.title}
-          style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform .3s" }}
+    <div className="cd" onClick={onClick} style={{ background: S, borderRadius: 16, overflow: "hidden", border: `1px solid ${B}`, breakInside: "avoid", marginBottom: view === "muro" ? 12 : 0 }}>
+      <div style={{ position: "relative", ...(view === "muro" ? {} : { aspectRatio: "1 / 1" }), background: "#161616", overflow: "hidden" }}>
+        <img src={img} alt={p.title}
+          style={{ width: "100%", ...(view === "muro" ? { height: "auto", display: "block" } : { height: "100%", objectFit: "cover" }), transition: "transform .3s" }}
           onError={e => { e.target.src = "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400"; }} />
-        <div style={{ position: "absolute", top: 7, left: 7, background: "rgba(0,0,0,.72)", backdropFilter: "blur(6px)", borderRadius: 100, padding: "3px 8px", fontSize: 9, fontWeight: 700, color: cat ? cat.color + "cc" : "#999" }}>
-          {cat?.name?.split(" ")[0] || p.cat}
-        </div>
-        {p.badge && <div style={{ position: "absolute", top: 7, right: 30, background: bc.bg, borderRadius: 100, padding: "3px 7px", fontSize: 9, fontWeight: 700, color: bc.tx }}>{p.badge}</div>}
-        {disc > 0 && <div style={{ position: "absolute", bottom: 7, left: 7, background: "#16A34A", borderRadius: 100, padding: "3px 7px", fontSize: 9, fontWeight: 700, color: "#fff" }}>-{disc}%</div>}
-        <button className="p" onClick={e => { e.stopPropagation(); onFav(p.id); }} style={{ position: "absolute", top: 5, right: 5, width: 26, height: 26, background: "rgba(0,0,0,.6)", backdropFilter: "blur(8px)", border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill={isFav ? "#F87171" : "none"} stroke={isFav ? "#F87171" : "#888"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+        {disc > 0 && <div style={{ position: "absolute", top: 7, left: 7, background: G, borderRadius: 999, padding: "3px 8px", fontSize: 9.5, fontWeight: 800, color: "#000" }}>-{disc}%</div>}
+        {flag && <div style={{ position: "absolute", bottom: 7, left: 7, fontSize: 14, filter: "drop-shadow(0 1px 2px rgba(0,0,0,.6))" }}>{flag}</div>}
+        <button className="p" onClick={e => { e.stopPropagation(); onFav(p.id); }} style={{ position: "absolute", top: 6, right: 6, width: 27, height: 27, background: "rgba(0,0,0,.55)", backdropFilter: "blur(8px)", border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill={isFav ? G : "none"} stroke={isFav ? G : "#bbb"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
         </button>
       </div>
-      <div style={{ padding: "9px 10px 11px" }}>
-        <p style={{ fontSize: 11 * ts, fontWeight: 600, color: T1, marginBottom: 6, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{p.title}</p>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 13 * ts, fontWeight: 900, color: G }}>{money(p.price, p.currency)}</span>
-          {hasDisc && <span style={{ fontSize: 9 * ts, color: T2, textDecoration: "line-through" }}>{(CURRENCIES[p.currency || "USD"] || CURRENCIES.USD).symbol}{parseFloat(p.orig_price).toLocaleString("es-ES")}</span>}
+      <div style={{ padding: "10px 11px 12px" }}>
+        <p style={{ fontSize: 11.5 * ts, fontWeight: 600, color: T1, marginBottom: 7, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: view === "muro" ? undefined : `${2 * 1.35 * 11.5 * ts}px` }}>{p.title}</p>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 5 }}>
+          <span style={{ fontSize: 15 * ts, fontWeight: 900, color: G }}>{money(p.price, p.currency)}</span>
+          {hasDisc && <span style={{ fontSize: 9.5 * ts, color: T3, textDecoration: "line-through" }}>{(CURRENCIES[p.currency || "USD"] || CURRENCIES.USD).symbol}{parseFloat(p.orig_price).toLocaleString("es-ES")}</span>}
+          {isVerified && <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, color: G, display: "flex", alignItems: "center", gap: 2 }} title="Vendedor verificado">✓</span>}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9.5 * ts, color: T2, fontWeight: 600 }}>
+          <span style={{ color: rating > 0 ? T2 : T3 }}>{rating > 0 ? `⭐ ${rating.toFixed(1)}` : "Nuevo"}</span>
+          {sold > 0 && <span style={{ color: T3 }}>· {sold} vendido{sold === 1 ? "" : "s"}</span>}
+          {lowStock && <span style={{ marginLeft: "auto", color: "#ef4444", fontWeight: 700 }}>¡Últimas {Number(stock)}!</span>}
         </div>
       </div>
     </div>

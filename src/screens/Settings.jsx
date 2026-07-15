@@ -446,7 +446,7 @@ function CFG_DensitySelector() {
   );
 }
 
-function CFG_AppearanceScreen({ settings, upd, nav, appScale = 1, onScale, onThemeChange, appTheme="auto", appTextScale=1, onTextScaleChange }) {
+function CFG_AppearanceScreen({ settings, upd, nav, appScale = 1, onScale, onThemeChange, appTheme="auto", appTextScale=1, onTextScaleChange, productView="grid", onProductViewChange }) {
   const tk = CFG_useTk();
   const ap = settings.appearance;
   function set(k, v) { upd("appearance", { ...ap, [k]:v }); }
@@ -460,6 +460,13 @@ function CFG_AppearanceScreen({ settings, upd, nav, appScale = 1, onScale, onThe
           { value:"light", label:"Claro",      sub:"Fondo blanco"     },
           { value:"dark",  label:"Oscuro",     sub:"Fondo negro"      },
           { value:"auto",  label:"Automático", sub:"Sigue el sistema" },
+        ]} />
+      </CFG_Crd>
+      <CFG_Lbl>Vista de productos</CFG_Lbl>
+      <CFG_Crd>
+        <CFG_Radio val={productView} change={v => onProductViewChange?.(v)} opts={[
+          { value:"grid", label:"Cuadrícula", sub:"Dos columnas parejas, foto cuadrada" },
+          { value:"muro", label:"Muro",       sub:"Estilo Pinterest: fotos en su tamaño real" },
         ]} />
       </CFG_Crd>
       <CFG_Lbl>Densidad visual</CFG_Lbl>
@@ -1181,7 +1188,7 @@ function CFG_AboutScreen({ nav }) {
 }
 
 /* ── APP ──────────────────────────────────────────────────────── */
-export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTheme="auto", onThemeChange, imgScale=1, onImgScaleChange, appTextScale=1, onTextScaleChange, profileData={}, onProfileUpdate, isVerified=false, onRequestVerification, accountPassword="", onSetPassword, blockedUsers=[], onToggleBlock, onOpenWallet, orders=[] }) {
+export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTheme="auto", onThemeChange, imgScale=1, onImgScaleChange, appTextScale=1, onTextScaleChange, profileData={}, onProfileUpdate, isVerified=false, onRequestVerification, accountPassword="", onSetPassword, blockedUsers=[], onToggleBlock, onOpenWallet, orders=[], productView="grid", onProductViewChange }) {
   const [screen, setScreen]     = useState("home");
   const me0 = profileData?.name || user?.name || "Usuario";
   const [profile, setProfile]   = useState({
@@ -1212,7 +1219,7 @@ export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTh
     return next;
   });
 
-  const p = { profile, setProfile: saveProfile, settings, upd, nav, appScale:imgScale, onScale:onImgScaleChange, onBack, onSignOut, onThemeChange, appTheme, appTextScale, onTextScaleChange, flash, isVerified, onRequestVerification, accountPassword, onSetPassword, blockedUsers, onToggleBlock, onOpenWallet, orders };
+  const p = { profile, setProfile: saveProfile, settings, upd, nav, appScale:imgScale, onScale:onImgScaleChange, onBack, onSignOut, onThemeChange, appTheme, appTextScale, onTextScaleChange, flash, isVerified, onRequestVerification, accountPassword, onSetPassword, blockedUsers, onToggleBlock, onOpenWallet, orders, productView, onProductViewChange };
   const map = {
     home:          <CFG_HomeScreen          {...p} />,
     account:       <CFG_AccountScreen       {...p} />,

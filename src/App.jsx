@@ -56,6 +56,10 @@ import { setThemeColor } from "./pwa/themeColor.js";
 
 // OMNIPANEL — panel admin integrado (CSS aislado bajo .omni)
 
+// Vista de productos por defecto de la plataforma (hasta que el admin la controle).
+// "grid" = cuadrícula pareja; "muro" = masonry con alturas reales.
+const PLATFORM_DEFAULT_VIEW = "grid";
+
 // ═════════════════════════════════════════════════════════════════════════════
 // APP ROOT
 // ═════════════════════════════════════════════════════════════════════════════
@@ -326,6 +330,10 @@ function AppShell({ sessionUser }) {
   }, []);
   const [search,    setSearch]    = useState("");
   const [filter,    setFilter]    = useState("TODOS");
+  // VISTA de productos (Cuadrícula / Muro). Preferencia del usuario, persistente.
+  // Si no hay preferencia, se usa el default de plataforma (luego lo pondrá el admin).
+  const [productView, setProductView] = useState(() => { try { return localStorage.getItem("retador_prodview") || PLATFORM_DEFAULT_VIEW; } catch { return PLATFORM_DEFAULT_VIEW; } });
+  useEffect(() => { try { localStorage.setItem("retador_prodview", productView); } catch (e) {} }, [productView]);
   // Navegación desde botones de bloques publicados en el Editor Visual
   const navTo = (dest) => {
     if (!dest) return;
@@ -839,16 +847,29 @@ function AppShell({ sessionUser }) {
     setBuyModal(product);
   };
 
-  const marketVisible = products.filter(p => {
+  // Filtros que FILTRAN/ORDENAN de verdad, con columnas reales del backend.
+  const marketVisible = (() => {
     const q = search.toLowerCase();
-    const ms = !q || p.title?.toLowerCase().includes(q) || p.cat?.toLowerCase().includes(q) || p.description?.toLowerCase().includes(q);
-    const mf = filter === "TODOS"
-      || (filter === "OFERTAS"      && p.orig_price)
-      || (filter === "NUEVO"        && p.badge === "NUEVO")
-      || (filter === "RECOMENDADO"  && p.badge === "RECOMENDADO")
-      || (filter === "FAVORITOS"    && favorites.has(p.id));
-    return ms && mf;
-  });
+    const disc = p => p.orig_price && parseFloat(p.orig_price) > parseFloat(p.price || 0);
+    const isNew = p => p.badge === "NUEVO" || !!p.created_at;
+    const sold = p => Number(p.sold_count ?? p.soldCount) || 0;
+    const created = p => p.created_at ? new Date(p.created_at).getTime() : 0;
+    let list = products.filter(p => {
+      const ms = !q || p.title?.toLowerCase().includes(q) || p.cat?.toLowerCase().includes(q) || p.description?.toLowerCase().includes(q);
+      const mf = filter === "TODOS"
+        || (filter === "OFERTAS"     && disc(p))
+        || (filter === "NUEVO"       && isNew(p))
+        || (filter === "RECOMENDADO" && (p.promoted || p.featured || p.badge === "RECOMENDADO"))
+        || (filter === "MAS_VENDIDO" && sold(p) > 0)
+        || (filter === "FAVORITOS"   && favorites.has(p.id));
+      return ms && mf;
+    });
+    // Ordenamientos por defecto de cada filtro.
+    if (filter === "NUEVO")            list = [...list].sort((a, b) => created(b) - created(a));
+    else if (filter === "MAS_VENDIDO") list = [...list].sort((a, b) => sold(b) - sold(a));
+    else if (filter === "OFERTAS")     list = [...list].sort((a, b) => (parseFloat(b.orig_price || 0) - parseFloat(b.price || 0)) - (parseFloat(a.orig_price || 0) - parseFloat(a.price || 0)));
+    return list;
+  })();
 
   return (
     <AppThCtx.Provider value={appTk}>
@@ -1126,6 +1147,7 @@ function AppShell({ sessionUser }) {
               <MarketHome
                 hidden={navHidden}
                 scrollKeeper={marketScrollRef}
+                view={productView}
                 loading={loading} products={marketVisible} filter={filter} setFilter={setFilter}
                 search={search} setSearch={setSearch} activeCat={activeCat} setActiveCat={cat => { setActiveCat(cat); }}
                 onCats={() => setShowCats(true)}
@@ -1173,6 +1195,7 @@ function AppShell({ sessionUser }) {
 
           {tab === "search" && (
             <AdvancedSearch
+              view={productView}
               products={products}
               onProduct={p => {
                 setSelProd(p);
@@ -1206,6 +1229,7 @@ function AppShell({ sessionUser }) {
             })()}
             {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
             {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}
+              productView={productView} onProductViewChange={setProductView}
               profileData={profileData} onProfileUpdate={setProfileData}
               isVerified={verifiedUsers.includes(profileData?.name || user?.name)}
               onRequestVerification={() => setPScr("profile-full")}

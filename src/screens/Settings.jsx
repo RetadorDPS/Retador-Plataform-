@@ -478,7 +478,7 @@ function CFG_AppearanceScreen({ settings, upd, nav, appScale = 1, onScale, onThe
         <CFG_StepSlider
           index={(() => { let bi = 0, bd = 9; TEXT_STEPS.forEach((s, i) => { const d = Math.abs(s - (appTextScale || 1)); if (d < bd) { bd = d; bi = i; } }); return bi; })()}
           count={TEXT_STEPS.length}
-          labels={["Pequeño", "Normal", "Grande", "Mayor", "Máx"]}
+          labels={["Pequeño", "Normal", "Grande", "Máx"]}
           onChange={i => onTextScaleChange?.(TEXT_STEPS[i])}
           hint="Aplica a todo el texto de la app"
         />

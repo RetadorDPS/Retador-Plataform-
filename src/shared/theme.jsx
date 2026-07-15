@@ -44,15 +44,14 @@ export const useAt = () => useContext(AppThCtx);
 //  + provider + hooks. Persistencia adaptada a localStorage (igual que el
 //  tema), tal como indica la guía de integración del motor.
 // ═══════════════════════════════════════════════════════════════════
-export const DENSITY_MODES = ['pequena', 'compacta', 'normal', 'comoda', 'grande'];
-// 5 niveles de densidad (slider). designW = ancho de diseño virtual (móvil): mayor =
+export const DENSITY_MODES = ['pequena', 'compacta', 'normal', 'comoda'];
+// 4 niveles de densidad (slider). designW = ancho de diseño virtual (móvil): mayor =
 // más zoom-out = todo más pequeño/elegante; menor = más grande. fixedZoom = tablet/PC.
 export const DENSITY_TOKENS = {
   pequena:  { name:'pequena',  label:'Pequeña',  designW:470, fixedZoom:0.88, grid:{ gap:8  } },
   compacta: { name:'compacta', label:'Compacta', designW:438, fixedZoom:0.94, grid:{ gap:10 } },
   normal:   { name:'normal',   label:'Normal',   designW:408, fixedZoom:1.00, grid:{ gap:12 } },
   comoda:   { name:'comoda',   label:'Cómoda',   designW:380, fixedZoom:1.06, grid:{ gap:15 } },
-  grande:   { name:'grande',   label:'Grande',   designW:352, fixedZoom:1.12, grid:{ gap:18 } },
 };
 export const DENSITY_STORAGE_KEY = 'retador_density';
 export const DensityContext = createContext(null);
@@ -79,6 +78,6 @@ export function useDensity() {
 export function densityCols(mode, isDesktop, isTablet) {
   return isDesktop ? 5 : isTablet ? 3 : 2;
 }
-// Tamaño de texto: 5 pasos. El más pequeño se mantiene (ya estaba bien chico) y crece
-// bastante más hacia arriba (antes "Grande" sabía a normal).
-export const TEXT_STEPS = [0.85, 1.0, 1.18, 1.4, 1.62];
+// Tamaño de texto: 4 pasos (Pequeño / Normal / Grande / Máx). El más pequeño se
+// mantiene y crece de forma proporcionada hacia arriba, sin desbordar la interfaz.
+export const TEXT_STEPS = [0.85, 1.0, 1.18, 1.4];

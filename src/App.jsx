@@ -355,7 +355,8 @@ function AppShell({ sessionUser }) {
     try { return localStorage.getItem("retador_theme") || "auto"; } catch { return "auto"; }
   });
   const [appTextScale, setAppTextScale] = useState(() => {
-    try { const v = localStorage.getItem("retador_txt_scale"); return v ? parseFloat(v) : 1; } catch { return 1; }
+    // Si había guardado el 5º nivel (1.62, ya eliminado), cae al mayor válido (1.4).
+    try { const v = parseFloat(localStorage.getItem("retador_txt_scale")); if (!v) return 1; return TEXT_STEPS.reduce((best, s) => Math.abs(s - v) < Math.abs(best - v) ? s : best, TEXT_STEPS[1]); } catch { return 1; }
   });
 
   // Densidad visual → normalización por ANCHO DE DISEÑO.

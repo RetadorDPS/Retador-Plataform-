@@ -1630,9 +1630,10 @@ img{display:block;object-fit:cover;}
 
 /* HEADER */
 .hdr{position:sticky;top:0;z-index:90;padding:28px 22px 14px;background:linear-gradient(180deg,var(--bg) 72%,transparent);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);}
-.hdr-row{display:flex;justify-content:space-between;align-items:flex-start;}
-.hdr-title{font-size:38px;font-weight:800;letter-spacing:-1px;line-height:1;background:linear-gradient(120deg,var(--white) 35%,var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
-.hdr-platform{font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:var(--w40);margin-top:5px;}
+.hdr-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+.hdr-row>div:first-child{min-width:0;overflow:hidden;}
+.hdr-title{font-size:34px;font-weight:800;letter-spacing:-1px;line-height:1.05;background:linear-gradient(120deg,var(--white) 35%,var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;white-space:nowrap;overflow:hidden;}
+.hdr-platform{font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:var(--w40);margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .hdr-platform span{color:var(--w70);font-weight:600;}
 .icon-btn{width:34px;height:34px;border-radius:10px;background:transparent;border:1px solid var(--w08);color:var(--w40);display:flex;align-items:center;justify-content:center;position:relative;transition:border-color .2s,color .2s;}
 .icon-btn:hover{border-color:var(--w15);color:var(--w70);}
@@ -1973,7 +1974,7 @@ img{display:block;object-fit:cover;}
 @keyframes bellpop{0%{transform:scale(1)}40%{transform:scale(1.3) rotate(-12deg)}70%{transform:scale(.9) rotate(6deg)}100%{transform:scale(1) rotate(0)}}
 
 /* ── FAB removed — publish lives in header ── */
-.hdr-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-top:2px;}
+.hdr-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-top:2px;flex-shrink:0;}
 .hdr-icons{display:flex;gap:6px;}
 .hdr-publish-btn{
   display:flex;align-items:center;gap:6px;

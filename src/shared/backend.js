@@ -75,6 +75,34 @@ export const loadProducts = async () => {
   if (error) { console.error("loadProducts:", error.message); return []; }
   return (data || []).map(mapProduct);
 };
+// ── PRODUCTO DEMO (temporal) ─────────────────────────────────────────────────
+// Tarjeta "llena" de ejemplo para ver el diseño AliExpress con todos los datos.
+// Es SOLO del lado cliente (no toca el backend). Para quitarlo: borra esta
+// constante y la línea `[DEMO_PRODUCT, ...list]` en App.jsx (buscar DEMO_PRODUCT).
+// El id "demo-retador-card" lo hace fácil de reconocer y eliminar.
+export const DEMO_PRODUCT = mapProduct({
+  id: "demo-retador-card",
+  seller_id: "demo",
+  title: "Audífonos inalámbricos Bluetooth 5.3 con cancelación de ruido y estuche de carga rápida",
+  description: "Producto de demostración RETADOR. Bórralo cuando quieras.",
+  price: 42.99,
+  orig_price: 89.99,          // → -52% (chip rojo + precio tachado)
+  currency: "USD",
+  images: ["https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=600"],
+  cat: null,
+  sold_count: 1280,           // "1280 vendidos"
+  rating: 4.8,                // "⭐ 4.8 (342)"
+  reviews: 342,
+  promoted: true,             // chip "Destacado"
+  featured: true,
+  seller_verified: true,      // chip "✓ Verificado"
+  stock: 3,                   // "¡Últimas 3!"
+  country: "China",           // banderita 🇨🇳
+  status: "active",
+  moderation_status: "approved",
+  created_at: new Date().toISOString(),
+  _demo: true,
+});
 export const getFeed = async (ctx) => loadProducts();
 export const saveProduct = async (data, userId) => ({ ...data, id: Date.now(), seller_id: userId, seller_name: MOCK_USER.name });
 export const deleteProduct = async (id) => {};

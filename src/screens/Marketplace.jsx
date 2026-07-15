@@ -1047,35 +1047,57 @@ function PCard({ p, onClick, isFav, onFav, view = "grid", verified = false }) {
   const hasDisc = p.orig_price && parseFloat(p.orig_price) > parseFloat(p.price || 0);
   const disc = hasDisc ? Math.round((1 - parseFloat(p.price) / parseFloat(p.orig_price)) * 100) : 0;
   const rating = Number(p.rating) || 0;
+  const reviews = Number(p.reviews ?? p.reviews_count ?? p.rating_count) || 0;
   const sold = Number(p.sold_count ?? p.soldCount) || 0;
   const stock = (p.stock ?? p.qty_available);
   const lowStock = stock != null && Number(stock) > 0 && Number(stock) <= 5;
   const flag = flagOf(p.origin || p.country);
   const isVerified = verified || p.seller_verified || p.verified;
+  const isPromo = !!(p.promoted || p.featured);
+  const isOffer = !!(p.on_sale || p.oferta || p.promo);
+
+  // ── Línea de métricas: "[X] vendidos  ·  ⭐ rating (reviews)" — cada parte
+  //    solo si existe; si no hay ni ventas ni rating, muestra "Nuevo".
+  const metricParts = [];
+  if (sold > 0) metricParts.push(`${sold} vendido${sold === 1 ? "" : "s"}`);
+  if (rating > 0) metricParts.push(`⭐ ${rating.toFixed(1)}${reviews > 0 ? ` (${reviews})` : ""}`);
+  const metricsText = metricParts.length ? metricParts.join("  ·  ") : "Nuevo";
+
+  // ── Chips (solo los que apliquen). La fila se omite entera si no hay ninguno.
+  const chips = [];
+  if (disc > 0) chips.push({ k: "disc", t: `-${disc}%`, bg: "#ef4444", fg: "#fff", bd: "transparent" });
+  else if (isOffer) chips.push({ k: "offer", t: "Oferta", bg: "rgba(239,68,68,.14)", fg: "#ef4444", bd: "transparent" });
+  if (isPromo) chips.push({ k: "promo", t: "Destacado", bg: G, fg: "#000", bd: "transparent" });
+  if (isVerified) chips.push({ k: "ver", t: "✓ Verificado", bg: "transparent", fg: G, bd: G });
+  if (lowStock) chips.push({ k: "stock", t: `¡Últimas ${Number(stock)}!`, bg: "rgba(255,192,30,.12)", fg: G, bd: "transparent" });
 
   return (
     <div className="cd" onClick={onClick} style={{ background: S, borderRadius: 16, overflow: "hidden", border: `1px solid ${B}`, breakInside: "avoid", marginBottom: view === "muro" ? 12 : 0 }}>
-      <div style={{ position: "relative", ...(view === "muro" ? {} : { aspectRatio: "1 / 1" }), background: "#161616", overflow: "hidden" }}>
+      <div style={{ position: "relative", ...(view === "muro" ? {} : { aspectRatio: "1 / 1" }), background: "#161616", overflow: "hidden", borderRadius: "16px 16px 0 0" }}>
         <img src={img} alt={p.title}
           style={{ width: "100%", ...(view === "muro" ? { height: "auto", display: "block" } : { height: "100%", objectFit: "cover" }), transition: "transform .3s" }}
           onError={e => { e.target.src = "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400"; }} />
-        {disc > 0 && <div style={{ position: "absolute", top: 7, left: 7, background: G, borderRadius: 999, padding: "3px 8px", fontSize: 9.5, fontWeight: 800, color: "#000" }}>-{disc}%</div>}
         {flag && <div style={{ position: "absolute", bottom: 7, left: 7, fontSize: 14, filter: "drop-shadow(0 1px 2px rgba(0,0,0,.6))" }}>{flag}</div>}
         <button className="p" onClick={e => { e.stopPropagation(); onFav(p.id); }} style={{ position: "absolute", top: 6, right: 6, width: 27, height: 27, background: "rgba(0,0,0,.55)", backdropFilter: "blur(8px)", border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill={isFav ? G : "none"} stroke={isFav ? G : "#bbb"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
         </button>
       </div>
-      <div style={{ padding: "10px 11px 12px" }}>
-        <p style={{ fontSize: 11.5 * ts, fontWeight: 600, color: T1, marginBottom: 7, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: view === "muro" ? undefined : `${2 * 1.35 * 11.5 * ts}px` }}>{p.title}</p>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 5 }}>
-          <span style={{ fontSize: 15 * ts, fontWeight: 900, color: G }}>{money(p.price, p.currency)}</span>
-          {hasDisc && <span style={{ fontSize: 9.5 * ts, color: T3, textDecoration: "line-through" }}>{(CURRENCIES[p.currency || "USD"] || CURRENCIES.USD).symbol}{parseFloat(p.orig_price).toLocaleString("es-ES")}</span>}
-          {isVerified && <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, color: G, display: "flex", alignItems: "center", gap: 2 }} title="Vendedor verificado">✓</span>}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9.5 * ts, color: T2, fontWeight: 600 }}>
-          <span style={{ color: rating > 0 ? T2 : T3 }}>{rating > 0 ? `⭐ ${rating.toFixed(1)}` : "Nuevo"}</span>
-          {sold > 0 && <span style={{ color: T3 }}>· {sold} vendido{sold === 1 ? "" : "s"}</span>}
-          {lowStock && <span style={{ marginLeft: "auto", color: "#ef4444", fontWeight: 700 }}>¡Últimas {Number(stock)}!</span>}
+      {/* Info bajo la foto: apilada, alineada a la IZQUIERDA, jerarquía + aire.
+          Orden AliExpress: título → métricas → chips → PRECIO (lo más pesado, abajo).
+          Cada dato solo si existe → alturas naturales distintas por tarjeta. */}
+      <div style={{ padding: "10px 11px 12px", display: "flex", flexDirection: "column", gap: 6 * ts, minWidth: 0 }}>
+        <p style={{ margin: 0, fontSize: 11.5 * ts, fontWeight: 600, color: T1, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: view === "muro" ? undefined : `${2 * 1.35 * 11.5 * ts}px` }}>{p.title}</p>
+        <div style={{ fontSize: 9.5 * ts, color: T2, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{metricsText}</div>
+        {chips.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 * ts }}>
+            {chips.map(c => (
+              <span key={c.k} style={{ fontSize: 8.5 * ts, fontWeight: 800, lineHeight: 1.4, padding: "1.5px 6px", borderRadius: 999, background: c.bg, color: c.fg, border: c.bd === "transparent" ? "none" : `1px solid ${c.bd}`, whiteSpace: "nowrap" }}>{c.t}</span>
+            ))}
+          </div>
+        )}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", marginTop: 1 }}>
+          <span style={{ fontSize: 17 * ts, fontWeight: 900, color: G, lineHeight: 1.1 }}>{money(p.price, p.currency)}</span>
+          {hasDisc && <span style={{ fontSize: 10 * ts, color: T3, textDecoration: "line-through" }}>{(CURRENCIES[p.currency || "USD"] || CURRENCIES.USD).symbol}{parseFloat(p.orig_price).toLocaleString("es-ES")}</span>}
         </div>
       </div>
     </div>

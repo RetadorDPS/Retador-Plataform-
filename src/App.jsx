@@ -17,7 +17,7 @@ import {
   MOCK_PRODUCTS, MOCK_USER,
   authSignUp, authSignIn, authSignOut, authGetSession,
   getUserById, getUserName, updateUserName,
-  mapProduct, loadProducts, getFeed, saveProduct, deleteProduct, getProductsBySeller, uploadImage,
+  mapProduct, loadProducts, getFeed, saveProduct, deleteProduct, getProductsBySeller, uploadImage, DEMO_PRODUCT,
   sendMessage, loadMessages, markRead, getMyConversations,
   addFavorite, removeFavorite, getFavorites,
   getLedgerEntries, createEscrow, releaseEscrow, getSystemStatus,
@@ -295,7 +295,8 @@ function AppShell({ sessionUser }) {
     let alive = true;
     setLoading(true);
     loadProducts()
-      .then(list => { if (alive) setProducts(list); })
+      // DEMO_PRODUCT: tarjeta de ejemplo "llena" al frente (quitar cuando ya no se necesite).
+      .then(list => { if (alive) setProducts([DEMO_PRODUCT, ...list]); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, []);

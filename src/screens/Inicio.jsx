@@ -10,12 +10,20 @@ const INICIO_CFG = {
   badge: { text: "AHORA EN BETA PÚBLICA", color: "#F5B301" },
   tagline: ["Compra.", "Vende.", "Escala."],
   search: "Explora productos o empieza a vender...",
-  stats: [
-    { value: "1200+", label: "PRODUCTOS" },
-    { value: "340+",  label: "VENDEDORES" },
-    { value: "8500+", label: "VENTAS" },
+  // Etiquetas de las estadísticas. Los VALORES son SIEMPRE reales (get_platform_stats),
+  // nunca inventados: si no hay datos, no se muestra la fila.
+  statLabels: [
+    { key: "products",  label: "PRODUCTOS" },
+    { key: "sellers",   label: "VENDEDORES" },
+    { key: "delivered", label: "VENTAS" },
   ],
 };
+// Formatea un número real de forma compacta (1.2k, 8.5k) sin inventar nada.
+function fmtStat(n) {
+  const v = Number(n) || 0;
+  if (v >= 1000) return (v / 1000).toFixed(v >= 10000 ? 0 : 1).replace(/\.0$/, "") + "k";
+  return String(v);
+}
 const INICIO_GOLD = INICIO_CFG.badge.color;
 const INICIO_DISPLAY = "'Arial Black', 'Helvetica Neue', system-ui, sans-serif";
 
@@ -30,7 +38,7 @@ function GoogleG({ size = 19 }) {
   );
 }
 
-export function RetadorInicio({ onGoogle }) {
+export function RetadorInicio({ onGoogle, stats = null }) {
   return (
     <div style={{ minHeight: "100vh", width: "100%", background: "#080808", display: "flex", justifyContent: "center", WebkitFontSmoothing: "antialiased" }}>
       <style>{`
@@ -80,14 +88,18 @@ export function RetadorInicio({ onGoogle }) {
             </button>
             <p style={{ marginTop: 10, textAlign: "center", fontSize: 11.5, color: "rgba(255,255,255,.3)" }}>Con tu cuenta de Google. Rápido y seguro.</p>
           </div>
-          <div style={{ marginTop: "auto", paddingTop: 34, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
-            {INICIO_CFG.stats.map((s) => (
-              <div key={s.label} style={{ textAlign: "center" }}>
-                <div style={{ color: "#fff", fontSize: 28, fontWeight: 900, lineHeight: 1, fontFamily: INICIO_DISPLAY }}>{s.value}</div>
-                <div style={{ marginTop: 7, fontSize: 10.5, letterSpacing: "0.14em", color: "rgba(255,255,255,.34)", fontWeight: 500 }}>{s.label}</div>
-              </div>
-            ))}
-          </div>
+          {/* Estadísticas REALES (get_platform_stats). Si no hay datos o todo es 0,
+              no se muestra la fila: cero números inventados. */}
+          {stats && (stats.products || stats.sellers || stats.delivered) ? (
+            <div style={{ marginTop: "auto", paddingTop: 34, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+              {INICIO_CFG.statLabels.map((s) => (
+                <div key={s.label} style={{ textAlign: "center" }}>
+                  <div style={{ color: "#fff", fontSize: 28, fontWeight: 900, lineHeight: 1, fontFamily: INICIO_DISPLAY }}>{fmtStat(stats[s.key])}</div>
+                  <div style={{ marginTop: 7, fontSize: 10.5, letterSpacing: "0.14em", color: "rgba(255,255,255,.34)", fontWeight: 500 }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+          ) : <div style={{ marginTop: "auto" }} />}
         </div>
       </div>
     </div>

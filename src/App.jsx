@@ -19,7 +19,7 @@ import {
   getUserById, getUserName, updateUserName,
   mapProduct, loadProducts, getFeed, saveProduct, deleteProduct, getProductsBySeller, uploadImage, DEMO_PRODUCT,
   sendMessage, loadMessages, markRead, getMyConversations,
-  addFavorite, removeFavorite, getFavorites,
+  toggleFavorite, getMyFavorites, getPlatformStats,
   getLedgerEntries, createEscrow, releaseEscrow, getSystemStatus,
   CURRENCIES, CURRENCY_CODES, DEFAULT_CURRENCY, money,
   createOrder, estimateDeliveryFee,
@@ -66,6 +66,9 @@ const PLATFORM_DEFAULT_VIEW = "grid";
 export default function App() {
   // Control de sesión: undefined = comprobando, null = sin sesión, objeto = logueado.
   const [sessionUser, setSessionUser] = useState(undefined);
+  // Estadísticas REALES de la plataforma para el login (get_platform_stats). null = no cargó.
+  const [platformStats, setPlatformStats] = useState(null);
+  useEffect(() => { getPlatformStats().then(s => setPlatformStats(s)).catch(() => {}); }, []);
 
   useEffect(() => {
     let alive = true;
@@ -91,7 +94,7 @@ export default function App() {
             <CatalogProvider>
               {sessionUser
                 ? <AppShell sessionUser={sessionUser} />
-                : <RetadorInicio onGoogle={signInWithGoogle} />}
+                : <RetadorInicio onGoogle={signInWithGoogle} stats={platformStats} />}
             </CatalogProvider>
           </DensityProvider>
         )}
@@ -349,7 +352,18 @@ function AppShell({ sessionUser }) {
   };
   const [activeCat, setActiveCat] = useState(null);
   const [favorites, setFavorites] = useState(() => { try { const r = localStorage.getItem("retador_favs"); if (r) return new Set(JSON.parse(r)); } catch {} return new Set(); });
+  const [favProducts, setFavProducts] = useState([]); // productos favoritos (get_my_favorites) para la pantalla de Favoritos
   useEffect(() => { try { localStorage.setItem("retador_favs", JSON.stringify([...favorites])); } catch {} }, [favorites]);
+  // Cargar favoritos REALES del backend al entrar (get_my_favorites). El localStorage
+  // es solo caché offline; la verdad la manda el backend.
+  useEffect(() => {
+    let alive = true;
+    if (!user?.id) return;
+    getMyFavorites()
+      .then(({ products: favs, ids }) => { if (!alive) return; setFavProducts(favs); if (ids.length || favs.length) setFavorites(new Set(ids.length ? ids : favs.map(p => p.id))); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [user?.id]);
 
   // App-level appearance — persiste en localStorage
   const [appTheme, setAppTheme] = useState(() => {
@@ -832,17 +846,27 @@ function AppShell({ sessionUser }) {
   useEffect(() => { try { localStorage.setItem("retador_blocked", JSON.stringify(blockedUsers)); } catch {} }, [blockedUsers]);
   const toggleBlock = (key, name) => setBlockedUsers(prev => prev.some(b => b.key === String(key)) ? prev.filter(b => b.key !== String(key)) : [...prev, { key: String(key), name: name || "Usuario" }]);
 
-  const toggleFav = (productId) => {
-    const isFav = favorites.has(productId);
-    const next = new Set(favorites);
-    if (isFav) {
-      next.delete(productId);
-      flash("💔 Eliminado de favoritos");
-    } else {
-      next.add(productId);
-      flash("❤️ Añadido a favoritos");
+  // Favorito REAL: toggle_favorite en el backend. Actualiza el corazón al instante
+  // (optimista) y luego reconcilia con la verdad del backend; si falla, revierte.
+  const toggleFav = async (productId) => {
+    const wasFav = favorites.has(productId);
+    const addLocal = (id) => { const prod = [...products, ...favProducts].find(p => p.id === id); setFavProducts(prev => prod && !prev.some(p => p.id === id) ? [prod, ...prev] : prev); };
+    // Optimista
+    setFavorites(prev => { const n = new Set(prev); wasFav ? n.delete(productId) : n.add(productId); return n; });
+    if (wasFav) setFavProducts(prev => prev.filter(p => p.id !== productId)); else addLocal(productId);
+    flash(wasFav ? "💔 Eliminado de favoritos" : "❤️ Añadido a favoritos");
+    // El producto demo no vive en el backend: solo toggle local, sin RPC.
+    if (!UUID_RE.test(String(productId))) return;
+    try {
+      const nowFav = await toggleFavorite(productId);
+      setFavorites(prev => { const n = new Set(prev); nowFav ? n.add(productId) : n.delete(productId); return n; });
+      if (!nowFav) setFavProducts(prev => prev.filter(p => p.id !== productId));
+    } catch {
+      // Revertir
+      setFavorites(prev => { const n = new Set(prev); wasFav ? n.add(productId) : n.delete(productId); return n; });
+      if (wasFav) addLocal(productId); else setFavProducts(prev => prev.filter(p => p.id !== productId));
+      flash("⚠️ No se pudo actualizar el favorito");
     }
-    setFavorites(next);
   };
 
   const handleBuy = (product) => {
@@ -856,14 +880,18 @@ function AppShell({ sessionUser }) {
     const isNew = p => p.badge === "NUEVO" || !!p.created_at;
     const sold = p => Number(p.sold_count ?? p.soldCount) || 0;
     const created = p => p.created_at ? new Date(p.created_at).getTime() : 0;
-    let list = products.filter(p => {
+    // Favoritos: la lista sale de get_my_favorites (favProducts). Si la RPC solo
+    // devolvió ids, se cae a filtrar el feed por esos ids (sin inventar nada).
+    const favSource = favProducts.length ? favProducts : products.filter(p => favorites.has(p.id));
+    const source = filter === "FAVORITOS" ? favSource : products;
+    let list = source.filter(p => {
       const ms = !q || p.title?.toLowerCase().includes(q) || p.cat?.toLowerCase().includes(q) || p.description?.toLowerCase().includes(q);
       const mf = filter === "TODOS"
         || (filter === "OFERTAS"     && disc(p))
         || (filter === "NUEVO"       && isNew(p))
         || (filter === "RECOMENDADO" && (p.promoted || p.featured || p.badge === "RECOMENDADO"))
         || (filter === "MAS_VENDIDO" && sold(p) > 0)
-        || (filter === "FAVORITOS"   && favorites.has(p.id));
+        || (filter === "FAVORITOS");
       return ms && mf;
     });
     // Ordenamientos por defecto de cada filtro.

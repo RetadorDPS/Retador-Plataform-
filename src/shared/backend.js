@@ -240,10 +240,43 @@ export const getMyConversations = async (userId) => {
 };
 
 
-// Favorite functions
-export const addFavorite = async (userId, productId) => {};
-export const removeFavorite = async (userId, productId) => {};
-export const getFavorites = async (userId) => [];
+// Favorite functions — RPCs REALES del backend (nada local inventado).
+// toggle_favorite(p_product_id) → true (quedó marcado) | false (quedó desmarcado).
+export const toggleFavorite = async (productId) => {
+  const { data, error } = await supabase.rpc("toggle_favorite", { p_product_id: productId });
+  if (error) { console.error("toggleFavorite:", error.message); throw error; }
+  return !!data;
+};
+// get_my_favorites() → filas de productos favoritos del usuario. Devuelve la lista
+// mapeada al formato de la app (para la pantalla de Favoritos) + el set de ids.
+export const getMyFavorites = async () => {
+  const { data, error } = await supabase.rpc("get_my_favorites");
+  if (error) { console.error("getMyFavorites:", error.message); return { products: [], ids: [] }; }
+  const rows = Array.isArray(data) ? data : [];
+  // La RPC puede devolver filas de producto completas o solo ids/product_id.
+  const products = rows.filter(r => r && (r.title || r.images || r.price != null)).map(mapProduct);
+  const ids = rows.map(r => (r && (r.id ?? r.product_id)) ?? r).filter(Boolean);
+  return { products, ids };
+};
+// Compat: firmas antiguas usadas en algún punto → delegan en las RPCs reales.
+export const addFavorite = async (_userId, productId) => toggleFavorite(productId);
+export const removeFavorite = async (_userId, productId) => toggleFavorite(productId);
+export const getFavorites = async () => (await getMyFavorites()).ids;
+
+// Estadísticas públicas de la plataforma (login/pantallas públicas): números REALES.
+// get_platform_stats() → { products, sellers, users, delivered }. Sin login.
+export const getPlatformStats = async () => {
+  const { data, error } = await supabase.rpc("get_platform_stats");
+  if (error) { console.error("getPlatformStats:", error.message); return null; }
+  const s = Array.isArray(data) ? data[0] : data;
+  if (!s) return null;
+  return {
+    products:  Number(s.products)  || 0,
+    sellers:   Number(s.sellers)   || 0,
+    users:     Number(s.users)     || 0,
+    delivered: Number(s.delivered) || 0,
+  };
+};
 
 // Financial functions
 export const getLedgerEntries = async (userId) => [];

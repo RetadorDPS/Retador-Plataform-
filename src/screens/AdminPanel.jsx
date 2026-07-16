@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { G, systemRating, systemReviews, useCatalog } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount } from "../shared/index.js";
 
 const OmniPanel = (() => {
 
@@ -15,19 +15,6 @@ const FEED0=[
   {id:5,icon:"🚀",msg:"Delivery asignado",user:"Juan P. → Carlos M.",amt:"",t:"3m"},
   {id:6,icon:"🚫",msg:"Usuario suspendido automáticamente",user:"usr_9921",amt:"",t:"4m"},
   {id:7,icon:"✅",msg:"Verificación KYC aprobada",user:"Sandra V.",amt:"",t:"5m"},
-];
-const USERS=[
-  {id:"USR-001",name:"María García",email:"maria@email.com",trust:94,risk:"low",plan:"Premium",last:"2m",av:"MG",status:"active"},
-  {id:"USR-002",name:"Carlos Reyes",email:"carlos@email.com",trust:71,risk:"medium",plan:"Basic",last:"15m",av:"CR",status:"active"},
-  {id:"USR-003",name:"Sandra Vega",email:"sandra@email.com",trust:88,risk:"low",plan:"Pro",last:"1h",av:"SV",status:"active"},
-  {id:"USR-004",name:"Luis Torres",email:"luis@email.com",trust:42,risk:"high",plan:"Basic",last:"3h",av:"LT",status:"suspended"},
-  {id:"USR-005",name:"Ana Martínez",email:"ana@email.com",trust:96,risk:"low",plan:"Enterprise",last:"5m",av:"AM",status:"active"},
-];
-const BIZ=[
-  {id:"BIZ-001",name:"TechStore MX",plan:"Premium",sales:"$48,200",rep:4.9,kyc:true,fee:"$2,410",status:"active"},
-  {id:"BIZ-002",name:"Moda Élite",plan:"Pro",sales:"$31,800",rep:4.7,kyc:true,fee:"$1,590",status:"active"},
-  {id:"BIZ-003",name:"FoodHub CDMX",plan:"Basic",sales:"$12,400",rep:3.8,kyc:false,fee:"$620",status:"review"},
-  {id:"BIZ-004",name:"GadgetWorld",plan:"Premium",sales:"$67,100",rep:4.8,kyc:true,fee:"$3,355",status:"active"},
 ];
 const ORDERS=[
   {id:"ORD-8821",buyer:"María G.",seller:"TechStore MX",total:"$342.00",status:"processing",t:"12s"},
@@ -2211,6 +2198,144 @@ function Operaciones({sub,setSub,toast,data={},solo}){
   </>;
 }
 
+/* ── Directorio REAL de usuarios (profiles) — verificar/suspender de verdad ──── */
+function RealUsersDirectory({ toast, meId }){
+  const PAGE = 20;
+  const [q, setQ] = useState("");
+  const [dq, setDq] = useState("");           // query con debounce
+  const [page, setPage] = useState(0);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [busy, setBusy] = useState(null);      // id en proceso
+  const [sel, setSel] = useState(null);        // ficha rápida
+  const [selCount, setSelCount] = useState(null);
+  const [suspendFor, setSuspendFor] = useState(null); // { u } → modal de motivo
+  const [reason, setReason] = useState("");
+
+  useEffect(() => { const t = setTimeout(() => setDq(q), 350); return () => clearTimeout(t); }, [q]);
+  useEffect(() => {
+    let alive = true; setLoading(true);
+    const from = page * PAGE;
+    adminListUsers({ query: dq, from, to: from + PAGE - 1 })
+      .then(d => { if (!alive) return; setRows(d); setHasMore(d.length === PAGE); setLoading(false); })
+      .catch(() => { if (alive) { setRows([]); setLoading(false); } });
+    return () => { alive = false; };
+  }, [dq, page]);
+
+  const nmeOf = u => u.full_name || u.email || "Usuario";
+  const patch = (id, p) => { setRows(rs => rs.map(r => r.id === id ? { ...r, ...p } : r)); setSel(s => s && s.id === id ? { ...s, ...p } : s); };
+
+  const doVerify = async (u, verified) => {
+    setBusy(u.id);
+    try { await adminSetVerified(u.id, verified); patch(u.id, { is_verified: verified }); toast(verified ? `✓ ${nmeOf(u)} verificado` : `Verificación retirada a ${nmeOf(u)}`); }
+    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+    setBusy(null);
+  };
+  const doSuspend = async (u, suspended, why) => {
+    setBusy(u.id);
+    try { await adminSetSuspended(u.id, suspended, why || null); patch(u.id, { is_suspended: suspended }); toast(suspended ? `⛔ ${nmeOf(u)} suspendido` : `✅ ${nmeOf(u)} reactivado`); }
+    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+    setBusy(null);
+  };
+  const openSuspend = (u) => { setReason(""); setSuspendFor(u); };
+  const confirmSuspend = async () => { const u = suspendFor; setSuspendFor(null); await doSuspend(u, true, reason.trim()); };
+
+  const openSheet = async (u) => { setSel(u); setSelCount(null); const c = await getSellerProductCount(u.id).catch(() => 0); setSelCount(c); };
+
+  const chips = (u) => (
+    <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+      {u.role === 'admin'   && <span className="bdg by">Admin</span>}
+      {u.role === 'courier' && <span className="bdg bb">Mensajero</span>}
+      {u.plan && u.plan !== 'gratis' && <span className="bdg bx">{u.plan}</span>}
+      {u.is_verified && <span className="bdg" style={{ background:'rgba(255,192,30,.14)', color:G }}>✓ Verificado</span>}
+      {u.is_suspended && <span className="bdg br">⛔ Suspendido</span>}
+    </div>
+  );
+
+  return (
+    <div className="card cp">
+      <div className="ch"><span className="ct">Directorio de usuarios</span><span className="bdg bx">{rows.length}{hasMore ? '+' : ''}</span></div>
+      <div style={{ fontSize:11, color:'var(--tx3)', margin:'2px 0 10px' }}>Perfiles reales de la plataforma. Busca, verifica o suspende. Toca una fila para su ficha.</div>
+      <input value={q} onChange={e => { setQ(e.target.value); setPage(0); }} placeholder="Buscar por nombre o email…"
+        style={{ width:'100%', boxSizing:'border-box', background:'var(--bg3,#12151f)', border:'1px solid var(--bd2,#222)', borderRadius:10, padding:'10px 12px', color:'var(--tx)', fontSize:13, outline:'none', marginBottom:10 }} />
+      {loading
+        ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'24px 6px' }}>Cargando usuarios…</div>
+        : rows.length === 0
+          ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'24px 6px' }}>{dq ? 'Nadie coincide con la búsqueda.' : 'Aún no hay usuarios.'}</div>
+          : rows.map(u => (
+            <div key={u.id} onClick={() => openSheet(u)} className="reprow"
+              style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 8px', margin:'0 -8px', borderRadius:9, cursor:'pointer', borderBottom:'1px solid rgba(128,128,128,.1)', background: u.is_suspended ? 'rgba(224,82,82,.05)' : undefined }}>
+              <Avatar url={avatarUrlOf(u.avatar_url)} name={nmeOf(u)} size={38} />
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tx)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{nmeOf(u)}{u.id === meId && <span style={{ color:'var(--tx3)', fontWeight:500 }}> · tú</span>}</div>
+                <div style={{ fontSize:11, color:'var(--tx3)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{u.email || '—'}</div>
+                <div style={{ marginTop:4 }}>{chips(u)}</div>
+              </div>
+              <div style={{ display:'flex', gap:4, flexShrink:0 }} onClick={e => e.stopPropagation()}>
+                <button className="btn bts sm" disabled={busy === u.id} onClick={() => doVerify(u, !u.is_verified)}>{u.is_verified ? 'Quitar ✓' : '✓ Verificar'}</button>
+                {u.is_suspended
+                  ? <button className="btn btg sm" disabled={busy === u.id} onClick={() => doSuspend(u, false)}>Reactivar</button>
+                  : <button className="btn btd sm" disabled={busy === u.id || u.id === meId} onClick={() => openSuspend(u)}>Suspender</button>}
+              </div>
+            </div>
+          ))}
+      {!loading && (page > 0 || hasMore) && (
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:10 }}>
+          <button className="btn sm" disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))} style={{ opacity: page === 0 ? .4 : 1 }}>‹ Anterior</button>
+          <span style={{ fontSize:11, color:'var(--tx3)' }}>Página {page + 1}</span>
+          <button className="btn sm" disabled={!hasMore} onClick={() => setPage(p => p + 1)} style={{ opacity: hasMore ? 1 : .4 }}>Siguiente ›</button>
+        </div>
+      )}
+
+      {/* Modal de motivo al suspender */}
+      {suspendFor && <div className="mo" onClick={() => setSuspendFor(null)}>
+        <div className="mb" onClick={e => e.stopPropagation()} style={{ maxWidth:360 }}>
+          <div className="mt">Suspender a {nmeOf(suspendFor)}</div>
+          <div className="ms">No podrá publicar, comprar ni chatear hasta reactivarlo. Recibirá una notificación.</div>
+          <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Motivo (opcional)…"
+            style={{ width:'100%', boxSizing:'border-box', background:'var(--bg3,#12151f)', border:'1px solid var(--bd2,#222)', borderRadius:10, padding:'10px 12px', color:'var(--tx)', fontSize:13, outline:'none', resize:'none', margin:'6px 0 12px' }} />
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn" style={{ flex:1 }} onClick={() => setSuspendFor(null)}>Cancelar</button>
+            <button className="btn btd" style={{ flex:1 }} onClick={confirmSuspend}>Suspender</button>
+          </div>
+        </div>
+      </div>}
+
+      {/* Ficha rápida del usuario */}
+      {sel && <div className="mo" onClick={() => setSel(null)}>
+        <div className="mb" onClick={e => e.stopPropagation()} style={{ maxWidth:380 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:12 }}>
+            <Avatar url={avatarUrlOf(sel.avatar_url)} name={nmeOf(sel)} size={52} />
+            <div style={{ minWidth:0 }}>
+              <div style={{ fontSize:15, fontWeight:800, color:'var(--tx)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{nmeOf(sel)}</div>
+              <div style={{ fontSize:12, color:'var(--tx3)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{sel.email || '—'}</div>
+            </div>
+          </div>
+          <div style={{ marginBottom:12 }}>{chips(sel)}</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:14 }}>
+            {[['Registrado', sel.created_at ? new Date(sel.created_at).toLocaleDateString('es-ES', { day:'2-digit', month:'short', year:'numeric' }) : '—'],
+              ['Plan', sel.plan || 'gratis'],
+              ['Rol', sel.role || 'user'],
+              ['Productos', selCount == null ? '…' : String(selCount)]].map(([k,v]) => (
+              <div key={k} style={{ background:'var(--bg3,#12151f)', border:'1px solid var(--bd2,#222)', borderRadius:10, padding:'8px 10px' }}>
+                <div style={{ fontSize:10, color:'var(--tx3)' }}>{k}</div>
+                <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tx)' }}>{v}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn bts" style={{ flex:1 }} disabled={busy === sel.id} onClick={() => doVerify(sel, !sel.is_verified)}>{sel.is_verified ? 'Quitar verificación' : '✓ Verificar'}</button>
+            {sel.is_suspended
+              ? <button className="btn btg" style={{ flex:1 }} disabled={busy === sel.id} onClick={() => doSuspend(sel, false)}>Reactivar</button>
+              : <button className="btn btd" style={{ flex:1 }} disabled={busy === sel.id || sel.id === meId} onClick={() => { const u = sel; setSel(null); openSuspend(u); }}>Suspender</button>}
+          </div>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
 /* ── Usuarios ──────────────────────────────────────────────────────────────── */
 function Usuarios({sub,setSub,toast,data={}}){
   const[confirm,setConfirm]=useState(null);
@@ -2270,26 +2395,8 @@ function Usuarios({sub,setSub,toast,data={}}){
           </div>)}
       </div>
 
-      <div className="card">
-        <div className="cp"><div className="ch"><span className="ct">Directorio de usuarios</span></div></div>
-        {users.length===0
-          ? <div className="cp" style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'24px 6px'}}>Aún no hay usuarios con actividad. Aparecerán al haber ventas o reportes.</div>
-          : <div className="tw"><table>
-            <thead><tr><th>Usuario</th><th>Ventas</th><th>Órdenes</th><th>Reportes</th><th>Plan</th><th>Acciones</th></tr></thead>
-            <tbody>{users.map(u=><tr key={u.name} style={u.reports?{background:'rgba(224,82,82,.05)'}:undefined}>
-              <td><div style={{display:'flex',alignItems:'center',gap:8}}><div className="av">{String(u.name).slice(0,2).toUpperCase()}</div><div style={{fontSize:12,fontWeight:600,color:'var(--tx)'}}>{u.name}</div></div></td>
-              <td style={{fontWeight:700,fontFamily:'var(--mo)',fontSize:12,color:'var(--tx)'}}>{fmt(u.sales)}</td>
-              <td style={{color:'var(--tx3)'}}>{u.orders}</td>
-              <td>{u.reports?<span className="bdg br" title={u.reasons.join(' · ')}>🚩 {u.reports}</span>:<span style={{color:'var(--tx3)',fontSize:11}}>—</span>}</td>
-              <td><span className="bdg bx">{u.plan}</span></td>
-              <td><div style={{display:'flex',gap:4}}>
-                {u.reports>0&&<button className="btn btd sm" onClick={()=>ask({title:'Bloquear usuario',msg:`${u.name} fue reportado por: ${u.reasons.join(', ')}. ¿Bloquear de la plataforma?`,danger:true,yes:'Bloquear',onYes:()=>{},msg2:`${u.name} bloqueado`})}>Bloquear</button>}
-                <button className="btn bts sm" onClick={()=>toast(`${u.name} verificado`)}>✓ Verificar</button>
-                <button className="btn btd sm" onClick={()=>ask({title:'Suspender usuario',msg:`¿Suspender a ${u.name}? No podrá operar hasta reactivarlo.`,danger:true,yes:'Suspender',onYes:()=>{},msg2:`${u.name} suspendido`})}>Suspender</button>
-              </div></td>
-            </tr>)}</tbody>
-          </table></div>}
-      </div>
+      {/* Directorio REAL de usuarios (profiles) con buscador, verificar/suspender y ficha */}
+      <RealUsersDirectory toast={toast} meId={data.meId} />
     </>}
 
     {sub==='Negocios'&&<>

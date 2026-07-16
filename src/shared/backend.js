@@ -430,9 +430,49 @@ export const markNotificationsRead = async (userId, id = null) => {
 // mensajero, para que el modo se desbloquee SIN cerrar la app).
 export const refreshSessionProfile = async (userId) => {
   if (!userId) return null;
-  const { data, error } = await supabase.from("profiles").select("role, full_name, avatar_url, bio").eq("id", userId).single();
+  const { data, error } = await supabase.from("profiles").select("role, full_name, avatar_url, bio, is_verified, is_suspended").eq("id", userId).single();
   if (error || !data) return null;
-  return { role: data.role || "user", name: data.full_name || null, avatar: data.avatar_url || null, bio: data.bio || "" };
+  return { role: data.role || "user", name: data.full_name || null, avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified, suspended: !!data.is_suspended };
+};
+
+// ── FASE 2 — ADMIN: usuarios reales + verificar/suspender ─────────────────────
+// Lista PERFILES REALES (perfiles públicos legibles). Buscador por nombre/email
+// (ilike) y paginación por range para escalar. Solo datos reales, cero demo.
+export const adminListUsers = async ({ query = "", from = 0, to = 29 } = {}) => {
+  let q = supabase.from("profiles")
+    .select("id, full_name, email, avatar_url, role, plan, is_verified, is_suspended, created_at")
+    .order("created_at", { ascending: false })
+    .range(from, to);
+  const s = (query || "").trim();
+  if (s) { const like = `%${s.replace(/[,()]/g, " ")}%`; q = q.or(`full_name.ilike.${like},email.ilike.${like}`); }
+  const { data, error } = await q;
+  if (error) { console.error("adminListUsers:", error.message); return []; }
+  return data || [];
+};
+// admin_set_verified / admin_set_suspended: SOLO admin; notifican al usuario y dejan
+// registro (lo hace el backend). Lanzan el error de la RPC (ej. suspenderte a ti mismo).
+export const adminSetVerified = async (userId, verified) => {
+  const { data, error } = await supabase.rpc("admin_set_verified", { p_user_id: userId, p_verified: verified });
+  if (error) { console.error("adminSetVerified:", error.message); throw error; }
+  return data;
+};
+export const adminSetSuspended = async (userId, suspended, reason = null) => {
+  const { data, error } = await supabase.rpc("admin_set_suspended", { p_user_id: userId, p_suspended: suspended, p_reason: reason || null });
+  if (error) { console.error("adminSetSuspended:", error.message); throw error; }
+  return data;
+};
+// ¿El usuario ACTUAL está suspendido? (para el candado del cliente).
+export const isSuspendedUser = async () => {
+  const { data, error } = await supabase.rpc("is_suspended_user");
+  if (error) { console.error("isSuspendedUser:", error.message); return false; }
+  return !!data;
+};
+// Nº de productos publicados por un vendedor (para la ficha rápida del admin).
+export const getSellerProductCount = async (userId) => {
+  if (!userId) return 0;
+  const { count, error } = await supabase.from("products").select("id", { count: "exact", head: true }).eq("seller_id", userId).neq("status", "deleted");
+  if (error) { console.error("getSellerProductCount:", error.message); return 0; }
+  return count || 0;
 };
 
 // ── REGISTRO DE MENSAJEROS (courier_applications) ────────────────────────────

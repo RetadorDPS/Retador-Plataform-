@@ -26,7 +26,7 @@ import {
   readRatings, aggRating, systemRating, serviceRating, serviceReviews, ratingForName, systemReviews,
   getUserOrders, updateOrderStatus, getUnreadCount, getProductById,
   getPendingCourierApplications, reviewCourierApplication,
-  getNotifications, markNotificationsRead, refreshSessionProfile,
+  getNotifications, markNotificationsRead, refreshSessionProfile, isSuspendedUser,
   ORDER_FLOW, SHIP_LABELS, MODALIDAD_LABELS,
   CONTACT_PATTERNS, maskContacts, CUBA_PROVINCES,
   getUserTrustStats, trackEvent, blockUser, isBlocked, getSB, convKey,
@@ -112,6 +112,9 @@ function AppShell({ sessionUser }) {
   const [scr,       setScr]       = useState("main");
   const [tab,       setTab]       = useState("market");
   const [user,      setUser]      = useState(sessionUser); // usuario REAL logueado (Supabase)
+  // ¿Cuenta SUSPENDIDA? Bloquea toda la app. Se confirma con el backend al entrar y
+  // se actualiza EN VIVO por realtime (perfil/notificación kind='account').
+  const [suspended, setSuspended] = useState(!!sessionUser?.suspended);
   const [toast,     setToast]     = useState(null);
   const [unread,    setUnread]    = useState(0); // contador de no leídos (real)
   // (el contador real de notificaciones es unreadNotif, calculado más abajo)
@@ -308,7 +311,10 @@ function AppShell({ sessionUser }) {
     refreshSessionProfile(sessionUser.id).then(p => {
       if (!p) return;
       setProfileData(prev => ({ ...prev, bio: p.bio || prev.bio || "", name: p.name || prev.name, avatar: p.avatar ? { type: "image", value: p.avatar } : prev.avatar }));
+      if (typeof p.suspended === "boolean") setSuspended(p.suspended);
     }).catch(() => {});
+    // Confirmación autoritativa con el backend (por si el perfil de sesión venía cacheado).
+    isSuspendedUser().then(s => setSuspended(!!s)).catch(() => {});
   }, [sessionUser?.id]);
 
   // Productos y búsqueda - Productos ya cargados
@@ -510,6 +516,7 @@ function AppShell({ sessionUser }) {
   };
 
   const handlePublish = async d => {
+    if (suspended) { flash("⛔ Tu cuenta está suspendida"); return; }
     if (!user?.id) { flash("⚠️ Debes iniciar sesión para publicar"); return; }
     const row = {
       seller_id: user.id,
@@ -765,6 +772,12 @@ function AppShell({ sessionUser }) {
           if (n.kind === "courier") {
             refreshSessionProfile(user.id).then(p => { if (p) setUser(prev => prev ? { ...prev, role: p.role } : prev); }).catch(() => {});
           }
+          // Suspensión/reactivación EN VIVO: al llegar una notificación de cuenta,
+          // re-consultamos el backend y bloqueamos/liberamos sin reinstalar.
+          if (n.kind === "account") {
+            isSuspendedUser().then(s => setSuspended(!!s)).catch(() => {});
+            refreshSessionProfile(user.id).then(p => { if (p) setUser(prev => prev ? { ...prev, verified: p.verified, suspended: p.suspended } : prev); }).catch(() => {});
+          }
           if (n.kind === "courier_app" && user.role === "admin") reloadCourierApps();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "courier_applications" }, () => {
@@ -883,7 +896,7 @@ function AppShell({ sessionUser }) {
     if (o && o.courierName) pushNotif(o.courierName, ok ? "El vendedor confirmó el pago. Entrega cerrada ✅" : "El vendedor reportó que no hubo pago. Devuelve el producto.", orderId);
     flash(ok ? "✅ Pago confirmado — entrega cerrada" : "⚠️ Marcado como sin pago");
   };
-  const requestChat = (sellerId, sellerName, context) => openChat(sellerId, sellerName, context); // sin bloqueo
+  const requestChat = (sellerId, sellerName, context) => { if (suspended) { flash("⛔ Tu cuenta está suspendida"); return; } openChat(sellerId, sellerName, context); };
 
   // Usuarios bloqueados (persistentes) — los usa Ajustes. El chat en sí ya va por
   // el backend (conversations/messages con realtime); no hay chat local.
@@ -915,6 +928,7 @@ function AppShell({ sessionUser }) {
   };
 
   const handleBuy = (product) => {
+    if (suspended) { flash("⛔ Tu cuenta está suspendida"); return; }
     setBuyModal(product);
   };
 
@@ -1191,6 +1205,7 @@ function AppShell({ sessionUser }) {
         </div>
       )}
       {showAdmin  && <OmniPanel onClose={() => setShowAdmin(false)} theme={appTk} zoom={densZoom} data={{
+        meId: user?.id,
         orders, cfg: adminCfg,
         onCfg: handleCfgChange,
         onOrderAction: (id, action) => setOrders(prev => prev.map(o => o.id === id ? { ...o, status: action === 'cancel' ? 'cancelado' : action === 'approve' ? 'confirmado' : o.status, flagged: action === 'flag' ? true : (action === 'cancel' || action === 'approve' ? false : o.flagged) } : o)),
@@ -1389,6 +1404,19 @@ function AppShell({ sessionUser }) {
         </>
       )}
     </div>
+    {/* ⛔ CUENTA SUSPENDIDA: candado a pantalla completa. Bloquea toda interacción
+        (no publicar, comprar ni chatear). Si el admin reactiva, desaparece EN VIVO. */}
+    {suspended && (
+      <div style={{ position: "fixed", inset: 0, zIndex: 99999, background: "#080808", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "32px 26px" }}>
+        <div style={{ fontSize: 56, marginBottom: 18 }}>⛔</div>
+        <h1 style={{ color: "#fff", fontSize: 22, fontWeight: 800, margin: 0 }}>Tu cuenta está suspendida</h1>
+        <p style={{ color: "rgba(255,255,255,.55)", fontSize: 14, lineHeight: 1.5, marginTop: 12, maxWidth: 320 }}>
+          No puedes publicar, comprar ni enviar mensajes por ahora. Si crees que es un error, contacta con soporte.
+        </p>
+        <a href="mailto:retadormarketplace@gmail.com" style={{ marginTop: 22, background: G, color: "#000", fontWeight: 800, fontSize: 14, padding: "12px 22px", borderRadius: 12, textDecoration: "none" }}>Contactar con soporte</a>
+        <button onClick={handleSignOut} style={{ marginTop: 14, background: "none", border: "none", color: "rgba(255,255,255,.4)", fontSize: 13, textDecoration: "underline", cursor: "pointer" }}>Cerrar sesión</button>
+      </div>
+    )}
     </RCtx.Provider>
     </PlatformCfgContext.Provider>
     </AppThCtx.Provider>

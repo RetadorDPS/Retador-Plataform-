@@ -50,6 +50,7 @@ export async function loadSessionUser() {
     role: profile?.role || "user",
     verified: profile?.is_verified || false,
     verifiedSince: profile?.verified_since || null,
+    suspended: profile?.is_suspended || false,
     profile,
   };
 }

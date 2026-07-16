@@ -899,7 +899,7 @@ export function ChatsModal({ onClose, initial, orders = [], chatMsgs = {}, chatP
    reales RESPETANDO la posición: cada anuncio se renderiza en el tramo donde el
    usuario lo colocó, entre las partes fijas del sistema. Botones que navegan. */
 
-export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, banners, onNav, hidden = false, scrollKeeper = null, view = "grid" }) {
+export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, onServices, banners, onNav, hidden = false, scrollKeeper = null, view = "grid" }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { cats } = useCatalog();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
@@ -992,6 +992,8 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
         {[["TODOS", "🏷️", "Todos"], ["OFERTAS", "🔥", "Ofertas"], ["NUEVO", "✨", "Nuevo"], ["RECOMENDADO", "⭐", "Destacado"], ["MAS_VENDIDO", "🏆", "Más vendido"]].map(([f, ic, lbl]) => (
           <button key={f} onClick={() => setFilter(f)} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: filter === f ? G : isDark ? "#0e0e0e" : S, color: filter === f ? "#000" : T3, border: `1.5px solid ${filter === f ? G : B}`, borderRadius: 999, padding: "7px 13px", fontSize: 10 * ts, fontWeight: 700, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>{ic} {lbl}</button>
         ))}
+        {/* Entrada a SERVICIOS (mundo aparte) */}
+        {onServices && <button onClick={onServices} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: isDark ? "#0e0e0e" : S, color: G, border: `1.5px solid ${G}55`, borderRadius: 999, padding: "7px 13px", fontSize: 10 * ts, fontWeight: 800, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>🛠️ Servicios</button>}
       </div>
 
       {/* Tramo: lo que pusiste entre los Filtros y los Productos */}
@@ -1128,20 +1130,21 @@ export function EditProductModal({ product, onClose, onSave, flash }) {
   const [pickupPhone, setPickupPhone] = useState(product.pickupPhone || product.pickup_phone || "");
   const [shipPrice, setShipPrice] = useState(product.shippingPrice ?? product.ship_price ?? "");
   const [location, setLocation] = useState(product.location || "");
+  const isService = product.kind === "service";   // el kind NO se puede cambiar al editar
   const save = () => {
     if (!title.trim()) { flash && flash("Ponle un título"); return; }
-    if (!shipModes.local && !shipModes.persona && !shipModes.intl) { flash && flash("⚠️ Marca al menos una forma de entrega"); return; }
-    if (shipModes.intl && !Number(shipPrice)) { flash && flash("⚠️ Define el precio del envío internacional"); return; }
+    if (!isService && !shipModes.local && !shipModes.persona && !shipModes.intl) { flash && flash("⚠️ Marca al menos una forma de entrega"); return; }
+    if (!isService && shipModes.intl && !Number(shipPrice)) { flash && flash("⚠️ Define el precio del envío internacional"); return; }
     const parts = catLabel.split("/").map(s => s.trim());
     const found = cats.find(c => (c.name || "").toLowerCase() === (parts[0] || "").toLowerCase());
     onSave({
       title: title.trim(), price: Number(price) || 0, description: desc,
       cat: found ? found.id : product.cat, subcat: parts[1] || undefined,
       image: imgs[0] || product.image, images: imgs,
-      shipModes, shippingPrice: Number(shipPrice) || 0,
-      pickupAddress, pickupPhone, location,
+      location,
+      ...(isService ? {} : { shipModes, shippingPrice: Number(shipPrice) || 0, pickupAddress, pickupPhone }),
     });
-    flash && flash("✅ Producto actualizado");
+    flash && flash(isService ? "✅ Servicio actualizado" : "✅ Producto actualizado");
   };
   const lbl = { fontSize: 11, fontWeight: 700, color: T2, marginBottom: 5, display: "block" };
   const inp = { width: "100%", background: isDark ? "#1a1a1a" : "#f5f5f7", color: T1, border: `1px solid ${B}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, outline: "none", fontFamily: "inherit" };
@@ -1149,7 +1152,10 @@ export function EditProductModal({ product, onClose, onSave, flash }) {
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 5200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
       <div onClick={e => e.stopPropagation()} style={{ background: BG, width: "100%", maxWidth: 480, borderRadius: "20px 20px 0 0", padding: "18px 16px 28px", maxHeight: "92vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <span style={{ fontSize: 17, fontWeight: 800, color: T1 }}>Editar producto</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 17, fontWeight: 800, color: T1 }}>{isService ? "Editar servicio" : "Editar producto"}</span>
+            <span style={{ fontSize: 10, fontWeight: 800, color: G, background: `${G}18`, border: `1px solid ${G}40`, borderRadius: 999, padding: "2px 8px" }}>{isService ? "🛠️ Servicio" : "📦 Producto"}</span>
+          </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T2, fontSize: 22, cursor: "pointer" }}>×</button>
         </div>
 
@@ -1182,7 +1188,16 @@ export function EditProductModal({ product, onClose, onSave, flash }) {
         <label style={lbl}>Descripción</label>
         <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4} style={{ ...inp, resize: "none", marginBottom: 18 }} />
 
-        {/* FORMAS DE ENTREGA (combinables) — igual que al publicar */}
+        {/* Zona (servicio): dónde ofrece el servicio */}
+        {isService && (
+          <div style={{ marginBottom: 8 }}>
+            <label style={lbl}>Zona donde ofreces el servicio</label>
+            <input value={location} onChange={e => setLocation(e.target.value)} placeholder="Ej: La Habana (o «toda Cuba», «en línea»…)" style={inp} />
+          </div>
+        )}
+
+        {/* FORMAS DE ENTREGA (combinables) — solo productos */}
+        {!isService && <>
         <label style={lbl}>Formas de entrega</label>
         {[
           { k: "local",   ic: "🛵", t: "Delivery local",       d: "Un mensajero lo recoge y lo entrega" },
@@ -1217,6 +1232,7 @@ export function EditProductModal({ product, onClose, onSave, flash }) {
             <input type="number" value={shipPrice} onChange={e => setShipPrice(e.target.value)} placeholder="Precio del envío" style={inp} />
           </div>
         )}
+        </>}
 
         <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
           <button onClick={onClose} style={{ flex: 1, height: 46, borderRadius: 12, border: `1px solid ${B}`, background: "transparent", color: T1, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
@@ -1594,14 +1610,15 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
   const { cols } = useR();
   const { cats, subcats } = useCatalog();
   const { S, B, CARD, T1, T2, T3, isDark } = useAt();
-  const [form, setForm] = useState({ 
-    title: "", 
-    price: "", 
-    currency: "USD", 
-    orig: "", 
-    cat: "", 
+  const [form, setForm] = useState({
+    kind: "",   // FASE 3: 'product' | 'service' — OBLIGATORIO elegir antes de publicar
+    title: "",
+    price: "",
+    currency: "USD",
+    orig: "",
+    cat: "",
     subcat: "",
-    desc: "", 
+    desc: "",
     images: [], // Array de URLs
     badge: "",
     shipModes: { local: true, intl: false, persona: false }, // combinables: el vendedor marca las que quiera
@@ -1682,11 +1699,16 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
     set("images", form.images.filter((_, i) => i !== idx));
   };
 
+  const kindChosen = form.kind === "product" || form.kind === "service";
+  const isService = form.kind === "service";
   const anyShip = form.shipModes.local || form.shipModes.intl || form.shipModes.persona;
   const needsLoc = form.shipModes.local || form.shipModes.persona;
-  const canPublish = form.title && form.price && form.cat && anyShip &&
-    (!needsLoc || form.location) &&
-    (!form.shipModes.intl || form.shippingPrice);
+  // Servicio: título + categoría (precio y zona opcionales). Producto: regla completa.
+  const canPublish = kindChosen && form.title && form.cat && (
+    isService
+      ? true
+      : (form.price && anyShip && (!needsLoc || form.location) && (!form.shipModes.intl || form.shippingPrice))
+  );
 
   return (
     <div className="fi" style={{ position: "fixed", inset: 0, zIndex: 400 }} onClick={onClose}>
@@ -1699,8 +1721,8 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
         {/* Header */}
         <div style={{ position: "sticky", top: 0, background: isDark ? "rgba(6,6,6,.98)" : `rgba(220,221,232,.98)`, backdropFilter: "blur(18px)", padding: "14px 20px", borderBottom: `1px solid ${B}`, display: "flex", justifyContent: "space-between", alignItems: "center", zIndex: 10 }}>
           <div>
-            <h2 style={{ fontSize: 16, fontWeight: 900, letterSpacing: -.3, color: T1 }}>Publicar Producto</h2>
-            <p style={{ fontSize: 10, color: T3, marginTop: 2 }}>Completa la información · Visible globalmente 🌍</p>
+            <h2 style={{ fontSize: 16, fontWeight: 900, letterSpacing: -.3, color: T1 }}>{isService ? "Publicar Servicio" : "Publicar Producto"}</h2>
+            <p style={{ fontSize: 10, color: T3, marginTop: 2 }}>Publicación libre e instantánea · Visible globalmente 🌍</p>
           </div>
           <button onClick={onClose} className="p" style={{ background: isDark?"#111":CARD, border: `1px solid ${B}`, borderRadius: "50%", width: 27, height: 27, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Ic n="close" c={T2} s={15} />
@@ -1708,7 +1730,32 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
         </div>
 
         <div style={{ padding: "13px" }}>
-          
+
+          {/* SELECTOR OBLIGATORIO: ¿Producto o Servicio? */}
+          <div style={sectionStyle}>
+            <div style={sectionTitle}><span>❓</span> ¿Qué vas a publicar?</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {[
+                { k: "product", ic: "📦", t: "Producto", d: "Algo físico que vendes y se entrega" },
+                { k: "service", ic: "🛠️", t: "Servicio", d: "Un trabajo o servicio que ofreces" },
+              ].map(o => {
+                const on = form.kind === o.k;
+                return (
+                  <button key={o.k} type="button" className="p" onClick={() => set("kind", o.k)}
+                    style={{ textAlign: "center", padding: "16px 10px", borderRadius: 14, cursor: "pointer",
+                      background: on ? `${G}14` : (isDark ? "#0e0e0e" : CARD),
+                      border: `2px solid ${on ? G : (isDark ? "#1a1a1a" : B)}` }}>
+                    <div style={{ fontSize: 26, marginBottom: 4 }}>{o.ic}</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: on ? G : (isDark ? "#fff" : T1) }}>{o.t}</div>
+                    <div style={{ fontSize: 9, color: isDark ? "#777" : T2, marginTop: 3, lineHeight: 1.35 }}>{o.d}</div>
+                  </button>
+                );
+              })}
+            </div>
+            {!kindChosen && <p style={{ fontSize: 9.5, color: G, marginTop: 8, textAlign: "center" }}>Elige una opción para continuar.</p>}
+          </div>
+
+          {kindChosen && <>
           {/* SECCIÓN 1: IMÁGENES */}
           <div style={sectionStyle}>
             <div style={sectionTitle}>
@@ -1746,21 +1793,21 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
                 <input style={inp} placeholder="Ej: iPhone 14 Pro Max 256GB" value={form.title} onChange={e => set("title", e.target.value)} maxLength={80} />
                 <p style={{ fontSize: 9, color: T3, marginTop: 4, textAlign: "right" }}>{form.title.length}/80</p>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols},1fr)`, gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isService ? "1fr" : `repeat(${cols},1fr)`, gap: 8 }}>
                 <div>
-                  <label style={lbl}>Precio *</label>
+                  <label style={lbl}>{isService ? <>Precio <span style={{ color: T3 }}>(desde · opcional)</span></> : "Precio *"}</label>
                   <div style={{ position: "relative" }}>
                     <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: isDark?"#666":T2, fontSize: 12, fontWeight: 700 }}>$</span>
-                    <input style={{ ...inp, paddingLeft: 26 }} type="number" min="0" step="0.01" placeholder="0.00" value={form.price} onChange={e => set("price", e.target.value)} />
+                    <input style={{ ...inp, paddingLeft: 26 }} type="number" min="0" step="0.01" placeholder={isService ? "Desde… (opcional)" : "0.00"} value={form.price} onChange={e => set("price", e.target.value)} />
                   </div>
                 </div>
-                <div>
+                {!isService && <div>
                   <label style={lbl}>Precio original <span style={{ color: T3 }}>(opcional)</span></label>
                   <div style={{ position: "relative" }}>
                     <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: isDark?"#444":T3, fontSize: 12, fontWeight: 700 }}>$</span>
                     <input style={{ ...inp, paddingLeft: 26 }} type="number" min="0" step="0.01" placeholder="0.00" value={form.orig} onChange={e => set("orig", e.target.value)} />
                   </div>
-                </div>
+                </div>}
               </div>
               <div style={{ marginTop: 12 }}>
                 <label style={lbl}>Moneda *</label>
@@ -1785,7 +1832,7 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
           {/* SECCIÓN 3: CATEGORÍA */}
           <div style={sectionStyle}>
             <div style={sectionTitle}>
-              <span>🏷️</span> Categoría y subcategoría
+              <span>🏷️</span> {isService ? "Categoría del servicio" : "Categoría y subcategoría"}
             </div>
             <select style={{ ...inp, appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23666' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 13px center", paddingRight: 40, cursor: "pointer", color: form.cat ? T1 : T3 }} value={form.cat ? `${form.cat}|${form.subcat || ""}` : ""} onChange={e => { const [cid, sub] = e.target.value.split("|"); set("cat", cid || ""); set("subcat", sub || ""); }}>
               <option value="">Selecciona categoría…</option>
@@ -1796,10 +1843,16 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
                   : <option key={c.id} value={`${c.id}|`}>{c.name}</option>;
               })}
             </select>
-            {!form.cat && <p style={{ fontSize: 9.5, color: T3, marginTop: 5 }}>Obligatorio · ayuda a que tu producto aparezca en la búsqueda correcta.</p>}
+            {!form.cat && <p style={{ fontSize: 9.5, color: T3, marginTop: 5 }}>Obligatorio · ayuda a que aparezca en la búsqueda correcta.</p>}
           </div>
 
-          {form.shipModes.local && <div style={sectionStyle}>
+          {/* ZONA (servicio): dónde ofrece el servicio */}
+          {isService && <div style={sectionStyle}>
+            <div style={sectionTitle}><span>📍</span> Zona donde ofreces el servicio</div>
+            <input style={inp} placeholder="Ej: La Habana, Vedado (o «toda Cuba», «en línea»…)" value={form.location} onChange={e => set("location", e.target.value)} />
+          </div>}
+
+          {!isService && form.shipModes.local && <div style={sectionStyle}>
             <div style={sectionTitle}>
               <span>🏪</span> Dirección de recogida
             </div>
@@ -1818,7 +1871,7 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
           </div>
 
           {/* SECCIÓN 5: ETIQUETA */}
-          <div style={sectionStyle}>
+          {!isService && <div style={sectionStyle}>
             <div style={sectionTitle}>
               <span>⭐</span> Etiqueta destacada
             </div>
@@ -1829,10 +1882,10 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
                 </button>
               ))}
             </div>
-          </div>
+          </div>}
 
-          {/* SECCIÓN 6: ENTREGA */}
-          <div style={sectionStyle}>
+          {/* SECCIÓN 6: ENTREGA (solo productos) */}
+          {!isService && <div style={sectionStyle}>
             <div style={sectionTitle}>
               <span>🚚</span> Opciones de entrega
             </div>
@@ -1893,7 +1946,7 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
                 </div>
               </div>
             )}
-          </div>
+          </div>}
 
           {/* SECCIÓN 8: VISIBILIDAD */}
           <div style={sectionStyle}>
@@ -1913,9 +1966,12 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
 
           {/* SECCIÓN 9: ACCIÓN */}
           <button 
-            onClick={async () => { 
+            onClick={async () => {
               if (!canPublish) {
-                if (!form.title) flash("⚠️ Escribe un título");
+                if (!kindChosen) flash("⚠️ Elige Producto o Servicio");
+                else if (!form.title) flash("⚠️ Escribe un título");
+                else if (!form.cat) flash("⚠️ Elige una categoría");
+                else if (isService) { /* servicio: resto opcional */ }
                 else if (!form.price) flash("⚠️ Define el precio");
                 else if (!anyShip) flash("⚠️ Marca al menos una forma de entrega");
                 else if (needsLoc && !form.location) flash("⚠️ Indica tu ubicación / zona");
@@ -1947,9 +2003,71 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
               justifyContent: "center",
               gap: 8
             }}>
-            {saving ? <><Spin size={17} color="#000" /> Publicando...</> : "🚀 PUBLICAR PRODUCTO"}
+            {saving ? <><Spin size={17} color="#000" /> Publicando...</> : (isService ? "🚀 PUBLICAR SERVICIO" : "🚀 PUBLICAR PRODUCTO")}
           </button>
+          </>}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SERVICIOS — mundo aparte (kind='service'): tarjeta simple + "Contactar".
+// Sin comprar, sin flujo de pedido, sin comisión. Se monetiza distinto (después).
+// ═════════════════════════════════════════════════════════════════════════════
+function ServiceCard({ s, onContact }) {
+  const { S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
+  const img = s.img || s.image || (s.images && s.images[0]) || null;
+  const price = Number(s.price) || 0;
+  return (
+    <div style={{ background: isDark ? "#0d0d0d" : CARD, border: `1px solid ${B}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div style={{ position: "relative", aspectRatio: "16 / 10", background: "#161616", overflow: "hidden" }}>
+        {img
+          ? <img src={img} alt={s.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => { e.target.style.display = "none"; }} />
+          : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34 }}>🛠️</div>}
+        <div style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,.6)", backdropFilter: "blur(6px)", color: G, fontSize: 9 * ts, fontWeight: 800, padding: "3px 8px", borderRadius: 999 }}>🛠️ Servicio</div>
+      </div>
+      <div style={{ padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
+        <p style={{ margin: 0, fontSize: 12.5 * ts, fontWeight: 700, color: T1, lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{s.title}</p>
+        {s.location && <div style={{ fontSize: 10 * ts, color: T2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>📍 {s.location}</div>}
+        <div style={{ marginTop: "auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, paddingTop: 4 }}>
+          {price > 0
+            ? <span style={{ fontSize: 13 * ts, fontWeight: 900, color: G }}><span style={{ fontSize: 9 * ts, color: T3, fontWeight: 600 }}>desde </span>{money(price, s.currency)}</span>
+            : <span style={{ fontSize: 10 * ts, color: T3 }}>Precio a consultar</span>}
+          <button className="p" onClick={() => onContact(s)} style={{ background: G, color: "#000", border: "none", borderRadius: 999, padding: "7px 12px", fontSize: 10.5 * ts, fontWeight: 800, whiteSpace: "nowrap", flexShrink: 0 }}>💬 Contactar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ServicesScreen({ services = [], loading = false, onBack, onContact, onPublish }) {
+  const { BG, S, B, T1, T2, T3, isDark } = useAt();
+  const { cols } = useR();
+  const ncols = Math.max(cols, 2);
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: BG }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${B}`, flexShrink: 0 }}>
+        {onBack && <button className="p" onClick={onBack} style={{ background: isDark ? "#111" : "#f0f0f0", border: `1px solid ${B}`, borderRadius: "50%", width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", color: T1 }}><Ic n="back" c={T1} s={16} /></button>}
+        <div style={{ flex: 1 }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 900, color: T1 }}>🛠️ Servicios</h2>
+          <p style={{ margin: 0, fontSize: 10, color: T3, marginTop: 1 }}>Contacta directo con quien ofrece el servicio</p>
+        </div>
+        {onPublish && <button className="p" onClick={onPublish} style={{ background: `${G}18`, color: G, border: `1px solid ${G}40`, borderRadius: 999, padding: "7px 12px", fontSize: 11, fontWeight: 800 }}>+ Ofrecer</button>}
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 100px" }}>
+        {loading
+          ? <div style={{ textAlign: "center", color: T3, fontSize: 12, padding: "40px 0" }}>Cargando servicios…</div>
+          : services.length === 0
+            ? <div style={{ textAlign: "center", color: T3, padding: "48px 20px" }}>
+                <div style={{ fontSize: 40, marginBottom: 10 }}>🛠️</div>
+                <p style={{ fontSize: 13, color: T2, fontWeight: 600 }}>Aún no hay servicios publicados</p>
+                <p style={{ fontSize: 11, marginTop: 4 }}>¿Ofreces un servicio? Publícalo y aparecerá aquí.</p>
+              </div>
+            : <div style={{ display: "grid", gridTemplateColumns: `repeat(${ncols}, 1fr)`, gap: 12 }}>
+                {services.map(s => <ServiceCard key={s.id} s={s} onContact={onContact} />)}
+              </div>}
       </div>
     </div>
   );

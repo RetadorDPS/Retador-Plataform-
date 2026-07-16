@@ -17,7 +17,7 @@ import {
   MOCK_PRODUCTS, MOCK_USER,
   authSignUp, authSignIn, authSignOut, authGetSession,
   getUserById, getUserName, updateUserName,
-  mapProduct, loadProducts, getFeed, saveProduct, deleteProduct, getProductsBySeller, uploadImage, DEMO_PRODUCT,
+  mapProduct, loadProducts, loadServices, getFeed, saveProduct, deleteProduct, getProductsBySeller, uploadImage, DEMO_PRODUCT,
   sendMessage, loadMessages, markRead, getMyConversations,
   toggleFavorite, getMyFavorites, getPlatformStats, getPlatformConfig, setPlatformConfig,
   getLedgerEntries, createEscrow, releaseEscrow, getSystemStatus,
@@ -42,7 +42,7 @@ import WalletApp from "./screens/Wallet.jsx";
 import ProductToolsApp from "./screens/ProductTools.jsx";
 import { LocalDelivery, IntlShipping } from "./screens/Delivery.jsx";
 import { CourierFlow } from "./screens/Courier.jsx";
-import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProductModal, ProductDetail, PubSheet, EnviosMenu, BottomNav } from "./screens/Marketplace.jsx";
+import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProductModal, ProductDetail, PubSheet, EnviosMenu, BottomNav, ServicesScreen } from "./screens/Marketplace.jsx";
 import OmniPanel from "./screens/AdminPanel.jsx";
 import { SubastasScreen } from "./screens/Auctions.jsx";
 import { SettingsScreen } from "./screens/Settings.jsx";
@@ -144,10 +144,15 @@ function AppShell({ sessionUser }) {
     if (changes.pickupAddress !== undefined) upd.pickup_address = changes.pickupAddress || null;
     if (changes.pickupPhone   !== undefined) upd.pickup_phone   = changes.pickupPhone || null;
     if (changes.location      !== undefined) upd.location       = changes.location || null;
+    // Al editar, una publicación RETIRADA vuelve a quedar visible (approved).
+    upd.moderation_status = "approved";
     const { data, error } = await supabase.from("products").update(upd).eq("id", id).select().single();
     if (error) { flash("⚠️ " + (error.message || "No se pudo editar")); return; }
-    setProducts(prev => prev.map(p => p.id === id ? mapProduct(data) : p));
-    flash("✏️ Producto actualizado");
+    const mapped = mapProduct(data);
+    setProducts(prev => { const exists = prev.some(p => p.id === id); return exists ? prev.map(p => p.id === id ? mapped : p) : (mapped.kind === "service" ? prev : [mapped, ...prev]); });
+    setServices(prev => prev.map(p => p.id === id ? mapped : p));
+    reloadOwn();
+    flash("✏️ Publicación actualizada");
   };
   const [selChat,   setSelChat]   = useState(null);
   const [selSeller, setSelSeller] = useState(null);
@@ -318,7 +323,8 @@ function AppShell({ sessionUser }) {
   }, [sessionUser?.id]);
 
   // Productos y búsqueda - Productos ya cargados
-  const [products,  setProducts]  = useState([]); // productos REALES del backend
+  const [products,  setProducts]  = useState([]); // productos REALES del backend (kind='product')
+  const [services,  setServices]  = useState([]); // SERVICIOS (kind='service') — mundo aparte
   const [loading,   setLoading]   = useState(true);
   // Cargar productos reales al iniciar (sin login: política pública active+approved).
   useEffect(() => {
@@ -328,8 +334,14 @@ function AppShell({ sessionUser }) {
       // DEMO_PRODUCT: tarjeta de ejemplo "llena" al frente (quitar cuando ya no se necesite).
       .then(list => { if (alive) setProducts([DEMO_PRODUCT, ...list]); })
       .finally(() => { if (alive) setLoading(false); });
+    loadServices().then(list => { if (alive) setServices(list); }).catch(() => {});
     return () => { alive = false; };
   }, []);
+  // MIS publicaciones (productos + servicios, INCLUIDAS las retiradas): el dueño las
+  // ve todas en su perfil, marcando las retiradas. Fuente: getProductsBySeller (sin filtrar).
+  const [ownListings, setOwnListings] = useState([]);
+  const reloadOwn = useCallback(() => { if (sessionUser?.id) getProductsBySeller(sessionUser.id).then(setOwnListings).catch(() => {}); }, [sessionUser?.id]);
+  useEffect(() => { reloadOwn(); }, [reloadOwn]);
   // Cargar TASAS DE CAMBIO reales del backend (lectura pública, sin login) y
   // volcarlas en la config (usdToCup / eurToCup) para que toda la app las use.
   useEffect(() => {
@@ -518,34 +530,45 @@ function AppShell({ sessionUser }) {
   const handlePublish = async d => {
     if (suspended) { flash("⛔ Tu cuenta está suspendida"); return; }
     if (!user?.id) { flash("⚠️ Debes iniciar sesión para publicar"); return; }
+    const isService = d.kind === "service";
     const row = {
       seller_id: user.id,
+      kind: isService ? "service" : "product",   // FASE 3: separa origen (obligatorio)
       title: d.title,
       description: d.desc || null,
       price: Number(d.price) || 0,
-      orig_price: (d.orig_price ?? d.orig) ? Number(d.orig_price ?? d.orig) : null,
+      orig_price: (!isService && (d.orig_price ?? d.orig)) ? Number(d.orig_price ?? d.orig) : null,
       currency: d.currency || "USD",
       cat: d.cat || null,
       subcat: d.subcat || null,
       images: Array.isArray(d.images) ? d.images : [],
-      badge: d.badge || null,
-      ship_modes: d.shipModes || { local: true, intl: false, persona: false },
-      ship_price: Number(d.shippingPrice) || 0,
-      location: d.location || null,
-      // Dirección/teléfono de recogida (los usa el mensajero al aceptar la entrega).
-      pickup_address: d.pickupAddress || null,
-      pickup_phone: d.pickupPhone || null,
+      badge: isService ? null : (d.badge || null),
+      // Un servicio no tiene formas de entrega/envío ni recogida.
+      ship_modes: isService ? null : (d.shipModes || { local: true, intl: false, persona: false }),
+      ship_price: isService ? 0 : (Number(d.shippingPrice) || 0),
+      location: d.location || null,   // zona (donde ofrece el servicio / ubicación del producto)
+      pickup_address: isService ? null : (d.pickupAddress || null),
+      pickup_phone: isService ? null : (d.pickupPhone || null),
     };
     const { data, error } = await supabase.from("products").insert(row).select().single();
-    if (error) { flash("⚠️ " + (error.message || "No se pudo publicar")); return; }
-    setProducts(prev => [mapProduct(data), ...prev]);
-    flash("✅ Producto publicado — visible para todos");
+    if (error) {
+      // Índice único anti-duplicados: mismo vendedor + mismo título activo.
+      if (error.code === "23505" || /duplicate|unique|ya existe/i.test(error.message || "")) {
+        flash("⚠️ Ya tienes una publicación activa con este nombre. Edítala o usa otro título.");
+      } else { flash("⚠️ " + (error.message || "No se pudo publicar")); }
+      return;
+    }
+    if (isService) { setServices(prev => [mapProduct(data), ...prev]); flash("✅ Servicio publicado — visible en la sección Servicios"); }
+    else { setProducts(prev => [mapProduct(data), ...prev]); flash("✅ Producto publicado — visible para todos"); }
+    reloadOwn();
   };
 
   const handleDelete = async id => {
     const { error } = await supabase.from("products").update({ status: "deleted" }).eq("id", id);
     if (error) { flash("⚠️ " + (error.message || "No se pudo eliminar")); return; }
     setProducts(prev => prev.filter(p => p.id !== id));
+    setServices(prev => prev.filter(p => p.id !== id));
+    reloadOwn();
     flash("🗑️ Eliminado");
   };
 
@@ -1251,8 +1274,18 @@ function AppShell({ sessionUser }) {
                 onPublish={() => setPubOpen(true)}
                 onPlusMenu={rect => setPlusMenu(rect)}
                 onOpenChats={openMessages}
+                onServices={() => setMScr("services")}
                 banners={banners}
                 onNav={navTo}
+              />
+            )}
+            {mScr === "services" && (
+              <ServicesScreen
+                services={services}
+                loading={loading}
+                onBack={() => setMScr("home")}
+                onContact={(s) => requestChat(s.seller_id, s.seller_name, { type: "service", id: s.id, title: s.title, image: s.image || s.img })}
+                onPublish={() => setPubOpen(true)}
               />
             )}
             {mScr === "product" && selProd && (
@@ -1319,7 +1352,7 @@ function AppShell({ sessionUser }) {
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
               const paid = payments.filter(p => p.sellerName === me).reduce((a, p) => a + (p.amount || 0), 0);
               const myDebt = Math.max(0, accrued - paid);
-              return <FreeProfileScreen onBack={() => setPScr("main")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={(p) => addVerification({ userName: me || "Usuario", ...p })} isVerified={verifiedUsers.includes(me)} onRequestPlan={(plan) => addPlanRequest({ userName: me || "Usuario", plan })} currentPlan={userPlans[me] || "Básico"} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={products.filter(p => p.seller_id === user?.id)} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} />;
+              return <FreeProfileScreen onBack={() => setPScr("main")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={(p) => addVerification({ userName: me || "Usuario", ...p })} isVerified={verifiedUsers.includes(me)} onRequestPlan={(plan) => addPlanRequest({ userName: me || "Usuario", plan })} currentPlan={userPlans[me] || "Básico"} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} />;
             })()}
             {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
             {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds } from "../shared/index.js";
 
 const OmniPanel = (() => {
 
@@ -2198,6 +2198,125 @@ function Operaciones({sub,setSub,toast,data={},solo}){
   </>;
 }
 
+/* ── Moderación de publicaciones (a posteriori) — aprobar / retirar de verdad ── */
+function ModeracionPublicaciones({ toast }){
+  const PAGE = 20;
+  const [q, setQ] = useState("");
+  const [dq, setDq] = useState("");
+  const [filter, setFilter] = useState("all"); // all | approved | rejected
+  const [page, setPage] = useState(0);
+  const [rows, setRows] = useState([]);
+  const [names, setNames] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [busy, setBusy] = useState(null);
+  const [rejectFor, setRejectFor] = useState(null);
+  const [reason, setReason] = useState("");
+
+  useEffect(() => { const t = setTimeout(() => setDq(q), 350); return () => clearTimeout(t); }, [q]);
+  useEffect(() => { setPage(0); }, [filter]);
+  useEffect(() => {
+    let alive = true; setLoading(true);
+    const from = page * PAGE;
+    adminListProducts({ query: dq, filter, from, to: from + PAGE - 1 })
+      .then(async d => {
+        if (!alive) return;
+        setRows(d); setHasMore(d.length === PAGE); setLoading(false);
+        const map = await getProfilesByIds(d.map(p => p.seller_id)).catch(() => ({}));
+        if (alive) setNames(map);
+      })
+      .catch(() => { if (alive) { setRows([]); setLoading(false); } });
+    return () => { alive = false; };
+  }, [dq, filter, page]);
+
+  const patch = (id, p) => setRows(rs => rs.map(r => r.id === id ? { ...r, ...p } : r));
+  const doApprove = async (p) => {
+    setBusy(p.id);
+    try { await adminModerateProduct(p.id, true); patch(p.id, { moderation_status: "approved" }); toast(`✅ «${p.title}» aprobada`); }
+    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+    setBusy(null);
+  };
+  const doReject = async () => {
+    const p = rejectFor; const why = reason.trim(); setRejectFor(null);
+    setBusy(p.id);
+    try { await adminModerateProduct(p.id, false, why || null); patch(p.id, { moderation_status: "rejected", moderation_reason: why }); toast(`🚫 «${p.title}» retirada`); }
+    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+    setBusy(null);
+  };
+
+  const statusChip = (s) => s === "rejected"
+    ? <span className="bdg br">🚫 Retirada</span>
+    : s === "pending"
+      ? <span className="bdg by">⏳ Pendiente</span>
+      : <span className="bdg bg">✅ Aprobada</span>;
+
+  return (
+    <>
+      <div className="stit">Moderación de publicaciones</div>
+      <div className="ssub">Publicación libre; tú retiras a posteriori lo que no va. El vendedor recibe aviso.</div>
+
+      <div className="tabs" style={{ maxWidth: 320 }}>
+        {[["all","Todas"],["approved","Aprobadas"],["rejected","Rechazadas"]].map(([k,l]) =>
+          <div key={k} className={`tab ${filter===k?'on':''}`} onClick={()=>setFilter(k)}>{l}</div>)}
+      </div>
+
+      <div className="card cp">
+        <input value={q} onChange={e => { setQ(e.target.value); setPage(0); }} placeholder="Buscar por título…"
+          style={{ width:'100%', boxSizing:'border-box', background:'var(--bg3,#12151f)', border:'1px solid var(--bd2,#222)', borderRadius:10, padding:'10px 12px', color:'var(--tx)', fontSize:13, outline:'none', marginBottom:10 }} />
+        {loading
+          ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'24px 6px' }}>Cargando publicaciones…</div>
+          : rows.length === 0
+            ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'24px 6px' }}>Nada por aquí.</div>
+            : rows.map(p => {
+              const img = Array.isArray(p.images) ? p.images[0] : (p.images || null);
+              const seller = names[p.seller_id];
+              return (
+                <div key={p.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 0', borderBottom:'1px solid rgba(128,128,128,.1)' }}>
+                  <div style={{ width:46, height:46, borderRadius:8, overflow:'hidden', background:'#161616', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:20 }}>
+                    {img ? <img src={img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} onError={e=>{e.target.style.display='none';}} /> : (p.kind === 'service' ? '🛠️' : '📦')}
+                  </div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tx)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.title}</div>
+                    <div style={{ fontSize:11, color:'var(--tx3)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                      {seller?.full_name || 'Vendedor'} · {p.kind === 'service' ? '🛠️ Servicio' : '📦 Producto'} · {p.created_at ? new Date(p.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}) : ''}
+                    </div>
+                    <div style={{ marginTop:4, display:'flex', gap:5, alignItems:'center' }}>
+                      {statusChip(p.moderation_status)}
+                      {p.moderation_status === 'rejected' && p.moderation_reason && <span style={{ fontSize:10, color:'var(--tx3)' }}>· {p.moderation_reason}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', gap:4, flexShrink:0 }}>
+                    {p.moderation_status !== 'approved' && <button className="btn bts sm" disabled={busy===p.id} onClick={()=>doApprove(p)}>✅ Aprobar</button>}
+                    {p.moderation_status !== 'rejected' && <button className="btn btd sm" disabled={busy===p.id} onClick={()=>{ setReason(''); setRejectFor(p); }}>🚫 Retirar</button>}
+                  </div>
+                </div>
+              );
+            })}
+        {!loading && (page > 0 || hasMore) && (
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:10 }}>
+            <button className="btn sm" disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))} style={{ opacity: page === 0 ? .4 : 1 }}>‹ Anterior</button>
+            <span style={{ fontSize:11, color:'var(--tx3)' }}>Página {page + 1}</span>
+            <button className="btn sm" disabled={!hasMore} onClick={() => setPage(p => p + 1)} style={{ opacity: hasMore ? 1 : .4 }}>Siguiente ›</button>
+          </div>
+        )}
+      </div>
+
+      {rejectFor && <div className="mo" onClick={() => setRejectFor(null)}>
+        <div className="mb" onClick={e => e.stopPropagation()} style={{ maxWidth:360 }}>
+          <div className="mt">Retirar «{rejectFor.title}»</div>
+          <div className="ms">Desaparece del feed y la búsqueda. El vendedor recibe el aviso y la ve marcada; al editarla vuelve a publicarse.</div>
+          <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Motivo (opcional, se le muestra al vendedor)…"
+            style={{ width:'100%', boxSizing:'border-box', background:'var(--bg3,#12151f)', border:'1px solid var(--bd2,#222)', borderRadius:10, padding:'10px 12px', color:'var(--tx)', fontSize:13, outline:'none', resize:'none', margin:'6px 0 12px' }} />
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn" style={{ flex:1 }} onClick={() => setRejectFor(null)}>Cancelar</button>
+            <button className="btn btd" style={{ flex:1 }} onClick={doReject}>Retirar</button>
+          </div>
+        </div>
+      </div>}
+    </>
+  );
+}
+
 /* ── Directorio REAL de usuarios (profiles) — verificar/suspender de verdad ──── */
 function RealUsersDirectory({ toast, meId }){
   const PAGE = 20;
@@ -2888,6 +3007,7 @@ const NAV=[
   {sec:'Principal',items:[{id:'overview',icon:'◈',label:'Resumen General'}]},
   {sec:'Plataforma',items:[
     {id:'ops',icon:'⚙',label:'Operaciones',subs:['Órdenes','Disputas','Moderación']},
+    {id:'modq',icon:'🛡',label:'Moderación'},
     {id:'delivery',icon:'🛵',label:'Delivery local'},
     {id:'support',icon:'💬',label:'Soporte'},
     {id:'users',icon:'◎',label:'Usuarios & Negocios',subs:['Usuarios','Negocios']},
@@ -2902,13 +3022,14 @@ const NAV=[
     {id:'sys',icon:'◉',label:'Sistema'},
   ]},
 ];
-const TITLES={overview:'Resumen General',ops:'Operaciones',delivery:'Delivery local',support:'Soporte',users:'Usuarios & Negocios',cats:'Pantallas de la plataforma',editor:'Editor Visual de Plataforma',eco:'Economía',sys:'Sistema',team:'Equipo y permisos',intl_es:'Envíos · España → Cuba',intl_us:'Envíos · EE.UU. → Cuba'};
+const TITLES={overview:'Resumen General',ops:'Operaciones',modq:'Moderación',delivery:'Delivery local',support:'Soporte',users:'Usuarios & Negocios',cats:'Pantallas de la plataforma',editor:'Editor Visual de Plataforma',eco:'Economía',sys:'Sistema',team:'Equipo y permisos',intl_es:'Envíos · España → Cuba',intl_us:'Envíos · EE.UU. → Cuba'};
 
 // Catálogo de secciones que el dueño puede delegar a un trabajador.
 // Cada una es una "llave": quien la tenga, entra y gestiona todo dentro de ella.
 const PERM_CATALOG=[
   {id:'overview',label:'Resumen General',desc:'Panorama y métricas',icon:'◈'},
   {id:'ops',     label:'Operaciones',    desc:'Órdenes, disputas y moderación',icon:'⚙'},
+  {id:'modq',    label:'Moderación',     desc:'Aprobar o retirar publicaciones',icon:'🛡'},
   {id:'delivery',label:'Delivery local', desc:'Entregas locales en curso',icon:'🛵'},
   {id:'support', label:'Soporte',        desc:'Centro de ayuda a usuarios',icon:'💬'},
   {id:'users',   label:'Usuarios & Negocios',desc:'Usuarios, verificaciones, planes',icon:'◎'},
@@ -3011,6 +3132,7 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
         <div className={`cnt ${isEd?'nop':''}`}>
           {page==='overview'&&<Overview toast={add} data={data} go={nav}/>}
           {page==='ops'&&<Operaciones sub={gSub('ops',cur?.subs)} setSub={s=>nav('ops',s)} toast={add} data={data}/>}
+          {page==='modq'&&<ModeracionPublicaciones toast={add}/>}
           {page==='delivery'&&<Operaciones solo="Delivery" toast={add} data={data}/>}
           {page==='support'&&<Operaciones solo="Soporte" toast={add} data={data}/>}
           {page==='users'&&<Usuarios sub={gSub('users',cur?.subs)} setSub={s=>nav('users',s)} toast={add} data={data}/>}

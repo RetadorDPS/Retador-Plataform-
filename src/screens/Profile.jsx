@@ -436,6 +436,9 @@ function FP_ProductCard({ product, onClick, onDelete, onEdit }) {
   const [liked, setLiked] = useState(false);
   const tc = FP_TAG_STYLE[product.tag] || {};
   const own = !!(onDelete || onEdit);
+  const rejected = product.moderation_status === "rejected";
+  const rejectReason = product.moderation_reason || product.rejection_reason || product.rejected_reason || "";
+  const isService = product.kind === "service";
   const ownBtn = { background:"rgba(0,0,0,.35)", backdropFilter:"blur(6px)", WebkitBackdropFilter:"blur(6px)", borderRadius:8, width:28, height:28, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" };
   return (
     <div onClick={onClick} style={{ background:FP_C.surface, borderRadius:10, overflow:"hidden",
@@ -480,9 +483,19 @@ function FP_ProductCard({ product, onClick, onDelete, onEdit }) {
       </button>
       )}
 
-      <div style={{ height:110, background:FP_C.surfaceHigh,
+      {isService && (
+        <div style={{ position:"absolute", top:8, left:8, zIndex:2, background:"rgba(255,192,30,.9)", color:"#111", borderRadius:4, padding:"2px 7px", fontSize:9, fontWeight:800, fontFamily:FP_FH }}>🛠️ SERVICIO</div>
+      )}
+      <div style={{ height:110, background:FP_C.surfaceHigh, position:"relative",
         display:"flex", alignItems:"center", justifyContent:"center", fontSize:44, overflow:"hidden" }}>
-        {product.image ? <img src={product.image} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e => e.target.style.display="none"}/> : (product.emoji || "📦")}
+        {product.image ? <img src={product.image} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", filter: rejected ? "grayscale(1) brightness(.5)" : "none" }} onError={e => e.target.style.display="none"}/> : (product.emoji || (isService ? "🛠️" : "📦"))}
+        {rejected && (
+          <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,.45)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 10px", textAlign:"center" }}>
+            <span style={{ fontSize:11, fontWeight:800, color:"#ff6b6b" }}>🚫 Retirado</span>
+            {rejectReason && <span style={{ fontSize:9, color:"#fff", marginTop:2, lineHeight:1.3, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{rejectReason}</span>}
+            <span style={{ fontSize:8, color:"rgba(255,255,255,.7)", marginTop:3 }}>Edítalo para volver a publicarlo</span>
+          </div>
+        )}
       </div>
 
       <div style={{ padding:"10px 12px 13px" }}>

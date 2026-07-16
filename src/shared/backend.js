@@ -64,15 +64,30 @@ export const getProductById = async (id) => {
   if (error || !data) return null;
   return mapProduct(data);
 };
-// Listado público del marketplace (sin login): solo activos y aprobados.
+// Listado público del marketplace (sin login): solo PRODUCTOS activos y aprobados.
+// Los servicios (kind='service') NO se mezclan aquí; los rechazados quedan fuera.
+// `kind` puede venir null en filas antiguas → se tratan como producto.
 export const loadProducts = async () => {
   const { data, error } = await supabase
     .from("products")
     .select("*")
     .eq("status", "active")
     .eq("moderation_status", "approved")
+    .or("kind.eq.product,kind.is.null")
     .order("created_at", { ascending: false });
   if (error) { console.error("loadProducts:", error.message); return []; }
+  return (data || []).map(mapProduct);
+};
+// Listado público de SERVICIOS (kind='service'): mundo aparte, sin comisión ni pedido.
+export const loadServices = async () => {
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("status", "active")
+    .eq("moderation_status", "approved")
+    .eq("kind", "service")
+    .order("created_at", { ascending: false });
+  if (error) { console.error("loadServices:", error.message); return []; }
   return (data || []).map(mapProduct);
 };
 // ── PRODUCTO DEMO (temporal) ─────────────────────────────────────────────────
@@ -473,6 +488,47 @@ export const getSellerProductCount = async (userId) => {
   const { count, error } = await supabase.from("products").select("id", { count: "exact", head: true }).eq("seller_id", userId).neq("status", "deleted");
   if (error) { console.error("getSellerProductCount:", error.message); return 0; }
   return count || 0;
+};
+
+// ── FASE 3 — MODERACIÓN A POSTERIORI de publicaciones ────────────────────────
+// Perfiles por lote (para poner nombre/avatar del vendedor en la lista de moderación).
+export const getProfilesByIds = async (ids = []) => {
+  const uniq = [...new Set((ids || []).filter(Boolean))];
+  if (!uniq.length) return {};
+  const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url").in("id", uniq);
+  if (error) { console.error("getProfilesByIds:", error.message); return {}; }
+  const map = {};
+  (data || []).forEach(p => { map[p.id] = p; });
+  return map;
+};
+// Lista de publicaciones para el panel (más recientes). filter: all|approved|rejected.
+export const adminListProducts = async ({ query = "", filter = "all", from = 0, to = 29 } = {}) => {
+  let q = supabase.from("products")
+    .select("id, title, images, seller_id, kind, moderation_status, moderation_reason, price, currency, created_at, status")
+    .neq("status", "deleted")
+    .order("created_at", { ascending: false })
+    .range(from, to);
+  if (filter === "approved") q = q.eq("moderation_status", "approved");
+  else if (filter === "rejected") q = q.eq("moderation_status", "rejected");
+  const s = (query || "").trim();
+  if (s) q = q.ilike("title", `%${s.replace(/[,()]/g, " ")}%`);
+  const { data, error } = await q;
+  if (error) {
+    // Si la columna moderation_reason no existiera, reintenta sin ella.
+    if (/moderation_reason/.test(error.message || "")) {
+      const alt = await supabase.from("products").select("id, title, images, seller_id, kind, moderation_status, price, currency, created_at, status").neq("status", "deleted").order("created_at", { ascending: false }).range(from, to);
+      return alt.data || [];
+    }
+    console.error("adminListProducts:", error.message); return [];
+  }
+  return data || [];
+};
+// admin_moderate_product(p_product_id, p_approve, p_reason): aprueba/retira y notifica
+// al vendedor (lo hace el backend). Solo admin. Lanza el error de la RPC si no autorizado.
+export const adminModerateProduct = async (productId, approve, reason = null) => {
+  const { data, error } = await supabase.rpc("admin_moderate_product", { p_product_id: productId, p_approve: approve, p_reason: reason || null });
+  if (error) { console.error("adminModerateProduct:", error.message); throw error; }
+  return data;
 };
 
 // ── REGISTRO DE MENSAJEROS (courier_applications) ────────────────────────────

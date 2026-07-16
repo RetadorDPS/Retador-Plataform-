@@ -1,6 +1,56 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, signOutUser } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser } from "../shared/index.js";
+
+// ─── TIRITA DE TASAS DEL DÍA ──────────────────────────────────────────────────
+// Franja discreta con las tasas del día que controla el admin (adminCfg.fx del
+// backend). Llega EN VIVO por realtime: si el admin cambia una tasa, esto se
+// actualiza solo en todos los teléfonos. Tocable → despliega el detalle.
+function FxTirita() {
+  const { CARD, B, T1, T2, T3, isDark, ts } = useAt();
+  const cfg = usePlatformCfg();
+  const fx = cfg.fx || {};
+  const [open, setOpen] = useState(false);
+  const usd = Number(fx.usdToCup) || 0;
+  const eur = Number(fx.eurToCup) || 0;
+  if (!usd && !eur) return null; // sin tasas reales → no mostramos nada inventado
+  const fmt = n => Math.round(n).toLocaleString("es-ES");
+  const rows = [
+    usd ? { code: "USD", flag: "🇺🇸", label: "Dólar", val: usd } : null,
+    eur ? { code: "EUR", flag: "🇪🇺", label: "Euro",  val: eur } : null,
+  ].filter(Boolean);
+  const up = cfg.__updatedAt ? new Date(cfg.__updatedAt) : null;
+  const updatedTxt = up && !isNaN(up.getTime())
+    ? `Actualizado ${up.toLocaleDateString("es-ES", { day: "2-digit", month: "short" })} · ${up.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}`
+    : "Actualizado por RETADOR";
+  const bg = isDark ? "#0d0d0d" : CARD, bd = isDark ? "#1a1a1a" : B;
+  return (
+    <div onClick={() => setOpen(o => !o)} style={{ background: bg, border: `1px solid ${bd}`, borderRadius: 12, padding: "9px 12px", marginBottom: 14, cursor: "pointer", WebkitTapHighlightColor: "transparent" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+        <span style={{ fontSize: 13 * ts, flexShrink: 0 }}>💱</span>
+        <span style={{ fontSize: 10.5 * ts, color: T2, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0 }}>
+          <span style={{ color: T3 }}>Tasas de hoy: </span>
+          {rows.map((r, i) => (
+            <span key={r.code}>{i > 0 && <span style={{ color: T3 }}> · </span>}1 {r.code} = <span style={{ color: G, fontWeight: 800 }}>{fmt(r.val)}</span> CUP</span>
+          ))}
+        </span>
+        <span style={{ color: T3, fontSize: 11 * ts, flexShrink: 0, transform: open ? "rotate(90deg)" : "none", transition: "transform .15s" }}>›</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${bd}` }}>
+          {rows.map(r => (
+            <div key={r.code} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+              <span style={{ fontSize: 13 * ts }}>{r.flag}</span>
+              <span style={{ fontSize: 11 * ts, color: T1, fontWeight: 700, flex: 1 }}>{r.label} <span style={{ color: T3, fontWeight: 500 }}>(1 {r.code})</span></span>
+              <span style={{ fontSize: 12 * ts, color: G, fontWeight: 800 }}>{fmt(r.val)} CUP</span>
+            </div>
+          ))}
+          <p style={{ fontSize: 8.5 * ts, color: T3, marginTop: 6, marginBottom: 0 }}>{updatedTxt}</p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProfile, onAdmin, onWallet, onTools, onCourier, isOwner, profileData = {}, ordersBadge = 0, messagesBadge = 0, adminBadge = 0 }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
@@ -30,6 +80,9 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
           </div>
           <span style={{ color: T3, fontSize: 18 }}>›</span>
         </div>
+
+        {/* Tirita de tasas del día (discreta, en vivo, controlada por el admin) */}
+        <FxTirita />
 
         {[
           { ic: "msg",  label: "Mensajes",       sub: "Chats y conversaciones",     action: onMessages, color: G, badge: messagesBadge },

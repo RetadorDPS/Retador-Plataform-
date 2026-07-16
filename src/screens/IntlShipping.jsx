@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { LiveSlot } from "../shared/index.js";
+import { LiveSlot, usePlatformCfg } from "../shared/index.js";
 
 const IntlShippingApp = (() => {
 
@@ -21,13 +21,10 @@ const RATES = {
   "España":         { aereo:8,  maritimo:4 },
   "Estados Unidos": { aereo:9,  maritimo:5 },
 };
-// Lee las tarifas que el dueño edita en el panel (Economía). Si no hay, usa las por defecto.
-function getLiveRates(){
-  try{ const r=localStorage.getItem('retador_admincfg'); if(r){ const c=JSON.parse(r); if(c&&c.rates) return c.rates; } }catch{}
-  return RATES;
-}
-function rateFor(origin, transport){
-  const lr=getLiveRates();
+// Tarifas que el dueño edita en el panel (Economía). Vienen de la config GLOBAL del
+// backend (adminCfg.rates), que se pasa como argumento. Si no hay, usa las por defecto.
+function rateFor(origin, transport, rates){
+  const lr = rates || RATES;
   return (lr[origin]&&lr[origin][transport]!=null) ? lr[origin][transport] : (RATES[origin]?.[transport]||0);
 }
 
@@ -125,8 +122,8 @@ function fmtShort(d) {
   const dt = new Date(d);
   return `${dt.getDate()} ${MO[dt.getMonth()]} ${dt.getFullYear()}`;
 }
-function calcCost(origin, transport, weight) {
-  return +((rateFor(origin,transport))*(parseFloat(weight)||0)).toFixed(2);
+function calcCost(origin, transport, weight, rates) {
+  return +((rateFor(origin,transport,rates))*(parseFloat(weight)||0)).toFixed(2);
 }
 function nextId(list) {
   const mx = list.reduce((m,s)=>{ const n=parseInt(s.id.split("-")[2]||0); return n>m?n:m; },42);
@@ -409,6 +406,7 @@ function HistCard({ s, onOpen }) {
 // ROUTE CARD — with aggregate rating + "Ver reseñas"
 // ─────────────────────────────────────────────────────────────
 function RouteCard({ origin, onCreate, onReviews, ships }) {
+  const { rates } = usePlatformCfg(); // tarifas de envío desde la config GLOBAL del backend
   const isES=origin==="España";
   const flag=isES?"🇪🇸":"🇺🇸";
   const grad=isES
@@ -441,10 +439,10 @@ function RouteCard({ origin, onCreate, onReviews, ships }) {
 
       <div style={{ display:"flex", flexDirection:"column", gap:5, marginBottom:14 }}>
         <div style={{ background:"rgba(255,255,255,0.12)", borderRadius:7, padding:"4px 10px", fontSize:12 }}>
-          ✈️ Aéreo · ${rateFor(origin,'aereo')}/lb
+          ✈️ Aéreo · ${rateFor(origin,'aereo',rates)}/lb
         </div>
         <div style={{ background:"rgba(255,255,255,0.12)", borderRadius:7, padding:"4px 10px", fontSize:12 }}>
-          🚢 Marítimo · ${rateFor(origin,'maritimo')}/lb
+          🚢 Marítimo · ${rateFor(origin,'maritimo',rates)}/lb
         </div>
       </div>
       <button onClick={()=>onCreate(origin)} className="bp" style={{ width:"100%", padding:"10px 0", borderRadius:10,
@@ -483,6 +481,7 @@ function Field({ label, value, onChange, placeholder, type="text", inputMode, op
 // CREATE FORM — origin is pre-set, no toggle shown
 // ─────────────────────────────────────────────────────────────
 function CreateForm({ initOrigin, onClose, onCreated }) {
+  const { rates } = usePlatformCfg(); // tarifas de envío desde la config GLOBAL del backend
   const origin = initOrigin || "España";
   const flag   = origin === "España" ? "🇪🇸" : "🇺🇸";
 
@@ -496,7 +495,7 @@ function CreateForm({ initOrigin, onClose, onCreated }) {
   function set(k,v){ setF(p=>({...p,[k]:v})); }
 
   const wt   = parseFloat(f.weight)||0;
-  const cost = wt>0 ? calcCost(origin,f.transport,wt) : 0;
+  const cost = wt>0 ? calcCost(origin,f.transport,wt,rates) : 0;
   const valid = f.description.trim()&&wt>0&&f.sName.trim()&&f.sPhone.trim()
     &&f.rName.trim()&&f.rPhone.trim()&&f.rAddr.trim()&&f.rCity.trim();
 

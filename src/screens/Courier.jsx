@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { getAvailableDeliveries, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase } from "../shared/index.js";
+import { getAvailableDeliveries, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase, usePlatformCfg } from "../shared/index.js";
 
 // Chip de PERFIL PÚBLICO: foto + nombre reales (tabla profiles). Al tocarlo abre
 // el perfil público de esa persona. No expone nada privado, solo reputación.
@@ -31,6 +31,7 @@ function ProfileChip({ id, fallback = "Usuario", role, onOpen, dark }) {
 // · Historial: mis entregas terminadas.
 // ═════════════════════════════════════════════════════════════════════════════
 function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, onCancel, onReport, onClose, dark, record, onViewProfile, onChat }) {
+  const platformCfg = usePlatformCfg(); // config GLOBAL del backend (surge, tarifas…)
   const bg = dark ? "#0a0a0a" : "#f1f5f9", card = dark ? "#141417" : "#fff", t1 = dark ? "#f0f0f2" : "#0f172a", t2 = dark ? "#9aa0aa" : "#64748b", t3 = dark ? "#6b7280" : "#94a3b8", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)", AC = "#6366F1";
   const [tab, setTab] = useState("disp");
   const [online, setOnline] = useState(true);
@@ -75,7 +76,7 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   useEffect(() => { setActivaSeen(false); }, [actives.length]);
 
   const money = n => Math.round(n || 0).toLocaleString() + " CUP";
-  const surgeCfg = (() => { try { const r = localStorage.getItem("retador_admincfg"); if (r) { const c = JSON.parse(r); return { on: c.surgeActive === true, every: Number(c.surgeIntervalMin) || 30, step: Number(c.surgeStepPct) || 15, cap: Number(c.surgeCapPct) || 60 }; } } catch (e) {} return { on: false, every: 30, step: 15, cap: 60 }; })();
+  const surgeCfg = (() => { const c = platformCfg || {}; return { on: c.surgeActive === true, every: Number(c.surgeIntervalMin) || 30, step: Number(c.surgeStepPct) || 15, cap: Number(c.surgeCapPct) || 60 }; })();
   const baseFeeOf = o => o.deliveryCost || o.shipPrice || o.ship_price || localBase;
   const surgePct = o => { if (!surgeCfg.on || o.courierId || o.courier_id) return 0; const mins = (Date.now() - (o.createdAt || 0)) / 60000; const steps = Math.floor(mins / surgeCfg.every); return Math.min(surgeCfg.cap, steps * surgeCfg.step); };
   const feeOf = o => { const b = baseFeeOf(o); return Math.round(b * (1 + surgePct(o) / 100)); };

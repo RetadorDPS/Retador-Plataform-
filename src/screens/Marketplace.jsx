@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, Logo, Spin, createOrder, densityCols, estimateDeliveryFee, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, useR, useScrollDir } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, Logo, Spin, createOrder, densityCols, estimateDeliveryFee, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -269,6 +269,8 @@ function getSavedInstructions() {
 
 export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
+  const platformCfg = usePlatformCfg(); // tarifa local desde la config GLOBAL del backend
+  const liveLocalBase = estimateDeliveryFee(platformCfg, null) || 150;
   const [loading, setLoading] = useState(false);
   const [qty, setQty] = useState(1);
   const [step, setStep] = useState("resumen");
@@ -305,7 +307,6 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
       if (shipMode === "persona") delivery = { mode: "persona" };
       else if (shipMode === "local") delivery = { mode: "local", name: del.name, phone: del.phone, address: del.addr, ref: del.ref, pickup: product.seller_name || "Vendedor", pickupAddress: product.pickupAddress || product.sellerAddress || product.location || "", pickupPhone: product.pickupPhone || product.sellerPhone || product.seller_phone || "" };
       else delivery = { mode: "intl", recipient: { name: del.name, phone: del.phone, province: del.prov, city: del.city, address: del.addr }, origin: product.origin || "Exterior", transport: product.shippingType || "standard" };
-      const liveLocalBase = (() => { try { const r = localStorage.getItem("retador_admincfg"); if (r) return estimateDeliveryFee(JSON.parse(r), null); } catch (e) {} return 150; })();
       const shipPrice = shipMode === "intl" ? parseFloat(product.shippingPrice || 0) : shipMode === "local" ? liveLocalBase : 0;
       const shipTo = shipMode === "intl" ? "empresa de envíos" : shipMode === "local" ? "mensajero" : null;
       const order = await createOrder({
@@ -358,7 +359,6 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
           </div>
 
           {(() => {
-            const liveLocalBase = (() => { try { const r = localStorage.getItem("retador_admincfg"); if (r) return estimateDeliveryFee(JSON.parse(r), null); } catch (e) {} return 150; })();
             const isIntl = shipMode === "intl", isLocal = shipMode === "local";
             const shipCost = isIntl ? parseFloat(product.shippingPrice || 0) : isLocal ? liveLocalBase : 0;
             const shipLabel = isIntl ? "Envío internacional" : isLocal ? "Delivery local" : "";
@@ -2025,7 +2025,7 @@ function ServiceReviewsModal({ onClose, onSubmitted, field = "sys", title = "Ser
 export function EnviosMenu({ onLocal, onIntl, user, requireAuth }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { S, B, T1, T2, T3, CARD, isDark } = useAt();
-  const dlOn = (() => { try { const r = localStorage.getItem("retador_admincfg"); if (r) return JSON.parse(r).deliveryServiceActive !== false; } catch (e) {} return true; })();
+  const dlOn = usePlatformCfg().deliveryServiceActive !== false;
   const [revOpen, setRevOpen] = useState(null);
   const [, refreshRev] = useState(0);
   const sysR = systemRating();

@@ -263,6 +263,22 @@ export const addFavorite = async (_userId, productId) => toggleFavorite(productI
 export const removeFavorite = async (_userId, productId) => toggleFavorite(productId);
 export const getFavorites = async () => (await getMyFavorites()).ids;
 
+// ── Configuración GLOBAL de la plataforma (platform_config, fila id=1) ─────────
+// TODOS pueden leerla (RLS select true). SOLO el admin la escribe vía RPC.
+// Es la ÚNICA fuente de verdad de comisiones, tarifas, tasas fx, servicios, planes…
+export const getPlatformConfig = async () => {
+  const { data, error } = await supabase.from("platform_config").select("config, updated_at").eq("id", 1).single();
+  if (error) { console.error("getPlatformConfig:", error.message); return null; }
+  return data ? { config: data.config || {}, updatedAt: data.updated_at || null } : null;
+};
+// set_platform_config(p_config jsonb) — guarda el objeto COMPLETO. Rechaza a quien
+// no sea admin (el RLS/RPC lo controla). Devuelve error si no autorizado.
+export const setPlatformConfig = async (cfg) => {
+  const { data, error } = await supabase.rpc("set_platform_config", { p_config: cfg });
+  if (error) { console.error("setPlatformConfig:", error.message); throw error; }
+  return data;
+};
+
 // Estadísticas públicas de la plataforma (login/pantallas públicas): números REALES.
 // get_platform_stats() → { products, sellers, users, delivered }. Sin login.
 export const getPlatformStats = async () => {

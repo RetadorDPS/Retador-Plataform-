@@ -2,7 +2,7 @@
 // RETADOR MARKETPLACE — Demo Version
 // Versión de demostración con datos simulados para visualización
 // ═════════════════════════════════════════════════════════════════════════════
-import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, createContext, useContext, useCallback } from "react";
 import { User, Palette, Bell, Shield, MessageCircle, Truck, Gavel, CreditCard, BarChart2, Globe, HardDrive, HelpCircle, Info, ChevronRight, ArrowLeft, Check, Plus, Edit2, Camera, Lock, LogOut, MapPin, Clock, Download, FileText, Award, ShoppingBag, Package, AlertCircle, CheckCircle2, Zap, TrendingUp, Database, Mail, Phone, Fingerprint, Star, Volume2, Smartphone, Calendar, Activity, Send, ArrowDownLeft, ArrowUpRight, PlusCircle, Eye, EyeOff, ShieldCheck, Search, X, Users, QrCode, Landmark, Wallet, Home, History, UserCircle2, Copy, Share2, Loader2, Banknote, Building2, Trash2, KeyRound, BadgeCheck, Receipt, ArrowLeftRight } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -19,7 +19,7 @@ import {
   getUserById, getUserName, updateUserName,
   mapProduct, loadProducts, getFeed, saveProduct, deleteProduct, getProductsBySeller, uploadImage, DEMO_PRODUCT,
   sendMessage, loadMessages, markRead, getMyConversations,
-  toggleFavorite, getMyFavorites, getPlatformStats,
+  toggleFavorite, getMyFavorites, getPlatformStats, getPlatformConfig, setPlatformConfig,
   getLedgerEntries, createEscrow, releaseEscrow, getSystemStatus,
   CURRENCIES, CURRENCY_CODES, DEFAULT_CURRENCY, money,
   createOrder, estimateDeliveryFee,
@@ -31,7 +31,7 @@ import {
   CONTACT_PATTERNS, maskContacts, CUBA_PROVINCES,
   getUserTrustStats, trackEvent, blockUser, isBlocked, getSB, convKey,
   G, BG, S, B, RCtx, useR, useResponsive, BC,
-  DARK_T, LIGHT_T, AppThCtx, useAt,
+  DARK_T, LIGHT_T, AppThCtx, useAt, PlatformCfgContext,
   DENSITY_MODES, DENSITY_TOKENS, DENSITY_STORAGE_KEY, DensityContext, DensityProvider, useDensity, densityCols, TEXT_STEPS,
   CATS, SUBCATS, CatalogContext, CatalogProvider, useCatalog, CatIcon,
   useCSS, Ic, Spin, Logo,
@@ -267,6 +267,27 @@ function AppShell({ sessionUser }) {
     return defaults;
   });
   useEffect(() => { try { localStorage.setItem("retador_admincfg", JSON.stringify(adminCfg)); } catch {} }, [adminCfg]);
+  // Fecha de última actualización de la config (para la tirita de tasas del perfil).
+  const [cfgUpdatedAt, setCfgUpdatedAt] = useState(null);
+  // Espejo del adminCfg más reciente (para guardar el objeto COMPLETO sin depender del render).
+  const latestCfgRef = useRef(adminCfg);
+  useEffect(() => { latestCfgRef.current = adminCfg; }, [adminCfg]);
+  const cfgSaveTimer = useRef(null);
+  // Marca si ya llegó la config del backend: mientras no llegue, exchange_rates puede
+  // rellenar fx; cuando llega platform_config, ESA manda (fuente de verdad única).
+  const cfgFromBackend = useRef(false);
+  // 1) CARGAR LA CONFIG DEL BACKEND al arrancar (fuente de verdad). localStorage
+  //    queda solo como caché de respaldo hasta que llega la del backend.
+  useEffect(() => {
+    let alive = true;
+    getPlatformConfig().then(res => {
+      if (!alive || !res) return;
+      cfgFromBackend.current = true;
+      setAdminCfg(prev => ({ ...prev, ...res.config }));
+      if (res.updatedAt) setCfgUpdatedAt(res.updatedAt);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const [buyModal,   setBuyModal]   = useState(null);
   const [plusMenu,   setPlusMenu]   = useState(null); // { top, right } posición del dropdown
   const [subOpenCreate, setSubOpenCreate] = useState(false); // abre CreateAuction directo
@@ -317,6 +338,9 @@ function AppShell({ sessionUser }) {
         const find = (f, t) => data.find(r => r.from_currency === f && r.to_currency === t)?.rate;
         const usdToCup = Number(find("USD", "CUP"));
         const eurToCup = Number(find("EUR", "CUP"));
+        // Si ya llegó la config del backend, ESA es la fuente de verdad de fx: no
+        // la pisamos con la tabla de tasas (que queda como respaldo si no hubo config).
+        if (cfgFromBackend.current) return;
         if (usdToCup > 0 || eurToCup > 0) {
           setAdminCfg(prev => ({
             ...prev,
@@ -462,6 +486,20 @@ function AppShell({ sessionUser }) {
   ]);
 
   const flash = (msg, dur = 3200) => { setToast(msg); setTimeout(() => setToast(null), dur); };
+  // 2) GUARDAR desde el panel (solo admin): aplica el cambio en caliente y persiste
+  //    el objeto COMPLETO en el backend vía RPC (con debounce, no en cada tecla).
+  //    El localStorage sigue siendo caché; el guardado REAL es la RPC.
+  const handleCfgChange = useCallback((patch) => {
+    const next = { ...latestCfgRef.current, ...patch };
+    latestCfgRef.current = next;
+    setAdminCfg(next);
+    if (!isOwner) return; // solo el admin escribe; la RPC igual rechaza a los demás
+    if (cfgSaveTimer.current) clearTimeout(cfgSaveTimer.current);
+    cfgSaveTimer.current = setTimeout(async () => {
+      try { await setPlatformConfig(latestCfgRef.current); setCfgUpdatedAt(new Date().toISOString()); flash("Guardado ✓"); }
+      catch (e) { flash("⚠️ " + (e?.message || "No se pudo guardar la configuración")); }
+    }, 800);
+  }, [isOwner]);
   const saveCfg = nc => { setCfg(nc); };
   const requireAuth = action => { action(); return true; }; // Siempre autorizado - solo visual
   const refreshUser = () => {}; // No-op en versión visual
@@ -732,6 +770,13 @@ function AppShell({ sessionUser }) {
         .on("postgres_changes", { event: "*", schema: "public", table: "courier_applications" }, () => {
           if (user.role === "admin") reloadCourierApps();
         })
+        // 3) CONFIG GLOBAL EN VIVO: si el admin cambia una tasa fx, la comisión o apaga
+        //    un servicio, TODOS los teléfonos lo aplican al instante, sin recargar.
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "platform_config" }, (payload) => {
+          const cfg = payload.new?.config;
+          if (cfg && typeof cfg === "object") { cfgFromBackend.current = true; latestCfgRef.current = { ...latestCfgRef.current, ...cfg }; setAdminCfg(prev => ({ ...prev, ...cfg })); }
+          if (payload.new?.updated_at) setCfgUpdatedAt(payload.new.updated_at);
+        })
         // RESILIENCIA: si el canal se cae (red intermitente tipo Cuba), reintenta
         // suscribirse con backoff y, al reconectar, recarga todo por si perdimos algo.
         .subscribe((status) => {
@@ -901,8 +946,12 @@ function AppShell({ sessionUser }) {
     return list;
   })();
 
+  // Config global expuesta a toda la app + la fecha de última actualización (para la
+  // tirita de tasas del perfil). __updatedAt no se guarda en el backend (es de UI).
+  const cfgCtxValue = useMemo(() => ({ ...adminCfg, __updatedAt: cfgUpdatedAt }), [adminCfg, cfgUpdatedAt]);
   return (
     <AppThCtx.Provider value={appTk}>
+    <PlatformCfgContext.Provider value={cfgCtxValue}>
     <RCtx.Provider value={rsp}>
     <div style={{ fontFamily: "'Barlow',sans-serif", background: appTk.BG, color: appTk.T1, height: `calc(100dvh / ${densZoom})`, width: `calc(100vw / ${densZoom})`, overflow: "hidden", position: "relative", display: "flex", flexDirection: rsp.isDesktop ? "row" : "column", paddingTop: "calc(env(safe-area-inset-top, 0px) / var(--img-s, 1))" }}>
 
@@ -1143,7 +1192,7 @@ function AppShell({ sessionUser }) {
       )}
       {showAdmin  && <OmniPanel onClose={() => setShowAdmin(false)} theme={appTk} zoom={densZoom} data={{
         orders, cfg: adminCfg,
-        onCfg: (patch) => setAdminCfg(c => ({ ...c, ...patch })),
+        onCfg: handleCfgChange,
         onOrderAction: (id, action) => setOrders(prev => prev.map(o => o.id === id ? { ...o, status: action === 'cancel' ? 'cancelado' : action === 'approve' ? 'confirmado' : o.status, flagged: action === 'flag' ? true : (action === 'cancel' || action === 'approve' ? false : o.flagged) } : o)),
         onDisputeAction: (id, action) => setOrders(prev => prev.map(o => o.id === id ? { ...o, status: action === 'resolve' ? 'confirmado' : action === 'freeze' ? 'congelado' : action === 'escalate' ? 'escalado' : o.status, disputeState: action } : o)),
         reports, onReportAction: (id, action) => setReports(prev => prev.map(r => r.id === id ? { ...r, state: action } : r)),
@@ -1341,6 +1390,7 @@ function AppShell({ sessionUser }) {
       )}
     </div>
     </RCtx.Provider>
+    </PlatformCfgContext.Provider>
     </AppThCtx.Provider>
   );
 }

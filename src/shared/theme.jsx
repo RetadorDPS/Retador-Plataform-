@@ -38,6 +38,13 @@ export const LIGHT_T = { BG:"#FFFFFF", S:"#FFFFFF", B:"#E4E6EB", CARD:"#FFFFFF",
 export const AppThCtx = createContext({ ...DARK_T, imgScale:1, ts:1 });
 export const useAt = () => useContext(AppThCtx);
 
+// ─── Configuración GLOBAL de la plataforma (fuente de verdad: backend) ─────────
+// El admin la edita en su panel → se guarda en platform_config (RPC) → llega EN
+// VIVO a todos por realtime. Cualquier pantalla lee de aquí (comisiones, tarifas,
+// tasas fx, servicios on/off, planes…), NUNCA de localStorage directamente.
+export const PlatformCfgContext = createContext(null);
+export const usePlatformCfg = () => useContext(PlatformCfgContext) || {};
+
 // ═══════════════════════════════════════════════════════════════════
 //  UI DENSITY ENGINE — motor de densidad visual (núcleo reutilizable)
 //  Reemplaza el antiguo sistema de escala de imágenes. Tokens + contexto

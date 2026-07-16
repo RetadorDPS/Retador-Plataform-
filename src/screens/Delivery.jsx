@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import IntlShippingApp from "./IntlShipping.jsx";
-import { LiveSlot, useAt } from "../shared/index.js";
+import { LiveSlot, useAt, usePlatformCfg } from "../shared/index.js";
 
 const DELIVERY_LOCAL_CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=Outfit:wght@300;400;500;600;700&display=swap');
@@ -260,7 +260,7 @@ function DLNavHeader({ title, showBack, onBack, onMenuBack }) {
 /* ── HOME ───────────────────────────────────────────────────────── */
 function DLHomeScreen({ onNew, onRastrear, onMenuBack, onNav }) {
   const C = useC();
-  const svcOn = (() => { try { const r = localStorage.getItem("retador_admincfg"); if (r) return JSON.parse(r).deliveryServiceActive !== false; } catch (e) {} return true; })();
+  const svcOn = usePlatformCfg().deliveryServiceActive !== false;
   return (
     <div className="screen-back" style={{ height:'100%', display:'flex', flexDirection:'column' }}>
       <DLNavHeader showBack={false} onMenuBack={onMenuBack}/>
@@ -298,7 +298,7 @@ function DLLiveTicker() {
 
 function DLHeroSection() {
   const C = useC();
-  const svcOn = (() => { try { const r = localStorage.getItem("retador_admincfg"); if (r) return JSON.parse(r).deliveryServiceActive !== false; } catch (e) {} return true; })();
+  const svcOn = usePlatformCfg().deliveryServiceActive !== false;
   return (
     <div style={{ margin:'13px 14px 0', borderRadius:22, overflow:'hidden', position:'relative', minHeight:200 }}>
       <div style={{ position:'absolute', inset:0, background:'#0C0C10' }}/>
@@ -594,6 +594,7 @@ function DLHistoryRow({ e }) {
 /* ── NUEVO ENVÍO ─────────────────────────────────────────────────── */
 function DLNuevoEnvioScreen({ onBack }) {
   const C = useC();
+  const platformCfg = usePlatformCfg(); // tarifa local desde la config GLOBAL del backend
   const [form,setForm]=useState({pickAddr:'',pickRef:'',pickName:'',pickPhone:'',dropAddr:'',dropRef:'',dropName:'',dropPhone:'',article:''});
   const [touched,setTouched]=useState({});
   const [submitted,setSubmitted]=useState(false);
@@ -606,7 +607,7 @@ function DLNuevoEnvioScreen({ onBack }) {
   const blr=(k)=>setTouched(p=>({...p,[k]:true}));
   const err=(k)=>touched[k]&&!form[k].trim();
   const hasBoth=form.pickAddr.trim()&&form.dropAddr.trim();
-  const localRate=(()=>{ try{ const r=localStorage.getItem('retador_admincfg'); if(r){ const c=JSON.parse(r); return { base:c.localBase??150, perKm:c.localPerKm??25 }; } }catch{} return { base:150, perKm:25 }; })();
+  const localRate={ base:platformCfg.localBase??150, perKm:platformCfg.localPerKm??25 };
   const distKm=4.2; // distancia de ejemplo (sin GPS aún)
   const localPrice=Math.round(localRate.base+localRate.perKm*distKm);
   const summary=hasBoth?{dist:distKm+' km',time:'22 min',price:'$'+localPrice.toLocaleString()+' CUP'}:null;

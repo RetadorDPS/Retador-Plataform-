@@ -1,59 +1,10 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan } from "../shared/index.js";
 
 const OmniPanel = (() => {
 
 const REV=[{t:"00h",v:4200},{t:"03h",v:3100},{t:"06h",v:5800},{t:"09h",v:9400},{t:"12h",v:14200},{t:"15h",v:16800},{t:"18h",v:19200},{t:"21h",v:11400},{t:"24h",v:8900}];
-const ORD=[{d:"Lun",o:234},{d:"Mar",o:312},{d:"Mié",o:289},{d:"Jue",o:401},{d:"Vie",o:523},{d:"Sáb",o:614},{d:"Dom",o:487}];
-const FEE=[{m:"Ene",f:12400},{m:"Feb",f:15800},{m:"Mar",f:13200},{m:"Abr",f:19600},{m:"May",f:22800},{m:"Jun",f:26400}];
-const FEED0=[
-  {id:1,icon:"📦",msg:"Nueva orden #ORD-8821 creada",user:"María G.",amt:"$342.00",t:"12s"},
-  {id:2,icon:"⭐",msg:"Negocio Premium aprobado",user:"TechStore MX",amt:"",t:"34s"},
-  {id:3,icon:"⚠️",msg:"Disputa abierta #DSP-441",user:"Carlos R.",amt:"$780.00",t:"1m"},
-  {id:4,icon:"💳",msg:"Pago recibido vía escrow",user:"Orden #8814",amt:"$1,240.00",t:"2m"},
-  {id:5,icon:"🚀",msg:"Delivery asignado",user:"Juan P. → Carlos M.",amt:"",t:"3m"},
-  {id:6,icon:"🚫",msg:"Usuario suspendido automáticamente",user:"usr_9921",amt:"",t:"4m"},
-  {id:7,icon:"✅",msg:"Verificación KYC aprobada",user:"Sandra V.",amt:"",t:"5m"},
-];
-const ORDERS=[
-  {id:"ORD-8821",buyer:"María G.",seller:"TechStore MX",total:"$342.00",status:"processing",t:"12s"},
-  {id:"ORD-8820",buyer:"Luis T.",seller:"Moda Élite",total:"$89.00",status:"delivered",t:"6m"},
-  {id:"ORD-8819",buyer:"Sandra V.",seller:"GadgetWorld",total:"$1,240.00",status:"disputed",t:"18m"},
-  {id:"ORD-8818",buyer:"Ana M.",seller:"SportZone",total:"$215.00",status:"processing",t:"31m"},
-  {id:"ORD-8817",buyer:"Carlos R.",seller:"FoodHub",total:"$67.00",status:"cancelled",t:"52m"},
-];
-const DISPUTES=[
-  {id:"DSP-441",parties:"Carlos R. vs TechStore MX",amt:"$780.00",pri:"high",status:"open"},
-  {id:"DSP-440",parties:"Luis T. vs Moda Élite",amt:"$89.00",pri:"critical",status:"escalated"},
-  {id:"DSP-439",parties:"Pedro L. vs GadgetWorld",amt:"$445.00",pri:"medium",status:"review"},
-];
-const DELIVS=[
-  {id:"DEL-221",rider:"Juan P.",order:"ORD-8818",addr:"Polanco, CDMX",status:"en_route",eta:"8 min"},
-  {id:"DEL-220",rider:"Ana M.",order:"ORD-8815",addr:"Condesa, CDMX",status:"pickup",eta:"12 min"},
-  {id:"DEL-219",rider:"Marco L.",order:"ORD-8812",addr:"Roma Norte",status:"delivered",eta:"Entregado"},
-];
-const MODQ=[
-  {id:1,type:"product",item:"iPhone 14 REPLICA",rep:"María G.",sev:"high",t:"5m"},
-  {id:2,type:"review",item:"Reseña con lenguaje ofensivo",rep:"TechStore",sev:"medium",t:"18m"},
-  {id:3,type:"user",item:"Spam masivo usr_9901",rep:"Sistema",sev:"high",t:"32m"},
-  {id:4,type:"chat",item:"Conversación fraudulenta #441",rep:"Carlos R.",sev:"critical",t:"1h"},
-];
-const TXNS=[
-  {id:"TXN-9901",desc:"Comisión TechStore MX",amt:"+$17.10",tag:"fee",t:"12s"},
-  {id:"TXN-9900",desc:"Payout Moda Élite",amt:"-$1,590.00",tag:"payout",t:"5m"},
-  {id:"TXN-9899",desc:"Escrow DSP-441",amt:"~$780.00",tag:"escrow",t:"8m"},
-  {id:"TXN-9898",desc:"Suscripción Premium GadgetWorld",amt:"+$149.00",tag:"sub",t:"22m"},
-  {id:"TXN-9897",desc:"Reembolso ORD-8817",amt:"-$67.00",tag:"refund",t:"52m"},
-];
-const SVCS=[
-  {name:"API Gateway",status:"healthy",up:"99.98%",lat:"42ms",rpm:"12,441"},
-  {name:"Realtime WS",status:"healthy",up:"99.95%",lat:"8ms",rpm:"34,210"},
-  {name:"Payment Worker",status:"healthy",up:"100%",lat:"120ms",rpm:"890"},
-  {name:"Delivery Engine",status:"degraded",up:"98.12%",lat:"380ms",rpm:"2,110"},
-  {name:"Notification Queue",status:"healthy",up:"99.91%",lat:"65ms",rpm:"8,934"},
-  {name:"ML Risk Engine",status:"healthy",up:"99.87%",lat:"210ms",rpm:"3,440"},
-];
 const ED_AREAS=[
   {id:"inicio",label:"Inicio / Tienda",icon:"⌂",group:"Páginas de la plataforma"},
   {id:"busqueda",label:"Búsqueda",icon:"⌕",group:"Páginas de la plataforma"},
@@ -1817,93 +1768,106 @@ function RangedChart({title, base, type='area', color='var(--ac)', height=185, d
 }
 
 function Overview({toast, data={}, go}){
-  const orders = data.orders || [];
-  const cfg = data.cfg || {};
-  const now = new Date();
-  const sameDay = ts => { const d=new Date(ts||0); return d.toDateString()===now.toDateString(); };
-  const DONE = ['entregado','cancelado','delivered','cancelled','completado'];
-  const DISP = ['disputed','disputa','en_disputa','disputado'];
-  const sum = (arr,f)=>arr.reduce((a,o)=>a+(f(o)||0),0);
-  const commPct = cfg.commissionPct ?? 10;
-  const totalOrders = orders.length;
-  const activeOrders = orders.filter(o=>!DONE.includes(o.status)).length;
-  const salesToday = sum(orders.filter(o=>sameDay(o.createdAt)), o=>o.amount||0);
-  const revenue = sum(orders, o=>(o.amount||0)*((o.commissionPct??commPct)/100));
-  const disputes = orders.filter(o=>DISP.includes(o.status)).length;
-  const uniq = a=>new Set(a.filter(Boolean)).size;
-  const buyers = uniq(orders.map(o=>o.buyerId));
-  const sellers = uniq(orders.map(o=>o.sellerId||o.sellerName));
-  const fmt = n=>'$'+Math.round(n).toLocaleString();
-  const ago = ts=>{ if(!ts) return 'reciente'; const s=Math.floor((Date.now()-ts)/1000); if(s<60) return `hace ${s}s`; const m=Math.floor(s/60); if(m<60) return `hace ${m}m`; const h=Math.floor(m/60); if(h<24) return `hace ${h}h`; return `hace ${Math.floor(h/24)}d`; };
-  const M=[
-    {l:'Usuarios Activos',v:String(buyers+sellers),i:'👥',c:`${buyers} compradores · ${sellers} vendedores`},
-    {l:'Órdenes Activas',v:String(activeOrders),i:'📦',c:`${totalOrders} en total`},
-    {l:'Ventas del Día',v:fmt(salesToday),i:'💰',c:'hoy'},
-    {l:'Ingresos Plataforma',v:fmt(revenue),i:'📈',c:`comisión ${commPct}%`},
-    {l:'Disputas Abiertas',v:String(disputes),i:'⚠️',c:disputes?'requieren atención':'sin disputas'},
-    {l:'Negocios Premium',v:'0',i:'⭐',c:'aún sin altas'},
-    {l:'Repartidores Activos',v:'0',i:'🚀',c:'aún sin altas'},
-    {l:'Tickets Soporte',v:'0',i:'🎫',c:'bandeja vacía'},
-  ];
-  const accounts = buyers+sellers;
-  const feed = orders.slice(0,7).map(o=>({
-    id:o.id, icon:'📦',
-    msg:`Nueva orden · ${o.title||'Producto'}`,
-    user:o.sellerName||'Vendedor',
-    amt:o.amount?fmt(o.amount):'',
-    t:o.createdAt?ago(o.createdAt):'reciente'
-  }));
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(() => {
+    setLoading(true);
+    adminDashboardStats().then(s => { setStats(s); setLoading(false); }).catch(() => { setStats(null); setLoading(false); });
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  // Refresco EN VIVO: cuando cambian solicitudes o pedidos, recalcula (debounce).
+  useEffect(() => {
+    let t = null; const bump = () => { clearTimeout(t); t = setTimeout(load, 1500); };
+    const ch = supabase.channel(`admin-dash-${Date.now()}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "verifications" }, bump)
+      .on("postgres_changes", { event: "*", schema: "public", table: "plan_requests" }, bump)
+      .on("postgres_changes", { event: "*", schema: "public", table: "courier_applications" }, bump)
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, bump)
+      .subscribe();
+    return () => { clearTimeout(t); try { Promise.resolve(supabase.removeChannel(ch)).catch(()=>{}); } catch(e){} };
+  }, [load]);
+
+  const s = stats || {};
+  const n = v => Number(v) || 0;
+  const num = v => n(v).toLocaleString('es-ES');
+  const cash = v => '$' + Math.round(n(v)).toLocaleString('es-ES');
+
+  // Tarjeta reutilizable. Si `onClick`, es tocable (navega). `gold` = acento dorado.
+  const Card = ({ icon, label, value, sub, gold, onClick, badge }) => (
+    <div className="mc" onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default', position:'relative', border: gold ? `1px solid ${G}55` : undefined }}>
+      {badge > 0 && <span style={{ position:'absolute', top:8, right:8, minWidth:18, height:18, borderRadius:999, background:G, color:'#000', fontSize:10.5, fontWeight:800, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 5px' }}>{badge}</span>}
+      <div style={{ fontSize:20, marginBottom:7 }}>{icon}</div>
+      <div className="ml">{label}</div>
+      <div className="mv" style={{ color: gold ? G : undefined }}>{value}</div>
+      {sub && <div style={{ fontSize:10, color:'var(--tx3)', marginTop:3, fontWeight:500 }}>{sub}</div>}
+    </div>
+  );
+  const Head = ({ children }) => <div style={{ fontSize:12, fontWeight:800, color:'var(--tx2,#aaa)', letterSpacing:'.03em', margin:'6px 0 9px' }}>{children}</div>;
+
+  const pendV = n(s.pending_verifications), pendP = n(s.pending_plans), pendC = n(s.pending_couriers);
+
   return <>
-    <div className="stit">Resumen General</div>
-    <div className="ssub">Centro de control · conectado a la plataforma</div>
-    <div className="g4 mb16">{M.map(m=><div className="mc" key={m.l}>
-      <div style={{fontSize:20,marginBottom:7}}>{m.i}</div>
-      <div className="ml">{m.l}</div><div className="mv">{m.v}</div>
-      <div style={{fontSize:10,color:'var(--tx3)',marginTop:3,fontWeight:500}}>{m.c}</div>
-    </div>)}</div>
-    <div className="alert">
-      <span style={{fontSize:14}}>🔴</span>
-      <span style={{fontSize:12,fontWeight:600,color:'var(--rd)'}}>Alerta: Delivery Engine degradado (latencia +280ms)</span>
-      <span style={{fontSize:11,color:'var(--tx3)'}}>hace 4 min</span>
-      <button className="btn btg sm" style={{marginLeft:'auto'}} onClick={()=>go&&go('sys')}>Ver</button>
-    </div>
-    <div className="g2 mb16">
-      <RangedChart title="Ingresos" base={Math.max(1200, Math.round(revenue)||1200)} type="area" color="#4f72ff" height={165} defaultRange="24h"/>
-      <RangedChart title="Órdenes" base={Math.max(20, totalOrders||20)} type="bar" color="#4f72ff" height={165} defaultRange="7d"/>
-    </div>
-    <div className="g2">
-      <div className="card cp">
-        <div className="ch"><span className="ct">Feed en Vivo</span><div className="lpill"><span className="ldot"/><span className="llbl">EN VIVO</span></div></div>
-        {feed.length===0
-          ? <div style={{padding:'22px 6px',textAlign:'center',color:'var(--tx3)',fontSize:12}}>Sin actividad aún. Las órdenes aparecerán aquí en cuanto haya ventas.</div>
-          : feed.map(e=><div className="fi" key={e.id}>
-            <div className="fic">{e.icon}</div>
-            <div style={{flex:1,minWidth:0}}><div className="fm">{e.msg}</div><div className="fmeta"><span>{e.user}</span><span>·</span><span>{e.t}</span></div></div>
-            {e.amt&&<div className="famt">{e.amt}</div>}
-          </div>)}
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
+      <div>
+        <div className="stit">Resumen General</div>
+        <div className="ssub">Números reales de tu plataforma · RETADOR</div>
       </div>
-      <div style={{display:'flex',flexDirection:'column',gap:14}}>
-        <div className="card cp">
-          <div className="ch"><span className="ct">Distribución de Planes</span></div>
-          {[{p:'Enterprise',n:0},{p:'Premium',n:0},{p:'Pro',n:0},{p:'Basic',n:accounts}].map(x=>{
-            const pct=accounts?Math.round(x.n/accounts*100):0;
-            return <div key={x.p} style={{marginBottom:11}}>
-              <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}><span style={{fontSize:12,fontWeight:500}}>{x.p}</span><span style={{fontSize:10,fontFamily:'var(--mo)',color:'var(--tx3)'}}>{x.n.toLocaleString()}</span></div>
-              <div className="prog"><div className="progf" style={{width:`${pct}%`}}/></div>
-            </div>;
-          })}
-        </div>
-        <div className="card cp">
-          <div className="ch"><span className="ct">Acciones Rápidas</span></div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:7}}>
-            <button className="btn btg" style={{justifyContent:'flex-start',width:'100%',fontSize:11}} onClick={()=>go&&go('ops','Órdenes')}><span>📦</span>Ver Órdenes</button>
-            <button className="btn btg" style={{justifyContent:'flex-start',width:'100%',fontSize:11}} onClick={()=>go&&go('ops','Disputas')}><span>⚠️</span>Ver Disputas</button>
-            <button className="btn btg" style={{justifyContent:'flex-start',width:'100%',fontSize:11}} onClick={()=>go&&go('ops','Moderación')}><span>🛡️</span>Moderación</button>
-            <button className="btn btg" style={{justifyContent:'flex-start',width:'100%',fontSize:11}} onClick={()=>go&&go('eco')}><span>📊</span>Economía</button>
+      <button className="btn sm" onClick={load} disabled={loading}>{loading ? '…' : '↻ Actualizar'}</button>
+    </div>
+
+    {loading && !stats
+      ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:13, padding:'40px 0' }}>Cargando métricas…</div>
+      : stats === null
+        ? <div className="card cp" style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'28px 12px' }}>No se pudieron cargar las métricas. Toca ↻ Actualizar para reintentar.</div>
+        : <>
+          <Head>💰 Negocio</Head>
+          <div className="g4 mb16">
+            <Card icon="💵" label="Ventas completadas" value={cash(s.gmv_completed)} sub="pedidos entregados" />
+            <Card icon="📈" label="Comisiones acumuladas" value={cash(s.commission_total)} sub="ganado hasta hoy" />
+            <Card icon="🪙" label="Comisiones por cobrar" value={cash(s.commission_pending)} sub="tu dinero pendiente" gold />
           </div>
-        </div>
-      </div>
-    </div>
+
+          <Head>📦 Actividad</Head>
+          <div className="g4 mb16">
+            <Card icon="🛒" label="Pedidos activos" value={num(s.orders_active)} sub="en curso ahora" />
+            <Card icon="✅" label="Pedidos completados" value={num(s.orders_completed)} />
+            <Card icon="🗓️" label="Pedidos esta semana" value={num(s.orders_week)} />
+            <Card icon="💬" label="Mensajes esta semana" value={num(s.messages_week)} />
+          </div>
+
+          <Head>👥 Comunidad</Head>
+          <div className="g4 mb16">
+            <Card icon="👤" label="Usuarios" value={num(s.users_total)} sub={n(s.users_week) > 0 ? `+${num(s.users_week)} esta semana` : 'sin altas esta semana'} />
+            <Card icon="🏪" label="Vendedores" value={num(s.sellers)} />
+            <Card icon="🛵" label="Mensajeros" value={num(s.couriers)} />
+            <Card icon="✓" label="Verificados" value={num(s.verified_users)} />
+            <Card icon="⛔" label="Suspendidos" value={num(s.suspended_users)} />
+          </div>
+
+          <Head>🛍️ Catálogo</Head>
+          <div className="g4 mb16">
+            <Card icon="📦" label="Productos activos" value={num(s.products_active)} />
+            <Card icon="🛠️" label="Servicios activos" value={num(s.services_active)} />
+            <Card icon="🚫" label="Retirados" value={num(s.products_rejected)} />
+          </div>
+
+          <Head>⏳ Pendientes de ti</Head>
+          <div className="g4 mb16">
+            <Card icon="🪪" label="Verificaciones" value={num(pendV)} sub={pendV ? 'toca para revisar' : 'todo al día'} gold={pendV > 0} badge={pendV} onClick={() => go && go('users', 'Usuarios')} />
+            <Card icon="⭐" label="Planes" value={num(pendP)} sub={pendP ? 'toca para revisar' : 'todo al día'} gold={pendP > 0} badge={pendP} onClick={() => go && go('users', 'Usuarios')} />
+            <Card icon="🛵" label="Mensajeros" value={num(pendC)} sub={pendC ? 'toca para revisar' : 'todo al día'} gold={pendC > 0} badge={pendC} onClick={() => go && go('delivery')} />
+          </div>
+
+          <div className="card cp">
+            <div className="ch"><span className="ct">Acciones rápidas</span></div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:7 }}>
+              <button className="btn btg" style={{ justifyContent:'flex-start', width:'100%', fontSize:11 }} onClick={()=>go&&go('ops','Órdenes')}><span>📦</span>Ver Órdenes</button>
+              <button className="btn btg" style={{ justifyContent:'flex-start', width:'100%', fontSize:11 }} onClick={()=>go&&go('modq')}><span>🛡️</span>Moderación</button>
+              <button className="btn btg" style={{ justifyContent:'flex-start', width:'100%', fontSize:11 }} onClick={()=>go&&go('users','Usuarios')}><span>👥</span>Usuarios</button>
+              <button className="btn btg" style={{ justifyContent:'flex-start', width:'100%', fontSize:11 }} onClick={()=>go&&go('eco')}><span>📊</span>Economía</button>
+            </div>
+          </div>
+        </>}
   </>;
 }
 
@@ -2938,7 +2902,14 @@ function Economia({toast, data={}}){
     </div>
 
     <div className="g2 mb16">
-      <RangedChart title="Ingresos por comisión" base={Math.max(800,Math.round(revenue)||800)} type="area" color="#22d3a0" height={185} defaultRange="30d"/>
+      <div className="card cp" style={{display:'flex',flexDirection:'column',justifyContent:'center'}}>
+        <div className="ch"><span className="ct">Comisiones (real)</span></div>
+        <div style={{display:'flex',gap:18,flexWrap:'wrap',marginTop:8}}>
+          <div><div style={{fontSize:10,color:'var(--tx3)'}}>Acumuladas</div><div style={{fontSize:24,fontWeight:800,color:'var(--gn)',fontFamily:'var(--mo)'}}>{fmt(revenue)}</div></div>
+          <div><div style={{fontSize:10,color:'var(--tx3)'}}>Por cobrar</div><div style={{fontSize:24,fontWeight:800,color:'var(--yw)',fontFamily:'var(--mo)'}}>{fmt(sellers.reduce((a,[name,amt])=>a+Math.max(0,amt-(paidBy[name]||0)),0)*((cfg.commissionPct??10)/100))}</div></div>
+        </div>
+        <div style={{fontSize:10,color:'var(--tx3)',marginTop:8}}>Calculado de tus pedidos reales, no de un gráfico de ejemplo.</div>
+      </div>
       <div className="card cp">
         <div className="ch"><span className="ct">Comisión por cobrar · por vendedor</span></div>
         <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 8px'}}>Cada venta suma comisión a la deuda del vendedor. Cuando te pague (manual), márcalo aquí.</div>
@@ -3129,7 +3100,18 @@ function Sistema({toast, data={}}){
           <span className={`bdg ${s.state==='ok'?'bg':'bx'}`}>{s.note}</span>
         </div>)}
       </div>
-      <RangedChart title="Actividad de la plataforma" base={Math.max(8,orders.length*3||8)} type="line" color="#22d3a0" height={185} defaultRange="7d"/>
+      <div className="card cp">
+        <div className="ch"><span className="ct">Actividad registrada</span><span className="bdg bx">{events.length}</span></div>
+        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Conteo real de eventos por tipo (de tus pedidos, reportes y solicitudes).</div>
+        {[['órdenes','📦','Órdenes'],['moderación','⚠️','Reportes'],['planes','⭐','Solicitudes de plan']].map(([k,ic,lbl])=>{
+          const c = events.filter(e=>e.svc===k).length;
+          return <div key={k} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+            <span style={{fontSize:16}}>{ic}</span>
+            <span style={{flex:1,fontSize:12,fontWeight:600,color:'var(--tx)'}}>{lbl}</span>
+            <span style={{fontSize:14,fontWeight:800,fontFamily:'var(--mo)',color:'var(--tx)'}}>{c}</span>
+          </div>;
+        })}
+      </div>
     </div>
     <div className="card cp">
       <div className="ch"><span className="ct">Registro de actividad</span><div style={{display:'flex',gap:5}}>{[['todo','Todo'],['warn','⚠ Avisos'],['info','Info']].map(([k,l])=><button key={k} className={`btn ${flt===k?'btp':'btg'} sm`} onClick={()=>setFlt(k)}>{l}</button>)}</div></div>

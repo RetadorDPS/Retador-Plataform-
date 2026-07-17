@@ -531,6 +531,14 @@ export const adminModerateProduct = async (productId, approve, reason = null) =>
   return data;
 };
 
+// ── FASE 5 — DASHBOARD del panel: métricas REALES del ecosistema ─────────────
+// admin_dashboard_stats() → jsonb con todos los números reales. Solo admin.
+export const adminDashboardStats = async () => {
+  const { data, error } = await supabase.rpc("admin_dashboard_stats");
+  if (error) { console.error("adminDashboardStats:", error.message); return null; }
+  return (Array.isArray(data) ? data[0] : data) || null;
+};
+
 // ── FASE 4 — VERIFICACIÓN (KYC) y SOLICITUDES DE PLAN, de punta a punta ───────
 // Sube una foto KYC al bucket PRIVADO 'kyc', en la carpeta del usuario (su uid).
 // Devuelve el PATH (no URL): el bucket es privado, se lee con createSignedUrl.

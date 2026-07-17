@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest } from "../shared/index.js";
 
 // ─── TIRITA DE TASAS DEL DÍA ──────────────────────────────────────────────────
 // Franja discreta con las tasas del día que controla el admin (adminCfg.fx del
@@ -1211,68 +1211,153 @@ function FP_SettingsScreen({ onClose }) {
   );
 }
 
-// ── MAIN ──────────────────────────────────────────────────────────
-function FP_VerifyModal({ name, onClose, onSubmit, C }) {
+// ── VERIFICAR MI CUENTA (KYC real) ─────────────────────────────────
+function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash }) {
   const TYPES = ["Carnet de identidad", "Pasaporte", "Licencia de conducir"];
+  const [loading, setLoading] = useState(true);
+  const [myVerif, setMyVerif] = useState(null);
   const [docType, setDocType] = useState("Carnet de identidad");
   const [fullName, setFullName] = useState(name || "");
   const [docNum, setDocNum] = useState("");
-  const [photoFront, setPhotoFront] = useState(null);
-  const [photoBack, setPhotoBack] = useState(null);
-  const frontRef = useRef(null);
-  const backRef = useRef(null);
-  const pick = (setter) => (e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => setter(r.result); r.readAsDataURL(f); };
-  const valid = fullName.trim() && docNum.trim() && photoFront && photoBack;
-  const upBox = (label, photo, refEl) => (
-    <button onClick={()=>refEl.current?.click()} style={{ flex:1, height: photo?120:84, borderRadius:10, border:`1.5px dashed ${C.border}`, background:C.surfaceTop, cursor:"pointer", overflow:"hidden", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, color:C.textSecondary, fontSize:11, fontWeight:600 }}>
-      {photo ? <img src={photo} alt={label} style={{ width:"100%", height:"100%", objectFit:"cover" }}/> : <><span style={{fontSize:20}}>📷</span>{label}</>}
+  const [front, setFront] = useState(null);   // { file, url }
+  const [back, setBack]   = useState(null);
+  const [selfie, setSelfie] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const frontRef = useRef(null), backRef = useRef(null), selfieRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+    if (!user?.id) { setLoading(false); return; }
+    getMyVerification(user.id).then(v => { if (alive) { setMyVerif(v); setLoading(false); } }).catch(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [user?.id]);
+
+  const pick = (setter) => (e) => { const f = e.target.files?.[0]; if (!f) return; setter({ file: f, url: URL.createObjectURL(f) }); };
+  const valid = fullName.trim() && docNum.trim() && front && back && selfie;
+  const flash_ = flash || (() => {});
+
+  const doSubmit = async () => {
+    if (!valid || submitting) return;
+    setSubmitting(true);
+    try {
+      const [pf, pb, ps] = await Promise.all([
+        uploadKyc(front.file, user.id, "front"),
+        uploadKyc(back.file, user.id, "back"),
+        uploadKyc(selfie.file, user.id, "selfie"),
+      ]);
+      await submitVerification(user.id, { full_name: fullName.trim(), doc_type: docType, doc_number: docNum.trim(), doc_front: pf, doc_back: pb, selfie: ps });
+      onSubmit?.();
+      flash_("✅ Verificación enviada — la revisaremos pronto");
+      onClose();
+    } catch (e) {
+      flash_("⚠️ " + (e?.message || "No se pudo enviar la verificación"));
+    }
+    setSubmitting(false);
+  };
+
+  const upBox = (label, photo, refEl, hint) => (
+    <button onClick={() => refEl.current?.click()} style={{ flex:1, height: photo ? 120 : 92, borderRadius:10, border:`1.5px dashed ${C.border}`, background:C.surfaceTop, cursor:"pointer", overflow:"hidden", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, color:C.textSecondary, fontSize:10.5, fontWeight:600, textAlign:"center", padding:"0 4px" }}>
+      {photo ? <img src={photo.url} alt={label} style={{ width:"100%", height:"100%", objectFit:"cover" }}/> : <><span style={{fontSize:20}}>{hint}</span>{label}</>}
     </button>
   );
+
+  const banner = (bg, color, txt) => <div style={{ background:bg, border:`1px solid ${color}44`, borderRadius:12, padding:"14px 14px", color, fontSize:13, fontWeight:700, textAlign:"center", lineHeight:1.5 }}>{txt}</div>;
+  const status = myVerif?.status;
+  const showForm = !isVerified && status !== "pending" && status !== "approved";
+
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.6)", zIndex:2000, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
       <div onClick={e=>e.stopPropagation()} style={{ background:C.surface, width:"100%", maxWidth:440, borderRadius:"18px 18px 0 0", padding:"20px 18px 26px", border:`1px solid ${C.border}`, maxHeight:"88vh", overflowY:"auto" }}>
-        <div style={{ fontSize:16, fontWeight:800, color:C.textPrimary, marginBottom:4 }}>Verificar mi cuenta</div>
-        <div style={{ fontSize:12, color:C.textSecondary, marginBottom:16, lineHeight:1.5 }}>Sube tu documento de identidad por ambos lados. Lo revisamos y, si todo está bien, tu cuenta queda verificada. Tus datos son confidenciales.</div>
-        <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Tipo de documento</div>
-        <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap" }}>
-          {TYPES.map(t => <button key={t} onClick={()=>setDocType(t)} style={{ padding:"8px 12px", borderRadius:8, cursor:"pointer", fontSize:11.5, fontWeight:600, background: docType===t ? `${C.accent}1a` : C.surfaceTop, border:`1.5px solid ${docType===t ? C.accent : C.border}`, color: docType===t ? C.accent : C.textPrimary }}>{t}</button>)}
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+          <div style={{ fontSize:16, fontWeight:800, color:C.textPrimary }}>Verificar mi cuenta</div>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:C.textSecondary, fontSize:22, cursor:"pointer" }}>×</button>
         </div>
-        <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Nombre completo</div>
-        <input value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Como aparece en tu documento" style={{ width:"100%", background:C.surfaceTop, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 12px", color:C.textPrimary, fontSize:13, marginBottom:13, outline:"none" }}/>
-        <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Número de documento</div>
-        <input value={docNum} onChange={e=>setDocNum(e.target.value)} placeholder="Ej. 95010112345" style={{ width:"100%", background:C.surfaceTop, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 12px", color:C.textPrimary, fontSize:13, marginBottom:13, outline:"none" }}/>
-        <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Foto del documento (frente y reverso)</div>
-        <input ref={frontRef} type="file" accept="image/*" onChange={pick(setPhotoFront)} style={{ display:"none" }}/>
-        <input ref={backRef} type="file" accept="image/*" onChange={pick(setPhotoBack)} style={{ display:"none" }}/>
-        <div style={{ display:"flex", gap:9, marginBottom:18 }}>
-          {upBox("Frente", photoFront, frontRef)}
-          {upBox("Reverso", photoBack, backRef)}
-        </div>
-        <div style={{ display:"flex", gap:9 }}>
-          <button onClick={onClose} style={{ flex:1, height:44, borderRadius:10, background:C.surfaceTop, border:`1px solid ${C.border}`, color:C.textPrimary, fontSize:13, fontWeight:700, cursor:"pointer" }}>Cancelar</button>
-          <button disabled={!valid} onClick={()=>onSubmit({ docType, fullName, docNum, photo: photoFront, photoBack })} style={{ flex:1, height:44, borderRadius:10, background: valid?C.positive:C.surfaceTop, border:"none", color: valid?"#fff":C.textSecondary, fontSize:13, fontWeight:800, cursor: valid?"pointer":"default", opacity: valid?1:.6 }}>Enviar</button>
-        </div>
+
+        {loading ? <div style={{ textAlign:"center", color:C.textSecondary, fontSize:13, padding:"30px 0" }}>Cargando…</div> : <>
+          {(isVerified || status === "approved") && banner(`${C.positive}14`, C.positive, "✓ Tu cuenta ya está verificada")}
+          {!isVerified && status === "pending" && banner(`${C.warning}14`, C.warning, "🕐 Pendiente de revisión. Te avisamos cuando la revisemos.")}
+          {!isVerified && status === "rejected" && (
+            <div style={{ marginBottom:14 }}>{banner(`${C.danger}14`, C.danger, `🚫 Rechazada${myVerif?.reject_reason ? `: ${myVerif.reject_reason}` : ""} — puedes intentarlo de nuevo`)}</div>
+          )}
+
+          {showForm && <>
+            <div style={{ fontSize:12, color:C.textSecondary, margin:"12px 0 16px", lineHeight:1.5 }}>Sube tu documento (frente y reverso) y una selfie sosteniéndolo. Tus datos son confidenciales y solo los ve el equipo de RETADOR.</div>
+            <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Tipo de documento</div>
+            <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap" }}>
+              {TYPES.map(t => <button key={t} onClick={()=>setDocType(t)} style={{ padding:"8px 12px", borderRadius:8, cursor:"pointer", fontSize:11.5, fontWeight:600, background: docType===t ? `${C.accent}1a` : C.surfaceTop, border:`1.5px solid ${docType===t ? C.accent : C.border}`, color: docType===t ? C.accent : C.textPrimary }}>{t}</button>)}
+            </div>
+            <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Nombre completo</div>
+            <input value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Como aparece en tu documento" style={{ width:"100%", boxSizing:"border-box", background:C.surfaceTop, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 12px", color:C.textPrimary, fontSize:13, marginBottom:13, outline:"none" }}/>
+            <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Número de documento</div>
+            <input value={docNum} onChange={e=>setDocNum(e.target.value)} placeholder="Ej. 95010112345" style={{ width:"100%", boxSizing:"border-box", background:C.surfaceTop, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 12px", color:C.textPrimary, fontSize:13, marginBottom:13, outline:"none" }}/>
+            <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Fotos</div>
+            <input ref={frontRef} type="file" accept="image/*" onChange={pick(setFront)} style={{ display:"none" }}/>
+            <input ref={backRef} type="file" accept="image/*" onChange={pick(setBack)} style={{ display:"none" }}/>
+            <input ref={selfieRef} type="file" accept="image/*" capture="user" onChange={pick(setSelfie)} style={{ display:"none" }}/>
+            <div style={{ display:"flex", gap:9, marginBottom:9 }}>
+              {upBox("Frente", front, frontRef, "📄")}
+              {upBox("Reverso", back, backRef, "📄")}
+            </div>
+            <div style={{ display:"flex", gap:9, marginBottom:18 }}>
+              {upBox("Selfie sosteniendo el documento", selfie, selfieRef, "🤳")}
+            </div>
+            <div style={{ display:"flex", gap:9 }}>
+              <button onClick={onClose} style={{ flex:1, height:44, borderRadius:10, background:C.surfaceTop, border:`1px solid ${C.border}`, color:C.textPrimary, fontSize:13, fontWeight:700, cursor:"pointer" }}>Cancelar</button>
+              <button disabled={!valid || submitting} onClick={doSubmit} style={{ flex:1, height:44, borderRadius:10, background: (valid && !submitting) ? C.positive : C.surfaceTop, border:"none", color: (valid && !submitting) ? "#fff" : C.textSecondary, fontSize:13, fontWeight:800, cursor: (valid && !submitting) ? "pointer" : "default", opacity: (valid && !submitting) ? 1 : .6 }}>{submitting ? "Enviando…" : "Enviar verificación"}</button>
+            </div>
+          </>}
+        </>}
       </div>
     </div>
   );
 }
-function FP_PlansModal({ plans = [], current, onClose, onRequest, C }) {
+// Mapea el nombre del plan (Pro/Premium) al valor del backend (pro/premium).
+const PLAN_KEY = (nameOrId) => { const s = String(nameOrId || "").toLowerCase(); if (s.includes("premium")) return "premium"; if (s.includes("pro")) return "pro"; return null; };
+function FP_PlansModal({ user, plans = [], current, onClose, C, flash }) {
   const price = p => p.promo && p.promoPrice >= 0 ? p.promoPrice : p.price;
+  const [pending, setPending] = useState(null);   // { plan } de la solicitud pendiente
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const flash_ = flash || (() => {});
+  useEffect(() => {
+    let alive = true;
+    if (!user?.id) { setLoading(false); return; }
+    getMyPlanRequest(user.id).then(r => { if (alive) { setPending(r && r.status === "pending" ? r : null); setLoading(false); } }).catch(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [user?.id]);
+
+  const request = async (p) => {
+    const key = PLAN_KEY(p.id || p.name);
+    if (!key) { flash_("Ese plan no se puede solicitar"); return; }
+    if (pending || busy) return;
+    setBusy(true);
+    try { const r = await submitPlanRequest(user.id, key); setPending(r); flash_(`🕐 Solicitud enviada: plan ${p.name}. Pendiente de aprobación.`); }
+    catch (e) { flash_("⚠️ " + (e?.message || "No se pudo enviar la solicitud")); }
+    setBusy(false);
+  };
+
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.6)", zIndex:2000, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
       <div onClick={e=>e.stopPropagation()} style={{ background:C.surface, width:"100%", maxWidth:460, borderRadius:"18px 18px 0 0", padding:"20px 18px 26px", border:`1px solid ${C.border}`, maxHeight:"88vh", overflowY:"auto" }}>
         <div style={{ fontSize:16, fontWeight:800, color:C.textPrimary, marginBottom:4 }}>Planes</div>
         <div style={{ fontSize:12, color:C.textSecondary, marginBottom:16 }}>Elige un plan. El pago se coordina manualmente; cuando se confirme, se activa.</div>
+        {pending && <div style={{ background:`${C.warning}14`, border:`1px solid ${C.warning}44`, borderRadius:10, padding:"11px 12px", color:C.warning, fontSize:12.5, fontWeight:700, marginBottom:14, textAlign:"center" }}>🕐 Solicitud enviada (plan {pending.plan}), pendiente de aprobación</div>}
         <div style={{ display:"flex", flexDirection:"column", gap:11 }}>
           {plans.map(p => {
             const isCur = current === p.name;
+            const requestable = !isCur && !!PLAN_KEY(p.id || p.name);
+            const isPendingThis = pending && PLAN_KEY(pending.plan) === PLAN_KEY(p.id || p.name);
             return <div key={p.id} style={{ border:`1.5px solid ${isCur ? C.accent : C.border}`, borderRadius:12, padding:"14px 14px 16px", background: isCur ? `${C.accent}0d` : C.surfaceTop }}>
               <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginBottom:8 }}>
                 <span style={{ fontSize:15, fontWeight:800, color:C.textPrimary }}>{p.name}{isCur && <span style={{ fontSize:10, fontWeight:700, color:C.accent, marginLeft:7 }}>· actual</span>}</span>
                 <span style={{ fontSize:14, fontWeight:800, color:C.textPrimary }}>{price(p) === 0 ? "Gratis" : `$${price(p)}/mes`}{p.promo && p.price !== price(p) && <span style={{ fontSize:11, color:C.textSecondary, textDecoration:"line-through", marginLeft:6 }}>${p.price}</span>}</span>
               </div>
               {(p.features||[]).map((f,i)=><div key={i} style={{ display:"flex", gap:7, alignItems:"flex-start", marginBottom:5 }}><span style={{ color:C.positive, fontSize:12, flexShrink:0 }}>✓</span><span style={{ fontSize:12, color:C.textPrimary }}>{f}</span></div>)}
-              {!isCur && p.name !== "Básico" && <button onClick={()=>onRequest(p.name)} style={{ width:"100%", height:38, marginTop:11, borderRadius:9, background:C.accent, border:"none", color:"#fff", fontSize:12.5, fontWeight:800, cursor:"pointer" }}>Solicitar {p.name}</button>}
+              {requestable && (
+                isPendingThis
+                  ? <button disabled style={{ width:"100%", height:38, marginTop:11, borderRadius:9, background:C.surfaceTop, border:`1px solid ${C.border}`, color:C.textSecondary, fontSize:12.5, fontWeight:700, cursor:"default" }}>🕐 Solicitud enviada</button>
+                  : <button disabled={!!pending || busy || loading} onClick={()=>request(p)} style={{ width:"100%", height:38, marginTop:11, borderRadius:9, background: (pending || busy) ? C.surfaceTop : C.accent, border:"none", color: (pending || busy) ? C.textSecondary : "#fff", fontSize:12.5, fontWeight:800, cursor: (pending || busy) ? "default" : "pointer", opacity: (pending || busy) ? .7 : 1 }}>{busy ? "Enviando…" : `Solicitar plan ${p.name}`}</button>
+              )}
             </div>;
           })}
         </div>
@@ -1417,8 +1502,8 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
       {showPro      && isOwner && <FP_ProModal onClose={() => setShowPro(false)}/>}
       {showSettings && isOwner && <FP_SettingsScreen onClose={() => setShowSettings(false)}/>}
       {showReport && !isOwner && <FP_ReportModal targetName={profile.name} onClose={() => setShowReport(false)} onSubmit={(payload) => { onReport?.(payload); setShowReport(false); toast_("Reporte enviado. Gracias por avisar."); }} C={FP_C}/>}
-      {showVerify && isOwner && <FP_VerifyModal name={profile.name} onClose={() => setShowVerify(false)} onSubmit={(payload) => { onVerify?.(payload); setShowVerify(false); toast_("Solicitud de verificación enviada. La revisaremos pronto."); }} C={FP_C}/>}
-      {showPlans && isOwner && <FP_PlansModal plans={plans} current={currentPlan} onClose={() => setShowPlans(false)} onRequest={(planName) => { onRequestPlan?.(planName); setShowPlans(false); toast_(`Solicitud enviada: plan ${planName}. Te contactaremos para el pago.`); }} C={FP_C}/>}
+      {showVerify && isOwner && <FP_VerifyModal user={user} name={profile.name} isVerified={isVerified} onClose={() => setShowVerify(false)} onSubmit={() => onVerify?.()} C={FP_C} flash={toast_}/>}
+      {showPlans && isOwner && <FP_PlansModal user={user} plans={plans} current={currentPlan} onClose={() => setShowPlans(false)} C={FP_C} flash={toast_}/>}
 
       {/* TOAST */}
       {toast && (

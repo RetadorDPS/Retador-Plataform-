@@ -445,9 +445,9 @@ export const markNotificationsRead = async (userId, id = null) => {
 // mensajero, para que el modo se desbloquee SIN cerrar la app).
 export const refreshSessionProfile = async (userId) => {
   if (!userId) return null;
-  const { data, error } = await supabase.from("profiles").select("role, full_name, avatar_url, bio, is_verified, is_suspended").eq("id", userId).single();
+  const { data, error } = await supabase.from("profiles").select("role, full_name, avatar_url, bio, is_verified, is_suspended, plan").eq("id", userId).single();
   if (error || !data) return null;
-  return { role: data.role || "user", name: data.full_name || null, avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified, suspended: !!data.is_suspended };
+  return { role: data.role || "user", name: data.full_name || null, avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified, suspended: !!data.is_suspended, plan: data.plan || "gratis" };
 };
 
 // ── FASE 2 — ADMIN: usuarios reales + verificar/suspender ─────────────────────
@@ -528,6 +528,79 @@ export const adminListProducts = async ({ query = "", filter = "all", from = 0, 
 export const adminModerateProduct = async (productId, approve, reason = null) => {
   const { data, error } = await supabase.rpc("admin_moderate_product", { p_product_id: productId, p_approve: approve, p_reason: reason || null });
   if (error) { console.error("adminModerateProduct:", error.message); throw error; }
+  return data;
+};
+
+// ── FASE 4 — VERIFICACIÓN (KYC) y SOLICITUDES DE PLAN, de punta a punta ───────
+// Sube una foto KYC al bucket PRIVADO 'kyc', en la carpeta del usuario (su uid).
+// Devuelve el PATH (no URL): el bucket es privado, se lee con createSignedUrl.
+export const uploadKyc = async (file, userId, slot) => {
+  if (!userId) throw new Error("Sesión no válida");
+  const blob = await compressImage(file, 1280, 0.82);
+  const path = `${userId}/${slot}.jpg`;   // front | back | selfie
+  const { error } = await supabase.storage.from("kyc").upload(path, blob, {
+    cacheControl: "3600", upsert: true, contentType: "image/jpeg",
+  });
+  if (error) throw error;
+  return path;
+};
+// Enlace firmado temporal para VER una foto KYC (solo dueño/admin por RLS).
+export const kycSignedUrl = async (path, expiresIn = 3600) => {
+  if (!path) return null;
+  const { data, error } = await supabase.storage.from("kyc").createSignedUrl(path, expiresIn);
+  if (error) { console.error("kycSignedUrl:", error.message); return null; }
+  return data?.signedUrl || null;
+};
+// Mi verificación (la última): para saber el estado y si puedo reenviar.
+export const getMyVerification = async (userId) => {
+  if (!userId) return null;
+  const { data, error } = await supabase.from("verifications").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) { console.error("getMyVerification:", error.message); return null; }
+  return data || null;
+};
+// Enviar una solicitud de verificación (el usuario inserta la suya, status pending).
+export const submitVerification = async (userId, { full_name, doc_type, doc_number, doc_front, doc_back, selfie }) => {
+  const row = { user_id: userId, full_name, doc_type, doc_number, doc_front, doc_back, selfie, status: "pending" };
+  const { data, error } = await supabase.from("verifications").insert(row).select().single();
+  if (error) { console.error("submitVerification:", error.message); throw error; }
+  return data;
+};
+// Admin: lista de verificaciones por estado (pending|approved|rejected|all).
+export const adminListVerifications = async ({ status = "pending", from = 0, to = 49 } = {}) => {
+  let q = supabase.from("verifications").select("*").order("created_at", { ascending: false }).range(from, to);
+  if (status && status !== "all") q = q.eq("status", status);
+  const { data, error } = await q;
+  if (error) { console.error("adminListVerifications:", error.message); return []; }
+  return data || [];
+};
+export const adminReviewVerification = async (verifId, approve, reason = null) => {
+  const { data, error } = await supabase.rpc("admin_review_verification", { p_verif_id: verifId, p_approve: approve, p_reason: reason || null });
+  if (error) { console.error("adminReviewVerification:", error.message); throw error; }
+  return data;
+};
+
+// Solicitudes de plan (pro|premium).
+export const getMyPlanRequest = async (userId) => {
+  if (!userId) return null;
+  const { data, error } = await supabase.from("plan_requests").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) { console.error("getMyPlanRequest:", error.message); return null; }
+  return data || null;
+};
+export const submitPlanRequest = async (userId, plan) => {
+  const { data, error } = await supabase.from("plan_requests").insert({ user_id: userId, plan, status: "pending" }).select().single();
+  if (error) { console.error("submitPlanRequest:", error.message); throw error; }
+  return data;
+};
+export const adminListPlanRequests = async ({ status = "pending", from = 0, to = 49 } = {}) => {
+  let q = supabase.from("plan_requests").select("*").order("created_at", { ascending: false }).range(from, to);
+  if (status && status !== "all") q = q.eq("status", status);
+  const { data, error } = await q;
+  if (error) { console.error("adminListPlanRequests:", error.message); return []; }
+  return data || [];
+};
+export const adminReviewPlan = async (requestId, approve) => {
+  const { data, error } = await supabase.rpc("admin_review_plan", { p_request_id: requestId, p_approve: approve });
+  if (error) { console.error("adminReviewPlan:", error.message); throw error; }
   return data;
 };
 

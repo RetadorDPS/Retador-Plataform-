@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan } from "../shared/index.js";
 
 const OmniPanel = (() => {
 
@@ -2455,16 +2455,207 @@ function RealUsersDirectory({ toast, meId }){
   );
 }
 
+/* ── Cola REAL de verificaciones (KYC) ──────────────────────────────────────── */
+function VerificationQueue({ toast, onViewProfile }){
+  const [filter, setFilter] = useState("pending"); // pending|approved|rejected
+  const [rows, setRows] = useState([]);
+  const [names, setNames] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(null);
+  const [sel, setSel] = useState(null);            // ficha con fotos
+  const [urls, setUrls] = useState({});            // signed urls del sel
+  const [zoom, setZoom] = useState(null);          // foto ampliada
+  const [rejectFor, setRejectFor] = useState(null);
+  const [reason, setReason] = useState("");
+
+  const load = useCallback(() => {
+    setLoading(true);
+    adminListVerifications({ status: filter, from: 0, to: 49 })
+      .then(async d => {
+        setRows(d); setLoading(false);
+        const map = await getProfilesByIds(d.map(v => v.user_id)).catch(() => ({}));
+        setNames(map);
+      })
+      .catch(() => { setRows([]); setLoading(false); });
+  }, [filter]);
+  useEffect(() => { load(); }, [load]);
+  // Realtime: la cola se actualiza sola cuando llega/cambia una verificación.
+  useEffect(() => {
+    const ch = supabase.channel(`admin-verifs-${Date.now()}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "verifications" }, () => load())
+      .subscribe();
+    return () => { try { Promise.resolve(supabase.removeChannel(ch)).catch(()=>{}); } catch(e){} };
+  }, [load]);
+
+  const openSheet = async (v) => {
+    setSel(v); setUrls({});
+    const [f, b, s] = await Promise.all([kycSignedUrl(v.doc_front), kycSignedUrl(v.doc_back), kycSignedUrl(v.selfie)]);
+    setUrls({ front: f, back: b, selfie: s });
+  };
+  const patch = (id, p) => { setRows(rs => rs.map(r => r.id === id ? { ...r, ...p } : r)); setSel(s => s && s.id === id ? { ...s, ...p } : s); };
+  const approve = async (v) => {
+    setBusy(v.id);
+    try { await adminReviewVerification(v.id, true); patch(v.id, { status: "approved" }); toast(`✓ ${v.full_name || 'Usuario'} verificado`); if (filter === "pending") setRows(rs => rs.filter(r => r.id !== v.id)); setSel(null); }
+    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+    setBusy(null);
+  };
+  const doReject = async () => {
+    const v = rejectFor; const why = reason.trim(); setRejectFor(null);
+    setBusy(v.id);
+    try { await adminReviewVerification(v.id, false, why || null); patch(v.id, { status: "rejected", reject_reason: why }); toast(`🚫 Verificación de ${v.full_name || 'usuario'} rechazada`); if (filter === "pending") setRows(rs => rs.filter(r => r.id !== v.id)); setSel(null); }
+    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+    setBusy(null);
+  };
+  const chip = (s) => s === "approved" ? <span className="bdg bg">✓ Aprobada</span> : s === "rejected" ? <span className="bdg br">🚫 Rechazada</span> : <span className="bdg by">🕐 Pendiente</span>;
+  const pending = rows.filter(r => r.status === "pending").length;
+
+  return (
+    <div className="card cp mb16">
+      <div className="ch"><span className="ct">Verificación de identidad</span><span className={`bdg ${filter==='pending'&&pending?'by':'bx'}`}>{filter==='pending'? `${pending} pendientes` : `${rows.length}`}</span></div>
+      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Revisa el documento y la selfie. Al aprobar, el usuario queda verificado (insignia real) y recibe aviso.</div>
+      <div className="tabs" style={{maxWidth:320,marginBottom:10}}>
+        {[["pending","Pendientes"],["approved","Aprobadas"],["rejected","Rechazadas"]].map(([k,l])=><div key={k} className={`tab ${filter===k?'on':''}`} onClick={()=>setFilter(k)}>{l}</div>)}
+      </div>
+      {loading ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Cargando…</div>
+        : rows.length===0 ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Sin solicitudes.</div>
+        : rows.map(v => { const pr = names[v.user_id]; return (
+          <div key={v.id} onClick={()=>openSheet(v)} className="reprow" style={{display:'flex',alignItems:'center',gap:10,padding:'10px 8px',margin:'0 -8px',borderRadius:9,cursor:'pointer',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+            <Avatar url={avatarUrlOf(pr?.avatar_url)} name={v.full_name||pr?.full_name||'Usuario'} size={38} />
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12.5,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{v.full_name||pr?.full_name||'Usuario'}</div>
+              <div style={{fontSize:11,color:'var(--tx3)'}}>{v.doc_type||'—'} · {v.doc_number||'—'} · {v.created_at?new Date(v.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}):''}</div>
+              <div style={{marginTop:4}}>{chip(v.status)}</div>
+            </div>
+            <span style={{fontSize:16,color:'var(--tx3)',flexShrink:0}}>›</span>
+          </div>
+        ); })}
+
+      {/* Ficha de la verificación con las 3 fotos (signed urls) */}
+      {sel && <div className="mo" onClick={()=>setSel(null)}>
+        <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:400}}>
+          <div className="mt">🪪 Verificación de {sel.full_name||'usuario'}</div>
+          <div className="ms">Documento y selfie. Toca una foto para ampliarla.</div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:10}}>
+            {[["Frente",urls.front],["Reverso",urls.back],["Selfie",urls.selfie]].map(([lbl,u])=>(
+              <div key={lbl} onClick={()=>u&&setZoom(u)} style={{borderRadius:10,overflow:'hidden',border:'1px solid var(--bd2,#222)',background:'#111',height:110,display:'flex',alignItems:'center',justifyContent:'center',cursor:u?'pointer':'default'}}>
+                {u ? <img src={u} alt={lbl} style={{width:'100%',height:'100%',objectFit:'cover'}}/> : <span style={{fontSize:11,color:'var(--tx3)'}}>{lbl}…</span>}
+              </div>
+            ))}
+          </div>
+          {[['Nombre',sel.full_name||'—'],['Documento',sel.doc_type||'—'],['Número',sel.doc_number||'—'],['Estado',sel.status||'—']].map(([k,v])=>(
+            <div key={k} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'6px 0',borderBottom:'1px solid var(--bd)'}}>
+              <span style={{fontSize:12,color:'var(--tx3)'}}>{k}</span><span style={{fontSize:12,fontWeight:600,textAlign:'right'}}>{v}</span>
+            </div>
+          ))}
+          {sel.status==='rejected'&&sel.reject_reason&&<div style={{fontSize:11,color:'var(--rd,#e05252)',marginTop:8}}>Motivo: {sel.reject_reason}</div>}
+          <div style={{display:'flex',gap:8,marginTop:14}}>
+            {onViewProfile && <button className="btn sm" onClick={()=>{ onViewProfile(sel.user_id); setSel(null); }}>Ver perfil</button>}
+            {sel.status!=='approved' && <button className="btn bts" style={{flex:1}} disabled={busy===sel.id} onClick={()=>approve(sel)}>✅ Aprobar</button>}
+            {sel.status!=='rejected' && <button className="btn btd" style={{flex:1}} disabled={busy===sel.id} onClick={()=>{ setReason(''); setRejectFor(sel); }}>🚫 Rechazar</button>}
+          </div>
+        </div>
+      </div>}
+
+      {zoom && <div className="mo" onClick={()=>setZoom(null)} style={{zIndex:6000}}>
+        <img src={zoom} alt="" onClick={e=>e.stopPropagation()} style={{maxWidth:'92vw',maxHeight:'88vh',borderRadius:12,objectFit:'contain'}}/>
+      </div>}
+
+      {rejectFor && <div className="mo" onClick={()=>setRejectFor(null)}>
+        <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:360}}>
+          <div className="mt">Rechazar verificación</div>
+          <div className="ms">El usuario verá el motivo y podrá reenviar.</div>
+          <textarea value={reason} onChange={e=>setReason(e.target.value)} rows={3} placeholder="Motivo (opcional)…" style={{width:'100%',boxSizing:'border-box',background:'var(--bg3,#12151f)',border:'1px solid var(--bd2,#222)',borderRadius:10,padding:'10px 12px',color:'var(--tx)',fontSize:13,outline:'none',resize:'none',margin:'6px 0 12px'}}/>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn" style={{flex:1}} onClick={()=>setRejectFor(null)}>Cancelar</button>
+            <button className="btn btd" style={{flex:1}} onClick={doReject}>Rechazar</button>
+          </div>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+/* ── Cola REAL de solicitudes de plan ───────────────────────────────────────── */
+function PlanQueue({ toast, onViewProfile }){
+  const [filter, setFilter] = useState("pending");
+  const [rows, setRows] = useState([]);
+  const [names, setNames] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(null);
+  const [confirmFor, setConfirmFor] = useState(null); // { req, approve }
+
+  const load = useCallback(() => {
+    setLoading(true);
+    adminListPlanRequests({ status: filter, from: 0, to: 49 })
+      .then(async d => { setRows(d); setLoading(false); const map = await getProfilesByIds(d.map(r => r.user_id)).catch(()=>({})); setNames(map); })
+      .catch(() => { setRows([]); setLoading(false); });
+  }, [filter]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const ch = supabase.channel(`admin-plans-${Date.now()}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "plan_requests" }, () => load())
+      .subscribe();
+    return () => { try { Promise.resolve(supabase.removeChannel(ch)).catch(()=>{}); } catch(e){} };
+  }, [load]);
+
+  const decide = async () => {
+    const { req, approve } = confirmFor; setConfirmFor(null);
+    setBusy(req.id);
+    try {
+      await adminReviewPlan(req.id, approve);
+      setRows(rs => filter === "pending" ? rs.filter(r => r.id !== req.id) : rs.map(r => r.id === req.id ? { ...r, status: approve ? "approved" : "rejected" } : r));
+      toast(approve ? `✅ Plan ${req.plan} aprobado` : "Solicitud de plan rechazada");
+    } catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+    setBusy(null);
+  };
+  const chip = (s) => s === "approved" ? <span className="bdg bg">✅ Aprobada</span> : s === "rejected" ? <span className="bdg br">🚫 Rechazada</span> : <span className="bdg by">🕐 Pendiente</span>;
+  const pending = rows.filter(r => r.status === "pending").length;
+
+  return (
+    <div className="card cp mb16">
+      <div className="ch"><span className="ct">Solicitudes de plan</span><span className={`bdg ${filter==='pending'&&pending?'by':'bx'}`}>{filter==='pending'?`${pending} pendientes`:`${rows.length}`}</span></div>
+      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Cuando un usuario pide Pro o Premium, aparece aquí. Confirmas el pago (manual) y apruebas: el plan cambia de verdad.</div>
+      <div className="tabs" style={{maxWidth:320,marginBottom:10}}>
+        {[["pending","Pendientes"],["approved","Aprobadas"],["rejected","Rechazadas"]].map(([k,l])=><div key={k} className={`tab ${filter===k?'on':''}`} onClick={()=>setFilter(k)}>{l}</div>)}
+      </div>
+      {loading ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Cargando…</div>
+        : rows.length===0 ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Sin solicitudes.</div>
+        : rows.map(r => { const pr = names[r.user_id]; return (
+          <div key={r.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+            <Avatar url={avatarUrlOf(pr?.avatar_url)} name={pr?.full_name||'Usuario'} size={36} />
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12.5,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{pr?.full_name||'Usuario'}</div>
+              <div style={{fontSize:11,color:'var(--tx3)'}}>quiere <b style={{color:'var(--ac)',textTransform:'capitalize'}}>{r.plan}</b> · {r.created_at?new Date(r.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}):''}</div>
+              <div style={{marginTop:4}}>{chip(r.status)}</div>
+            </div>
+            <div style={{display:'flex',gap:4,flexShrink:0}}>
+              {onViewProfile && <button className="btn sm" onClick={()=>onViewProfile(r.user_id)}>Perfil</button>}
+              {r.status!=='approved' && <button className="btn bts sm" disabled={busy===r.id} onClick={()=>setConfirmFor({req:r,approve:true})}>✅ Aprobar</button>}
+              {r.status!=='rejected' && <button className="btn btd sm" disabled={busy===r.id} onClick={()=>setConfirmFor({req:r,approve:false})}>🚫 Rechazar</button>}
+            </div>
+          </div>
+        ); })}
+
+      {confirmFor && <div className="mo" onClick={()=>setConfirmFor(null)}>
+        <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:340}}>
+          <div className="mt">{confirmFor.approve ? `Aprobar plan ${confirmFor.req.plan}` : 'Rechazar solicitud'}</div>
+          <div className="ms">{confirmFor.approve ? `Confirma que el usuario ya pagó. Se activará su plan ${confirmFor.req.plan} de verdad.` : 'Se rechaza la solicitud de plan.'}</div>
+          <div style={{display:'flex',gap:8,marginTop:12}}>
+            <button className="btn" style={{flex:1}} onClick={()=>setConfirmFor(null)}>Cancelar</button>
+            <button className={`btn ${confirmFor.approve?'bts':'btd'}`} style={{flex:1}} onClick={decide}>{confirmFor.approve?'Aprobar':'Rechazar'}</button>
+          </div>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
 /* ── Usuarios ──────────────────────────────────────────────────────────────── */
 function Usuarios({sub,setSub,toast,data={}}){
   const[confirm,setConfirm]=useState(null);
-  const[verView,setVerView]=useState(null);
-  const verifs = (data.verifications || []).filter(v=>v.state==='pending');
   const orders = data.orders || [];
   const reports = data.reports || [];
-  const planReqs = (data.planRequests || []).filter(p=>p.state==='pending');
   const fmt = n=>'$'+Math.round(n||0).toLocaleString();
-  const ago = ts=>{ if(!ts) return '—'; const s=Math.floor((Date.now()-ts)/1000); if(s<60) return `${s}s`; const m=Math.floor(s/60); if(m<60) return `${m}m`; const h=Math.floor(m/60); if(h<24) return `${h}h`; return `${Math.floor(h/24)}d`; };
   // construir usuarios reales desde órdenes (vendedores) y reportes
   const map = {};
   const touch = (name) => { if(!name) return null; if(!map[name]) map[name]={name, sales:0, orders:0, reports:0, reasons:[], plan:'Básico'}; return map[name]; };
@@ -2475,7 +2666,6 @@ function Usuarios({sub,setSub,toast,data={}}){
   const reported = users.filter(u=>u.reports>0);
   const ask=(c)=>setConfirm(c);
   const run=()=>{ confirm?.onYes&&confirm.onYes(); confirm?.msg2&&toast(confirm.msg2); setConfirm(null); };
-  const planAct=(id,action,msg)=>{ data.onPlanAction&&data.onPlanAction(id,action); toast(msg); };
   return <>
     <div className="stit">Usuarios & Negocios</div>
     <div className="ssub">Cuentas reales, planes y reportes · conectado a la plataforma</div>
@@ -2484,35 +2674,9 @@ function Usuarios({sub,setSub,toast,data={}}){
     {sub==='Usuarios'&&<>
       <div className="g3 mb16">{[{l:'Usuarios con actividad',v:String(users.length)},{l:'Vendedores activos',v:String(sellers.length)},{l:'Reportados',v:String(reported.length),c:reported.length?'var(--rd)':undefined}].map(m=><div className="mc" key={m.l}><div className="ml">{m.l}</div><div className="mv" style={{fontSize:20,color:m.c}}>{m.v}</div></div>)}</div>
 
-      {/* Solicitudes de verificación (KYC) */}
-      <div className="card cp mb16">
-        <div className="ch"><span className="ct">Verificación de identidad</span><span className={`bdg ${verifs.length?'by':'bx'}`}>{verifs.length} pendientes</span></div>
-        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 8px'}}>Los usuarios suben su documento. Revisa y aprueba para darles la insignia de verificado.</div>
-        {verifs.length===0
-          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Sin solicitudes de verificación.</div>
-          : verifs.map(v=><div key={v.id} onClick={()=>setVerView(v)} style={{display:'flex',alignItems:'center',gap:10,padding:'11px 8px',margin:'0 -8px',borderRadius:9,cursor:'pointer',borderBottom:'1px solid rgba(128,128,128,.1)'}} className="reprow">
-            <div className="avxs">🪪</div>
-            <div style={{flex:1,minWidth:0}}><div style={{fontSize:12.5,fontWeight:700}}>{v.userName||v.fullName||'Usuario'}</div><div style={{fontSize:11,color:'var(--tx3)'}}>{v.docType} · {v.docNum}</div></div>
-            <span style={{fontSize:14,color:'var(--tx3)'}}>›</span>
-          </div>)}
-      </div>
-
-      {/* Solicitudes de plan */}
-      <div className="card cp mb16">
-        <div className="ch"><span className="ct">Solicitudes de plan</span><span className={`bdg ${planReqs.length?'by':'bx'}`}>{planReqs.length} pendientes</span></div>
-        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 8px'}}>Cuando un usuario pide pasar a Pro o Premium, aparece aquí. Tú confirmas el pago (manual) y apruebas.</div>
-        {planReqs.length===0
-          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Sin solicitudes por ahora.</div>
-          : planReqs.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'11px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
-            <div className="avxs">{String(p.userName||'?').slice(0,2)}</div>
-            <div style={{flex:1,minWidth:0}}><div style={{fontSize:12.5,fontWeight:700}}>{p.userName||'Usuario'}</div><div style={{fontSize:11,color:'var(--tx3)'}}>quiere <b style={{color:'var(--ac)'}}>{p.plan}</b> · hace {ago(p.at)}</div></div>
-            <div style={{display:'flex',gap:5,flexShrink:0}}>
-              <button className="btn btg sm" onClick={()=>toast('Abriendo chat…')}>💬 Chat</button>
-              <button className="btn bts sm" onClick={()=>ask({title:`Aprobar plan ${p.plan}`,msg:`Confirma que ${p.userName||'el usuario'} ya pagó. Se activará su plan ${p.plan}. ¿Aprobar?`,yes:'Aprobar',onYes:()=>planAct(p.id,'approved','Plan aprobado'),msg2:null})}>✓ Aprobar</button>
-              <button className="btn btd sm" onClick={()=>ask({title:'Rechazar solicitud',msg:'Se rechaza la solicitud de plan. ¿Continuar?',danger:true,yes:'Rechazar',onYes:()=>planAct(p.id,'rejected','Solicitud rechazada'),msg2:null})}>Rechazar</button>
-            </div>
-          </div>)}
-      </div>
+      {/* Cola REAL de verificaciones (KYC) y de planes */}
+      <VerificationQueue toast={toast} onViewProfile={data.onViewProfile} />
+      <PlanQueue toast={toast} onViewProfile={data.onViewProfile} />
 
       {/* Directorio REAL de usuarios (profiles) con buscador, verificar/suspender y ficha */}
       <RealUsersDirectory toast={toast} meId={data.meId} />
@@ -2540,25 +2704,6 @@ function Usuarios({sub,setSub,toast,data={}}){
           </table></div>}
       </div>
     </>}
-
-    {verView&&<div className="mo" onClick={()=>setVerView(null)}>
-      <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:380}}>
-        <div className="mt">🪪 Verificación de identidad</div>
-        <div className="ms">Revisa el documento y decide.</div>
-        {(verView.photo||verView.photoBack)&&<div style={{display:'flex',gap:8,marginBottom:12}}>
-          {verView.photo&&<img src={verView.photo} alt="frente" style={{flex:1,width:'50%',borderRadius:10,maxHeight:160,objectFit:'cover',border:'1px solid var(--bd2)'}}/>}
-          {verView.photoBack&&<img src={verView.photoBack} alt="reverso" style={{flex:1,width:'50%',borderRadius:10,maxHeight:160,objectFit:'cover',border:'1px solid var(--bd2)'}}/>}
-        </div>}
-        {[['Usuario',verView.userName||'—'],['Nombre',verView.fullName||'—'],['Documento',verView.docType||'—'],['Número',verView.docNum||'—']].map(([k,v])=><div key={k} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'8px 0',borderBottom:'1px solid var(--bd)'}}>
-          <span style={{fontSize:12,color:'var(--tx3)'}}>{k}</span><span style={{fontSize:12,fontWeight:600,textAlign:'right'}}>{v}</span>
-        </div>)}
-        <div className="mact">
-          <button className="btn btd sm" onClick={()=>{const v=verView;setVerView(null);ask({title:'Rechazar verificación',msg:`¿Rechazar la verificación de ${v.userName||'el usuario'}?`,danger:true,yes:'Rechazar',onYes:()=>{data.onVerifyAction&&data.onVerifyAction(v.id,'rejected');},msg2:'Verificación rechazada'});}}>Rechazar</button>
-          <button className="btn btp sm" onClick={()=>{const v=verView;setVerView(null);ask({title:'Aprobar verificación',msg:`Se verificará a ${v.userName||'el usuario'} y tendrá la insignia. ¿Aprobar?`,yes:'Aprobar',onYes:()=>{data.onVerifyAction&&data.onVerifyAction(v.id,'approved');},msg2:'Usuario verificado ✓'});}}>✓ Aprobar</button>
-          <button className="btn btg sm" onClick={()=>setVerView(null)} style={{marginLeft:'auto'}}>Cerrar</button>
-        </div>
-      </div>
-    </div>}
 
     {confirm&&<div className="mo" onClick={()=>setConfirm(null)}>
       <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:340}}>

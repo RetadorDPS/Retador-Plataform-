@@ -801,6 +801,12 @@ function AppShell({ sessionUser }) {
             isSuspendedUser().then(s => setSuspended(!!s)).catch(() => {});
             refreshSessionProfile(user.id).then(p => { if (p) setUser(prev => prev ? { ...prev, verified: p.verified, suspended: p.suspended } : prev); }).catch(() => {});
           }
+          // Verificación aprobada/rechazada o PLAN cambiado: refresca el perfil en vivo
+          // (insignia verificada real, plan real) — igual que con 'courier'.
+          if (n.kind === "plan" || n.kind === "verification") {
+            refreshSessionProfile(user.id).then(p => { if (p) setUser(prev => prev ? { ...prev, verified: p.verified, plan: p.plan, role: p.role } : prev); }).catch(() => {});
+          }
+          if ((n.kind === "verification_app" || n.kind === "plan_app") && user.role === "admin") { /* la cola se refresca sola por realtime de sus tablas */ }
           if (n.kind === "courier_app" && user.role === "admin") reloadCourierApps();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "courier_applications" }, () => {
@@ -1229,6 +1235,7 @@ function AppShell({ sessionUser }) {
       )}
       {showAdmin  && <OmniPanel onClose={() => setShowAdmin(false)} theme={appTk} zoom={densZoom} data={{
         meId: user?.id,
+        onViewProfile: (id) => { setShowAdmin(false); openPublicProfile(id); },
         orders, cfg: adminCfg,
         onCfg: handleCfgChange,
         onOrderAction: (id, action) => setOrders(prev => prev.map(o => o.id === id ? { ...o, status: action === 'cancel' ? 'cancelado' : action === 'approve' ? 'confirmado' : o.status, flagged: action === 'flag' ? true : (action === 'cancel' || action === 'approve' ? false : o.flagged) } : o)),
@@ -1352,7 +1359,7 @@ function AppShell({ sessionUser }) {
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
               const paid = payments.filter(p => p.sellerName === me).reduce((a, p) => a + (p.amount || 0), 0);
               const myDebt = Math.max(0, accrued - paid);
-              return <FreeProfileScreen onBack={() => setPScr("main")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={(p) => addVerification({ userName: me || "Usuario", ...p })} isVerified={verifiedUsers.includes(me)} onRequestPlan={(plan) => addPlanRequest({ userName: me || "Usuario", plan })} currentPlan={userPlans[me] || "Básico"} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} />;
+              return <FreeProfileScreen onBack={() => setPScr("main")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} onRequestPlan={() => {}} currentPlan={(user?.plan && user.plan !== "gratis") ? (user.plan === "pro" ? "Pro" : user.plan === "premium" ? "Premium" : userPlans[me] || "Básico") : (userPlans[me] || "Básico")} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} />;
             })()}
             {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
             {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}

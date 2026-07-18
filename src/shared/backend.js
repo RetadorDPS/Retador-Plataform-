@@ -504,7 +504,7 @@ export const getProfilesByIds = async (ids = []) => {
 // Lista de publicaciones para el panel (más recientes). filter: all|approved|rejected.
 export const adminListProducts = async ({ query = "", filter = "all", from = 0, to = 29 } = {}) => {
   let q = supabase.from("products")
-    .select("id, title, images, seller_id, kind, moderation_status, moderation_reason, price, currency, created_at, status")
+    .select("id, title, description, images, seller_id, kind, moderation_status, moderation_reason, price, currency, location, created_at, status")
     .neq("status", "deleted")
     .order("created_at", { ascending: false })
     .range(from, to);
@@ -516,7 +516,7 @@ export const adminListProducts = async ({ query = "", filter = "all", from = 0, 
   if (error) {
     // Si la columna moderation_reason no existiera, reintenta sin ella.
     if (/moderation_reason/.test(error.message || "")) {
-      const alt = await supabase.from("products").select("id, title, images, seller_id, kind, moderation_status, price, currency, created_at, status").neq("status", "deleted").order("created_at", { ascending: false }).range(from, to);
+      const alt = await supabase.from("products").select("id, title, description, images, seller_id, kind, moderation_status, price, currency, location, created_at, status").neq("status", "deleted").order("created_at", { ascending: false }).range(from, to);
       return alt.data || [];
     }
     console.error("adminListProducts:", error.message); return [];
@@ -529,6 +529,32 @@ export const adminModerateProduct = async (productId, approve, reason = null) =>
   const { data, error } = await supabase.rpc("admin_moderate_product", { p_product_id: productId, p_approve: approve, p_reason: reason || null });
   if (error) { console.error("adminModerateProduct:", error.message); throw error; }
   return data;
+};
+
+// ── CIERRE DEL PANEL — pedidos, admins y registro de acciones ────────────────
+// Lista REAL de pedidos de la plataforma (el RLS deja al admin verlos todos).
+// Solo lectura: los pedidos los mueven sus dueños; el admin observa.
+export const adminListOrders = async ({ status = "all", from = 0, to = 29 } = {}) => {
+  let q = supabase.from("orders").select("*").order("created_at", { ascending: false }).range(from, to);
+  if (status && status !== "all") q = q.eq("status", status);
+  const { data, error } = await q;
+  if (error) { console.error("adminListOrders:", error.message); return []; }
+  return data || [];
+};
+// Administradores reales de la plataforma (profiles con role='admin').
+export const adminListAdmins = async () => {
+  const { data, error } = await supabase.from("profiles").select("id, full_name, email, avatar_url, created_at").eq("role", "admin").order("created_at", { ascending: true });
+  if (error) { console.error("adminListAdmins:", error.message); return []; }
+  return data || [];
+};
+// Registro de acciones admin (si la tabla de log existe y es legible).
+// Prueba nombres habituales; si ninguno responde, devuelve null (la UI lo omite).
+export const adminListLogs = async (limit = 30) => {
+  for (const table of ["admin_logs", "action_logs", "audit_log"]) {
+    const { data, error } = await supabase.from(table).select("*").order("created_at", { ascending: false }).limit(limit);
+    if (!error && Array.isArray(data)) return data;
+  }
+  return null;
 };
 
 // ── FASE 5 — DASHBOARD del panel: métricas REALES del ecosistema ─────────────

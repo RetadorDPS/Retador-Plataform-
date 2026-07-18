@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs } from "../shared/index.js";
 
 const OmniPanel = (() => {
 
@@ -1861,7 +1861,7 @@ function Overview({toast, data={}, go}){
           <div className="card cp">
             <div className="ch"><span className="ct">Acciones rápidas</span></div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:7 }}>
-              <button className="btn btg" style={{ justifyContent:'flex-start', width:'100%', fontSize:11 }} onClick={()=>go&&go('ops','Órdenes')}><span>📦</span>Ver Órdenes</button>
+              <button className="btn btg" style={{ justifyContent:'flex-start', width:'100%', fontSize:11 }} onClick={()=>go&&go('ops')}><span>📦</span>Ver Órdenes</button>
               <button className="btn btg" style={{ justifyContent:'flex-start', width:'100%', fontSize:11 }} onClick={()=>go&&go('modq')}><span>🛡️</span>Moderación</button>
               <button className="btn btg" style={{ justifyContent:'flex-start', width:'100%', fontSize:11 }} onClick={()=>go&&go('users','Usuarios')}><span>👥</span>Usuarios</button>
               <button className="btn btg" style={{ justifyContent:'flex-start', width:'100%', fontSize:11 }} onClick={()=>go&&go('eco')}><span>📊</span>Economía</button>
@@ -1872,84 +1872,22 @@ function Overview({toast, data={}, go}){
 }
 
 /* ── Operaciones ────────────────────────────────────────────────────────────── */
-function Operaciones({sub,setSub,toast,data={},solo}){
-  const sub2 = solo || sub;
-  const[omod,setOmod]=useState(null);          // detalle de orden
+// Hoy solo se usa para DELIVERY LOCAL (solo='Delivery'): interruptor real del
+// servicio, surge, valoraciones y el registro de mensajeros. Las antiguas
+// sub-pestañas (Órdenes/Disputas/Moderación demo) se eliminaron en el cierre.
+function Operaciones({toast,data={},solo}){
+  const sub2 = solo;
   const[confirm,setConfirm]=useState(null);    // diálogo de confirmación {title,msg,danger,yes,onYes}
-  const[repView,setRepView]=useState(null);    // detalle de reporte
-  const orders = data.orders || [];
-  const reports = data.reports || [];
   const couriers = data.couriers || [];
   const [couView, setCouView] = useState(null);
-  const [showDone, setShowDone] = useState(false);
   const couAct = (id, status) => { data.onCourierAction && data.onCourierAction(id, status); };
   const fmt = n=>'$'+Math.round(n||0).toLocaleString();
   const ago = ts=>{ if(!ts) return '—'; const s=Math.floor((Date.now()-ts)/1000); if(s<60) return `${s}s`; const m=Math.floor(s/60); if(m<60) return `${m}m`; const h=Math.floor(m/60); if(h<24) return `${h}h`; return `${Math.floor(h/24)}d`; };
-  const DONE = ['entregado','cancelado','delivered','cancelled','completado'];
-  const ATTN = ['disputado','escalado','congelado','en_disputa','disputed'];
-  const disputes = orders.filter(o=>ATTN.includes(o.status));
-  const pendingReports = reports.filter(r=>r.state==='pending');
   const ask = (cfg)=>setConfirm(cfg);
-  const run = ()=>{ if(confirm?.onYes) confirm.onYes(); if(confirm?.msg2) toast(confirm.msg2); setConfirm(null); setOmod(null); };
-  const ordAct = (id,action)=>{ data.onOrderAction&&data.onOrderAction(id,action); };
-  const dispAct = (id,action)=>{ data.onDisputeAction&&data.onDisputeAction(id,action); };
-  const repAct = (id,action)=>{ data.onReportAction&&data.onReportAction(id,action); };
-  const detail = orders.find(o=>o.id===omod?.id);
+  const run = ()=>{ if(confirm?.onYes) confirm.onYes(); if(confirm?.msg2) toast(confirm.msg2); setConfirm(null); };
   return <>
-    <div className="stit">{solo==='Delivery'?'Delivery local':solo==='Soporte'?'Centro de ayuda':'Operaciones'}</div>
-    <div className="ssub">{solo?'Sección delegable':`Gestión operativa · ${orders.length} órdenes · ${disputes.length} disputas · ${pendingReports.length} reportes`}</div>
-    {!solo&&<div className="tabs">{['Órdenes','Disputas','Moderación'].map(t=><div key={t} className={`tab ${sub2===t?'on':''}`} onClick={()=>setSub(t)}>{t}{t==='Moderación'&&pendingReports.length>0?` (${pendingReports.length})`:''}</div>)}</div>}
-
-    {sub2==='Órdenes'&&<>
-      <div className="alert" style={{background:'var(--ag)',borderColor:'var(--bd2)'}}>
-        <span style={{fontSize:14}}>⚙️</span>
-        <span style={{fontSize:12,fontWeight:600,color:'var(--tx2)'}}>Las órdenes se crean y avanzan <b style={{color:'var(--tx)'}}>automáticamente</b>. Solo necesitas intervenir en casos marcados o en disputa.</span>
-      </div>
-      <div className="card">
-        <div className="cp"><div className="ch"><span className="ct">Órdenes activas</span><span className="bdg bx">{orders.filter(o=>!(DONE.includes(o.status)||o.courierStage==='completado'||(o.buyerConfirmed&&o.sellerPaid))).length} en curso</span></div></div>
-        {(()=>{
-          const term=o=>DONE.includes(o.status)||o.courierStage==='completado'||(o.buyerConfirmed&&o.sellerPaid);
-          const activeOrds=orders.filter(o=>!term(o));
-          const doneOrds=orders.filter(o=>term(o));
-          const row=(o,isDone)=>{
-            const attn=o.flagged||ATTN.includes(o.status);
-            const active=!DONE.includes(o.status)&&!isDone;
-            return <tr key={o.id} style={attn?{background:'rgba(245,166,35,.06)'}:undefined}>
-              <td><span className="mono" style={{color:'var(--ac2)',fontSize:10}}>{String(o.id).slice(-6)}</span></td>
-              <td style={{color:'var(--tx)'}}>{o.title||'Producto'}</td>
-              <td>{o.sellerName||'—'}</td>
-              <td><span style={{fontWeight:700,color:'var(--tx)'}}>{fmt(o.amount)}</span></td>
-              <td><span className={`bdg ${attn?'by':isDone?'bg':active?'bb':'bx'}`}>{o.status||'—'}</span></td>
-              <td style={{color:'var(--tx3)',fontSize:10}}>{ago(o.createdAt)}</td>
-              <td><div style={{display:'flex',gap:4}}>
-                <button className="btn btg sm" onClick={()=>setOmod({id:o.id})}>Ver</button>
-                {active&&<button className="btn btd sm" onClick={()=>ask({title:'Cancelar orden',msg:`¿Cancelar la orden de "${o.title||'Producto'}" por ${fmt(o.amount)}? El comprador será notificado.`,danger:true,yes:'Cancelar orden',onYes:()=>ordAct(o.id,'cancel'),msg2:'Orden cancelada'})}>Cancelar</button>}
-              </div></td>
-            </tr>;
-          };
-          return orders.length===0
-          ? <div className="cp" style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'26px 6px'}}>Aún no hay órdenes. Cuando alguien compre, la orden aparecerá aquí sola.</div>
-          : <>
-            <div className="tw"><table>
-              <thead><tr><th>ID</th><th>Producto</th><th>Vendedor</th><th>Total</th><th>Estado</th><th>Hace</th><th>Acciones</th></tr></thead>
-              <tbody>{activeOrds.length===0
-                ? <tr><td colSpan={7} style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'20px 6px'}}>No hay órdenes activas ahora mismo.</td></tr>
-                : activeOrds.map(o=>row(o,false))}</tbody>
-            </table></div>
-            {doneOrds.length>0 && <div style={{borderTop:'1px solid var(--bd)'}}>
-              <div onClick={()=>setShowDone(s=>!s)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 14px',cursor:'pointer'}}>
-                <span style={{fontSize:12,fontWeight:700,color:'var(--tx2)'}}>✓ Completadas ({doneOrds.length})</span>
-                <span style={{fontSize:12,color:'var(--tx3)'}}>{showDone?'Ocultar ▲':'Mostrar ▼'}</span>
-              </div>
-              {showDone && <div className="tw"><table>
-                <thead><tr><th>ID</th><th>Producto</th><th>Vendedor</th><th>Total</th><th>Estado</th><th>Hace</th><th>Acciones</th></tr></thead>
-                <tbody>{doneOrds.map(o=>row(o,true))}</tbody>
-              </table></div>}
-            </div>}
-          </>;
-        })()}
-      </div>
-    </>}
+    <div className="stit">Delivery local</div>
+    <div className="ssub">Servicio, tarifas dinámicas y mensajeros · control real</div>
 
     {sub2==='Delivery'&&<>
       {(()=>{ const on = data.cfg?.deliveryServiceActive !== false; return (
@@ -2068,86 +2006,9 @@ function Operaciones({sub,setSub,toast,data={},solo}){
       </div>
     </div>}
 
-    {sub2==='Disputas'&&<div className="card">
-      <div className="cp"><div className="ch"><span className="ct">Disputas Abiertas</span><span className={`bdg ${disputes.length?'br':'bx'}`}>{disputes.length} ACTIVAS</span></div></div>
-      {disputes.length===0
-        ? <div className="cp" style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'26px 6px'}}>No hay disputas abiertas. Aparecerán aquí cuando un comprador o vendedor abra una.</div>
-        : <div className="tw"><table>
-          <thead><tr><th>Orden</th><th>Producto</th><th>Monto</th><th>Estado</th><th>Acciones</th></tr></thead>
-          <tbody>{disputes.map(d=><tr key={d.id}>
-            <td><span className="mono" style={{color:'var(--rd)',fontSize:10}}>{String(d.id).slice(-6)}</span></td>
-            <td style={{color:'var(--tx)'}}>{d.title||'Producto'}</td>
-            <td><span style={{fontWeight:700,color:'var(--yw)'}}>{fmt(d.amount)}</span></td>
-            <td><span className="bdg by">{d.status}</span></td>
-            <td><div style={{display:'flex',gap:4}}>
-              <button className="btn bts sm" onClick={()=>ask({title:'Resolver disputa',msg:'Se cierra la disputa a favor del acuerdo y la orden vuelve a su curso normal. ¿Continuar?',yes:'Resolver',onYes:()=>dispAct(d.id,'resolve'),msg2:'Disputa resuelta'})}>Resolver</button>
-              <button className="btn btg sm" onClick={()=>ask({title:'Escalar disputa',msg:'La disputa pasa a revisión prioritaria del equipo. ¿Escalar?',yes:'Escalar',onYes:()=>dispAct(d.id,'escalate'),msg2:'Disputa escalada'})}>Escalar</button>
-              <button className="btn btd sm" onClick={()=>ask({title:'Congelar fondos',msg:'Se congelan los fondos de la orden hasta resolver. ¿Congelar?',danger:true,yes:'Congelar',onYes:()=>dispAct(d.id,'freeze'),msg2:'Fondos congelados'})}>Congelar</button>
-            </div></td>
-          </tr>)}</tbody>
-        </table></div>}
-    </div>}
 
-    {sub2==='Moderación'&&<div className="card cp">
-      <div className="ch"><span className="ct">Reportes de usuarios</span><span className={`bdg ${pendingReports.length?'by':'bx'}`}>{pendingReports.length} PENDIENTES</span></div>
-      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Toca un reporte para ver quién lo hizo, a quién y por qué, y decidir.</div>
-      {pendingReports.length===0
-        ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>Sin reportes pendientes. Todo en orden.</div>
-        : pendingReports.map(r=><div key={r.id} onClick={()=>setRepView(r)} style={{display:'flex',alignItems:'center',gap:10,padding:'11px 8px',margin:'0 -8px',borderRadius:9,cursor:'pointer',borderBottom:'1px solid rgba(128,128,128,.1)'}} className="reprow">
-          <span style={{fontSize:16,flexShrink:0}}>🚩</span>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontSize:12.5,fontWeight:700,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.targetName||'Usuario'}</div>
-            <div style={{fontSize:11,color:'var(--ac)',fontWeight:600,marginTop:1,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.reason}</div>
-          </div>
-          <span style={{fontSize:10,color:'var(--tx3)',flexShrink:0}}>{ago(r.at)}</span>
-          <span style={{fontSize:14,color:'var(--tx3)',flexShrink:0}}>›</span>
-        </div>)}
-    </div>}
 
-    {sub2==='Soporte'&&<div className="card cp">
-      <div className="ch"><span className="ct">Centro de ayuda</span><span className="bdg bx">bandeja</span></div>
-      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Aquí llegarán las quejas y problemas de los usuarios (pagos, entregas, cuenta) cuando puedan enviarlos desde la app.</div>
-      <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'30px 6px',background:'var(--bg)',borderRadius:10,border:'1px dashed var(--bd2)'}}>
-        <div style={{fontSize:26,marginBottom:8,opacity:.6}}>💬</div>
-        Sin solicitudes de ayuda por ahora.
-      </div>
-    </div>}
 
-    {detail&&<div className="mo" onClick={()=>setOmod(null)}>
-      <div className="mb" onClick={e=>e.stopPropagation()}>
-        <div className="mt">Detalle — Orden {String(detail.id).slice(-6)}</div>
-        <div className="ms">Información de la transacción</div>
-        {[['Producto',detail.title||'—'],['Estado',detail.status||'—'],['Vendedor',detail.sellerName||'—'],['Cantidad',String(detail.qty||1)],['Total',fmt(detail.amount)],['Comisión',`${detail.commissionPct??(data.cfg?.commissionPct??10)}% · ${fmt((detail.amount||0)*((detail.commissionPct??(data.cfg?.commissionPct??10))/100))}`],['Modalidad',detail.modalidad||detail.shipMode||'—'],['Creada',ago(detail.createdAt)+' atrás']].map(([k,v])=><div key={k} style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid var(--bd)'}}>
-          <span style={{fontSize:12,color:'var(--tx3)'}}>{k}</span><span style={{fontSize:12,fontWeight:600}}>{v}</span>
-        </div>)}
-        <div className="mact">
-          <button className="btn btg sm" onClick={()=>setOmod(null)}>Cerrar</button>
-          {!detail.flagged&&<button className="btn btg sm" onClick={()=>ask({title:'Marcar para revisión',msg:'La orden quedará marcada para que la revises aparte. ¿Marcar?',yes:'Marcar',onYes:()=>ordAct(detail.id,'flag'),msg2:'Orden marcada'})}>Marcar</button>}
-          {!DONE.includes(detail.status)&&<button className="btn btd sm" onClick={()=>ask({title:'Cancelar orden',msg:`¿Cancelar esta orden por ${fmt(detail.amount)}? El comprador será notificado.`,danger:true,yes:'Cancelar orden',onYes:()=>ordAct(detail.id,'cancel'),msg2:'Orden cancelada'})}>Cancelar</button>}
-          {!DONE.includes(detail.status)&&<button className="btn btp sm" onClick={()=>ask({title:'Aprobar orden',msg:'Se confirma la orden manualmente. ¿Aprobar?',yes:'Aprobar',onYes:()=>ordAct(detail.id,'approve'),msg2:'Orden aprobada'})}>Aprobar</button>}
-        </div>
-      </div>
-    </div>}
-
-    {repView&&<div className="mo" onClick={()=>setRepView(null)}>
-      <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:360}}>
-        <div className="mt">🚩 Reporte de usuario</div>
-        <div className="ms">Revisa los datos y decide la acción.</div>
-        {[['Usuario reportado',repView.targetName||'—'],['ID de usuario',repView.targetId||'(se asignará con cuentas)'],['Rol',repView.targetRole||'—'],['Reportado por',repView.reporterName||'—'],['Motivo',repView.reason||'—'],['Cuándo','hace '+ago(repView.at)]].map(([k,v])=><div key={k} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'8px 0',borderBottom:'1px solid var(--bd)'}}>
-          <span style={{fontSize:12,color:'var(--tx3)',flexShrink:0}}>{k}</span><span style={{fontSize:12,fontWeight:600,textAlign:'right'}}>{v}</span>
-        </div>)}
-        {repView.detail&&<div style={{marginTop:10,padding:'10px 12px',background:'var(--bg2)',borderRadius:9,border:'1px solid var(--bd2)'}}>
-          <div style={{fontSize:10,color:'var(--tx3)',marginBottom:4,fontWeight:600}}>LO QUE ESCRIBIÓ:</div>
-          <div style={{fontSize:12.5,color:'var(--tx)',lineHeight:1.5}}>{repView.detail}</div>
-        </div>}
-        <div className="mact" style={{flexWrap:'wrap'}}>
-          <button className="btn btg sm" onClick={()=>{const r=repView;setRepView(null);ask({title:'Advertir al usuario',msg:`Se enviará un aviso a ${r.targetName||'el usuario'} indicando que fue reportado por "${r.reason}". ¿Enviar advertencia?`,yes:'Advertir',onYes:()=>repAct(r.id,'warned'),msg2:'Advertencia enviada'});}}>⚠ Advertir</button>
-          <button className="btn btd sm" onClick={()=>{const r=repView;setRepView(null);ask({title:'Bloquear de la plataforma',msg:`${r.targetName||'El usuario'} será bloqueado y no podrá seguir operando. ¿Bloquear?`,danger:true,yes:'Bloquear',onYes:()=>repAct(r.id,'blocked'),msg2:'Usuario bloqueado'});}}>🚫 Bloquear</button>
-          <button className="btn bts sm" onClick={()=>{const r=repView;setRepView(null);ask({title:'Descartar reporte',msg:'El reporte se cierra sin sanción. ¿Descartar?',yes:'Descartar',onYes:()=>repAct(r.id,'dismissed'),msg2:'Reporte descartado'});}}>Descartar</button>
-          <button className="btn btg sm" onClick={()=>setRepView(null)} style={{marginLeft:'auto'}}>Cerrar</button>
-        </div>
-      </div>
-    </div>}
 
     {confirm&&<div className="mo" onClick={()=>setConfirm(null)}>
       <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:340}}>
@@ -2162,12 +2023,135 @@ function Operaciones({sub,setSub,toast,data={},solo}){
   </>;
 }
 
+/* ── Próximamente (pantalla honesta: una línea, sin fingir funcionalidad) ────── */
+function ComingSoon({ icon, title, note }){
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', padding:'70px 24px' }}>
+      <div style={{ fontSize:44, marginBottom:14, opacity:.7 }}>{icon}</div>
+      <div style={{ fontSize:17, fontWeight:800, color:'var(--tx)' }}>🔜 {title} · Próximamente</div>
+      <p style={{ fontSize:12.5, color:'var(--tx3)', marginTop:8, maxWidth:420, lineHeight:1.55 }}>{note}</p>
+    </div>
+  );
+}
+
+/* ── Órdenes REALES de la plataforma (solo lectura: el admin observa) ─────────── */
+function AdminOrders({ toast, onViewProfile }){
+  const PAGE = 20;
+  const [filter, setFilter] = useState("all");
+  const [page, setPage] = useState(0);
+  const [rows, setRows] = useState([]);
+  const [names, setNames] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [sel, setSel] = useState(null);   // detalle de pedido
+  useEffect(() => { setPage(0); }, [filter]);
+  const load = useCallback(() => {
+    let alive = true; setLoading(true);
+    const from = page * PAGE;
+    adminListOrders({ status: filter, from, to: from + PAGE - 1 })
+      .then(async d => {
+        if (!alive) return;
+        setRows(d); setHasMore(d.length === PAGE); setLoading(false);
+        const map = await getProfilesByIds([...d.map(o => o.buyer_id), ...d.map(o => o.seller_id), ...d.map(o => o.courier_id)]).catch(() => ({}));
+        if (alive) setNames(map);
+      })
+      .catch(() => { if (alive) { setRows([]); setLoading(false); } });
+    return () => { alive = false; };
+  }, [filter, page]);
+  useEffect(() => { const c = load(); return c; }, [load]);
+  // En vivo: cualquier cambio en orders refresca la lista (debounce ligero).
+  useEffect(() => {
+    let t = null; const bump = () => { clearTimeout(t); t = setTimeout(load, 1200); };
+    const ch = supabase.channel(`admin-orders-${Date.now()}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, bump)
+      .subscribe();
+    return () => { clearTimeout(t); try { Promise.resolve(supabase.removeChannel(ch)).catch(()=>{}); } catch(e){} };
+  }, [load]);
+
+  const nm = id => names[id]?.full_name || null;
+  const fmt = n => '$' + Math.round(Number(n) || 0).toLocaleString('es-ES');
+  const when = ts => ts ? new Date(ts).toLocaleDateString('es-ES', { day:'2-digit', month:'short' }) + ' · ' + new Date(ts).toLocaleTimeString('es-ES', { hour:'2-digit', minute:'2-digit' }) : '—';
+  const TERMINAL = ['entregado','completado','cancelado','fallido'];
+  const stChip = s => {
+    const done = TERMINAL.includes(s);
+    const cls = s === 'cancelado' || s === 'fallido' ? 'br' : done ? 'bg' : 'by';
+    return <span className={`bdg ${cls}`}>{s || '—'}</span>;
+  };
+  const person = (id, fallback) => id
+    ? <span onClick={e => { e.stopPropagation(); onViewProfile && onViewProfile(id); }} style={{ color:'var(--ac)', fontWeight:700, cursor:'pointer' }}>{nm(id) || fallback}</span>
+    : <span style={{ color:'var(--tx3)' }}>{fallback}</span>;
+
+  const FILTERS = [["all","Todos"],["pendiente","Pendientes"],["confirmado","Confirmados"],["entregado","Entregados"],["completado","Completados"],["cancelado","Cancelados"]];
+
+  return <>
+    <div className="stit">Órdenes</div>
+    <div className="ssub">Todos los pedidos reales de la plataforma · solo lectura (los mueven sus dueños)</div>
+    <div className="tabs" style={{ maxWidth:560, overflowX:'auto' }}>
+      {FILTERS.map(([k,l]) => <div key={k} className={`tab ${filter===k?'on':''}`} onClick={()=>setFilter(k)}>{l}</div>)}
+    </div>
+    <div className="card cp">
+      {loading
+        ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'26px 6px' }}>Cargando pedidos…</div>
+        : rows.length === 0
+          ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'26px 6px' }}>{filter==='all' ? 'Aún no hay pedidos en la plataforma.' : 'No hay pedidos con este estado.'}</div>
+          : rows.map(o => (
+            <div key={o.id} onClick={()=>setSel(o)} className="reprow" style={{ display:'flex', alignItems:'center', gap:10, padding:'11px 8px', margin:'0 -8px', borderRadius:9, cursor:'pointer', borderBottom:'1px solid rgba(128,128,128,.1)' }}>
+              <div style={{ width:42, height:42, borderRadius:8, overflow:'hidden', background:'#161616', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:18 }}>
+                {o.image ? <img src={o.image} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} onError={e=>{e.target.style.display='none';}}/> : '📦'}
+              </div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tx)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{o.title || 'Pedido'}</div>
+                <div style={{ fontSize:11, color:'var(--tx3)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                  {person(o.buyer_id, 'Comprador')} <span style={{ color:'var(--tx3)' }}>compra a</span> {person(o.seller_id, 'Vendedor')} · {when(o.created_at)}
+                </div>
+                <div style={{ marginTop:4, display:'flex', gap:6, alignItems:'center' }}>{stChip(o.status)}<span style={{ fontSize:12, fontWeight:800, fontFamily:'var(--mo)', color:'var(--tx)' }}>{fmt(o.amount)}</span></div>
+              </div>
+              <span style={{ fontSize:16, color:'var(--tx3)', flexShrink:0 }}>›</span>
+            </div>
+          ))}
+      {!loading && (page > 0 || hasMore) && (
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:10 }}>
+          <button className="btn sm" disabled={page===0} onClick={()=>setPage(p=>Math.max(0,p-1))} style={{ opacity:page===0?.4:1 }}>‹ Anterior</button>
+          <span style={{ fontSize:11, color:'var(--tx3)' }}>Página {page+1}</span>
+          <button className="btn sm" disabled={!hasMore} onClick={()=>setPage(p=>p+1)} style={{ opacity:hasMore?1:.4 }}>Siguiente ›</button>
+        </div>
+      )}
+    </div>
+
+    {/* Detalle del pedido (solo lectura) */}
+    {sel && <div className="mo" onClick={()=>setSel(null)}>
+      <div className="mb" onClick={e=>e.stopPropagation()} style={{ maxWidth:400 }}>
+        <div className="mt">📦 {sel.title || 'Pedido'}</div>
+        <div className="ms">Detalle del pedido · solo lectura</div>
+        {sel.image && <img src={sel.image} alt="" style={{ width:'100%', maxHeight:160, objectFit:'cover', borderRadius:10, marginBottom:10 }} onError={e=>{e.target.style.display='none';}}/>}
+        {[['Estado', sel.status || '—'],
+          ['Monto', fmt(sel.amount) + (sel.currency ? ` ${sel.currency}` : '')],
+          ['Envío', sel.ship_mode || sel.shipMode || '—'],
+          ['Costo de entrega', sel.delivery_cost != null ? fmt(sel.delivery_cost) : '—'],
+          ['Creado', when(sel.created_at)]].map(([k,v]) => (
+          <div key={k} style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'7px 0', borderBottom:'1px solid var(--bd)' }}>
+            <span style={{ fontSize:12, color:'var(--tx3)' }}>{k}</span><span style={{ fontSize:12, fontWeight:600, textAlign:'right' }}>{String(v)}</span>
+          </div>
+        ))}
+        <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:10 }}>
+          {[[sel.buyer_id,'Comprador'],[sel.seller_id,'Vendedor'],[sel.courier_id,'Mensajero']].filter(([id])=>id).map(([id,role]) => (
+            <button key={role} className="btn sm" style={{ justifyContent:'space-between', width:'100%' }} onClick={()=>{ onViewProfile && onViewProfile(id); setSel(null); }}>
+              <span style={{ color:'var(--tx3)' }}>{role}</span><span style={{ fontWeight:700 }}>{nm(id) || 'Ver perfil'} ›</span>
+            </button>
+          ))}
+        </div>
+        <button className="btn" style={{ width:'100%', marginTop:12 }} onClick={()=>setSel(null)}>Cerrar</button>
+      </div>
+    </div>}
+  </>;
+}
+
 /* ── Moderación de publicaciones (a posteriori) — aprobar / retirar de verdad ── */
-function ModeracionPublicaciones({ toast }){
+function ModeracionPublicaciones({ toast, onViewProfile }){
   const PAGE = 20;
   const [q, setQ] = useState("");
   const [dq, setDq] = useState("");
-  const [filter, setFilter] = useState("all"); // all | approved | rejected
+  const [filter, setFilter] = useState("all"); // all | approved | rejected (retiradas)
   const [page, setPage] = useState(0);
   const [rows, setRows] = useState([]);
   const [names, setNames] = useState({});
@@ -2176,6 +2160,8 @@ function ModeracionPublicaciones({ toast }){
   const [busy, setBusy] = useState(null);
   const [rejectFor, setRejectFor] = useState(null);
   const [reason, setReason] = useState("");
+  const [view, setView] = useState(null);     // detalle del producto (capa)
+  const [viewImg, setViewImg] = useState(0);  // índice de la foto grande
 
   useEffect(() => { const t = setTimeout(() => setDq(q), 350); return () => clearTimeout(t); }, [q]);
   useEffect(() => { setPage(0); }, [filter]);
@@ -2220,7 +2206,7 @@ function ModeracionPublicaciones({ toast }){
       <div className="ssub">Publicación libre; tú retiras a posteriori lo que no va. El vendedor recibe aviso.</div>
 
       <div className="tabs" style={{ maxWidth: 320 }}>
-        {[["all","Todas"],["approved","Aprobadas"],["rejected","Rechazadas"]].map(([k,l]) =>
+        {[["all","Todas"],["approved","Aprobadas"],["rejected","Retiradas"]].map(([k,l]) =>
           <div key={k} className={`tab ${filter===k?'on':''}`} onClick={()=>setFilter(k)}>{l}</div>)}
       </div>
 
@@ -2235,21 +2221,22 @@ function ModeracionPublicaciones({ toast }){
               const img = Array.isArray(p.images) ? p.images[0] : (p.images || null);
               const seller = names[p.seller_id];
               return (
-                <div key={p.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 0', borderBottom:'1px solid rgba(128,128,128,.1)' }}>
+                <div key={p.id} onClick={()=>{ setView(p); setViewImg(0); }} className="reprow" style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 8px', margin:'0 -8px', borderRadius:9, cursor:'pointer', borderBottom:'1px solid rgba(128,128,128,.1)' }}>
                   <div style={{ width:46, height:46, borderRadius:8, overflow:'hidden', background:'#161616', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:20 }}>
                     {img ? <img src={img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} onError={e=>{e.target.style.display='none';}} /> : (p.kind === 'service' ? '🛠️' : '📦')}
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tx)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.title}</div>
                     <div style={{ fontSize:11, color:'var(--tx3)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                      {seller?.full_name || 'Vendedor'} · {p.kind === 'service' ? '🛠️ Servicio' : '📦 Producto'} · {p.created_at ? new Date(p.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}) : ''}
+                      <span onClick={e=>{ e.stopPropagation(); onViewProfile && onViewProfile(p.seller_id); }} style={{ color:'var(--ac)', fontWeight:700, cursor:'pointer' }}>{seller?.full_name || 'Vendedor'}</span>
+                      {' '}· {p.kind === 'service' ? '🛠️ Servicio' : '📦 Producto'} · {p.created_at ? new Date(p.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}) : ''}
                     </div>
                     <div style={{ marginTop:4, display:'flex', gap:5, alignItems:'center' }}>
                       {statusChip(p.moderation_status)}
                       {p.moderation_status === 'rejected' && p.moderation_reason && <span style={{ fontSize:10, color:'var(--tx3)' }}>· {p.moderation_reason}</span>}
                     </div>
                   </div>
-                  <div style={{ display:'flex', gap:4, flexShrink:0 }}>
+                  <div style={{ display:'flex', gap:4, flexShrink:0 }} onClick={e=>e.stopPropagation()}>
                     {p.moderation_status !== 'approved' && <button className="btn bts sm" disabled={busy===p.id} onClick={()=>doApprove(p)}>✅ Aprobar</button>}
                     {p.moderation_status !== 'rejected' && <button className="btn btd sm" disabled={busy===p.id} onClick={()=>{ setReason(''); setRejectFor(p); }}>🚫 Retirar</button>}
                   </div>
@@ -2264,6 +2251,47 @@ function ModeracionPublicaciones({ toast }){
           </div>
         )}
       </div>
+
+      {/* DETALLE del producto (capa): fotos, descripción y precio, como lo ve un comprador */}
+      {view && (() => {
+        const imgs = (Array.isArray(view.images) ? view.images : (view.images ? [view.images] : [])).filter(Boolean);
+        const seller = names[view.seller_id];
+        const price = Number(view.price) || 0;
+        return <div className="mo" onClick={()=>setView(null)}>
+          <div className="mb" onClick={e=>e.stopPropagation()} style={{ maxWidth:420, maxHeight:'88vh', overflowY:'auto' }}>
+            <div style={{ position:'relative', borderRadius:12, overflow:'hidden', background:'#111', marginBottom:8 }}>
+              {imgs.length
+                ? <img src={imgs[Math.min(viewImg, imgs.length-1)]} alt="" style={{ width:'100%', maxHeight:260, objectFit:'cover', display:'block' }} onError={e=>{e.target.style.display='none';}}/>
+                : <div style={{ height:140, display:'flex', alignItems:'center', justifyContent:'center', fontSize:40 }}>{view.kind==='service'?'🛠️':'📦'}</div>}
+              {imgs.length > 1 && (
+                <div style={{ position:'absolute', bottom:8, left:0, right:0, display:'flex', justifyContent:'center', gap:6 }}>
+                  {imgs.map((_,i) => <span key={i} onClick={()=>setViewImg(i)} style={{ width:8, height:8, borderRadius:'50%', cursor:'pointer', background: i===Math.min(viewImg, imgs.length-1) ? G : 'rgba(255,255,255,.4)' }}/>)}
+                </div>
+              )}
+            </div>
+            {imgs.length > 1 && (
+              <div style={{ display:'flex', gap:6, marginBottom:10, overflowX:'auto' }}>
+                {imgs.map((u,i) => <img key={i} src={u} alt="" onClick={()=>setViewImg(i)} style={{ width:44, height:44, objectFit:'cover', borderRadius:8, cursor:'pointer', border: i===viewImg ? `2px solid ${G}` : '2px solid transparent' }} onError={e=>{e.target.style.display='none';}}/>)}
+              </div>
+            )}
+            <div style={{ fontSize:15, fontWeight:800, color:'var(--tx)', lineHeight:1.3 }}>{view.title}</div>
+            <div style={{ fontSize:18, fontWeight:900, color:G, margin:'6px 0' }}>{price > 0 ? money(price, view.currency) : 'Precio a consultar'}</div>
+            <div style={{ fontSize:11, color:'var(--tx3)', marginBottom:8 }}>
+              <span onClick={()=>{ onViewProfile && onViewProfile(view.seller_id); setView(null); }} style={{ color:'var(--ac)', fontWeight:700, cursor:'pointer' }}>{seller?.full_name || 'Ver vendedor'}</span>
+              {' '}· {view.kind==='service' ? '🛠️ Servicio' : '📦 Producto'}{view.location ? ` · 📍 ${view.location}` : ''}
+            </div>
+            <div style={{ marginBottom:8 }}>{statusChip(view.moderation_status)}{view.moderation_status==='rejected' && view.moderation_reason && <span style={{ fontSize:11, color:'var(--tx3)', marginLeft:6 }}>{view.moderation_reason}</span>}</div>
+            {view.description
+              ? <p style={{ fontSize:12.5, color:'var(--tx2,#aaa)', lineHeight:1.55, whiteSpace:'pre-wrap', margin:'0 0 12px' }}>{view.description}</p>
+              : <p style={{ fontSize:11, color:'var(--tx3)', margin:'0 0 12px' }}>Sin descripción.</p>}
+            <div style={{ display:'flex', gap:8 }}>
+              {view.moderation_status !== 'approved' && <button className="btn bts" style={{ flex:1 }} disabled={busy===view.id} onClick={async()=>{ await doApprove(view); setView(v=>v?{...v,moderation_status:'approved'}:v); }}>✅ Aprobar</button>}
+              {view.moderation_status !== 'rejected' && <button className="btn btd" style={{ flex:1 }} disabled={busy===view.id} onClick={()=>{ setReason(''); setRejectFor(view); setView(null); }}>🚫 Retirar</button>}
+              <button className="btn" onClick={()=>setView(null)}>Cerrar</button>
+            </div>
+          </div>
+        </div>;
+      })()}
 
       {rejectFor && <div className="mo" onClick={() => setRejectFor(null)}>
         <div className="mb" onClick={e => e.stopPropagation()} style={{ maxWidth:360 }}>
@@ -2615,70 +2643,20 @@ function PlanQueue({ toast, onViewProfile }){
 }
 
 /* ── Usuarios ──────────────────────────────────────────────────────────────── */
-function Usuarios({sub,setSub,toast,data={}}){
-  const[confirm,setConfirm]=useState(null);
-  const orders = data.orders || [];
-  const reports = data.reports || [];
-  const fmt = n=>'$'+Math.round(n||0).toLocaleString();
-  // construir usuarios reales desde órdenes (vendedores) y reportes
-  const map = {};
-  const touch = (name) => { if(!name) return null; if(!map[name]) map[name]={name, sales:0, orders:0, reports:0, reasons:[], plan:'Básico'}; return map[name]; };
-  orders.forEach(o=>{ const u=touch(o.sellerName); if(u){ u.sales+=(o.amount||0); u.orders++; } });
-  reports.forEach(r=>{ const u=touch(r.targetName); if(u){ u.reports++; u.reasons.push(r.reason); } });
-  const users = Object.values(map);
-  const sellers = users.filter(u=>u.orders>0);
-  const reported = users.filter(u=>u.reports>0);
-  const ask=(c)=>setConfirm(c);
-  const run=()=>{ confirm?.onYes&&confirm.onYes(); confirm?.msg2&&toast(confirm.msg2); setConfirm(null); };
+function Usuarios({toast,data={}}){
+  // Una sola pantalla, todo REAL: colas de verificación/planes + directorio de perfiles.
+  // (La sub-pestaña "Negocios" se eliminó: era una tabla derivada de datos parciales
+  // con botones sin conectar. El control real de cada vendedor vive en el directorio.)
   return <>
-    <div className="stit">Usuarios & Negocios</div>
-    <div className="ssub">Cuentas reales, planes y reportes · conectado a la plataforma</div>
-    <div className="tabs" style={{maxWidth:260}}>{['Usuarios','Negocios'].map(t=><div key={t} className={`tab ${sub===t?'on':''}`} onClick={()=>setSub(t)}>{t}</div>)}</div>
+    <div className="stit">Usuarios</div>
+    <div className="ssub">Cuentas reales, verificaciones y planes · conectado a la plataforma</div>
 
-    {sub==='Usuarios'&&<>
-      <div className="g3 mb16">{[{l:'Usuarios con actividad',v:String(users.length)},{l:'Vendedores activos',v:String(sellers.length)},{l:'Reportados',v:String(reported.length),c:reported.length?'var(--rd)':undefined}].map(m=><div className="mc" key={m.l}><div className="ml">{m.l}</div><div className="mv" style={{fontSize:20,color:m.c}}>{m.v}</div></div>)}</div>
+    {/* Cola REAL de verificaciones (KYC) y de planes */}
+    <VerificationQueue toast={toast} onViewProfile={data.onViewProfile} />
+    <PlanQueue toast={toast} onViewProfile={data.onViewProfile} />
 
-      {/* Cola REAL de verificaciones (KYC) y de planes */}
-      <VerificationQueue toast={toast} onViewProfile={data.onViewProfile} />
-      <PlanQueue toast={toast} onViewProfile={data.onViewProfile} />
-
-      {/* Directorio REAL de usuarios (profiles) con buscador, verificar/suspender y ficha */}
-      <RealUsersDirectory toast={toast} meId={data.meId} />
-    </>}
-
-    {sub==='Negocios'&&<>
-      <div className="g3 mb16">{[{l:'Vendedores',v:String(sellers.length)},{l:'GMV total',v:fmt(orders.reduce((a,o)=>a+(o.amount||0),0))},{l:'Comisión por cobrar',v:fmt(orders.reduce((a,o)=>a+(o.amount||0)*((o.commissionPct??data.cfg?.commissionPct??10)/100),0)),c:'var(--yw)'}].map(m=><div className="mc" key={m.l}><div className="ml">{m.l}</div><div className="mv" style={{fontSize:20,color:m.c}}>{m.v}</div></div>)}</div>
-      <div className="card">
-        <div className="cp"><div className="ch"><span className="ct">Vendedores</span></div></div>
-        {sellers.length===0
-          ? <div className="cp" style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'24px 6px'}}>Sin vendedores con ventas todavía.</div>
-          : <div className="tw"><table>
-            <thead><tr><th>Vendedor</th><th>Ventas</th><th>Órdenes</th><th>Comisión</th><th>Plan</th><th>Acciones</th></tr></thead>
-            <tbody>{sellers.map(b=><tr key={b.name}>
-              <td><div style={{display:'flex',alignItems:'center',gap:8}}><div className="av" style={{background:'linear-gradient(135deg,#22d3a0,#4f72ff)',borderRadius:8}}>{String(b.name).slice(0,2).toUpperCase()}</div><div style={{fontSize:12,fontWeight:600,color:'var(--tx)'}}>{b.name}</div></div></td>
-              <td style={{fontWeight:700,color:'var(--tx)',fontFamily:'var(--mo)',fontSize:12}}>{fmt(b.sales)}</td>
-              <td style={{color:'var(--tx3)'}}>{b.orders}</td>
-              <td style={{color:'var(--gn)',fontWeight:700,fontFamily:'var(--mo)',fontSize:12}}>{fmt(b.sales*((data.cfg?.commissionPct??10)/100))}</td>
-              <td><span className="bdg bx">{b.plan}</span></td>
-              <td><div style={{display:'flex',gap:4}}>
-                <button className="btn bts sm" onClick={()=>toast(`${b.name} → destacado`)}>⭐ Destacar</button>
-                <button className="btn btd sm" onClick={()=>ask({title:'Suspender vendedor',msg:`¿Suspender a ${b.name}?`,danger:true,yes:'Suspender',onYes:()=>{},msg2:`${b.name} suspendido`})}>Suspender</button>
-              </div></td>
-            </tr>)}</tbody>
-          </table></div>}
-      </div>
-    </>}
-
-    {confirm&&<div className="mo" onClick={()=>setConfirm(null)}>
-      <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:340}}>
-        <div className="mt">{confirm.title}</div>
-        <div className="ms" style={{lineHeight:1.55}}>{confirm.msg}</div>
-        <div className="mact">
-          <button className="btn btg sm" onClick={()=>setConfirm(null)}>Cancelar</button>
-          <button className={`btn ${confirm.danger?'btd':'btp'} sm`} onClick={run}>{confirm.yes||'Confirmar'}</button>
-        </div>
-      </div>
-    </div>}
+    {/* Directorio REAL de usuarios (profiles) con buscador, verificar/suspender y ficha */}
+    <RealUsersDirectory toast={toast} meId={data.meId} />
   </>;
 }
 
@@ -2997,67 +2975,34 @@ function IntlRoute({country, toast, data={}}){
 }
 
 function TeamScreen({toast, data={}}){
-  const team = data.teamMembers || [];
-  const save = data.onSaveTeam || (()=>{});
-  const known = data.knownUsers || [];
-  const [editing, setEditing] = useState(null); // 'new' | member.id | null
-  const [name, setName] = useState('');
-  const [perms, setPerms] = useState([]);
-  const startNew = ()=>{ setEditing('new'); setName(''); setPerms([]); };
-  const startEdit = (m)=>{ setEditing(m.id); setName(m.name); setPerms(m.perms||[]); };
-  const togglePerm = (id)=> setPerms(p=> p.includes(id)? p.filter(x=>x!==id): [...p,id]);
-  const commit = ()=>{
-    if(!name.trim()||perms.length===0){ toast('Pon un nombre y marca al menos una sección'); return; }
-    if(editing==='new') save([...team, {id:'tm_'+Date.now(), name:name.trim(), perms}]);
-    else save(team.map(m=> m.id===editing? {...m, name:name.trim(), perms}: m));
-    setEditing(null); toast('Permisos guardados');
-  };
-  const remove = (id)=>{ save(team.filter(m=>m.id!==id)); toast('Miembro eliminado'); };
-  const labelFor = id => (PERM_CATALOG.find(p=>p.id===id)||{}).label || id;
+  // Equipo REAL: lista los administradores reales (profiles con role='admin').
+  // La delegación de permisos por sección llegará cuando haya equipo de verdad.
+  const [admins, setAdmins] = useState(null);
+  useEffect(() => { adminListAdmins().then(setAdmins).catch(() => setAdmins([])); }, []);
   return <div className="mc">
     <div className="card cp mb16">
-      <div className="ch"><span className="ct">Equipo y permisos</span><span className="bdg bx">{team.length} miembro{team.length===1?'':'s'}</span></div>
-      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 12px'}}>Dale a una persona el control de secciones específicas del panel. Entra y gestiona todo dentro de lo que le asignes — y no ve nada más. Tú (dueño) sigues viendo todo.</div>
-      {team.length===0 && editing!=='new'
-        ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px',background:'var(--bg)',borderRadius:10,border:'1px dashed var(--bd2)'}}>Aún no has agregado a nadie a tu equipo.</div>
-        : team.map(m=><div key={m.id} style={{display:'flex',alignItems:'flex-start',gap:10,padding:'11px 0',borderBottom:'1px solid rgba(128,128,128,.12)'}}>
-            <div className="av" style={{flexShrink:0}}>{(m.name||'?').charAt(0).toUpperCase()}</div>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:13,fontWeight:700,color:'var(--tx)'}}>{m.name}</div>
-              <div style={{display:'flex',flexWrap:'wrap',gap:4,marginTop:4}}>
-                {(m.perms||[]).map(pid=><span key={pid} className="bdg bb" style={{fontSize:9}}>{labelFor(pid)}</span>)}
+      <div className="ch"><span className="ct">Administradores de la plataforma</span><span className="bdg bx">{admins ? admins.length : '…'}</span></div>
+      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 12px'}}>Cuentas con rol de administrador real en el backend.</div>
+      {admins === null
+        ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Cargando…</div>
+        : admins.length === 0
+          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>No se pudieron listar los administradores.</div>
+          : admins.map(a => (
+            <div key={a.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+              <Avatar url={avatarUrlOf(a.avatar_url)} name={a.full_name||a.email||'Admin'} size={38} />
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12.5,fontWeight:700,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{a.full_name||'Admin'}</div>
+                <div style={{fontSize:11,color:'var(--tx3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{a.email||'—'}</div>
               </div>
+              <span className="bdg by">Admin</span>
             </div>
-            <button className="btn btg sm" onClick={()=>startEdit(m)}>Editar</button>
-            <button className="btn btd sm" onClick={()=>remove(m.id)}>Quitar</button>
-          </div>)}
-      {editing===null && <button className="btn btp" style={{marginTop:12}} onClick={startNew}>+ Agregar miembro</button>}
+          ))}
     </div>
-
-    {editing!==null && <div className="card cp">
-      <div className="ch"><span className="ct">{editing==='new'?'Nuevo miembro':'Editar permisos'}</span></div>
-      <div style={{fontSize:11,fontWeight:700,color:'var(--tx2)',margin:'8px 0 5px'}}>Persona</div>
-      <input value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre o usuario" list="known-users"
-        style={{width:'100%',height:38,borderRadius:8,border:'1px solid var(--bd2)',background:'var(--bg2)',color:'var(--tx)',fontSize:13,padding:'0 11px',marginBottom:4,outline:'none'}}/>
-      <datalist id="known-users">{known.map(u=><option key={u} value={u}/>)}</datalist>
-      <div style={{fontSize:11,fontWeight:700,color:'var(--tx2)',margin:'12px 0 6px'}}>Secciones que controla</div>
-      <div className="g2">
-        {PERM_CATALOG.map(pc=>{ const on=perms.includes(pc.id); return (
-          <button key={pc.id} onClick={()=>togglePerm(pc.id)} style={{textAlign:'left',display:'flex',gap:8,alignItems:'flex-start',padding:'10px 11px',borderRadius:10,cursor:'pointer',border:`1.5px solid ${on?'var(--ac)':'var(--bd2)'}`,background:on?'var(--ag)':'var(--bg2)'}}>
-            <span style={{fontSize:16,lineHeight:1,color:on?'var(--ac)':'var(--tx3)'}}>{pc.icon}</span>
-            <span style={{flex:1,minWidth:0}}>
-              <span style={{display:'block',fontSize:12.5,fontWeight:700,color:'var(--tx)'}}>{pc.label}</span>
-              <span style={{display:'block',fontSize:10,color:'var(--tx3)',marginTop:1}}>{pc.desc}</span>
-            </span>
-            {on&&<span style={{color:'var(--ac)',fontWeight:900}}>✓</span>}
-          </button>
-        );})}
-      </div>
-      <div style={{display:'flex',gap:8,marginTop:14}}>
-        <button className="btn btd" style={{flex:1}} onClick={()=>setEditing(null)}>Cancelar</button>
-        <button className="btn btp" style={{flex:1}} onClick={commit}>Guardar permisos</button>
-      </div>
-    </div>}
+    <div className="card cp" style={{textAlign:'center',padding:'26px 14px'}}>
+      <div style={{fontSize:26,marginBottom:8,opacity:.7}}>◔</div>
+      <div style={{fontSize:13,fontWeight:800,color:'var(--tx)'}}>🔜 Permisos por sección · Próximamente</div>
+      <p style={{fontSize:11.5,color:'var(--tx3)',marginTop:6,lineHeight:1.5}}>Podrás delegar secciones del panel a trabajadores (moderación, delivery, soporte) con llaves reales en el backend.</p>
+    </div>
   </div>;
 }
 
@@ -3068,6 +3013,10 @@ function Sistema({toast, data={}}){
   const fmt = n=>'$'+Math.round(n||0).toLocaleString();
   const hhmm = ts=>{ const d=new Date(ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
   const [flt,setFlt] = useState('todo');
+  // Registro REAL de acciones admin (tabla de log del backend, si es legible).
+  // null = no disponible → la tarjeta no se muestra (sin fingir).
+  const [logs, setLogs] = useState(undefined);
+  useEffect(() => { adminListLogs(30).then(setLogs).catch(() => setLogs(null)); }, []);
   // registro real de actividad de la plataforma
   const events = [
     ...orders.map(o=>({at:o.createdAt, lv:'info', msg:`Orden creada · ${o.title||'Producto'} (${fmt(o.amount)})`, svc:'órdenes'})),
@@ -3085,6 +3034,22 @@ function Sistema({toast, data={}}){
   return <>
     <div className="stit">Sistema</div>
     <div className="ssub">Actividad real de la plataforma e integraciones</div>
+    {Array.isArray(logs) && logs.length > 0 && (
+      <div className="card cp mb16">
+        <div className="ch"><span className="ct">Registro de acciones (backend)</span><span className="bdg bx">{logs.length}</span></div>
+        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 8px'}}>Últimas acciones registradas por el sistema: qué, quién y cuándo.</div>
+        {logs.map((l,i) => (
+          <div key={l.id || i} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+            <span style={{fontSize:13,flexShrink:0}}>🧾</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:600,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{l.action || l.event || l.message || l.description || 'Acción'}</div>
+              {(l.detail || l.details || l.meta) && <div style={{fontSize:10.5,color:'var(--tx3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{typeof (l.detail||l.details||l.meta) === 'string' ? (l.detail||l.details||l.meta) : JSON.stringify(l.detail||l.details||l.meta)}</div>}
+            </div>
+            <span style={{fontSize:10,color:'var(--tx3)',flexShrink:0}}>{l.created_at ? new Date(l.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'})+' '+hhmm(l.created_at) : ''}</span>
+          </div>
+        ))}
+      </div>
+    )}
     <div className="g3 mb16">{[
       {l:'Órdenes procesadas',v:String(orders.length),c:'var(--gn)'},
       {l:'Avisos (reportes)',v:String(reports.length),c:reports.length?'var(--yw)':'var(--gn)'},
@@ -3130,26 +3095,28 @@ function Sistema({toast, data={}}){
 }
 
 /* ── NAV + APP ──────────────────────────────────────────────────────────────── */
+// CIERRE DEL PANEL: solo secciones REALES arriba; lo que aún no existe va en
+// "Próximamente" con pantalla honesta (sin fingir tablas ni datos).
 const NAV=[
   {sec:'Principal',items:[{id:'overview',icon:'◈',label:'Resumen General'}]},
   {sec:'Plataforma',items:[
-    {id:'ops',icon:'⚙',label:'Operaciones',subs:['Órdenes','Disputas','Moderación']},
+    {id:'ops',icon:'📦',label:'Órdenes'},
     {id:'modq',icon:'🛡',label:'Moderación'},
     {id:'delivery',icon:'🛵',label:'Delivery local'},
-    {id:'support',icon:'💬',label:'Soporte'},
-    {id:'users',icon:'◎',label:'Usuarios & Negocios',subs:['Usuarios','Negocios']},
-    {id:'editor',icon:'◐',label:'Editor Visual'},
-  ]},
-  {sec:'Envíos internacionales',items:[
-    {id:'intl_es',icon:'✈',label:'España → Cuba'},
-    {id:'intl_us',icon:'✈',label:'EE.UU. → Cuba'},
+    {id:'users',icon:'◎',label:'Usuarios'},
   ]},
   {sec:'Control',items:[
     {id:'eco',icon:'◇',label:'Economía'},
     {id:'sys',icon:'◉',label:'Sistema'},
   ]},
+  {sec:'Próximamente',items:[
+    {id:'support',icon:'💬',label:'Soporte 🔜'},
+    {id:'editor',icon:'◐',label:'Editor Visual 🔜'},
+    {id:'intl_es',icon:'✈',label:'España → Cuba 🔜'},
+    {id:'intl_us',icon:'✈',label:'EE.UU. → Cuba 🔜'},
+  ]},
 ];
-const TITLES={overview:'Resumen General',ops:'Operaciones',modq:'Moderación',delivery:'Delivery local',support:'Soporte',users:'Usuarios & Negocios',cats:'Pantallas de la plataforma',editor:'Editor Visual de Plataforma',eco:'Economía',sys:'Sistema',team:'Equipo y permisos',intl_es:'Envíos · España → Cuba',intl_us:'Envíos · EE.UU. → Cuba'};
+const TITLES={overview:'Resumen General',ops:'Órdenes',modq:'Moderación',delivery:'Delivery local',support:'Soporte',users:'Usuarios',cats:'Pantallas de la plataforma',editor:'Editor Visual de Plataforma',eco:'Economía',sys:'Sistema',team:'Equipo y permisos',intl_es:'Envíos · España → Cuba',intl_us:'Envíos · EE.UU. → Cuba'};
 
 // Catálogo de secciones que el dueño puede delegar a un trabajador.
 // Cada una es una "llave": quien la tenga, entra y gestiona todo dentro de ella.
@@ -3224,15 +3191,6 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
               <div className={`sbi ${page===item.id?'on':''}`} onClick={()=>nav(item.id,item.subs?.[0])}>
                 <span className="sbic">{item.icon}</span>
                 <span className="sbil">{item.label}</span>
-                {(()=>{
-                  const ords=data.orders||[];
-                  const ATTN=['disputado','escalado','congelado','en_disputa','disputed'];
-                  const term=o=>['entregado','completado','cancelado','fallido'].includes(o.status)||o.courierStage==='completado'||(o.buyerConfirmed&&o.sellerPaid);
-                  let n=0;
-                  if(item.id==='ops') n=(data.reports||[]).filter(r=>r.state==='pending').length + ords.filter(o=>!term(o)&&(ATTN.includes(o.status)||o.flagged)).length;
-                  else if(item.id==='users') n=(data.planRequests||[]).filter(p=>p.state==='pending').length;
-                  return n>0?<span className="sbbdg">{n}</span>:null;
-                })()}
               </div>
             </div>)}
           </div>)}
@@ -3242,11 +3200,7 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
         <header className="hdr">
           <button className="htog" onClick={()=>narrow?setMnav(m=>!m):setCol(c=>!c)}>{narrow?'☰':(col?'▶':'◀')}</button>
           <div className="htit">{TITLES[page]}</div>
-          {!isEd&&<div className="hsrch">
-            <span style={{color:'var(--tx3)',fontSize:12}}>⌕</span>
-            <input placeholder="Buscar órdenes, usuarios, negocios…"/>
-            <span style={{color:'var(--tx3)',fontSize:10,fontFamily:'var(--mo)',flexShrink:0}}>⌘K</span>
-          </div>}
+          {/* (El buscador global decorativo se quitó: cada sección tiene su buscador REAL) */}
           <div className="hacts">
             {effPerms === null
               ? (team.length > 0 && <select value="" onChange={e => { const m = team.find(x => x.id === e.target.value); if (m) setViewAs(m); }} style={{ background:'var(--bg2)', color:'var(--tx2)', border:'1px solid var(--bd)', borderRadius:8, fontSize:11, padding:'5px 8px', cursor:'pointer' }}>
@@ -3258,15 +3212,15 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
         </header>
         <div className={`cnt ${isEd?'nop':''}`}>
           {page==='overview'&&<Overview toast={add} data={data} go={nav}/>}
-          {page==='ops'&&<Operaciones sub={gSub('ops',cur?.subs)} setSub={s=>nav('ops',s)} toast={add} data={data}/>}
-          {page==='modq'&&<ModeracionPublicaciones toast={add}/>}
+          {page==='ops'&&<AdminOrders toast={add} onViewProfile={data.onViewProfile}/>}
+          {page==='modq'&&<ModeracionPublicaciones toast={add} onViewProfile={data.onViewProfile}/>}
           {page==='delivery'&&<Operaciones solo="Delivery" toast={add} data={data}/>}
-          {page==='support'&&<Operaciones solo="Soporte" toast={add} data={data}/>}
-          {page==='users'&&<Usuarios sub={gSub('users',cur?.subs)} setSub={s=>nav('users',s)} toast={add} data={data}/>}
-          {page==='editor'&&<EditorVisual toast={add}/>}
+          {page==='support'&&<ComingSoon icon="💬" title="Soporte" note="El centro de ayuda tendrá su módulo cuando haya volumen de usuarios. Las quejas y problemas llegarán aquí."/>}
+          {page==='users'&&<Usuarios toast={add} data={data}/>}
+          {page==='editor'&&<ComingSoon icon="◐" title="Editor Visual" note="El diseño de pantallas desde el panel llegará en una próxima versión, guardado en el backend para que lo vean todos."/>}
           {page==='eco'&&<Economia toast={add} data={data}/>}
-          {page==='intl_es'&&<IntlRoute country="España" toast={add} data={data}/>}
-          {page==='intl_us'&&<IntlRoute country="Estados Unidos" toast={add} data={data}/>}
+          {page==='intl_es'&&<ComingSoon icon="✈" title="Envíos · España → Cuba" note="Será parte del módulo de envíos internacionales / dropshipping. Su tarifa por libra ya se edita en Economía."/>}
+          {page==='intl_us'&&<ComingSoon icon="✈" title="Envíos · EE.UU. → Cuba" note="Será parte del módulo de envíos internacionales / dropshipping. Su tarifa por libra ya se edita en Economía."/>}
           {page==='sys'&&<Sistema toast={add} data={data}/>}
           {page==='team'&&<TeamScreen toast={add} data={data}/>}
         </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid } from "../shared/index.js";
 
 const OmniPanel = (() => {
 
@@ -2708,6 +2708,8 @@ function Economia({toast, data={}}){
     usMar: cfg.rates?.['Estados Unidos']?.maritimo ?? 6,
     usdCup: cfg.fx?.usdToCup ?? 400,
     eurCup: cfg.fx?.eurToCup ?? 430,
+    promoActive: cfg.promoActive === true,
+    promoCost: cfg.promoCost ?? 100,
   });
   const set=(k,v)=>setT(s=>({...s,[k]:v}));
   const saveTarifas=(override={})=>{
@@ -2723,6 +2725,8 @@ function Economia({toast, data={}}){
       localBase: Number(t.localBase)||0,
       localPerKm: Number(t.localPerKm)||0,
       rates: { 'España':{aereo:Number(t.esAereo)||0,maritimo:Number(t.esMar)||0}, 'Estados Unidos':{aereo:Number(t.usAereo)||0,maritimo:Number(t.usMar)||0} },
+      promoActive: t.promoActive === true,
+      promoCost: Number(t.promoCost)||0,
     });
     toast(override.commissionActive===true ? 'Tarifas activadas y aplicadas en la plataforma' : override.commissionActive===false ? 'Tarifas desactivadas' : 'Tarifas guardadas y aplicadas en la plataforma');
   };
@@ -2740,6 +2744,77 @@ function Economia({toast, data={}}){
     {suf&&<span style={{fontSize:11,color:'var(--tx3)',whiteSpace:'nowrap',flexShrink:0}}>{suf}</span>}
   </div>);
   const field=(label,node,hint)=>(<div><div style={{fontSize:11,fontWeight:600,color:'var(--tx2)',marginBottom:5}}>{label}</div>{node}{hint&&<div style={{fontSize:10,color:'var(--tx3)',marginTop:4}}>{hint}</div>}</div>);
+
+  // ── ⭐ Destacados reales + ledger (cargos) + nombres de vendedores ──────────
+  const [promoted, setPromoted] = useState(null);
+  const [ledger, setLedgerRows] = useState(undefined);   // undefined=cargando · null=no legible
+  const [pNames, setPNames] = useState({});
+  const [busyP, setBusyP] = useState(null);
+  const [debtConfirm, setDebtConfirm] = useState(null);  // { uid, name, total }
+  const [showMoves, setShowMoves] = useState(20);        // Movimientos: "Ver más"
+  const reloadPromo = useCallback(() => { adminListPromoted().then(setPromoted).catch(() => setPromoted([])); }, []);
+  useEffect(() => { reloadPromo(); }, [reloadPromo]);
+  useEffect(() => { listLedger().then(setLedgerRows).catch(() => setLedgerRows(null)); }, []);
+  // Nombres/avatares para destacados, deudas y lo que venga del ledger.
+  useEffect(() => {
+    const ids = [
+      ...(promoted || []).map(p => p.seller_id),
+      ...((Array.isArray(ledger) ? ledger : []).map(e => e.user_id || e.seller_id)),
+      ...orders.map(o => o.sellerId || o.seller_id),
+    ].filter(Boolean);
+    if (!ids.length) return;
+    getProfilesByIds(ids).then(m => setPNames(prev => ({ ...prev, ...m }))).catch(() => {});
+  }, [promoted, ledger, orders.length]);
+  const nameOf = uid => pNames[uid]?.full_name || null;
+  // DEUDAS por vendedor: del LEDGER real (comisiones + promociones sin saldar);
+  // si el ledger no es legible, cae al cálculo desde pedidos (solo comisiones).
+  const debts = useMemo(() => {
+    if (Array.isArray(ledger)) {
+      const m = {};
+      ledger.forEach(e => {
+        const uid = e.user_id || e.seller_id; if (!uid) return;
+        if (e.paid === true || e.settled === true || String(e.status || '').toLowerCase() === 'paid' || String(e.status || '').toLowerCase() === 'pagado') return;
+        const amt = Number(e.amount) || 0; if (amt <= 0) return;
+        const kind = String(e.kind || e.type || '').toLowerCase();
+        if (!m[uid]) m[uid] = { uid, comm: 0, promo: 0 };
+        if (kind.includes('promo')) m[uid].promo += amt; else m[uid].comm += amt;
+      });
+      return Object.values(m).map(d => ({ ...d, total: d.comm + d.promo })).filter(d => d.total > 0).sort((a, b) => b.total - a.total);
+    }
+    if (ledger === null) {
+      const m = {};
+      orders.forEach(o => {
+        const uid = o.sellerId || o.seller_id; if (!uid) return;
+        const c = (o.amount || 0) * pctOf(o); if (c <= 0) return;
+        if (!m[uid]) m[uid] = { uid, comm: 0, promo: 0 };
+        m[uid].comm += c;
+      });
+      return Object.values(m).map(d => ({ ...d, total: d.comm })).filter(d => d.total > 0).sort((a, b) => b.total - a.total);
+    }
+    return [];   // cargando
+  }, [ledger, orders]);
+  const promoCharges = (Array.isArray(ledger) ? ledger : []).filter(e => String(e.kind || e.type || '').toLowerCase().includes('promo')).slice(0, 20);
+  const unpromote = async (p) => {
+    setBusyP(p.id);
+    try { await adminSetPromoted(p.id, false); setPromoted(rows => (rows || []).filter(r => r.id !== p.id)); toast(`Destacado retirado a «${p.title}»`); }
+    catch (e) { toast('⚠️ ' + (e?.message || 'No se pudo')); }
+    setBusyP(null);
+  };
+  const markPaid = async () => {
+    const { uid, name } = debtConfirm; setDebtConfirm(null);
+    try {
+      await adminMarkCommissionPaid(uid);
+      setLedgerRows(rows => Array.isArray(rows) ? rows.map(e => ((e.user_id || e.seller_id) === uid ? { ...e, paid: true } : e)) : rows);
+      toast(`✔ Deuda de ${name || 'vendedor'} saldada — se le notificó`);
+    } catch (e) { toast('⚠️ ' + (e?.message || 'No se pudo saldar')); }
+  };
+  const collectMsg = (d) => {
+    const name = nameOf(d.uid) || 'vendedor';
+    const parts = [];
+    if (d.comm > 0) parts.push(`${Math.round(d.comm)} por comisiones`);
+    if (d.promo > 0) parts.push(`${Math.round(d.promo)} por promociones`);
+    return `Hola ${name} 👋. Tienes una deuda pendiente de ${Math.round(d.total)} CUP con RETADOR (${parts.join(' y ')}). ¡Gracias!`;
+  };
   return <>
     <div className="stit">Economía</div>
     <div className="ssub">Tarifas, comisiones e ingresos · conectado a la plataforma</div>
@@ -2779,7 +2854,7 @@ function Economia({toast, data={}}){
     {(() => { const pend=promoReqs.filter(r=>r.state==='pending'); return (
       <div className="card cp mb16">
         <div className="ch"><span className="ct">⭐ Solicitudes de promoción</span><span className={`bdg ${pend.length?'by':'bx'}`}>{pend.length} pendientes</span></div>
-        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 12px'}}>Subastas que pidieron destacarse o ser VIP. Apruebas cuando recibas el pago (transferencia/efectivo); la plataforma se queda su %.</div>
+        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 12px'}}>Solicitudes de SUBASTAS (destacar/VIP): apruebas al recibir el pago. Los PRODUCTOS ya no piden permiso: se destacan directo con ⭐ y el cargo va a la deuda del vendedor.</div>
         {pend.length===0
           ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Sin solicitudes pendientes.</div>
           : pend.map(r=><div key={r.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.12)'}}>
@@ -2799,6 +2874,19 @@ function Economia({toast, data={}}){
       <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',margin:'4px 0 10px'}}>Comisión por venta de productos</div>
       <div className="g2" style={{marginBottom:18}}>
         {field('Porcentaje por venta', numInput('commissionPct','%'), 'Se cobra al vendedor sobre cada venta. En 0% no cobra.')}
+      </div>
+
+      <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',margin:'4px 0 10px'}}>⭐ Función Destacar (productos)</div>
+      <div className="g2" style={{marginBottom:18}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:'var(--tx2)',marginBottom:5}}>Interruptor</div>
+          <button onClick={()=>{ set('promoActive', !t.promoActive); }} style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,background:'var(--bg2)',border:`1px solid ${t.promoActive?'var(--gn)':'var(--bd2)'}`,borderRadius:8,padding:'8px 10px',cursor:'pointer',color:t.promoActive?'var(--gn)':'var(--tx3)',fontSize:13,fontWeight:800}}>
+            {t.promoActive ? '⭐ ENCENDIDA' : 'APAGADA'}
+            <span style={{width:38,height:20,borderRadius:12,background:t.promoActive?'var(--gn)':'var(--bd2)',position:'relative',flexShrink:0}}><span style={{position:'absolute',top:2,left:t.promoActive?20:2,width:16,height:16,borderRadius:'50%',background:'#fff',transition:'left .15s'}}/></span>
+          </button>
+          <div style={{fontSize:10,color:'var(--tx3)',marginTop:4}}>Apagada: los vendedores NO ven la opción ⭐ en ningún lado.</div>
+        </div>
+        {field('Costo de destacar', numInput('promoCost','CUP','$'), 'Se suma a la deuda del vendedor al destacar.')}
       </div>
 
       <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',margin:'4px 0 4px'}}>Tu ganancia por usar la plataforma</div>
@@ -2889,35 +2977,101 @@ function Economia({toast, data={}}){
         <div style={{fontSize:10,color:'var(--tx3)',marginTop:8}}>Calculado de tus pedidos reales, no de un gráfico de ejemplo.</div>
       </div>
       <div className="card cp">
-        <div className="ch"><span className="ct">Comisión por cobrar · por vendedor</span></div>
-        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 8px'}}>Cada venta suma comisión a la deuda del vendedor. Cuando te pague (manual), márcalo aquí.</div>
-        {sellers.length===0
-          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>Sin ventas todavía. Aquí verás cuánto debe cada vendedor.</div>
-          : sellers.slice(0,12).map(([name,amt])=>{
-            const debt=Math.max(0, amt-(paidBy[name]||0));
-            return <div key={name} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
-              <div className="avxs">{String(name).split(' ').map(w=>w[0]).join('').slice(0,2)}</div>
-              <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{name}</div>{paidBy[name]>0&&<div style={{fontSize:10,color:'var(--gn)'}}>pagado {fmt(paidBy[name])}</div>}</div>
-              <span style={{fontSize:12,fontWeight:800,color:debt>0?'var(--yw)':'var(--gn)',fontFamily:'var(--mo)',flexShrink:0}}>{debt>0?fmt(debt):'✓ al día'}</span>
-              {debt>0&&<button className="btn bts sm" style={{flexShrink:0}} onClick={()=>{ data.onMarkPaid&&data.onMarkPaid(name,debt); toast(`Pago de ${name} registrado`); }}>Marcar pagado</button>}
+        <div className="ch"><span className="ct">Deudas por vendedor</span><span className={`bdg ${debts.length?'by':'bx'}`}>{debts.length}</span></div>
+        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 8px'}}>Comisiones y promociones sin saldar. Toca el nombre para ver su ficha; "Cobrar" abre el chat con el mensaje listo.</div>
+        {debts.length===0
+          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>Nadie debe nada por ahora. Cada venta o destacado sumará aquí.</div>
+          : debts.slice(0,12).map(d=>{
+            const name = nameOf(d.uid) || 'Vendedor';
+            const parts = [d.comm>0?`${fmt(d.comm)} comisiones`:null, d.promo>0?`${fmt(d.promo)} promociones`:null].filter(Boolean).join(' · ');
+            return <div key={d.uid} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+              <div onClick={()=>data.onViewProfile&&data.onViewProfile(d.uid)} style={{display:'flex',alignItems:'center',gap:8,flex:1,minWidth:0,cursor:'pointer'}}>
+                <Avatar url={avatarUrlOf(pNames[d.uid]?.avatar_url)} name={name} size={34} />
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:12.5,fontWeight:700,color:'var(--ac)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{name}</div>
+                  <div style={{fontSize:10,color:'var(--tx3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{parts}</div>
+                </div>
+              </div>
+              <span style={{fontSize:12.5,fontWeight:800,color:'var(--yw)',fontFamily:'var(--mo)',flexShrink:0}}>{fmt(d.total)}</span>
+              <div style={{display:'flex',gap:4,flexShrink:0}}>
+                <button className="btn btg sm" onClick={()=>data.onCollectDebt&&data.onCollectDebt(d.uid, name, collectMsg(d))}>💬 Cobrar</button>
+                <button className="btn bts sm" onClick={()=>setDebtConfirm({ uid:d.uid, name, total:d.total })}>✔ Pagado</button>
+              </div>
             </div>;
           })}
       </div>
     </div>
 
+    {/* ── ⭐ PROMOCIONES Y DESTACADOS (reales) ── */}
+    <div className="card cp mb16">
+      <div className="ch"><span className="ct">⭐ Promociones y Destacados</span><span className="bdg bx">{promoted ? promoted.length : '…'} activos</span></div>
+      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Productos destacados ahora mismo. Puedes quitar el destacado cuando quieras.</div>
+      {promoted === null
+        ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Cargando…</div>
+        : promoted.length === 0
+          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>No hay productos destacados.</div>
+          : promoted.map(p=>{
+            const img = Array.isArray(p.images) ? p.images[0] : p.images;
+            const owner = nameOf(p.seller_id) || 'Vendedor';
+            return <div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+              <div style={{width:40,height:40,borderRadius:8,overflow:'hidden',background:'#161616',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>
+                {img ? <img src={img} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}} onError={e=>{e.target.style.display='none';}}/> : '📦'}
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{p.title}</div>
+                <div style={{fontSize:10.5,color:'var(--tx3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                  <span onClick={()=>data.onViewProfile&&data.onViewProfile(p.seller_id)} style={{color:'var(--ac)',fontWeight:700,cursor:'pointer'}}>{owner}</span>
+                  {' '}· {p.created_at ? new Date(p.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}) : ''}
+                </div>
+              </div>
+              <button className="btn btd sm" disabled={busyP===p.id} onClick={()=>unpromote(p)} style={{flexShrink:0}}>Quitar destacado</button>
+            </div>;
+          })}
+      {promoCharges.length > 0 && <>
+        <div style={{fontSize:11,fontWeight:700,color:'var(--tx2)',margin:'14px 0 6px'}}>Cargos de promoción (ledger)</div>
+        {promoCharges.map((e,i)=>(
+          <div key={e.id||i} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0',borderBottom:'1px solid rgba(128,128,128,.08)'}}>
+            <span style={{fontSize:12}}>🪙</span>
+            <span style={{flex:1,fontSize:11.5,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{nameOf(e.user_id||e.seller_id)||'Vendedor'}</span>
+            <span style={{fontSize:10,color:'var(--tx3)'}}>{e.created_at?new Date(e.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}):''}</span>
+            <span style={{fontSize:12,fontWeight:800,color:'var(--yw)',fontFamily:'var(--mo)'}}>{fmt(e.amount)}</span>
+          </div>
+        ))}
+      </>}
+    </div>
+
+    {/* Confirmación de "Marcar pagado" */}
+    {debtConfirm && <div className="mo" onClick={()=>setDebtConfirm(null)}>
+      <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:340}}>
+        <div className="mt">✔ Saldar deuda</div>
+        <div className="ms">Se marca como pagada la deuda de <b>{debtConfirm.name}</b> ({fmt(debtConfirm.total)}). Recibirá la notificación de deuda saldada. ¿Confirmas?</div>
+        <div style={{display:'flex',gap:8,marginTop:12}}>
+          <button className="btn" style={{flex:1}} onClick={()=>setDebtConfirm(null)}>Cancelar</button>
+          <button className="btn bts" style={{flex:1}} onClick={markPaid}>Marcar pagado</button>
+        </div>
+      </div>
+    </div>}
+
     <div className="card">
-      <div className="cp"><div className="ch"><span className="ct">Movimientos recientes</span><button className="btn btg sm" onClick={()=>toast('Exportando…')}>Exportar</button></div></div>
+      <div className="cp"><div className="ch"><span className="ct">Movimientos recientes</span><span className="bdg bx">{orders.length}</span></div></div>
       {orders.length===0
         ? <div className="cp" style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'24px 6px'}}>Aún no hay movimientos. Cada venta generará su comisión aquí.</div>
-        : <div className="tw"><table>
+        : <>
+        <div className="tw"><table>
           <thead><tr><th>Orden</th><th>Producto</th><th>Venta</th><th>Comisión</th></tr></thead>
-          <tbody>{orders.slice(0,12).map(o=><tr key={o.id}>
+          <tbody>{orders.slice(0,showMoves).map(o=><tr key={o.id}>
             <td><span className="mono" style={{fontSize:10,color:'var(--tx3)'}}>{String(o.id).slice(-6)}</span></td>
             <td style={{color:'var(--tx)'}}>{o.title||'Producto'}</td>
             <td style={{fontWeight:700,fontFamily:'var(--mo)',fontSize:12,color:'var(--tx)'}}>{fmt(o.amount)}</td>
             <td style={{fontWeight:700,fontFamily:'var(--mo)',fontSize:12,color:'var(--gn)'}}>{fmt((o.amount||0)*pctOf(o))}</td>
           </tr>)}</tbody>
-        </table></div>}
+        </table></div>
+        {orders.length > showMoves && (
+          <div className="cp" style={{paddingTop:8}}>
+            <button className="btn btg" style={{width:'100%'}} onClick={()=>setShowMoves(n=>n+20)}>Ver más ({orders.length - showMoves} restantes)</button>
+          </div>
+        )}
+        </>}
     </div>
   </>;
 }
@@ -3012,21 +3166,40 @@ function Sistema({toast, data={}}){
   const planReqs = data.planRequests || [];
   const fmt = n=>'$'+Math.round(n||0).toLocaleString();
   const hhmm = ts=>{ const d=new Date(ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
-  const [flt,setFlt] = useState('todo');
-  // Registro REAL de acciones admin (tabla de log del backend, si es legible).
-  // null = no disponible → la tarjeta no se muestra (sin fingir).
+  const dmy = ts=>new Date(ts).toLocaleDateString('es-ES',{day:'2-digit',month:'short'});
+  // Registro REAL de acciones del backend (si la tabla de log es legible).
   const [logs, setLogs] = useState(undefined);
-  useEffect(() => { adminListLogs(30).then(setLogs).catch(() => setLogs(null)); }, []);
-  // registro real de actividad de la plataforma
+  useEffect(() => { adminListLogs(50).then(setLogs).catch(() => setLogs(null)); }, []);
+  // Actividad local real (pedidos, reportes, solicitudes).
   const events = [
-    ...orders.map(o=>({at:o.createdAt, lv:'info', msg:`Orden creada · ${o.title||'Producto'} (${fmt(o.amount)})`, svc:'órdenes'})),
-    ...reports.map(r=>({at:r.at, lv:'warn', msg:`Reporte recibido sobre ${r.targetName||'usuario'} · ${r.reason}`, svc:'moderación'})),
-    ...planReqs.map(p=>({at:p.at, lv:'info', msg:`Solicitud de plan ${p.plan} · ${p.userName||'usuario'}`, svc:'planes'})),
-  ].filter(e=>e.at).sort((a,b)=>b.at-a.at);
-  const shown = events.filter(e=> flt==='todo' ? true : flt===e.lv );
+    ...orders.map(o=>({at:o.createdAt, msg:`Orden creada · ${o.title||'Producto'} (${fmt(o.amount)})`, svc:'órdenes'})),
+    ...reports.map(r=>({at:r.at, msg:`Reporte recibido sobre ${r.targetName||'usuario'} · ${r.reason}`, svc:'moderación'})),
+    ...planReqs.map(p=>({at:p.at, msg:`Solicitud de plan ${p.plan} · ${p.userName||'usuario'}`, svc:'planes'})),
+  ].filter(e=>e.at);
+  // ── 📜 ACTIVIDAD CONSOLIDADA: backend + local, UNA sola lista ────────────────
+  const activity = useMemo(() => [
+    ...((Array.isArray(logs)?logs:[]).map(l=>({
+      at: l.created_at ? new Date(l.created_at).getTime() : 0,
+      msg: l.action || l.event || l.message || l.description || 'Acción',
+      svc: 'sistema',
+    }))),
+    ...events,
+  ].filter(e=>e.at).sort((a,b)=>b.at-a.at), [logs, orders.length, reports.length, planReqs.length]);
+  const [actOpen, setActOpen] = useState(false);
+  const [actShow, setActShow] = useState(20);
+  // "N nuevas" desde la última vez que el admin abrió la actividad (last-seen local).
+  const [lastSeen, setLastSeen] = useState(() => { try { return Number(localStorage.getItem('retador_adminact_seen')) || 0; } catch { return 0; } });
+  const newCount = activity.filter(e => e.at > lastSeen).length;
+  const toggleAct = () => {
+    setActOpen(o => {
+      const next = !o;
+      if (next) { const now = Date.now(); setLastSeen(now); try { localStorage.setItem('retador_adminact_seen', String(now)); } catch {} }
+      return next;
+    });
+  };
   const services = [
     {name:'App RETADOR', state:'ok', note:'Operativo'},
-    {name:'Almacenamiento de datos', state:'ok', note:'Local (dispositivo)'},
+    {name:'Backend (Supabase)', state:'ok', note:'Conectado'},
     {name:'Pasarela de pagos exterior', state:'off', note:'Sin integrar'},
     {name:'GPS / Rastreo de envíos', state:'off', note:'Sin integrar'},
     {name:'Notificaciones push', state:'off', note:'Sin integrar'},
@@ -3034,62 +3207,46 @@ function Sistema({toast, data={}}){
   return <>
     <div className="stit">Sistema</div>
     <div className="ssub">Actividad real de la plataforma e integraciones</div>
-    {Array.isArray(logs) && logs.length > 0 && (
-      <div className="card cp mb16">
-        <div className="ch"><span className="ct">Registro de acciones (backend)</span><span className="bdg bx">{logs.length}</span></div>
-        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 8px'}}>Últimas acciones registradas por el sistema: qué, quién y cuándo.</div>
-        {logs.map((l,i) => (
-          <div key={l.id || i} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
-            <span style={{fontSize:13,flexShrink:0}}>🧾</span>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:12,fontWeight:600,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{l.action || l.event || l.message || l.description || 'Acción'}</div>
-              {(l.detail || l.details || l.meta) && <div style={{fontSize:10.5,color:'var(--tx3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{typeof (l.detail||l.details||l.meta) === 'string' ? (l.detail||l.details||l.meta) : JSON.stringify(l.detail||l.details||l.meta)}</div>}
-            </div>
-            <span style={{fontSize:10,color:'var(--tx3)',flexShrink:0}}>{l.created_at ? new Date(l.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'})+' '+hhmm(l.created_at) : ''}</span>
-          </div>
-        ))}
-      </div>
-    )}
+    {/* Resumen compacto: conteos por tipo */}
     <div className="g3 mb16">{[
-      {l:'Órdenes procesadas',v:String(orders.length),c:'var(--gn)'},
-      {l:'Avisos (reportes)',v:String(reports.length),c:reports.length?'var(--yw)':'var(--gn)'},
-      {l:'Eventos registrados',v:String(events.length),c:'var(--ac2)'}
+      {l:'Órdenes',v:String(orders.length),c:'var(--gn)'},
+      {l:'Reportes',v:String(reports.length),c:reports.length?'var(--yw)':'var(--gn)'},
+      {l:'Eventos totales',v:String(activity.length),c:'var(--ac2)'}
     ].map(m=><div className="mc" key={m.l}><div className="ml">{m.l}</div><div className="mv" style={{color:m.c}}>{m.v}</div></div>)}</div>
-    <div className="g2 mb16">
-      <div className="card cp">
-        <div className="ch"><span className="ct">Estado de servicios</span><button className="btn btg sm" onClick={()=>toast('Estado actualizado')}>↻ Refrescar</button></div>
-        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Cuando integres servicios externos (pagos, GPS, push), su estado real aparecerá aquí.</div>
-        {services.map(s=><div key={s.name} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
-          <span style={{width:9,height:9,borderRadius:'50%',flexShrink:0,background:s.state==='ok'?'var(--gn)':'var(--tx3)',boxShadow:s.state==='ok'?'0 0 8px var(--gn)':'none'}}/>
-          <span style={{flex:1,fontSize:12,fontWeight:600,color:s.state==='ok'?'var(--tx)':'var(--tx2)'}}>{s.name}</span>
-          <span className={`bdg ${s.state==='ok'?'bg':'bx'}`}>{s.note}</span>
-        </div>)}
+
+    {/* 📜 ACTIVIDAD (consolidada): plegada por defecto, con contador de nuevas */}
+    <div className="card cp mb16">
+      <div onClick={toggleAct} style={{display:'flex',alignItems:'center',gap:9,cursor:'pointer'}}>
+        <span style={{fontSize:15}}>📜</span>
+        <span className="ct" style={{flex:1}}>Actividad</span>
+        {newCount > 0 && !actOpen && <span style={{display:'flex',alignItems:'center',gap:5,color:'var(--ac)',fontSize:11,fontWeight:800}}><span style={{width:8,height:8,borderRadius:'50%',background:'var(--ac)',boxShadow:'0 0 6px var(--ac)'}}/>{newCount} nuevas</span>}
+        <span className="bdg bx">{activity.length}</span>
+        <span style={{fontSize:12,color:'var(--tx3)'}}>{actOpen?'Plegar ▲':'Desplegar ▼'}</span>
       </div>
-      <div className="card cp">
-        <div className="ch"><span className="ct">Actividad registrada</span><span className="bdg bx">{events.length}</span></div>
-        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Conteo real de eventos por tipo (de tus pedidos, reportes y solicitudes).</div>
-        {[['órdenes','📦','Órdenes'],['moderación','⚠️','Reportes'],['planes','⭐','Solicitudes de plan']].map(([k,ic,lbl])=>{
-          const c = events.filter(e=>e.svc===k).length;
-          return <div key={k} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
-            <span style={{fontSize:16}}>{ic}</span>
-            <span style={{flex:1,fontSize:12,fontWeight:600,color:'var(--tx)'}}>{lbl}</span>
-            <span style={{fontSize:14,fontWeight:800,fontFamily:'var(--mo)',color:'var(--tx)'}}>{c}</span>
-          </div>;
-        })}
-      </div>
+      {actOpen && (
+        activity.length===0
+          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'20px 6px'}}>Sin actividad todavía. Cada orden, reporte, solicitud o acción quedará registrada aquí.</div>
+          : <div style={{marginTop:12}}>
+            {activity.slice(0,actShow).map((l,i)=>(
+              <div key={i} style={{display:'flex',alignItems:'center',gap:9,padding:'7px 0',borderBottom:'1px solid rgba(128,128,128,.08)'}}>
+                <span style={{fontSize:12,flexShrink:0}}>{l.svc==='sistema'?'🧾':l.svc==='órdenes'?'📦':l.svc==='moderación'?'⚠️':'⭐'}</span>
+                <span style={{flex:1,minWidth:0,fontSize:11.5,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{l.msg}</span>
+                <span style={{fontSize:9.5,color:'var(--tx3)',flexShrink:0}}>{dmy(l.at)} {hhmm(l.at)}</span>
+              </div>
+            ))}
+            {activity.length > actShow && <button className="btn btg" style={{width:'100%',marginTop:10}} onClick={()=>setActShow(n=>n+20)}>Ver más ({activity.length-actShow} restantes)</button>}
+          </div>
+      )}
     </div>
+
     <div className="card cp">
-      <div className="ch"><span className="ct">Registro de actividad</span><div style={{display:'flex',gap:5}}>{[['todo','Todo'],['warn','⚠ Avisos'],['info','Info']].map(([k,l])=><button key={k} className={`btn ${flt===k?'btp':'btg'} sm`} onClick={()=>setFlt(k)}>{l}</button>)}</div></div>
-      {shown.length===0
-        ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'24px 6px'}}>{events.length===0?'Sin actividad todavía. Cada orden, reporte o solicitud quedará registrada aquí.':'No hay eventos de este tipo.'}</div>
-        : <div style={{background:'var(--bg)',borderRadius:8,padding:14,fontFamily:'var(--mo)',fontSize:10.5,maxHeight:340,overflowY:'auto'}}>
-          {shown.map((l,i)=><div key={i} style={{display:'flex',gap:11,padding:'6px 0',borderBottom:i<shown.length-1?'1px solid rgba(128,128,128,.06)':'none'}}>
-            <span style={{color:'var(--tx3)',flexShrink:0}}>{hhmm(l.at)}</span>
-            <span style={{flexShrink:0,fontWeight:700,color:l.lv==='warn'?'var(--yw)':'var(--gn)'}}>{l.lv.toUpperCase()}</span>
-            <span style={{color:'var(--tx2)',flex:1,fontFamily:'inherit'}}>{l.msg}</span>
-            <span style={{color:'var(--tx3)',flexShrink:0}}>[{l.svc}]</span>
-          </div>)}
-        </div>}
+      <div className="ch"><span className="ct">Estado de servicios</span></div>
+      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Cuando integres servicios externos (pagos, GPS, push), su estado real aparecerá aquí.</div>
+      {services.map(s=><div key={s.name} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+        <span style={{width:9,height:9,borderRadius:'50%',flexShrink:0,background:s.state==='ok'?'var(--gn)':'var(--tx3)',boxShadow:s.state==='ok'?'0 0 8px var(--gn)':'none'}}/>
+        <span style={{flex:1,fontSize:12,fontWeight:600,color:s.state==='ok'?'var(--tx)':'var(--tx2)'}}>{s.name}</span>
+        <span className={`bdg ${s.state==='ok'?'bg':'bx'}`}>{s.note}</span>
+      </div>)}
     </div>
   </>;
 }

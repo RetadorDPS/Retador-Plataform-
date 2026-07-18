@@ -431,7 +431,7 @@ const FP_TAG_STYLE = {
   "Nuevo":       { bg:FP_C.accentSoft,  color:FP_C.accentText, border:"#1A2550" },
 };
 
-function FP_ProductCard({ product, onClick, onDelete, onEdit }) {
+function FP_ProductCard({ product, onClick, onDelete, onEdit, onPromote }) {
   const FP_C = useFP_C();
   const [liked, setLiked] = useState(false);
   const tc = FP_TAG_STYLE[product.tag] || {};
@@ -458,6 +458,11 @@ function FP_ProductCard({ product, onClick, onDelete, onEdit }) {
 
       {own ? (
         <div style={{ position:"absolute", top:8, right:8, zIndex:2, display:"flex", gap:6 }}>
+          {onPromote && !product.promoted && (
+            <button title="Destacar" onClick={e => { e.stopPropagation(); onPromote(); }} style={{ ...ownBtn, border:`1px solid rgba(255,192,30,.6)`, background:"rgba(255,192,30,.16)" }}>
+              <span style={{ fontSize:13, lineHeight:1 }}>⭐</span>
+            </button>
+          )}
           {onEdit && (
             <button onClick={e => { e.stopPropagation(); onEdit(); }} style={{ ...ownBtn, border:`1px solid rgba(255,255,255,.28)` }}>
               <Edit2 size={13} color="#fff" />
@@ -1397,7 +1402,9 @@ function FP_ReportModal({ targetName, onClose, onSubmit, C }) {
     </div>
   );
 }
-export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, onRequestPlan, currentPlan = "Básico", plans = [], myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct }) {
+export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, onRequestPlan, currentPlan = "Básico", plans = [], myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct }) {
+  // ⭐ Destacar: visible solo si el admin tiene la función encendida (config en vivo).
+  const promoOn = usePlatformCfg().promoActive === true;
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const FP_C = useFP_C();
   const isOwner = isOwnerProp !== undefined ? isOwnerProp : FP_MOCK_IS_OWNER;
@@ -1860,7 +1867,7 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
               <div style={{ display:"grid",
                 gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",
                 gap:10, marginBottom:12 }}>
-                {userProducts.map(p => <FP_ProductCard key={p.id} product={p} onClick={() => onProduct && onProduct(p)} onDelete={onDeleteProduct ? (() => onDeleteProduct(p.id)) : null} onEdit={onEditProduct ? (() => onEditProduct(p)) : null}/>)}
+                {userProducts.map(p => <FP_ProductCard key={p.id} product={p} onClick={() => onProduct && onProduct(p)} onDelete={onDeleteProduct ? (() => onDeleteProduct(p.id)) : null} onEdit={onEditProduct ? (() => onEditProduct(p)) : null} onPromote={(promoOn && onPromoteProduct && !p.promoted && p.kind !== "service") ? (() => onPromoteProduct(p)) : null}/>)}
               </div>
             )}
             {isOwner && (

@@ -531,6 +531,46 @@ export const adminModerateProduct = async (productId, approve, reason = null) =>
   return data;
 };
 
+// ── PROMOCIONES (⭐ Destacar) — el admin controla, el vendedor usa ────────────
+// promote_product(p_product_id): cobra promoCost a la deuda del vendedor y marca
+// promoted=true. El backend rechaza si el admin apagó la función (promoActive).
+// Devuelve el costo cobrado.
+export const promoteProduct = async (productId) => {
+  const { data, error } = await supabase.rpc("promote_product", { p_product_id: productId });
+  if (error) { console.error("promoteProduct:", error.message); throw error; }
+  return data;
+};
+// Admin: quitar (o poner) el destacado a mano, sin cobro.
+export const adminSetPromoted = async (productId, promoted) => {
+  const { data, error } = await supabase.rpc("admin_set_promoted", { p_product_id: productId, p_promoted: promoted });
+  if (error) { console.error("adminSetPromoted:", error.message); throw error; }
+  return data;
+};
+// Admin: lista real de productos destacados (promoted=true).
+export const adminListPromoted = async () => {
+  const { data, error } = await supabase.from("products")
+    .select("id, title, images, seller_id, kind, price, currency, created_at")
+    .eq("promoted", true).neq("status", "deleted")
+    .order("created_at", { ascending: false }).limit(100);
+  if (error) { console.error("adminListPromoted:", error.message); return []; }
+  return data || [];
+};
+// Ledger (cargos: comisiones, promociones…). Lectura flexible: prueba los nombres
+// de tabla habituales; si ninguno es legible devuelve null (la UI cae a su fallback).
+export const listLedger = async (limit = 500) => {
+  for (const table of ["ledger", "ledger_entries", "charges"]) {
+    const { data, error } = await supabase.from(table).select("*").order("created_at", { ascending: false }).limit(limit);
+    if (!error && Array.isArray(data)) return data;
+  }
+  return null;
+};
+// Admin: saldar la deuda de comisiones/promociones de un vendedor (lo notifica el backend).
+export const adminMarkCommissionPaid = async (sellerId) => {
+  const { data, error } = await supabase.rpc("admin_mark_commission_paid", { p_seller_id: sellerId });
+  if (error) { console.error("adminMarkCommissionPaid:", error.message); throw error; }
+  return data;
+};
+
 // ── CIERRE DEL PANEL — pedidos, admins y registro de acciones ────────────────
 // Lista REAL de pedidos de la plataforma (el RLS deja al admin verlos todos).
 // Solo lectura: los pedidos los mueven sus dueños; el admin observa.

@@ -19,7 +19,7 @@ import {
   getUserById, getUserName, updateUserName,
   mapProduct, loadProducts, loadServices, getFeed, saveProduct, deleteProduct, getProductsBySeller, uploadImage, DEMO_PRODUCT,
   sendMessage, loadMessages, markRead, getMyConversations,
-  toggleFavorite, getMyFavorites, getPlatformStats, getPlatformConfig, setPlatformConfig,
+  toggleFavorite, getMyFavorites, getPlatformStats, getPlatformConfig, setPlatformConfig, promoteProduct,
   getLedgerEntries, createEscrow, releaseEscrow, getSystemStatus,
   CURRENCIES, CURRENCY_CODES, DEFAULT_CURRENCY, money,
   createOrder, estimateDeliveryFee,
@@ -561,6 +561,8 @@ function AppShell({ sessionUser }) {
     if (isService) { setServices(prev => [mapProduct(data), ...prev]); flash("✅ Servicio publicado — visible en la sección Servicios"); }
     else { setProducts(prev => [mapProduct(data), ...prev]); flash("✅ Producto publicado — visible para todos"); }
     reloadOwn();
+    // ⭐ Marcó "Destacar" al publicar (ya confirmó la tarifa en el formulario).
+    if (d.promote && adminCfg.promoActive === true) promoteFlow(data.id, { skipConfirm: true });
   };
 
   const handleDelete = async id => {
@@ -579,10 +581,10 @@ function AppShell({ sessionUser }) {
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   // context opcional {type:'product'|'order', id, title, image}: el chat muestra
   // la franja "estás consultando sobre esto" y el primer mensaje lleva la referencia.
-  const openChat = (otherId, otherName, context = null) => {
+  const openChat = (otherId, otherName, context = null, draft = null) => {
     const id = typeof otherId === "string" && UUID_RE.test(otherId) ? otherId : null;
     if (!id) { flash("No se pudo abrir el chat: usuario no identificado"); return; }
-    setSelChat({ otherId: id, otherName, context });
+    setSelChat({ otherId: id, otherName, context, draft });
     setChatOpen(true);
   };
   // Abrir el DETALLE de un pedido/producto desde una tarjeta del chat.
@@ -956,6 +958,23 @@ function AppShell({ sessionUser }) {
     }
   };
 
+  // ⭐ DESTACAR un producto (el vendedor). Confirmación con la tarifa REAL de la
+  // config en vivo → RPC promote_product (cobra a la deuda) → estado al instante.
+  const promoteFlow = (productId, { skipConfirm = false } = {}) => {
+    if (suspended) { flash("⛔ Tu cuenta está suspendida"); return; }
+    const cost = Number(adminCfg.promoCost) || 0;
+    const doIt = async () => {
+      try {
+        const charged = await promoteProduct(productId);
+        const mark = p => p.id === productId ? { ...p, promoted: true } : p;
+        setProducts(prev => prev.map(mark)); setServices(prev => prev.map(mark)); reloadOwn();
+        flash(`⭐ Producto destacado — ${Number(charged) || cost} CUP sumados a tu deuda`);
+      } catch (e) { flash("⚠️ " + (e?.message || "Destacar no está disponible por ahora")); }
+    };
+    if (skipConfirm) { doIt(); return; }
+    askConfirm(`Destacar cuesta ${cost} CUP. Se suma a tu deuda con RETADOR y se cobra después. El impago puede llevar a sanciones. ¿Confirmas?`, doIt);
+  };
+
   const handleBuy = (product) => {
     if (suspended) { flash("⛔ Tu cuenta está suspendida"); return; }
     setBuyModal(product);
@@ -1066,7 +1085,7 @@ function AppShell({ sessionUser }) {
         </div>
       )}
 
-      {editProd && <EditProductModal product={editProd} onClose={() => setEditProd(null)} onSave={(changes) => { updateProduct(editProd.id, changes); setEditProd(null); }} flash={flash} />}
+      {editProd && <EditProductModal product={editProd} onClose={() => setEditProd(null)} onSave={(changes) => { updateProduct(editProd.id, changes); setEditProd(null); }} flash={flash} onPromote={() => { setEditProd(null); promoteFlow(editProd.id); }} />}
       {confirmCfg && (
         <div onClick={() => setConfirmCfg(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 5300, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div onClick={e => e.stopPropagation()} style={{ background: effectiveTheme === "dark" ? "#161618" : "#fff", borderRadius: 18, padding: "22px 20px", maxWidth: 340, width: "100%", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,.4)" }}>
@@ -1235,7 +1254,12 @@ function AppShell({ sessionUser }) {
       )}
       {showAdmin  && <OmniPanel onClose={() => setShowAdmin(false)} theme={appTk} zoom={densZoom} data={{
         meId: user?.id,
-        onViewProfile: (id) => { setShowAdmin(false); openPublicProfile(id); },
+        // CAPA ENCIMA del panel: la ficha se abre por encima (zIndex 5200 + backstack);
+        // atrás la cierra y el panel sigue EXACTAMENTE donde estaba. No cerrar el panel.
+        onViewProfile: (id) => openPublicProfile(id),
+        // 💬 Cobrar deuda: abre el chat (capa encima del panel) con el mensaje
+        // predefinido EDITABLE ya escrito en el input.
+        onCollectDebt: (sellerId, sellerName, message) => { openChat(sellerId, sellerName, null, message); },
         orders, cfg: adminCfg,
         onCfg: handleCfgChange,
         onOrderAction: (id, action) => setOrders(prev => prev.map(o => o.id === id ? { ...o, status: action === 'cancel' ? 'cancelado' : action === 'approve' ? 'confirmado' : o.status, flagged: action === 'flag' ? true : (action === 'cancel' || action === 'approve' ? false : o.flagged) } : o)),
@@ -1359,7 +1383,7 @@ function AppShell({ sessionUser }) {
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
               const paid = payments.filter(p => p.sellerName === me).reduce((a, p) => a + (p.amount || 0), 0);
               const myDebt = Math.max(0, accrued - paid);
-              return <FreeProfileScreen onBack={() => setPScr("main")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} onRequestPlan={() => {}} currentPlan={(user?.plan && user.plan !== "gratis") ? (user.plan === "pro" ? "Pro" : user.plan === "premium" ? "Premium" : userPlans[me] || "Básico") : (userPlans[me] || "Básico")} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} />;
+              return <FreeProfileScreen onBack={() => setPScr("main")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} onRequestPlan={() => {}} currentPlan={(user?.plan && user.plan !== "gratis") ? (user.plan === "pro" ? "Pro" : user.plan === "premium" ? "Premium" : userPlans[me] || "Básico") : (userPlans[me] || "Básico")} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)} />;
             })()}
             {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
             {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}

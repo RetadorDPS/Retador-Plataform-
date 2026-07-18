@@ -1109,8 +1109,12 @@ function PCard({ p, onClick, isFav, onFav, view = "grid", verified = false }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // PRODUCT DETAIL — carga nombre + trust stats del vendedor
 // ═════════════════════════════════════════════════════════════════════════════
-export function EditProductModal({ product, onClose, onSave, flash }) {
+export function EditProductModal({ product, onClose, onSave, flash, onPromote }) {
   const { T1, T2, T3, B, CARD, BG, isDark, S } = useAt();
+  // ⭐ Destacar desde editar: solo si el admin tiene la función encendida y el
+  // producto aún no está destacado. (La confirmación con tarifa la maneja App.)
+  const pCfg = usePlatformCfg();
+  const canPromote = pCfg.promoActive === true && !product.promoted && product.kind !== "service" && !!onPromote;
   const [title, setTitle] = useState(product.title || "");
   const [price, setPrice] = useState(product.price ?? "");
   const [desc, setDesc]   = useState(product.description || "");
@@ -1233,6 +1237,13 @@ export function EditProductModal({ product, onClose, onSave, flash }) {
           </div>
         )}
         </>}
+
+        {canPromote && (
+          <button onClick={onPromote} style={{ width: "100%", height: 44, borderRadius: 12, border: `1.5px solid ${G}`, background: `${G}12`, color: G, fontSize: 13.5, fontWeight: 800, cursor: "pointer", marginTop: 12 }}>
+            ⭐ Destacar este producto · {Number(pCfg.promoCost) || 0} CUP
+          </button>
+        )}
+        {product.promoted && <div style={{ marginTop: 12, textAlign: "center", fontSize: 11.5, fontWeight: 700, color: G }}>⭐ Este producto ya está destacado</div>}
 
         <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
           <button onClick={onClose} style={{ flex: 1, height: 46, borderRadius: 12, border: `1px solid ${B}`, background: "transparent", color: T1, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
@@ -1610,6 +1621,11 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
   const { cols } = useR();
   const { cats, subcats } = useCatalog();
   const { S, B, CARD, T1, T2, T3, isDark } = useAt();
+  // ⭐ Destacar: controlado por el admin (config global en vivo). Apagado → oculto.
+  const platformCfg = usePlatformCfg();
+  const promoOn = platformCfg.promoActive === true;
+  const promoCost = Number(platformCfg.promoCost) || 0;
+  const [promoAsk, setPromoAsk] = useState(false);
   const [form, setForm] = useState({
     kind: "",   // FASE 3: 'product' | 'service' — OBLIGATORIO elegir antes de publicar
     title: "",
@@ -1948,21 +1964,39 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
             )}
           </div>}
 
-          {/* SECCIÓN 8: VISIBILIDAD */}
+          {/* SECCIÓN 8: DESTACAR (⭐) — solo si el admin tiene la función ENCENDIDA.
+              Apagada → oculta del todo (ni gris ni nada). La tarifa es la REAL de
+              la config en vivo; se confirma ANTES de marcar. */}
+          {!isService && promoOn && (
           <div style={sectionStyle}>
             <div style={sectionTitle}>
-              <span>🚀</span> Visibilidad
+              <span>⭐</span> Destacar
             </div>
             <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", padding: "12px 14px", background: form.promote ? `${G}08` : isDark?"#0e0e0e":CARD, borderRadius: 10, border: `1px solid ${form.promote ? `${G}30` : isDark?"#1a1a1a":B}` }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: form.promote ? G : isDark?"#fff":T1, marginBottom: 2 }}>⭐ Promocionar producto</div>
-                <div style={{ fontSize: 9, color: isDark?"#555":T2 }}>Aparece en destacados de su categoría</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: form.promote ? G : isDark?"#fff":T1, marginBottom: 2 }}>⭐ Destacar este producto · {promoCost} CUP</div>
+                <div style={{ fontSize: 9, color: isDark?"#555":T2 }}>Aparece en el filtro Destacado. Se cobra a tu deuda al publicar.</div>
               </div>
-              <div onClick={() => set("promote", !form.promote)} style={{ width: 44, height: 24, borderRadius: 12, background: form.promote ? G : isDark?"#222":B, position: "relative", transition: "background 0.2s", cursor: "pointer" }}>
+              <div onClick={() => { if (form.promote) { set("promote", false); } else { setPromoAsk(true); } }} style={{ width: 44, height: 24, borderRadius: 12, background: form.promote ? G : isDark?"#222":B, position: "relative", transition: "background 0.2s", cursor: "pointer" }}>
                 <div style={{ position: "absolute", top: 2, left: form.promote ? 22 : 2, width: 20, height: 20, borderRadius: "50%", background: form.promote ? "#000" : isDark?"#444":T3, transition: "left 0.2s" }} />
               </div>
             </label>
           </div>
+          )}
+
+          {/* Confirmación de la tarifa de destacar (antes de marcar) */}
+          {promoAsk && (
+            <div onClick={() => setPromoAsk(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.65)", zIndex: 6000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+              <div onClick={e => e.stopPropagation()} style={{ background: isDark ? "#141414" : "#fff", borderRadius: 16, padding: "20px 18px", maxWidth: 340, width: "100%" }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: T1, marginBottom: 8 }}>⭐ Destacar producto</div>
+                <p style={{ fontSize: 12.5, color: T2, lineHeight: 1.55, margin: "0 0 14px" }}>Destacar cuesta <b style={{ color: G }}>{promoCost} CUP</b>. Se suma a tu deuda con RETADOR y se cobra después. El impago puede llevar a sanciones. ¿Confirmas?</p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="p" onClick={() => setPromoAsk(false)} style={{ flex: 1, height: 42, borderRadius: 10, border: `1px solid ${B}`, background: "transparent", color: T1, fontSize: 13, fontWeight: 700 }}>Cancelar</button>
+                  <button className="p" onClick={() => { set("promote", true); setPromoAsk(false); }} style={{ flex: 1, height: 42, borderRadius: 10, border: "none", background: G, color: "#000", fontSize: 13, fontWeight: 800 }}>Confirmar</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* SECCIÓN 9: ACCIÓN */}
           <button 

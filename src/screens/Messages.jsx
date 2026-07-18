@@ -154,8 +154,9 @@ export function MessagesScreen({ user, onBack, onChat, chatOpen = false }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // Input AISLADO: guarda su propio borrador, así los mensajes que llegan por
 // realtime (que re-renderizan el chat) NO le roban el foco ni borran las letras.
-const ChatInput = memo(function ChatInput({ onSend, blocked, S, B, T1 }) {
-  const [draft, setDraft] = useState("");
+const ChatInput = memo(function ChatInput({ onSend, blocked, S, B, T1, initialDraft = "" }) {
+  // initialDraft: mensaje predefinido EDITABLE (ej. el cobro de deuda del admin).
+  const [draft, setDraft] = useState(initialDraft || "");
   const inputRef = useRef(null);
   // Al enviar NO se hace blur: se limpia el texto y el input CONSERVA el foco,
   // así el teclado se queda abierto (con botón y con Enter).
@@ -353,7 +354,7 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
           <button onClick={() => setCtx(null)} style={{ background: "none", border: "none", color: T3, fontSize: 17, cursor: "pointer", lineHeight: 1, padding: 4 }}>×</button>
         </div>
       )}
-      <ChatInput onSend={handleSend} blocked={blocked} S={S} B={B} T1={T1} />
+      <ChatInput onSend={handleSend} blocked={blocked} S={S} B={B} T1={T1} initialDraft={chat.draft || ""} />
     </div>
   );
 }

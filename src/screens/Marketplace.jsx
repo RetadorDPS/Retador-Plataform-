@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, Logo, Spin, createOrder, densityCols, estimateDeliveryFee, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, Logo, MarketBanners, Spin, createOrder, densityCols, estimateDeliveryFee, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -899,7 +899,7 @@ export function ChatsModal({ onClose, initial, orders = [], chatMsgs = {}, chatP
    reales RESPETANDO la posición: cada anuncio se renderiza en el tramo donde el
    usuario lo colocó, entre las partes fijas del sistema. Botones que navegan. */
 
-export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, onServices, banners, onNav, hidden = false, scrollKeeper = null, view = "grid" }) {
+export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, onServices, onNav, hidden = false, scrollKeeper = null, view = "grid" }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { cats } = useCatalog();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
@@ -967,25 +967,8 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
       </div>
 
 
-      {/* Tramo: lo que pusiste antes de los Filtros (sale arriba, bajo el encabezado) */}
-      <LiveSlot page="inicio" from={null} to="in_f" onNav={onNav} />
-
-      {/* Banners - Solo se muestra si hay banners activos */}
-      {banners.filter(b => b.active).length > 0 && (
-        <div style={{ position: "relative", overflow: "hidden", minHeight: 200 }}>
-          {banners.filter(b => b.active).map((banner, i) => (
-            <div key={banner.id} style={{ position: "relative", overflow: "hidden", minHeight: 200, marginBottom: i < banners.filter(b => b.active).length - 1 ? 12 : 0 }}>
-              <div style={{ position: "absolute", inset: 0, backgroundImage: `url(${banner.image || "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&q=50"})`, backgroundSize: "cover", backgroundPosition: "center", filter: "brightness(0.15) saturate(0.4)" }} />
-              <div style={{ position: "absolute", inset: 0, background: isDark ? "linear-gradient(to right,rgba(8,8,8,1) 34%,rgba(8,8,8,.35))" : "linear-gradient(to right,rgba(255,255,255,.97) 34%,rgba(255,255,255,.35))" }} />
-              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 60, background: isDark ? "linear-gradient(to top,rgba(8,8,8,1),transparent)" : "linear-gradient(to top,rgba(255,255,255,1),transparent)" }} />
-              <div style={{ position: "relative", zIndex: 1, padding: "18px 18px 26px" }}>
-                <h2 style={{ fontSize: 21, fontWeight: 900, lineHeight: 1.2, marginBottom: 8, color: "#fff" }}>{banner.title || "Promoción Especial"}</h2>
-                {banner.description && <p style={{ color: "#888", fontSize: 11, lineHeight: 1.6, marginBottom: 12, maxWidth: 240 }}>{banner.description}</p>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* BANNERS REALES del Editor Visual (config global, en vivo). El CTA navega. */}
+      <MarketBanners onNav={onNav} />
 
       {/* Filtros - Ahora con sticky */}
       <div style={{ position: "sticky", top: hidden ? 0 : 45, zIndex: 50, background: isDark ? BG : "#fff", borderBottom: "none", padding: "12px clamp(18px,3vw,48px)", display: "flex", gap: 7, overflowX: "auto", transition: "top .28s cubic-bezier(.4,0,.2,1)" }}>
@@ -995,9 +978,6 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
         {/* Entrada a SERVICIOS (mundo aparte) */}
         {onServices && <button onClick={onServices} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: isDark ? "#0e0e0e" : S, color: G, border: `1.5px solid ${G}55`, borderRadius: 999, padding: "7px 13px", fontSize: 10 * ts, fontWeight: 800, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>🛠️ Servicios</button>}
       </div>
-
-      {/* Tramo: lo que pusiste entre los Filtros y los Productos */}
-      <LiveSlot page="inicio" from="in_f" to="in_p" onNav={onNav} />
 
       {/* Grid de productos */}
       <div style={{ padding: "0 18px 80px" }}>

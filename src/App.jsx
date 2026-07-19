@@ -32,7 +32,7 @@ import {
   getUserTrustStats, trackEvent, blockUser, isBlocked, getSB, convKey,
   G, BG, S, B, RCtx, useR, useResponsive, BC,
   DARK_T, LIGHT_T, AppThCtx, useAt, PlatformCfgContext,
-  DENSITY_MODES, DENSITY_TOKENS, DENSITY_STORAGE_KEY, DensityContext, DensityProvider, useDensity, densityCols, TEXT_STEPS,
+  DENSITY_MODES, DENSITY_TOKENS, DENSITY_STORAGE_KEY, DensityContext, DensityProvider, useDensity, densityCols, TEXT_STEPS, DEFAULT_BLOCKS,
   CATS, SUBCATS, CatalogContext, CatalogProvider, useCatalog, CatIcon,
   useCSS, Ic, Spin, Logo,
   getPageLayout, liveSlot, LiveBlock, LiveSlot,
@@ -270,6 +270,8 @@ function AppShell({ sessionUser }) {
         { id: 'premium', name: 'Premium', price: 12, promo: false, promoPrice: 0, features: ['Todo lo del Pro', 'Aparecer en Tiendas Premium', 'Soporte prioritario', 'Destacar productos'] },
       ],
       team: [],
+      // Editor Visual: bloques/banners de la tienda (guardado GLOBAL en la config).
+      blocks: DEFAULT_BLOCKS,
     };
     try { const r = localStorage.getItem("retador_admincfg"); if (r) return { ...defaults, ...JSON.parse(r) }; } catch {}
     return defaults;
@@ -498,10 +500,8 @@ function AppShell({ sessionUser }) {
   // Config local
   const [cfg, setCfg] = useState({ priceKm: 50, priceKg: 15, adminPass: "", espanaAereo: 15, espanaMaritimo: 10, usaAereo: 18, usaMaritimo: 12 });
   
-  // Banners state
-  const [banners, setBanners] = useState([
-    // { id: 1, title: "Banner ejemplo", image: "url", active: false }
-  ]);
+  // (Los banners de la tienda ya no viven aquí: son bloques de adminCfg.blocks,
+  //  editados en el Editor Visual y renderizados por MarketBanners.)
 
   const flash = (msg, dur = 3200) => { setToast(msg); setTimeout(() => setToast(null), dur); };
   // 2) GUARDAR desde el panel (solo admin): aplica el cambio en caliente y persiste
@@ -1306,7 +1306,6 @@ function AppShell({ sessionUser }) {
                 onPlusMenu={rect => setPlusMenu(rect)}
                 onOpenChats={openMessages}
                 onServices={() => setMScr("services")}
-                banners={banners}
                 onNav={navTo}
               />
             )}

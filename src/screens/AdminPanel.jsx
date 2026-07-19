@@ -1,110 +1,7 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, BannerCard, BLOCK_BG_PRESETS, BLOCK_TARGETS, DEFAULT_BLOCKS } from "../shared/index.js";
 
 const OmniPanel = (() => {
-
-const REV=[{t:"00h",v:4200},{t:"03h",v:3100},{t:"06h",v:5800},{t:"09h",v:9400},{t:"12h",v:14200},{t:"15h",v:16800},{t:"18h",v:19200},{t:"21h",v:11400},{t:"24h",v:8900}];
-const ED_AREAS=[
-  {id:"inicio",label:"Inicio / Tienda",icon:"⌂",group:"Páginas de la plataforma"},
-  {id:"busqueda",label:"Búsqueda",icon:"⌕",group:"Páginas de la plataforma"},
-  {id:"delivery_local",label:"Delivery local",icon:"🛵",group:"Páginas de la plataforma"},
-  {id:"delivery_intl",label:"Envíos internacionales",icon:"✈",group:"Páginas de la plataforma"},
-  {id:"subastas",label:"Subastas",icon:"🔨",group:"Páginas de la plataforma"},
-  {id:"stores",label:"Tiendas premium",icon:"⭐",group:"Páginas de la plataforma"},
-  {id:"banners",label:"Banners",icon:"◐",group:"Contenido"},
-  {id:"promotions",label:"Promociones",icon:"◇",group:"Contenido"},
-];
-const BLK_TYPES=[
-  {type:"hero",label:"Portada principal",icon:"◈",desc:"Imagen grande con título y botón",grad:"linear-gradient(135deg,#4f72ff,#7c3aed)"},
-  {type:"slider",label:"Imágenes deslizables",icon:"◁▷",desc:"Varias imágenes que se deslizan",grad:"linear-gradient(135deg,#22d3a0,#4f72ff)"},
-  {type:"categories",label:"Categorías",icon:"◎",desc:"Cuadrícula de categorías",grad:"linear-gradient(135deg,#7c3aed,#4f72ff)"},
-  {type:"trending",label:"Productos",icon:"⊞",desc:"Cuadrícula de productos",grad:"linear-gradient(135deg,#4f72ff,#22d3a0)"},
-  {type:"productzone",label:"Zona de productos",icon:"▦",desc:"Marca dónde salen los productos reales",grad:"linear-gradient(135deg,#0f2027,#4f72ff)"},
-  {type:"stores",label:"Vitrina de tiendas",icon:"⭐",desc:"Lista de tiendas destacadas",grad:"linear-gradient(135deg,#f5a623,#f05a5a)"},
-  {type:"promo",label:"Banner de promoción",icon:"◇",desc:"Anuncio con descuento u oferta",grad:"linear-gradient(135deg,#f05a5a,#f5a623)"},
-  {type:"delivery",label:"Bloque de entrega",icon:"🛵",desc:"Sección de envío a domicilio",grad:"linear-gradient(135deg,#22d3a0,#0f2027)"},
-  {type:"cta",label:"Llamado a la acción",icon:"→",desc:"Texto con un botón destacado",grad:"linear-gradient(135deg,#4f72ff,#a78bfa)"},
-  {type:"video",label:"Video",icon:"▶",desc:"Sección para subir un video",grad:"linear-gradient(135deg,#1a1a2e,#4f72ff)"},
-];
-
-const mkId=()=>`b${Date.now()}_${Math.random().toString(36).slice(2,5)}`;
-const CAT_EMOJIS=["💻","📱","🎮","⌚","📷","👗","👔","👟","👜","🕶","🏠","🛋","🍳","🌿","⚽","🏀","🏊","🚴","🥊","💄","🧴","🌸","🍕","🍔","🍣","🍷","☕","🎂","🚗","✈","📚","🎵","🎬","🎨","🐾","🌱","🐕","🐈","💊","🎁","🛒","💳","📦","🔖"];
-const PAGE_DEFAULTS={
-  inicio:[
-    {id:"in_h",type:"syszone",label:"Encabezado",icon:"⌂",title:"Encabezado — buscar · publicar · notificaciones · mensajes",active:true,bg:"transparent",items:[]},
-    {id:"in_f",type:"syszone",label:"Filtros",icon:"⚑",title:"Filtros — Todos · Más vendidos · Nuevos · Ofertas · Favoritos",active:true,bg:"transparent",items:[]},
-    {id:"in_p",type:"productzone",label:"Productos",active:true,bg:"transparent",count:40,title:"",sub:"",cta:"",badge:"",campaign:null,items:[]},
-  ],
-  marketplace:[
-    {id:"mk1",type:"hero",label:"Hero Marketplace",active:true,bg:"linear-gradient(135deg,#1a0533,#4f72ff)",title:"🛒 Todo en un lugar",sub:"Miles de productos de los mejores vendedores",cta:"Comprar ahora",badge:"TOP VENDEDORES",campaign:null,items:[]},
-    {id:"mk2",type:"categories",label:"Categorías",active:true,bg:"transparent",title:"Comprar por categoría",sub:"",cta:"",badge:"",campaign:null,items:[{icon:"📱",name:"Electrónica"},{icon:"👔",name:"Ropa"},{icon:"🏡",name:"Casa"},{icon:"🎮",name:"Gaming"},{icon:"🚗",name:"Autos"},{icon:"📚",name:"Libros"}]},
-    {id:"mk3",type:"trending",label:"Más vendidos",active:true,bg:"transparent",title:"Más vendidos esta semana",sub:"",cta:"",badge:"",campaign:null,items:[{icon:"📱",name:"Galaxy S25",price:"$999"},{icon:"🎮",name:"PS6 Controller",price:"$79"},{icon:"👟",name:"Ultraboost 25",price:"$220"},{icon:"⌚",name:"Apple Watch 12",price:"$499"}]},
-    {id:"mk4",type:"slider",label:"Slider Ofertas",active:true,bg:"linear-gradient(135deg,#0d1526,#1a3a5e)",title:"Ofertas del día",sub:"Solo por tiempo limitado",cta:"Ver todas",badge:"LIMITADO",campaign:null,items:[]},
-    {id:"mk5",type:"stores",label:"Tiendas Verificadas",active:true,bg:"transparent",title:"Vendedores Verificados",sub:"",cta:"",badge:"",campaign:null,items:["TechStore MX","Moda Élite","GadgetWorld","SportZone","FoodHub"]},
-  ],
-  delivery_local:[
-    {id:"dl_h",type:"syszone",label:"Encabezado",icon:"🛵",title:"Encabezado + cinta de avisos (texto en movimiento)",active:true,bg:"transparent",items:[]},
-    {id:"dl_hero",type:"syszone",label:"Tarjeta principal",icon:"🟢",title:"Tarjeta principal — Retador mensajería (servicio activo)",active:true,bg:"transparent",items:[]},
-    {id:"dl_cta",type:"syszone",label:"Crear envío",icon:"➕",title:"Botón — Crear envío",active:true,bg:"transparent",items:[]},
-    {id:"dl_act",type:"syszone",label:"En curso",icon:"📦",title:"En curso — pedidos activos",active:true,bg:"transparent",items:[]},
-    {id:"dl_stats",type:"syszone",label:"Rendimiento",icon:"📊",title:"Rendimiento — estadísticas",active:true,bg:"transparent",items:[]},
-    {id:"dl_hist",type:"syszone",label:"Historial",icon:"🕓",title:"Historial",active:true,bg:"transparent",items:[]},
-  ],
-  delivery_intl:[
-    {id:"di_h",type:"syszone",label:"Encabezado",icon:"✈️",title:"Encabezado — Centro de Envíos (Internacional)",active:true,bg:"transparent",items:[]},
-    {id:"di_create",type:"syszone",label:"Crear nuevo envío",icon:"➕",title:"Crear nuevo envío — tarjetas EE.UU. / España (aéreo · marítimo)",active:true,bg:"transparent",items:[]},
-    {id:"di_tabs",type:"syszone",label:"Pestañas",icon:"⇆",title:"Pestañas — Mis envíos / Historial",active:true,bg:"transparent",items:[]},
-    {id:"di_list",type:"syszone",label:"Lista de envíos",icon:"📋",title:"Lista de envíos",active:true,bg:"transparent",items:[]},
-  ],
-  subastas:[
-    {id:"su_h",type:"syszone",label:"Encabezado",icon:"🔨",title:"Encabezado — SUBASTAS (seguir · buscar · Nueva) + activas/finalizan/VIP",active:true,bg:"transparent",items:[]},
-    {id:"su_dest",type:"syszone",label:"Destacadas",icon:"⭐",title:"Destacadas — carrusel horizontal",active:true,bg:"transparent",items:[]},
-    {id:"su_vip",type:"syszone",label:"VIP Access",icon:"🔒",title:"VIP Access — banda horizontal",active:true,bg:"transparent",items:[]},
-    {id:"su_filt",type:"syszone",label:"Filtros",icon:"⚑",title:"Filtros — Todas · 🔥 Hot · ⏳ Finalizan · ✨ Nuevas · 🔒 VIP",active:true,bg:"transparent",items:[]},
-    {id:"su_feed",type:"productzone",label:"Feed de subastas",active:true,bg:"transparent",zlabel:"subastas",count:12,title:"",sub:"",cta:"",badge:"",campaign:null,items:[]},
-  ],
-  busqueda:[
-    {id:"bq_s",type:"syszone",label:"Barra de búsqueda",icon:"⌕",title:"Barra de búsqueda",active:true,bg:"transparent",items:[]},
-    {id:"bq_f",type:"syszone",label:"Filtros",icon:"⚑",title:"Filtros — Todos · 🔥 Ofertas · Nuevos · Más vendidos",active:true,bg:"transparent",items:[]},
-    {id:"bq_c",type:"syszone",label:"Categorías",icon:"◎",title:"Categorías (barra lateral) — edítalas con el botón ◎ Categorías",active:true,bg:"transparent",items:[]},
-    {id:"bq_p",type:"productzone",label:"Resultados",active:true,bg:"transparent",count:40,title:"",sub:"",cta:"",badge:"",campaign:null,items:[]},
-  ],
-  stores:[
-    {id:"st1",type:"hero",label:"Hero Tiendas",active:true,bg:"linear-gradient(135deg,#1a0533,#f5a623)",title:"⭐ Tiendas Premium",sub:"Los mejores negocios verificados",cta:"Explorar tiendas",badge:"VERIFICADAS",campaign:null,items:[]},
-    {id:"st2",type:"stores",label:"Featured Stores",active:true,bg:"transparent",title:"Tiendas Destacadas",sub:"",cta:"",badge:"",campaign:null,items:["TechStore MX","Moda Élite","GadgetWorld","SportZone","FoodHub","BeautyBox"]},
-    {id:"st3",type:"cta",label:"CTA Vendedor",active:true,bg:"transparent",title:"¿Quieres vender aquí?",sub:"Únete a más de 2,800 negocios exitosos",cta:"Crear mi tienda",badge:"",campaign:null,items:[]},
-  ],
-  categories:[
-    {id:"ca1",type:"hero",label:"Hero Categorías",active:true,bg:"linear-gradient(135deg,#0d1526,#7c3aed)",title:"◎ Explora todo",sub:"Encuentra exactamente lo que buscas",cta:"Explorar",badge:"",campaign:null,items:[]},
-    {id:"ca2",type:"categories",label:"Todas las Categorías",active:true,bg:"transparent",title:"Todas las Categorías",sub:"",cta:"",badge:"",campaign:null,items:[{icon:"💻",name:"Tecnología"},{icon:"👗",name:"Moda"},{icon:"🏠",name:"Hogar"},{icon:"⚽",name:"Deportes"},{icon:"💄",name:"Belleza"},{icon:"🍕",name:"Alimentos"},{icon:"🚗",name:"Autos"},{icon:"📚",name:"Libros"},{icon:"🎮",name:"Gaming"},{icon:"🌱",name:"Jardín"}]},
-  ],
-  campaigns:[
-    {id:"cmp1",type:"hero",label:"Banner Campaña",active:true,bg:"linear-gradient(135deg,#f05a5a,#f5a623)",title:"🎯 Black Friday 2026",sub:"Las mejores ofertas del año",cta:"Ver todas las ofertas",badge:"BLACK FRIDAY",campaign:"Black Friday",items:[]},
-    {id:"cmp2",type:"promo",label:"Promo Secundaria",active:true,bg:"linear-gradient(135deg,#4f72ff,#7c3aed)",title:"🛍️ Cyber Monday",sub:"Solo por 24 horas",cta:"Ir ahora",badge:"24H",campaign:"Black Friday",items:[]},
-  ],
-  banners:[
-    {id:"bn1",type:"hero",label:"Banner Top",active:true,bg:"linear-gradient(135deg,#0d1526,#4f72ff)",title:"📣 Nuevo en OmniMarket",sub:"Descubre las últimas novedades",cta:"Explorar",badge:"NUEVO",campaign:null,items:[]},
-    {id:"bn2",type:"slider",label:"Slider Banners",active:true,bg:"linear-gradient(135deg,#1a1a2e,#4f72ff)",title:"Banners Rotativos",sub:"",cta:"",badge:"",campaign:null,items:[]},
-  ],
-  promotions:[
-    {id:"pr1",type:"promo",label:"Promo Principal",active:true,bg:"linear-gradient(135deg,#f05a5a,#f5a623)",title:"🔥 Oferta del día",sub:"Hasta 50% OFF en productos seleccionados",cta:"Ver oferta",badge:"HOY",campaign:null,items:[]},
-    {id:"pr2",type:"promo",label:"Promo MSI",active:false,bg:"linear-gradient(135deg,#4f72ff,#22d3a0)",title:"💳 Paga en 12 MSI",sub:"Sin intereses con tarjetas participantes",cta:"Ver condiciones",badge:"MSI",campaign:null,items:[]},
-    {id:"pr3",type:"cta",label:"CTA Registro",active:true,bg:"transparent",title:"🎁 Regístrate y recibe $100",sub:"Solo para nuevos usuarios",cta:"Registrarme gratis",badge:"NUEVO",campaign:null,items:[]},
-  ],
-  nav2:[{id:"nv1",type:"text",label:"Menú Principal",active:true,bg:"transparent",title:"Navegación Global",sub:"Gestiona los ítems del menú principal",cta:"",badge:"",campaign:null,items:["Homepage","Marketplace","Delivery","Tiendas","Categorías","Ofertas","Mi cuenta"]}],
-  footer2:[{id:"ft1",type:"footer",label:"Footer Global",active:true,bg:"#0a0c14",title:"OmniMarket",sub:"© 2026 · La plataforma que conecta compradores y vendedores",cta:"",badge:"",campaign:null,items:["Términos","Privacidad","Soporte","Blog","API","Sobre nosotros"]}],
-  widgets:[
-    {id:"wg1",type:"cta",label:"Widget App",active:true,bg:"linear-gradient(135deg,#0d1526,#4f72ff)",title:"📱 Descarga la App",sub:"Disponible en iOS y Android",cta:"Descargar gratis",badge:"APP",campaign:null,items:[]},
-    {id:"wg2",type:"text",label:"Newsletter",active:true,bg:"transparent",title:"📧 Suscríbete",sub:"Recibe las mejores ofertas en tu correo",cta:"Suscribirme",badge:"",campaign:null,items:[]},
-  ],
-};
-const VERSIONS=[
-  {id:"v4",label:"v4 — Actual",time:"hace 2m",author:"Rafael A.",current:true},
-  {id:"v3",label:"v3 — Pre-Flash Sale",time:"hace 3h",author:"Rafael A.",current:false},
-  {id:"v2",label:"v2 — Navidad",time:"hace 1d",author:"Sofía V.",current:false},
-  {id:"v1",label:"v1 — Base inicial",time:"hace 5d",author:"Rafael A.",current:false},
-];
 
 const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
@@ -711,1060 +608,102 @@ const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;4
 `;
 
 /* ── Helpers generales ─────────────────────────────────────────────────────── */
-const Tip=({active,payload,label})=>{
-  if(!active||!payload?.length)return null;
-  const val=payload[0].value;
-  const fmt=typeof val==='number'&&val>999?val.toLocaleString():val;
-  return <div style={{background:'var(--bg1)',border:'1px solid var(--bd2)',borderRadius:9,padding:'9px 13px',fontFamily:'Sora',fontSize:11,boxShadow:'0 8px 26px rgba(0,0,0,.3)',transform:'translateY(-62px)',pointerEvents:'none'}}>
-    <div style={{color:'var(--tx2)',marginBottom:4,fontWeight:600,letterSpacing:.2}}>{label}</div>
-    <div style={{display:'flex',alignItems:'center',gap:7}}>
-      <span style={{width:8,height:8,borderRadius:'50%',background:payload[0].color||'var(--ac)',flexShrink:0}}/>
-      <span style={{fontWeight:800,color:'var(--tx)',fontSize:15}}>{fmt}</span>
-    </div>
-  </div>;
-};
-const Tog=({on,ch})=><div className={`tog ${on?'ton':'tof'}`} onClick={()=>ch&&ch(!on)}><div className="togth"/></div>;
-const TBar=({v})=>{
-  const c=v>=80?'#22d3a0':v>=60?'#f5a623':'#f05a5a';
-  return <span style={{display:'flex',alignItems:'center',gap:5}}>
-    <span className="tbar"><span className="tfill" style={{width:`${v}%`,background:c}}/></span>
-    <span style={{fontSize:10,fontWeight:700,color:c,fontFamily:'JetBrains Mono'}}>{v}</span>
-  </span>;
-};
-const Risk=({r})=>r==='low'?<span className="bdg bg">LOW</span>:r==='medium'?<span className="bdg by">MED</span>:<span className="bdg br">HIGH</span>;
-const SB=({s})=>{
-  const m={active:['bg','Activo'],suspended:['br','Suspendido'],processing:['bb','Procesando'],delivered:['bg','Entregado'],disputed:['br','Disputa'],cancelled:['bx','Cancelado'],review:['by','Revisión'],open:['by','Abierto'],escalated:['br','Escalado'],en_route:['bb','En ruta'],pickup:['bp','Recogiendo'],healthy:['bg','OK'],degraded:['by','Degradado']};
-  const[c,l]=m[s]||['bx',s];
-  return <span className={`bdg ${c}`}>{l}</span>;
-};
-
-/* ── Previews de bloques (RICH) ────────────────────────────────────────────── */
-function BlockPreview({blk,vp}){
-  const mob=vp==='mobile';
-  const t={};
-  t.hero=()=>(
-    <div style={{background:blk.bg||'linear-gradient(135deg,#0d1526,#1a2a5e)',padding:mob?'28px 16px':'40px 28px',position:'relative',overflow:'hidden',minHeight:mob?140:180}}>
-      {blk.image
-        ? <><div style={{position:'absolute',inset:0,backgroundImage:`url(${blk.image})`,backgroundSize:'cover',backgroundPosition:'center'}}/><div style={{position:'absolute',inset:0,background:'linear-gradient(180deg,rgba(0,0,0,.32),rgba(0,0,0,.68))'}}/></>
-        : <><div style={{position:'absolute',inset:0,opacity:.05,backgroundImage:'radial-gradient(circle,#fff 1px,transparent 1px)',backgroundSize:'22px 22px'}}/><div style={{position:'absolute',top:-40,right:-40,width:180,height:180,borderRadius:'50%',background:'rgba(79,114,255,.08)',filter:'blur(40px)'}}/></>}
-      <div style={{position:'relative'}}>
-        {blk.badge&&<div style={{display:'inline-flex',alignItems:'center',fontSize:9,fontWeight:800,letterSpacing:1.5,color:'#fff',background:'rgba(255,255,255,.1)',padding:'3px 9px',borderRadius:20,marginBottom:10,border:'1px solid rgba(255,255,255,.15)'}}>{blk.badge}</div>}
-        <div style={{fontSize:mob?16:22,fontWeight:800,color:'#fff',marginBottom:8,lineHeight:1.2}}>{blk.title||'Banner Hero'}</div>
-        <div style={{fontSize:11,color:'rgba(255,255,255,.6)',marginBottom:16,maxWidth:400}}>{blk.sub||'Subtítulo del banner'}</div>
-        <div style={{display:'flex',gap:8}}>
-          <span style={{background:'#fff',color:'#0d1526',fontSize:10,fontWeight:700,padding:'6px 16px',borderRadius:20,cursor:'pointer'}}>{blk.cta||'Ver más'}</span>
-          {blk.cta2&&<span style={{border:'1px solid rgba(255,255,255,.3)',color:'rgba(255,255,255,.8)',fontSize:10,fontWeight:600,padding:'6px 14px',borderRadius:20,cursor:'pointer'}}>{blk.cta2}</span>}
-        </div>
-      </div>
-    </div>
-  );
-  const getStr=x=>typeof x==='string'?x:x?.name||'';
-  const getIcon=x=>typeof x==='string'?'📦':x?.icon||'📦';
-  const isImgIcon=icon=>typeof icon==='string'&&(icon.startsWith('data:')||icon.startsWith('http')||icon.startsWith('/'));
-  const renderIcon=(x,size=22)=>{
-    const icon=getIcon(x);
-    return isImgIcon(icon)
-      ?<img src={icon} style={{width:size,height:size,borderRadius:4,objectFit:'cover',display:'block'}} alt=""/>
-      :<span style={{fontSize:size}}>{icon}</span>;
+/* ── EDITOR VISUAL REAL — banners de la tienda, guardado GLOBAL (config) ────── */
+// Edita adminCfg.blocks → set_platform_config (Fase 1, con debounce) → realtime:
+// lo que guardes aparece/cambia en la tienda de TODOS los teléfonos al instante.
+// Solo ofrece las páginas que de verdad se renderizan: Marketplace y Delivery.
+function EditorVisualReal({ toast, data={} }){
+  const cfg = data.cfg || {};
+  const [tab, setTab] = useState('marketplace');
+  const [mk, setMk] = useState(() => ((cfg.blocks?.marketplace?.length ? cfg.blocks.marketplace : DEFAULT_BLOCKS.marketplace)).map(b => ({ ...b })));
+  const [dl, setDl] = useState(() => ({ ...DEFAULT_BLOCKS.delivery, ...(cfg.blocks?.delivery || {}) }));
+  const [dirty, setDirty] = useState(false);
+  const setBlk = (i, k, v) => { setMk(a => a.map((b, j) => j === i ? { ...b, [k]: v } : b)); setDirty(true); };
+  const setDel = (k, v) => { setDl(d => ({ ...d, [k]: v })); setDirty(true); };
+  const addBanner = () => { setMk(a => [...a, { id: 'mk_' + Date.now(), active: false, badge: '', title: 'Nuevo banner', sub: '', cta: '', target: 'busqueda', preset: 'oro' }]); setDirty(true); };
+  const removeBanner = (i) => { setMk(a => a.filter((_, j) => j !== i)); setDirty(true); };
+  const save = () => {
+    if (!data.onCfg) { toast('⚠️ No se pudo guardar'); return; }
+    data.onCfg({ blocks: { marketplace: mk, delivery: dl } });
+    setDirty(false);
+    toast('✓ Guardado — visible para todos al instante');
   };
-  const getPrice=x=>typeof x==='object'?x?.price:null;
-  t.categories=()=>{const items=blk.items||[];return(
-    <div style={{padding:'18px 16px',background:'var(--bg1)'}}>
-      <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',marginBottom:12}}>{blk.title||'Categorías'}</div>
-      <div style={{display:'grid',gridTemplateColumns:`repeat(${mob?3:Math.min(6,items.length||6)},1fr)`,gap:7}}>
-        {items.slice(0,mob?18:24).map((x,i)=>(
-          <div key={i} style={{background:'var(--bg2)',borderRadius:10,padding:'10px 4px',display:'flex',flexDirection:'column',alignItems:'center',gap:5,border:'1px solid var(--bd)',cursor:'pointer'}}>
-            {renderIcon(x,22)}
-            <span style={{fontSize:9,fontWeight:600,color:'var(--tx3)',textAlign:'center',lineHeight:1.2}}>{getStr(x)}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );};
-  t.stores=()=>(
-    <div style={{padding:'18px 16px',background:'var(--bg)'}}>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:700,color:'var(--tx)'}}>{blk.title||'Tiendas'}</div>
-        <span style={{fontSize:10,color:'var(--ac2)',cursor:'pointer'}}>Ver todas →</span>
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:`repeat(${mob?2:4},1fr)`,gap:8}}>
-        {(blk.items||[]).slice(0,4).map((x,i)=>(
-          <div key={i} style={{background:'var(--bg2)',borderRadius:10,padding:'12px 8px',border:'1px solid var(--bd)',textAlign:'center',cursor:'pointer'}}>
-            <div style={{width:36,height:36,borderRadius:8,margin:'0 auto 8px',background:['linear-gradient(135deg,#4f72ff,#7c3aed)','linear-gradient(135deg,#22d3a0,#4f72ff)','linear-gradient(135deg,#f5a623,#f05a5a)','linear-gradient(135deg,#a78bfa,#4f72ff)'][i%4],display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:800,color:'#fff'}}>{x[0]}</div>
-            <div style={{fontSize:10,fontWeight:600,color:'var(--tx)',marginBottom:2}}>{x}</div>
-            <div style={{fontSize:9,color:'#f5a623'}}>★★★★★</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-  t.trending=()=>{const items=blk.items||[];return(
-    <div style={{padding:'18px 16px',background:'var(--bg1)'}}>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:700,color:'var(--tx)'}}>{blk.title||'Tendencia'}</div>
-        <span className="bdg bb" style={{fontSize:8}}>TRENDING</span>
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:`repeat(${mob?2:Math.min(4,items.length||4)},1fr)`,gap:8}}>
-        {items.slice(0,4).map((x,i)=>(
-          <div key={i} style={{background:'var(--bg2)',borderRadius:10,overflow:'hidden',border:'1px solid var(--bd)',cursor:'pointer'}}>
-            <div style={{height:56,background:['linear-gradient(135deg,#1a1a2e,#16213e)','linear-gradient(135deg,#0f3460,#533483)','linear-gradient(135deg,#1a1a2e,#4f72ff)','linear-gradient(135deg,#0d1117,#1a1a2e)'][i%4],display:'flex',alignItems:'center',justifyContent:'center'}}>{renderIcon(x,28)}</div>
-            <div style={{padding:'8px 8px'}}>
-              <div style={{fontSize:9,fontWeight:600,color:'var(--tx2)',marginBottom:3}}>{getStr(x)}</div>
-              {getPrice(x)&&<div style={{fontSize:12,fontWeight:800,color:'var(--ac2)'}}>{getPrice(x)}</div>}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );};
-  t.promo=()=>(
-    <div style={{background:blk.image?'#000':(blk.bg||'linear-gradient(135deg,#f05a5a,#f5a623)'),padding:'24px 20px',textAlign:'center',position:'relative',overflow:'hidden',minHeight:100}}>
-      {blk.image
-        ? <><div style={{position:'absolute',inset:0,backgroundImage:`url(${blk.image})`,backgroundSize:'cover',backgroundPosition:'center'}}/><div style={{position:'absolute',inset:0,background:'rgba(0,0,0,.45)'}}/></>
-        : <div style={{position:'absolute',inset:0,opacity:.06,background:'radial-gradient(circle,#fff 1px,transparent 1px)',backgroundSize:'18px 18px'}}/>}
-      <div style={{position:'relative'}}>
-        {blk.badge&&<div style={{fontSize:9,fontWeight:800,letterSpacing:2,color:'rgba(255,255,255,.85)',marginBottom:6,textTransform:'uppercase'}}>{blk.badge}</div>}
-        <div style={{fontSize:mob?16:20,fontWeight:800,color:'#fff',marginBottom:5}}>{blk.title||'Promoción'}</div>
-        <div style={{fontSize:11,color:'rgba(255,255,255,.8)',marginBottom:12}}>{blk.sub||'Subtítulo'}</div>
-        <div style={{display:'flex',gap:8,justifyContent:'center',flexWrap:'wrap'}}>
-          <span style={{background:'#fff',color:'#c0392b',fontSize:10,fontWeight:800,padding:'7px 18px',borderRadius:20,cursor:'pointer'}}>{blk.cta||'Ver más'}</span>
-          {blk.cta2&&<span style={{background:'rgba(255,255,255,.18)',color:'#fff',border:'1px solid rgba(255,255,255,.4)',fontSize:10,fontWeight:700,padding:'7px 16px',borderRadius:20,cursor:'pointer'}}>{blk.cta2}</span>}
-        </div>
-      </div>
-    </div>
-  );
-  t.delivery=()=>(
-    <div style={{background:blk.image?'#000':(blk.bg||'linear-gradient(135deg,#0f2027,#203a43)'),padding:'22px 20px',position:'relative',overflow:'hidden',minHeight:100}}>
-      {blk.image&&<><div style={{position:'absolute',inset:0,backgroundImage:`url(${blk.image})`,backgroundSize:'cover',backgroundPosition:'center'}}/><div style={{position:'absolute',inset:0,background:'rgba(0,0,0,.5)'}}/></>}
-      <div style={{position:'relative',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
-        <div>
-          {blk.badge&&<span style={{fontSize:9,fontWeight:800,color:'#22d3a0',background:'rgba(34,211,160,.1)',padding:'3px 8px',borderRadius:20,border:'1px solid rgba(34,211,160,.2)',display:'inline-block',marginBottom:7}}>{blk.badge}</span>}
-          <div style={{fontSize:mob?14:18,fontWeight:800,color:'#fff',marginBottom:6}}>{blk.title||'Delivery'}</div>
-          <div style={{fontSize:11,color:'rgba(255,255,255,.6)',marginBottom:10}}>{blk.sub||'Entrega express'}</div>
-          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-            <span style={{background:'var(--gn)',color:'#0a0c14',fontSize:10,fontWeight:700,padding:'6px 14px',borderRadius:20,cursor:'pointer'}}>{blk.cta||'Pedir'}</span>
-            {blk.cta2&&<span style={{background:'rgba(255,255,255,.16)',color:'#fff',border:'1px solid rgba(255,255,255,.35)',fontSize:10,fontWeight:700,padding:'6px 14px',borderRadius:20,cursor:'pointer'}}>{blk.cta2}</span>}
-          </div>
-        </div>
-        <div style={{fontSize:48,flexShrink:0,filter:'drop-shadow(0 4px 12px rgba(34,211,160,.3))'}}>🛵</div>
-      </div>
-    </div>
-  );
-  t.carousel=()=>(
-    <div style={{padding:'16px',background:'var(--bg)'}}>
-      <div style={{fontSize:11,fontWeight:700,color:'var(--tx)',marginBottom:10}}>{blk.title||'Marcas'}</div>
-      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-        {(blk.items||[]).map((x,i)=>(
-          <div key={i} style={{background:'var(--bg2)',borderRadius:8,padding:'7px 14px',border:'1px solid var(--bd)',cursor:'pointer',transition:'all .15s'}}>
-            <span style={{fontSize:10,fontWeight:600,color:'var(--tx2)'}}>{x}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-  t.footer=()=>(
-    <div style={{background:blk.bg||'#0a0c14',padding:'18px 16px',borderTop:'1px solid rgba(255,255,255,.06)'}}>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
-        <div>
-          <div style={{fontSize:13,fontWeight:800,color:'var(--tx)',marginBottom:3}}>{blk.title||'OmniMarket'}</div>
-          <div style={{fontSize:9,color:'var(--tx3)'}}>{blk.sub||'© 2026'}</div>
-        </div>
-        <div style={{display:'flex',gap:12}}>
-          {['Términos','Privacidad','Soporte'].map(l=><span key={l} style={{fontSize:10,color:'var(--tx3)',cursor:'pointer'}}>{l}</span>)}
-        </div>
-      </div>
-    </div>
-  );
-  t.slider=()=>(
-    <div style={{background:'linear-gradient(135deg,#0d1526,#1a3a5e)',padding:'28px 20px',position:'relative',overflow:'hidden',minHeight:120}}>
-      <div style={{position:'absolute',inset:0,opacity:.04,backgroundImage:'linear-gradient(var(--ac) 1px,transparent 1px),linear-gradient(90deg,var(--ac) 1px,transparent 1px)',backgroundSize:'30px 30px'}}/>
-      <div style={{fontSize:11,fontWeight:700,color:'rgba(255,255,255,.5)',marginBottom:8,letterSpacing:1}}>SLIDE 1 / 3</div>
-      <div style={{fontSize:mob?15:20,fontWeight:800,color:'#fff',marginBottom:6}}>Colección Primavera 2026</div>
-      <div style={{fontSize:11,color:'rgba(255,255,255,.6)',marginBottom:14}}>Descubre las últimas tendencias</div>
-      <div style={{display:'flex',gap:10,alignItems:'center'}}>
-        <span style={{background:'var(--ac)',color:'#fff',fontSize:10,fontWeight:700,padding:'6px 14px',borderRadius:20}}>Explorar</span>
-        <div style={{display:'flex',gap:5}}>{[0,1,2].map(i=><div key={i} style={{width:i===0?18:6,height:6,borderRadius:3,background:i===0?'#fff':'rgba(255,255,255,.3)'}}/>)}</div>
-      </div>
-    </div>
-  );
-  t.video=()=>(
-    <div style={{background:'#0a0c14',padding:'0',position:'relative',overflow:'hidden',minHeight:120,display:'flex',alignItems:'center',justifyContent:'center'}}>
-      <div style={{position:'absolute',inset:0,background:'linear-gradient(135deg,#1a1a2e,#0d0f18)',opacity:.95}}/>
-      <div style={{position:'relative',textAlign:'center',zIndex:2}}>
-        <div style={{width:52,height:52,borderRadius:'50%',background:'rgba(79,114,255,.2)',border:'2px solid rgba(79,114,255,.5)',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 10px',cursor:'pointer',fontSize:18}}>▶</div>
-        <div style={{fontSize:11,color:'rgba(255,255,255,.6)'}}>{blk.title||'Video Destacado'}</div>
-      </div>
-    </div>
-  );
-  t.cta=()=>(
-    <div style={{padding:'28px 24px',background:'linear-gradient(135deg,var(--bg2),var(--bg3))',textAlign:'center',border:'1px solid var(--bd)',borderLeft:'none',borderRight:'none'}}>
-      <div style={{fontSize:mob?14:17,fontWeight:700,color:'var(--tx)',marginBottom:6}}>{blk.title||'¿Listo para comenzar?'}</div>
-      <div style={{fontSize:11,color:'var(--tx3)',marginBottom:14}}>{blk.sub||'Únete a miles de usuarios'}</div>
-      <div style={{display:'flex',gap:9,justifyContent:'center'}}>
-        <span style={{background:'var(--ac)',color:'#fff',fontSize:11,fontWeight:700,padding:'8px 20px',borderRadius:20,cursor:'pointer'}}>{blk.cta||'Comenzar gratis'}</span>
-        {blk.cta2&&<span style={{border:'1px solid var(--bd2)',color:'var(--tx2)',fontSize:11,fontWeight:600,padding:'8px 16px',borderRadius:20,cursor:'pointer'}}>{blk.cta2}</span>}
-      </div>
-    </div>
-  );
-  t.text=()=>(
-    <div style={{padding:'22px 24px',background:'var(--bg1)'}}>
-      <div style={{fontSize:mob?13:16,fontWeight:700,color:'var(--tx)',marginBottom:8}}>{blk.title||'Título del artículo'}</div>
-      <div style={{fontSize:11,color:'var(--tx2)',lineHeight:1.7,marginBottom:12}}>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Descubre cómo OmniMarket está revolucionando el comercio digital en México con tecnología de punta...</div>
-      <span style={{fontSize:10,color:'var(--ac2)',cursor:'pointer',fontWeight:600}}>Leer más →</span>
-    </div>
-  );
-  t.events=()=>(
-    <div style={{padding:'18px 16px',background:'var(--bg)'}}>
-      <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',marginBottom:12}}>{blk.title||'Próximos Eventos'}</div>
-      <div style={{display:'flex',flexDirection:'column',gap:8}}>
-        {[{d:'15 JUN',n:'Flash Sale 24h',c:'var(--rd)'},{d:'21 JUN',n:'Día del Padre',c:'var(--yw)'},{d:'30 JUN',n:'Rebajas Verano',c:'var(--ac2)'}].map((e,i)=>(
-          <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:'var(--bg2)',borderRadius:8,border:'1px solid var(--bd)',cursor:'pointer'}}>
-            <div style={{width:36,flexShrink:0,textAlign:'center'}}>
-              <div style={{fontSize:14,fontWeight:800,color:e.c,lineHeight:1}}>{e.d.split(' ')[0]}</div>
-              <div style={{fontSize:8,color:'var(--tx3)',fontWeight:600}}>{e.d.split(' ')[1]}</div>
-            </div>
-            <div style={{width:'1px',height:28,background:'var(--bd2)'}}/>
-            <div style={{fontSize:11,fontWeight:600,color:'var(--tx)'}}>{e.n}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-  t.productzone=()=>{
-    const n=blk.count||20;
-    const lbl=blk.zlabel||'productos';
-    const cards=mob?4:6;
-    return(
-      <div style={{padding:'16px',background:'var(--bg1)',borderTop:'2px dashed var(--bd2)',borderBottom:'2px dashed var(--bd2)'}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
-          <span style={{fontSize:9,fontWeight:800,letterSpacing:1,color:'var(--ac2)',background:'var(--ag)',padding:'4px 10px',borderRadius:20}}>▦ ZONA DE {lbl.toUpperCase()}</span>
-          <span style={{fontSize:10,color:'var(--tx3)'}}>≈ {n} {lbl} aquí</span>
-        </div>
-        <div style={{display:'grid',gridTemplateColumns:`repeat(${mob?2:3},1fr)`,gap:8}}>
-          {Array.from({length:cards}).map((_,i)=>(
-            <div key={i} style={{background:'var(--bg2)',border:'1px dashed var(--bd2)',borderRadius:10,overflow:'hidden'}}>
-              <div style={{height:mob?66:82,background:'var(--bg3)'}}/>
-              <div style={{padding:8}}>
-                <div style={{height:7,width:'80%',background:'var(--bd2)',borderRadius:4,marginBottom:5}}/>
-                <div style={{height:7,width:'50%',background:'var(--bd)',borderRadius:4}}/>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div style={{textAlign:'center',fontSize:9,color:'var(--tx3)',marginTop:10,lineHeight:1.4}}>{lbl==='subastas'?'Las subastas reales salen aquí':'Los productos reales salen aquí'} en la app · esto es solo una guía para ubicar tus bloques en el flujo</div>
-      </div>
-    );
-  };
-  t.syszone=()=>(
-    <div style={{padding:'13px 14px',background:'var(--bg2)',borderLeft:'3px solid var(--ac)',display:'flex',alignItems:'center',gap:10}}>
-      <span style={{fontSize:16,flexShrink:0,opacity:.85}}>{blk.icon||'▦'}</span>
-      <div style={{flex:1,minWidth:0}}>
-        <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',overflow:'hidden',textOverflow:'ellipsis'}}>{blk.title||'Sección de la pantalla'}</div>
-        <div style={{fontSize:9,color:'var(--tx3)',marginTop:2}}>Parte fija de la app · guía de posición, aquí no se edita</div>
-      </div>
-      <span style={{fontSize:8,fontWeight:800,letterSpacing:.5,color:'var(--tx3)',background:'var(--bg3)',padding:'3px 7px',borderRadius:20,flexShrink:0}}>SISTEMA</span>
-    </div>
-  );
-  const render=t[blk.type];
-  if(render)return render();
-  return(
-    <div style={{padding:'16px',background:'var(--bg2)',display:'flex',alignItems:'center',gap:10,minHeight:64}}>
-      <div style={{width:6,height:32,background:'var(--ac)',borderRadius:3}}/>
+  const inp = { width:'100%', boxSizing:'border-box', background:'var(--bg2)', border:'1px solid var(--bd2)', borderRadius:8, padding:'9px 11px', color:'var(--tx)', fontSize:13, outline:'none' };
+  const lbl = { fontSize:10.5, fontWeight:700, color:'var(--tx2)', margin:'10px 0 4px' };
+  return <>
+    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
       <div>
-        <div style={{fontSize:12,fontWeight:600,color:'var(--tx)'}}>{blk.label}</div>
-        <div style={{fontSize:9,color:'var(--tx3)',marginTop:2}}>{blk.type}</div>
+        <div className="stit">Editor Visual</div>
+        <div className="ssub">Banners reales de la tienda · se guardan en el backend y llegan EN VIVO a todos</div>
       </div>
+      <button className={`btn ${dirty?'btp':'btg'}`} onClick={save} style={{fontWeight:800,padding:'10px 18px',flexShrink:0}}>{dirty?'💾 Guardar cambios':'✓ Guardado'}</button>
     </div>
-  );
-}
-
-/* ── EDITOR VISUAL ─────────────────────────────────────────────────────────── */
-/* ── Editor de categorías (Búsqueda) — limpio, reordenable, enlazado a la plataforma ── */
-function CategoryManager(){
-  const {cats, subcats, addCat, removeCat, renameCat, addSub, removeSub, renameSub, reorderCats} = useCatalog();
-  const [sel,setSel]=useState(null);
-  const [newCat,setNewCat]=useState('');
-  const [newColor,setNewColor]=useState('#A78BFA');
-  const [newSub,setNewSub]=useState('');
-  const [edit,setEdit]=useState(null);       // {kind:'cat'|'sub', id, sub, value}
-  const [confirm,setConfirm]=useState(null);  // {kind, id, sub, name}
-  const dragFrom=useRef(null);
-  const [dragOver,setDragOver]=useState(null);
-  const SW=['#A78BFA','#60A5FA','#E879F9','#4ADE80','#FBBF24','#F87171','#F472B6','#38BDF8','#2DD4BF','#FB7185','#22C55E','#F59E0B','#8B5CF6','#FB923C','#34D399','#94A3B8'];
-  const inpStyle={background:'var(--bg)',border:'1px solid var(--bd)',borderRadius:8,padding:'9px 11px',color:'var(--tx)',fontSize:12.5,outline:'none',minWidth:0};
-  const iconBtn={background:'none',border:'none',cursor:'pointer',fontSize:13,color:'var(--tx2)',flexShrink:0,padding:'0 2px'};
-  const moveBtn={background:'none',border:'none',cursor:'pointer',color:'var(--tx2)',fontSize:9,lineHeight:1,padding:0};
-  const startEdit=(kind,id,sub)=>setEdit({kind,id,sub,value:kind==='cat'?(cats.find(c=>c.id===id)?.name||''):sub});
-  const commitEdit=()=>{ if(!edit)return; const v=(edit.value||'').trim(); if(v){ if(edit.kind==='cat')renameCat(edit.id,v); else renameSub(edit.id,edit.sub,v);} setEdit(null); };
-  return (
-    <div style={{maxWidth:440,margin:'0 auto',width:'100%'}}>
-      <div style={{fontSize:13,fontWeight:800,color:'var(--tx)',marginBottom:5}}>Categorías de la plataforma</div>
-      <div style={{fontSize:11,color:'var(--tx2)',marginBottom:14,lineHeight:1.5}}>Arrastra (⠿) para ordenar. Toca una para editar sus subcategorías. Todo se refleja en la tienda, la búsqueda y al publicar.</div>
-      <div style={{background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:11,padding:12,marginBottom:14}}>
-        <div style={{display:'flex',gap:8,marginBottom:9}}>
-          <input value={newCat} onChange={e=>setNewCat(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&newCat.trim()){addCat(newCat.trim(),newColor);setNewCat('');}}} placeholder="Nueva categoría" style={{...inpStyle,flex:1}}/>
-          <button className="btn btp sm" onClick={()=>{if(newCat.trim()){addCat(newCat.trim(),newColor);setNewCat('');}}}>Agregar</button>
-        </div>
-        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>{SW.map(c=><div key={c} onClick={()=>setNewColor(c)} style={{width:20,height:20,borderRadius:'50%',background:c,cursor:'pointer',border:newColor===c?'2px solid var(--tx)':'2px solid transparent'}}/>)}</div>
-      </div>
-      <div style={{display:'flex',flexDirection:'column',gap:8}}>
-        {cats.map((c,idx)=>{
-          const isSel=sel===c.id, subs=subcats[c.id]||[];
-          const isEditingCat=edit&&edit.kind==='cat'&&edit.id===c.id;
-          return (
-            <div key={c.id} draggable={!edit}
-              onDragStart={()=>{dragFrom.current=idx;}}
-              onDragOver={e=>{e.preventDefault();setDragOver(idx);}}
-              onDrop={()=>{ if(dragFrom.current!=null)reorderCats(dragFrom.current,idx); dragFrom.current=null; setDragOver(null); }}
-              onDragEnd={()=>{dragFrom.current=null;setDragOver(null);}}
-              style={{background:'var(--bg2)',border:`1px solid ${dragOver===idx?'var(--ac)':'var(--bd)'}`,borderRadius:11,overflow:'hidden',transition:'border .15s'}}>
-              <div style={{display:'flex',alignItems:'center',gap:9,padding:'10px 12px'}}>
-                <span style={{cursor:'grab',color:'var(--tx3)',fontSize:15,flexShrink:0,lineHeight:1}} title="Arrastrar para ordenar">⠿</span>
-                <div style={{width:13,height:13,borderRadius:'50%',background:c.color,flexShrink:0}}/>
-                {isEditingCat
-                  ? <input autoFocus value={edit.value} onChange={e=>setEdit({...edit,value:e.target.value})} onKeyDown={e=>{if(e.key==='Enter')commitEdit();if(e.key==='Escape')setEdit(null);}} onBlur={commitEdit} style={{...inpStyle,flex:1}}/>
-                  : <span onClick={()=>setSel(isSel?null:c.id)} style={{flex:1,fontSize:13,fontWeight:600,color:'var(--tx)',cursor:'pointer',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',minWidth:0}}>{c.name} <span style={{fontSize:10,color:'var(--tx3)',fontWeight:500}}>· {subs.length} sub</span></span>}
-                <button onClick={()=>startEdit('cat',c.id)} title="Renombrar" style={iconBtn}>✎</button>
-                <button onClick={()=>setConfirm({kind:'cat',id:c.id,name:c.name})} title="Eliminar" style={{...iconBtn,color:'var(--rd)'}}>✕</button>
-                <span onClick={()=>setSel(isSel?null:c.id)} style={{cursor:'pointer',color:'var(--tx3)',fontSize:13,flexShrink:0,transform:isSel?'rotate(90deg)':'none',transition:'transform .2s'}}>›</span>
-              </div>
-              {isSel&&(
-                <div style={{padding:'0 12px 12px',borderTop:'1px solid var(--bd)'}}>
-                  <div style={{fontSize:9,color:'var(--tx3)',fontWeight:700,letterSpacing:.3,margin:'10px 0 7px'}}>SUBCATEGORÍAS</div>
-                  <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:8}}>
-                    {subs.length===0&&<span style={{fontSize:11,color:'var(--tx3)'}}>Ninguna todavía.</span>}
-                    {subs.map(s=>{
-                      const isEdS=edit&&edit.kind==='sub'&&edit.id===c.id&&edit.sub===s;
-                      return isEdS
-                        ? <input key={s} autoFocus value={edit.value} onChange={e=>setEdit({...edit,value:e.target.value})} onKeyDown={e=>{if(e.key==='Enter')commitEdit();if(e.key==='Escape')setEdit(null);}} onBlur={commitEdit} style={{...inpStyle,width:130,fontSize:11,padding:'5px 8px'}}/>
-                        : <span key={s} style={{display:'inline-flex',alignItems:'center',gap:6,background:'var(--bg3)',border:'1px solid var(--bd)',borderRadius:50,padding:'5px 10px',fontSize:11,color:'var(--tx2)'}}>
-                            {s}
-                            <span onClick={()=>startEdit('sub',c.id,s)} style={{cursor:'pointer',color:'var(--tx3)'}}>✎</span>
-                            <span onClick={()=>setConfirm({kind:'sub',id:c.id,sub:s,name:s})} style={{cursor:'pointer',color:'var(--rd)',fontWeight:800}}>×</span>
-                          </span>;
-                    })}
-                  </div>
-                  <div style={{display:'flex',gap:7}}>
-                    <input value={isSel?newSub:''} onChange={e=>setNewSub(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&newSub.trim()){addSub(c.id,newSub.trim());setNewSub('');}}} placeholder="+ subcategoría" style={{...inpStyle,flex:1,fontSize:11,padding:'7px 9px'}}/>
-                    <button className="btn btg sm" onClick={()=>{if(newSub.trim()){addSub(c.id,newSub.trim());setNewSub('');}}}>Añadir</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      {confirm&&(
-        <div onClick={()=>setConfirm(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:900,padding:20}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'var(--bg1)',border:'1px solid var(--bd2)',borderRadius:14,padding:20,maxWidth:320,width:'100%',boxShadow:'0 20px 60px rgba(0,0,0,.5)'}}>
-            <div style={{fontSize:14,fontWeight:800,color:'var(--tx)',marginBottom:8}}>¿Eliminar {confirm.kind==='cat'?'categoría':'subcategoría'}?</div>
-            <div style={{fontSize:12,color:'var(--tx2)',lineHeight:1.5,marginBottom:16}}>Vas a eliminar <b style={{color:'var(--tx)'}}>{confirm.name}</b>{confirm.kind==='cat'?' y todas sus subcategorías':''}. Esto se quita de toda la plataforma.</div>
-            <div style={{display:'flex',gap:9}}>
-              <button className="btn btg" style={{flex:1,justifyContent:'center'}} onClick={()=>setConfirm(null)}>Cancelar</button>
-              <button className="btn" style={{flex:1,justifyContent:'center',background:'var(--rd)',color:'#fff'}} onClick={()=>{ if(confirm.kind==='cat'){removeCat(confirm.id); if(sel===confirm.id)setSel(null);} else removeSub(confirm.id,confirm.sub); setConfirm(null); }}>Eliminar</button>
-            </div>
-          </div>
-        </div>
-      )}
+    <div className="tabs" style={{maxWidth:300}}>
+      {[['marketplace','🛒 Marketplace'],['delivery','🛵 Delivery']].map(([k,l])=><div key={k} className={`tab ${tab===k?'on':''}`} onClick={()=>setTab(k)}>{l}</div>)}
     </div>
-  );
-}
 
-/* Destinos a los que puede llevar un botón de un bloque (se conectarán a la navegación real) */
-const DESTINOS=[
-  {v:'',l:'Sin acción (no lleva a ningún lado)'},
-  {v:'inicio',l:'Inicio / Tienda'},
-  {v:'busqueda',l:'Búsqueda'},
-  {v:'delivery_local',l:'Delivery local'},
-  {v:'delivery_intl',l:'Envíos internacionales'},
-  {v:'subastas',l:'Subastas'},
-  {v:'ofertas',l:'Ver ofertas'},
-  {v:'mas_vendidos',l:'Más vendidos'},
-  {v:'nuevos',l:'Productos nuevos'},
-];
-
-function EditorVisual({toast}){
-  const[area,setArea]=useState('inicio');
-  const[pageBlocks,setPageBlocks]=useState(()=>{
-    const d={};
-    Object.keys(PAGE_DEFAULTS).forEach(k=>{d[k]=JSON.parse(JSON.stringify(PAGE_DEFAULTS[k]));});
-    try{const r=localStorage.getItem('retador_editor'); if(r){const saved=JSON.parse(r); Object.keys(saved).forEach(k=>{ if(saved[k]) d[k]=saved[k]; });}}catch{}
-    return d;
-  });
-  // Migración única: refresca pantallas a su nueva estructura (zonas/guías).
-  useEffect(()=>{
-    try{ if(localStorage.getItem('retador_editor_v6'))return;
-      setPageBlocks(p=>({...p,
-        inicio:JSON.parse(JSON.stringify(PAGE_DEFAULTS.inicio)),
-        busqueda:JSON.parse(JSON.stringify(PAGE_DEFAULTS.busqueda)),
-        delivery_local:JSON.parse(JSON.stringify(PAGE_DEFAULTS.delivery_local)),
-        delivery_intl:JSON.parse(JSON.stringify(PAGE_DEFAULTS.delivery_intl)),
-        subastas:JSON.parse(JSON.stringify(PAGE_DEFAULTS.subastas)),
-      }));
-      localStorage.setItem('retador_editor_v6','1');
-    }catch{}
-  },[]);
-  useEffect(()=>{ try{localStorage.setItem('retador_editor',JSON.stringify(pageBlocks));}catch{} },[pageBlocks]);
-  const[sel,setSel]=useState(null);
-  const[vp,setVp]=useState('mobile');
-  const[prevVp,setPrevVp]=useState('mobile');
-  const[modal,setModal]=useState(null);
-  const[dirty,setDirty]=useState(false);
-  const[saving,setSaving]=useState(false);
-  const[dIdx,setDIdx]=useState(null);
-  const[dOv,setDOv]=useState(null);
-  const[gCol,setGCol]=useState({primary:'#4f72ff',accent:'#22d3a0'});
-  const[showLeft,setShowLeft]=useState(true);
-  const[showRight,setShowRight]=useState(true);
-  const[showCats,setShowCats]=useState(false);
-  const[epick,setEpick]=useState(null);
-  const uploadRef=useRef(null);
-  const uploadTarget=useRef(null); // {id, idx}
-  const handleImageUpload=e=>{
-    const file=e.target.files?.[0];
-    if(!file||!uploadTarget.current)return;
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      const t=uploadTarget.current;
-      if(t.field!==undefined) updFieldDirect(t.id,t.field,ev.target.result);
-      else updItemDirect(t.id,t.idx,'icon',ev.target.result);
-      uploadTarget.current=null;
-    };
-    reader.readAsDataURL(file);
-    e.target.value='';
-  };
-  // undo/redo history per page
-  const histRef=useRef({});
-  const histIdxRef=useRef({});
-  const inHistRef=useRef(false);
-  const getHist=useCallback(a=>{
-    if(!histRef.current[a]){histRef.current[a]=[];histIdxRef.current[a]=-1;}
-    return histRef.current[a];
-  },[]);
-  const pushHist=useCallback((a,blks)=>{
-    if(inHistRef.current)return;
-    const h=getHist(a);
-    const idx=histIdxRef.current[a]??-1;
-    const t=h.slice(0,idx+1);
-    t.push(JSON.stringify(blks));
-    histRef.current[a]=t;
-    histIdxRef.current[a]=t.length-1;
-  },[getHist]);
-  useEffect(()=>{
-    const h=getHist(area);
-    if(h.length===0&&pageBlocks[area])pushHist(area,pageBlocks[area]);
-    setSel(null);
-  },[area]);
-  const canUndo=()=>(histIdxRef.current[area]??-1)>0;
-  const canRedo=()=>{const h=getHist(area);return(histIdxRef.current[area]??-1)<h.length-1;};
-  const undo=()=>{
-    const h=getHist(area);const idx=histIdxRef.current[area]??-1;
-    if(idx<=0)return;
-    const ni=idx-1;histIdxRef.current[area]=ni;
-    inHistRef.current=true;
-    setPageBlocks(p=>({...p,[area]:JSON.parse(h[ni])}));
-    inHistRef.current=false;setDirty(true);toast('↩ Deshecho');
-  };
-  const redo=()=>{
-    const h=getHist(area);const idx=histIdxRef.current[area]??-1;
-    if(idx>=h.length-1)return;
-    const ni=idx+1;histIdxRef.current[area]=ni;
-    inHistRef.current=true;
-    setPageBlocks(p=>({...p,[area]:JSON.parse(h[ni])}));
-    inHistRef.current=false;setDirty(true);toast('↪ Rehecho');
-  };
-
-  const blocks=pageBlocks[area]||[];
-  const selBlk=blocks.find(b=>b.id===sel);
-  const groups=ED_AREAS.reduce((a,x)=>{(a[x.group]=a[x.group]||[]).push(x);return a;},{});
-  const GRADS=[
-    'linear-gradient(135deg,#0d1526,#1a2a5e)',
-    'linear-gradient(135deg,#4f72ff,#7c3aed)',
-    'linear-gradient(135deg,#22d3a0,#4f72ff)',
-    'linear-gradient(135deg,#f05a5a,#f5a623)',
-    'linear-gradient(135deg,#f5a623,#22d3a0)',
-    'linear-gradient(135deg,#a78bfa,#4f72ff)',
-    'linear-gradient(135deg,#0f2027,#203a43)',
-    'transparent',
-  ];
-  const mutate=(a,nb)=>{
-    setPageBlocks(p=>{pushHist(a,nb);return{...p,[a]:nb};});
-    setDirty(true);
-  };
-  const upd=(id,k,v)=>mutate(area,blocks.map(b=>b.id===id?{...b,[k]:v}:b));
-  const togVis=id=>{mutate(area,blocks.map(b=>b.id===id?{...b,active:!b.active}:b));toast('Visibilidad actualizada');};
-  const delBlk=id=>{if(blocks.find(b=>b.id===id)?.type==='syszone')return;mutate(area,blocks.filter(b=>b.id!==id));if(sel===id)setSel(null);toast('Bloque eliminado');};
-  const dupBlk=id=>{const i=blocks.findIndex(b=>b.id===id);if(blocks[i]?.type==='syszone')return;const cl={...blocks[i],id:mkId(),label:blocks[i].label+' (copia)'};const nx=[...blocks];nx.splice(i+1,0,cl);mutate(area,nx);toast('Bloque duplicado');};
-  const addBlk=type=>{
-    const tpl=BLK_TYPES.find(x=>x.type===type);
-    const defItems={categories:[{icon:"💻",name:"Nueva categoría"}],stores:["Nueva tienda"],trending:[{icon:"📦",name:"Nuevo producto",price:"$0"}],carousel:["Marca"],footer:["Link"]};
-    const nb={id:mkId(),type,label:tpl.label,active:true,bg:tpl.grad,title:tpl.label,sub:'Subtítulo editable',cta:'Ver más',badge:'',items:defItems[type]||[],campaign:null,count:type==='productzone'?20:undefined};
-    mutate(area,[...blocks,nb]);setSel(nb.id);setModal(null);toast(`✦ "${tpl.label}" añadido`);
-  };
-  const updItem=(id,idx,field,val)=>mutate(area,blocks.map(b=>{
-    if(b.id!==id)return b;
-    const its=[...(b.items||[])];
-    its[idx]=typeof its[idx]==='string'?val:{...its[idx],[field]:val};
-    return{...b,items:its};
-  }));
-  // Direct version usable in async callbacks (uses latest pageBlocks via functional update)
-  const updItemDirect=(id,idx,field,val)=>{
-    setPageBlocks(prev=>{
-      const blks=(prev[area]||[]).map(b=>{
-        if(b.id!==id)return b;
-        const its=[...(b.items||[])];
-        its[idx]=typeof its[idx]==='string'?val:{...its[idx],[field]:val};
-        return{...b,items:its};
-      });
-      pushHist(area,blks);
-      return{...prev,[area]:blks};
-    });
-    setDirty(true);
-    toast('🖼 Imagen aplicada');
-  };
-  const updFieldDirect=(id,field,val)=>{
-    setPageBlocks(prev=>{
-      const blks=(prev[area]||[]).map(b=>b.id===id?{...b,[field]:val}:b);
-      pushHist(area,blks);
-      return{...prev,[area]:blks};
-    });
-    setDirty(true);
-    toast(field==='image'?'🖼 Imagen aplicada':'Actualizado');
-  };
-  const addItem=id=>{
-    const blk=blocks.find(b=>b.id===id);
-    const isObj=blk?.items?.length>0&&typeof blk.items[0]==='object';
-    const def=blk?.type==='categories'?{icon:'📦',name:'Nueva categoría'}:blk?.type==='trending'?{icon:'📦',name:'Nuevo producto',price:'$0'}:isObj?{icon:'📦',name:'Nuevo ítem'}:'Nuevo ítem';
-    mutate(area,blocks.map(b=>b.id===id?{...b,items:[...(b.items||[]),def]}:b));
-  };
-  const removeItem=(id,idx)=>mutate(area,blocks.map(b=>b.id===id?{...b,items:(b.items||[]).filter((_,i)=>i!==idx)}:b));
-  const saveAndPublish=()=>{setSaving(true);setTimeout(()=>{setSaving(false);setDirty(false);toast('🚀 Guardado y publicado');},1200);};
-  const ds=(e,i)=>{setDIdx(i);e.dataTransfer.effectAllowed='move';};
-  const dov=(e,i)=>{e.preventDefault();setDOv(i);};
-  const dd=(e,i)=>{e.preventDefault();if(dIdx===null||dIdx===i){setDIdx(null);setDOv(null);return;}const nx=[...blocks];const[m]=nx.splice(dIdx,1);nx.splice(i,0,m);mutate(area,nx);setDIdx(null);setDOv(null);toast('Orden actualizado');};
-  const de=()=>{setDIdx(null);setDOv(null);};
-  const mw=vp==='mobile'?375:vp==='tablet'?620:860;
-  const prevMw=prevVp==='mobile'?375:prevVp==='tablet'?620:860;
-  const hasItems=selBlk&&selBlk.items!==undefined&&['categories','stores','trending','carousel','footer','nav2','text'].includes(selBlk.type);
-  const isObjItems=selBlk&&selBlk.items?.length>0&&typeof selBlk.items[0]==='object';
-
-  return(
-    <div className="ve-root">
-      {/* TOOLBAR SUPERIOR */}
-      <div className="ve-tb" onClick={()=>setEpick(null)}>
-        {dirty&&<span className="ve-unsv">SIN GUARDAR</span>}
-        <div className="ve-sep"/>
-        <button className="vp-btn" disabled={!canUndo()} onClick={undo} title="Deshacer">↩ Deshacer</button>
-        <button className="vp-btn" disabled={!canRedo()} onClick={redo} title="Rehacer">↪ Rehacer</button>
-        <div className="ve-sep"/>
-        {[{k:'mobile',l:'📲 Mobile'},{k:'tablet',l:'📱 Tablet'},{k:'desktop',l:'🖥 Desktop'}].map(v=>(
-          <button key={v.k} className={`vp-btn ${vp===v.k?'on':''}`} onClick={()=>setVp(v.k)}>{v.l}</button>
-        ))}
-        <div className="ve-sep"/>
-        <button className="vp-btn" onClick={()=>setModal('history')}>◷ Versiones</button>
-        <div style={{flex:1}}/>
-        <button className="btn btg sm" onClick={()=>setModal('preview')} style={{flexShrink:0}}>◎ Vista previa</button>
-        <button className="btn btp sm" onClick={saveAndPublish} disabled={saving} style={{flexShrink:0}}>
-          {saving?<span className="spin">↻</span>:'🚀'} {saving?'Guardando…':'Guardar y Publicar'}
-        </button>
-      </div>
-
-      {/* CUERPO */}
-      <div className="ve-body">
-
-        {/* PANEL IZQUIERDO */}
-        <div className={`ve-left ${showLeft?'':'collapsed'}`}>
-          <div className="ve-left-inner">
-            <div className="ve-left-scroll" style={{paddingTop:6}}>
-              {Object.entries(groups).map(([grp,items])=>(
-                <div key={grp}>
-                  <div className="ve-grp">{grp}</div>
-                  {items.map(a=>(
-                    <div key={a.id} className={`ve-area ${area===a.id?'on':''}`} onClick={()=>setArea(a.id)}>
-                      <span className="ve-ai">{a.icon}</span>
-                      <span className="ve-al">{a.label}</span>
-                      <span style={{marginLeft:'auto',fontSize:9,color:'var(--tx3)',flexShrink:0}}>{(pageBlocks[a.id]||[]).length}</span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-              <div style={{height:12}}/>
+    {tab==='marketplace' && <>
+      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 12px'}}>Estos banners salen ARRIBA del feed de la tienda. Activa los que quieras (varios activos = carrusel deslizable). El botón CTA navega de verdad.</div>
+      {mk.map((b,i)=>(
+        <div key={b.id} className="card cp mb16">
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:10}}>
+            <span className="ct">Banner {i+1}</span>
+            <div style={{display:'flex',gap:6,alignItems:'center'}}>
+              <button onClick={()=>setBlk(i,'active',!b.active)} style={{display:'flex',alignItems:'center',gap:6,background:'transparent',border:`1px solid ${b.active?'var(--gn)':'var(--bd2)'}`,borderRadius:8,padding:'5px 10px',cursor:'pointer',color:b.active?'var(--gn)':'var(--tx3)',fontSize:11,fontWeight:800}}>
+                {b.active?'ACTIVO':'APAGADO'}
+                <span style={{width:30,height:16,borderRadius:10,background:b.active?'var(--gn)':'var(--bd2)',position:'relative'}}><span style={{position:'absolute',top:2,left:b.active?16:2,width:12,height:12,borderRadius:'50%',background:'#fff',transition:'left .15s'}}/></span>
+              </button>
+              <button className="btn btd sm" onClick={()=>removeBanner(i)}>Eliminar</button>
             </div>
           </div>
-        </div>
-
-        {/* CANVAS CENTRAL */}
-        <div className="ve-canvas">
-          <div className="ve-canvas-bar">
-            <button className="vp-btn" style={{flexShrink:0,padding:'5px 10px',fontSize:13,fontWeight:800}} onClick={()=>setShowLeft(v=>!v)} title={showLeft?'Ocultar páginas':'Mostrar páginas'}>{showLeft?'◀':'☰'}</button>
-            <div style={{display:'flex',alignItems:'center',gap:5,flex:1,minWidth:0,overflow:'hidden'}}>
-              <span style={{fontSize:11,fontWeight:700,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                {ED_AREAS.find(a=>a.id===area)?.label||'Homepage'}
-              </span>
-              <span className="bdg bg" style={{fontSize:8,flexShrink:0}}>LIVE</span>
-              {vp!=='desktop'&&<span className="bdg bb" style={{fontSize:8,flexShrink:0}}>{vp==='tablet'?'640':'375'}px</span>}
-              <span style={{fontSize:9,color:'var(--tx3)',flexShrink:0,whiteSpace:'nowrap'}}>{blocks.length} bloques</span>
+          {/* Vista previa FIEL: la misma tarjeta que pinta la tienda */}
+          <BannerCard b={b} onNav={(t)=>toast(`El CTA navegará a: ${(BLOCK_TARGETS.find(x=>x[0]===t)||['','ese destino'])[1]}`)} />
+          <div style={lbl}>Etiqueta (badge)</div>
+          <input style={inp} value={b.badge||''} onChange={e=>setBlk(i,'badge',e.target.value)} placeholder="Ej: RETADOR, OFERTA…" maxLength={20}/>
+          <div style={lbl}>Título</div>
+          <input style={inp} value={b.title||''} onChange={e=>setBlk(i,'title',e.target.value)} maxLength={70}/>
+          <div style={lbl}>Subtítulo</div>
+          <input style={inp} value={b.sub||''} onChange={e=>setBlk(i,'sub',e.target.value)} maxLength={110}/>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <div>
+              <div style={lbl}>Texto del botón (CTA)</div>
+              <input style={inp} value={b.cta||''} onChange={e=>setBlk(i,'cta',e.target.value)} placeholder="Vacío = sin botón" maxLength={22}/>
             </div>
-            {area==='busqueda'&&<button className="btn btg sm" onClick={()=>setShowCats(true)} style={{flexShrink:0,fontSize:11,padding:'4px 9px',whiteSpace:'nowrap'}} title="Editar categorías de la plataforma">◎ Categorías</button>}
-            <button className="btn btp sm" onClick={()=>setModal('add')} style={{flexShrink:0,fontSize:11,padding:'4px 11px',whiteSpace:'nowrap'}}>+ Añadir</button>
-          </div>
-          <div className="ve-canvas-scroll">
-            <div className="ve-frame" style={{maxWidth:mw}}>
-              {blocks.map((blk,idx)=>{const isSys=blk.type==='syszone';return(
-                <div
-                  key={blk.id}
-                  draggable={!isSys}
-                  className={[
-                    've-blk',
-                    isSys?'sys-blk':'',
-                    sel===blk.id?'sel':'',
-                    !blk.active?'hidden-blk':'',
-                    dIdx===idx?'dragging':'',
-                    dOv===idx&&dIdx!==idx?'dragover':'',
-                  ].filter(Boolean).join(' ')}
-                  onClick={()=>{if(!isSys)setSel(blk.id);}}
-                  onDragStart={e=>{if(!isSys)ds(e,idx);}}
-                  onDragOver={e=>dov(e,idx)}
-                  onDrop={e=>dd(e,idx)}
-                  onDragEnd={de}
-                >
-                  {!isSys&&<div className="ve-handle">
-                    {[0,1,2,3,4,5].map(i=><div key={i} className="ve-hdot"/>)}
-                  </div>}
-                  {/* Label */}
-                  <div className="ve-blk-lbl">
-                    {blk.label}{isSys?' · fijo':''}{!blk.active?' · oculto':''}{blk.campaign?` · ${blk.campaign}`:''}
-                  </div>
-                  {/* Action bar */}
-                  {isSys
-                    ? <div className="ve-blk-bar" onClick={e=>e.stopPropagation()}><span style={{fontSize:9,color:'var(--tx3)',padding:'2px 4px'}}>🔒 Parte fija del sistema · no se edita</span></div>
-                    : <div className="ve-blk-bar" onClick={e=>e.stopPropagation()}>
-                        <button className="ve-blk-btn" onClick={()=>{setSel(blk.id);setShowRight(true);}}>Editar</button>
-                        <button className="ve-blk-btn" onClick={()=>togVis(blk.id)}>{blk.active?'Ocultar':'Mostrar'}</button>
-                        <button className="ve-blk-btn" onClick={()=>dupBlk(blk.id)}>Duplicar</button>
-                        <button className="ve-blk-btn" onClick={()=>{setSel(blk.id);setModal('schedule');}}>Programar</button>
-                        <button className="ve-blk-btn del" onClick={e=>{e.stopPropagation();delBlk(blk.id);}}>✕</button>
-                      </div>}
-                  {/* Preview */}
-                  <BlockPreview blk={blk} vp={vp}/>
-                </div>
-              )})}
-              <div className="ve-add-btn" onClick={()=>setModal('add')}>
-                <span style={{fontSize:16}}>+</span>
-                Crear nueva sección
-              </div>
-            </div>
-            <div style={{height:40}}/>
-          </div>
-        </div>
-
-        {/* PANEL DERECHO */}
-        <div className={`ve-right ${showRight?'':'collapsed'}`}>
-          <div className="ve-right-toggle" onClick={()=>setShowRight(v=>!v)}>
-            {showRight?'›':'‹'}
-          </div>
-          <div className="ve-right-inner">
-            {!selBlk?(
-              <>
-                <div className="ve-ph">
-                  <div className="ve-pt">Propiedades</div>
-                  <div className="ve-ps">Sin bloque seleccionado</div>
-                </div>
-                <div className="ve-empty">
-                  <div style={{fontSize:32,marginBottom:10,opacity:.2}}>◫</div>
-                  <div style={{fontSize:12,fontWeight:600,color:'var(--tx)',marginBottom:6}}>Sin selección</div>
-                  <div className="ve-empty-hint">
-                    Haz clic sobre cualquier bloque de la vista previa central para editarlo aquí
-                  </div>
-                </div>
-                <div style={{padding:'14px',borderTop:'1px solid var(--bd)',flexShrink:0}}>
-                  <div className="ve-sec" style={{marginBottom:10}}>Colores Globales</div>
-                  {[{l:'Primario',k:'primary'},{l:'Acento',k:'accent'}].map(c=>(
-                    <div key={c.k} style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
-                      <span style={{fontSize:12,color:'var(--tx)'}}>{c.l}</span>
-                      <div style={{display:'flex',alignItems:'center',gap:7}}>
-                        <span style={{fontSize:9,fontFamily:'var(--mo)',color:'var(--tx3)'}}>{gCol[c.k]}</span>
-                        <input type="color" value={gCol[c.k]}
-                          onChange={e=>setGCol(p=>({...p,[c.k]:e.target.value}))}
-                          style={{width:28,height:22,borderRadius:5,border:'1px solid var(--bd2)',cursor:'pointer',background:'none'}}/>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ):(
-              <>
-                <div className="ve-ph">
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-                    <div className="ve-pt">{selBlk.label}</div>
-                    <button style={{background:'none',border:'none',color:'var(--tx3)',cursor:'pointer',fontSize:18,lineHeight:1,padding:'0 2px'}} onClick={()=>setSel(null)}>×</button>
-                  </div>
-                  <div className="ve-ps">type: {selBlk.type}</div>
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginTop:10}}>
-                    <Tog on={selBlk.active} ch={()=>togVis(selBlk.id)}/>
-                    <span style={{fontSize:11,color:selBlk.active?'var(--gn)':'var(--tx3)'}}>
-                      {selBlk.active?'Visible':'Oculto'}
-                    </span>
-                  </div>
-                </div>
-                <div className="ve-pb">
-                  <div className="ve-sec">Contenido</div>
-                  {selBlk.type==='productzone'&&(
-                    <div className="ve-field">
-                      <label className="ve-lbl">Cantidad de productos en esta zona</label>
-                      <input className="ve-inp" type="number" min="1" value={selBlk.count==null?20:selBlk.count} onChange={e=>upd(selBlk.id,'count',e.target.value)} onBlur={e=>{const n=parseInt(e.target.value,10);upd(selBlk.id,'count',(isNaN(n)||n<1)?20:n);}}/>
-                      <div style={{fontSize:10,color:'var(--tx3)',marginTop:5}}>Cuántos productos se muestran aquí antes del siguiente bloque.</div>
-                    </div>
-                  )}
-                  <div className="ve-field">
-                    <label className="ve-lbl">Título</label>
-                    <input className="ve-inp" value={selBlk.title||''} onChange={e=>upd(selBlk.id,'title',e.target.value)}/>
-                  </div>
-                  {selBlk.sub!==undefined&&(
-                    <div className="ve-field">
-                      <label className="ve-lbl">Subtítulo</label>
-                      <textarea className="ve-inp" rows={2} value={selBlk.sub||''} onChange={e=>upd(selBlk.id,'sub',e.target.value)}/>
-                    </div>
-                  )}
-                  {selBlk.cta!==undefined&&!['hero','promo','delivery','cta','slider','video'].includes(selBlk.type)&&(
-                    <div className="ve-field">
-                      <label className="ve-lbl">Botón CTA</label>
-                      <input className="ve-inp" value={selBlk.cta||''} onChange={e=>upd(selBlk.id,'cta',e.target.value)}/>
-                    </div>
-                  )}
-                  {selBlk.badge!==undefined&&(
-                    <div className="ve-field">
-                      <label className="ve-lbl">Badge / Etiqueta</label>
-                      <input className="ve-inp" value={selBlk.badge||''} onChange={e=>upd(selBlk.id,'badge',e.target.value)} placeholder="Ej: NUEVO, HOY, 30 MIN"/>
-                    </div>
-                  )}
-                  {/* IMAGEN del bloque */}
-                  {['hero','slider','promo','video','delivery','cta','stores'].includes(selBlk.type)&&(
-                    <div className="ve-field">
-                      <label className="ve-lbl">Imagen</label>
-                      {selBlk.image&&(
-                        <div style={{position:'relative',borderRadius:8,overflow:'hidden',marginBottom:7}}>
-                          <img src={selBlk.image} alt="" style={{width:'100%',height:90,objectFit:'cover',display:'block'}}/>
-                          <button onClick={()=>upd(selBlk.id,'image','')} style={{position:'absolute',top:6,right:6,background:'rgba(0,0,0,.6)',color:'#fff',border:'none',borderRadius:6,fontSize:11,padding:'3px 8px',cursor:'pointer'}}>Quitar</button>
-                        </div>
-                      )}
-                      <button className="btn btg sm" style={{width:'100%',justifyContent:'center'}} onClick={()=>{uploadTarget.current={id:selBlk.id,field:'image'};uploadRef.current?.click();}}>↑ {selBlk.image?'Cambiar imagen':'Subir imagen'}</button>
-                    </div>
-                  )}
-                  {/* BOTONES + DESTINO */}
-                  {['hero','promo','delivery','cta','slider','video'].includes(selBlk.type)&&(
-                    <>
-                      <div className="ve-div"/>
-                      <div className="ve-sec">Botones y acciones</div>
-                      <div className="ve-field">
-                        <label className="ve-lbl">Botón principal — texto</label>
-                        <input className="ve-inp" value={selBlk.cta||''} onChange={e=>upd(selBlk.id,'cta',e.target.value)} placeholder="Ej: Ver más"/>
-                      </div>
-                      <div className="ve-field">
-                        <label className="ve-lbl">Botón principal — a dónde lleva</label>
-                        <select className="ve-inp" value={selBlk.ctaAction||''} onChange={e=>upd(selBlk.id,'ctaAction',e.target.value)}>
-                          {DESTINOS.map(d=><option key={d.v} value={d.v}>{d.l}</option>)}
-                        </select>
-                      </div>
-                      <div className="ve-field">
-                        <label className="ve-lbl">Segundo botón — texto (opcional)</label>
-                        <input className="ve-inp" value={selBlk.cta2||''} onChange={e=>upd(selBlk.id,'cta2',e.target.value)} placeholder="Vacío = sin segundo botón"/>
-                      </div>
-                      {selBlk.cta2&&(
-                        <div className="ve-field">
-                          <label className="ve-lbl">Segundo botón — a dónde lleva</label>
-                          <select className="ve-inp" value={selBlk.cta2Action||''} onChange={e=>upd(selBlk.id,'cta2Action',e.target.value)}>
-                            {DESTINOS.map(d=><option key={d.v} value={d.v}>{d.l}</option>)}
-                          </select>
-                        </div>
-                      )}
-                    </>
-                  )}
-                  {/* ITEMS EDITOR — categorías, tiendas, productos, marcas, etc */}
-                  {hasItems&&(
-                    <>
-                      <div className="ve-div"/>
-                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
-                        <div className="ve-sec" style={{marginBottom:0}}>
-                          {selBlk.type==='categories'?'Categorías':selBlk.type==='stores'?'Tiendas':selBlk.type==='trending'?'Productos':selBlk.type==='carousel'?'Marcas':selBlk.type==='footer'?'Links':selBlk.type==='nav2'||selBlk.type==='text'?'Ítems':'Elementos'}
-                        </div>
-                        <span style={{fontSize:9,color:'var(--tx3)',fontFamily:'var(--mo)'}}>{(selBlk.items||[]).length}</span>
-                      </div>
-                      {(selBlk.items||[]).map((item,i)=>(
-                        <div key={i} className="item-row">
-                          {isObjItems&&(
-                            <div style={{display:'flex',gap:3,flexShrink:0}}>
-                              <button className="emoji-btn" title="Elegir emoji" onClick={e=>{e.stopPropagation();const r=e.target.getBoundingClientRect();setEpick(epick?.id===selBlk.id&&epick?.i===i?null:{id:selBlk.id,i,rect:r});}}>
-                                {typeof item==='object'&&item.icon&&(item.icon.startsWith('data:')||item.icon.startsWith('http'))
-                                  ?<img src={typeof item==='object'?item.icon:'📦'} className="icon-img" alt=""/>
-                                  :(typeof item==='object'?item.icon||'📦':'📦')
-                                }
-                              </button>
-                              <button className="upload-btn" title="Subir imagen" onClick={e=>{e.stopPropagation();uploadTarget.current={id:selBlk.id,idx:i};uploadRef.current?.click();}}>↑</button>
-                            </div>
-                          )}
-                          <input className="item-inp"
-                            value={typeof item==='string'?item:item?.name||''}
-                            onChange={e=>updItem(selBlk.id,i,'name',e.target.value)}
-                            placeholder="Nombre"
-                          />
-                          {typeof item==='object'&&item?.price!==undefined&&(
-                            <input className="price-inp"
-                              value={item.price||''}
-                              onChange={e=>updItem(selBlk.id,i,'price',e.target.value)}
-                              placeholder="$0"
-                            />
-                          )}
-                          <button className="item-del" onClick={()=>removeItem(selBlk.id,i)}>✕</button>
-                        </div>
-                      ))}
-                      <button className="btn btg sm" style={{width:'100%',marginTop:4,justifyContent:'center'}} onClick={()=>addItem(selBlk.id)}>+ Añadir elemento</button>
-                    </>
-                  )}
-                  <div className="ve-div"/>
-                  <div className="ve-sec">Tema de Color</div>
-                  <div className="sw-grid">
-                    {GRADS.map((g,i)=>(
-                      <div key={i} className={`sw ${selBlk.bg===g?'active':''}`}
-                        style={{background:g==='transparent'?'var(--bg3)':g}}
-                        onClick={()=>upd(selBlk.id,'bg',g)}>
-                        {g==='transparent'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:8,color:'var(--tx3)'}}>∅</div>}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="ve-div"/>
-                  <div className="ve-sec">Campaña</div>
-                  <div className="ve-field">
-                    <select className="ve-inp" value={selBlk.campaign||''} onChange={e=>upd(selBlk.id,'campaign',e.target.value||null)}>
-                      <option value="">Siempre visible</option>
-                      <option value="Black Friday">Black Friday</option>
-                      <option value="Navidad">Navidad 2026</option>
-                      <option value="Rebajas">Rebajas Enero</option>
-                      <option value="Verano">Verano 2026</option>
-                    </select>
-                  </div>
-                  <div className="ve-div"/>
-                  <div className="ve-sec">Acciones</div>
-                  <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                    <button className="btn btg sm" style={{justifyContent:'flex-start',width:'100%'}} onClick={()=>dupBlk(selBlk.id)}>◈ Duplicar bloque</button>
-                    <button className="btn btg sm" style={{justifyContent:'flex-start',width:'100%'}} onClick={()=>setModal('schedule')}>◷ Programar activación</button>
-                    <button className="btn btd sm" style={{justifyContent:'flex-start',width:'100%'}} onClick={()=>delBlk(selBlk.id)}>✕ Eliminar bloque</button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* OVERLAY — CATEGORÍAS (desplegable desde el botón discreto) */}
-      {showCats&&(
-        <div className="mo" onClick={()=>setShowCats(false)} style={{alignItems:'flex-start'}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'var(--bg1)',border:'1px solid var(--bd2)',borderRadius:16,padding:'16px 16px 20px',maxWidth:480,width:'100%',margin:'36px auto 20px',boxShadow:'0 20px 70px rgba(0,0,0,.5)',position:'relative',maxHeight:'calc(100% - 56px)',overflowY:'auto'}}>
-            <button onClick={()=>setShowCats(false)} style={{position:'absolute',top:12,right:14,background:'none',border:'none',color:'var(--tx2)',fontSize:20,cursor:'pointer',lineHeight:1,zIndex:2}}>×</button>
-            <CategoryManager/>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL — AÑADIR */}
-      {modal==='add'&&(
-        <div className="mo" onClick={()=>setModal(null)}>
-          <div className="mb" style={{width:520}} onClick={e=>e.stopPropagation()}>
-            <div className="mt">Añadir nueva sección</div>
-            <div className="ms">Elige el tipo de bloque a insertar</div>
-            <div className="amgrid">
-              {BLK_TYPES.map(tp=>(
-                <div key={tp.type} className="amcard" onClick={()=>addBlk(tp.type)}>
-                  <div className="amprev" style={{background:tp.grad}}>
-                    <span style={{fontSize:16}}>{tp.icon}</span>
-                  </div>
-                  <div className="aminfo">
-                    <div className="amname">{tp.label}</div>
-                    <div className="amdesc">{tp.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mact">
-              <button className="btn btg sm" onClick={()=>setModal(null)}>Cancelar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL — HISTORIAL */}
-      {modal==='history'&&(
-        <div className="mo" onClick={()=>setModal(null)}>
-          <div className="mb" onClick={e=>e.stopPropagation()}>
-            <div className="mt">Historial de versiones</div>
-            <div className="ms">Restaura cualquier versión guardada</div>
-            {VERSIONS.map(v=>(
-              <div key={v.id} className={`histitem ${v.current?'histcur':''}`}>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:12,fontWeight:700,color:v.current?'var(--ac2)':'var(--tx)',marginBottom:2}}>{v.label}</div>
-                  <div style={{fontSize:10,color:'var(--tx3)'}}>{v.time} · {v.author}</div>
-                </div>
-                {v.current
-                  ?<span className="bdg bg" style={{fontSize:8}}>ACTUAL</span>
-                  :<button className="btn btg sm" onClick={()=>{toast(`Restaurando ${v.label}…`);setModal(null);}}>Restaurar</button>
-                }
-              </div>
-            ))}
-            <div className="mact">
-              <button className="btn btg sm" onClick={()=>setModal(null)}>Cerrar</button>
-              <button className="btn btp sm" onClick={()=>{toast('Nueva versión guardada');setModal(null);}}>Guardar versión</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL — PROGRAMAR */}
-      {modal==='schedule'&&(
-        <div className="mo" onClick={()=>setModal(null)}>
-          <div className="mb" onClick={e=>e.stopPropagation()}>
-            <div className="mt">Programar publicación</div>
-            <div className="ms">{selBlk?.label||'Bloque'} · Configura cuándo será visible</div>
-            <div style={{marginBottom:12}}><label className="lbl">Fecha inicio</label><input type="date" className="inp" defaultValue="2026-06-01"/></div>
-            <div style={{marginBottom:12}}><label className="lbl">Fecha fin (opcional)</label><input type="date" className="inp" defaultValue="2026-06-30"/></div>
-            <div style={{marginBottom:12}}><label className="lbl">Campaña asociada</label>
-              <select className="inp">
-                <option>Ninguna</option><option>Black Friday 2026</option><option>Navidad 2026</option><option>Rebajas Enero</option>
+            <div>
+              <div style={lbl}>El botón lleva a…</div>
+              <select style={{...inp,cursor:'pointer'}} value={b.target||'busqueda'} onChange={e=>setBlk(i,'target',e.target.value)}>
+                {BLOCK_TARGETS.map(([k,l])=><option key={k} value={k}>{l}</option>)}
               </select>
             </div>
-            <div className="mact">
-              <button className="btn btg sm" onClick={()=>setModal(null)}>Cancelar</button>
-              <button className="btn btp sm" onClick={()=>{toast('📅 Programación guardada');setModal(null);}}>Confirmar</button>
-            </div>
           </div>
-        </div>
-      )}
-
-      {/* HIDDEN FILE INPUT for image upload */}
-      <input
-        ref={uploadRef}
-        type="file"
-        accept="image/*"
-        style={{display:'none'}}
-        onChange={handleImageUpload}
-      />
-
-      {/* EMOJI PICKER */}
-      {epick&&(
-        <div className="epick" style={{top:Math.min(epick.rect.bottom+6,window.innerHeight-220),left:Math.min(epick.rect.left,window.innerWidth-240)}} onClick={e=>e.stopPropagation()}>
-          <div className="epick-g">
-            {CAT_EMOJIS.map(em=>(
-              <div key={em} className="ep" onClick={()=>{updItem(epick.id,epick.i,'icon',em);setEpick(null);}}>{em}</div>
+          <div style={lbl}>Fondo (identidad RETADOR)</div>
+          <div style={{display:'flex',gap:7,flexWrap:'wrap'}}>
+            {Object.entries(BLOCK_BG_PRESETS).map(([k,p])=>(
+              <button key={k} onClick={()=>setBlk(i,'preset',k)} style={{display:'flex',alignItems:'center',gap:7,background:'var(--bg2)',border:`1.5px solid ${b.preset===k?p.accent:'var(--bd2)'}`,borderRadius:9,padding:'6px 10px',cursor:'pointer',color:b.preset===k?p.accent:'var(--tx2)',fontSize:11,fontWeight:700}}>
+                <span style={{width:16,height:16,borderRadius:5,background:p.bg,border:`1px solid ${p.accent}66`,flexShrink:0}}/>{p.name}
+              </button>
             ))}
           </div>
         </div>
-      )}
+      ))}
+      <button className="btn btg" style={{width:'100%'}} onClick={addBanner}>+ Añadir banner</button>
+    </>}
 
-      {/* MODAL VISTA PREVIA */}
-      {modal==='preview'&&(
-        <div className="prev-modal">
-          <div className="prev-hdr">
-            <div style={{flex:1,display:'flex',alignItems:'center',gap:8,minWidth:0}}>
-              <span style={{fontSize:13,fontWeight:700,color:'var(--tx)',whiteSpace:'nowrap'}}>Vista Previa</span>
-              <span style={{fontSize:11,color:'var(--tx3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>— {ED_AREAS.find(a=>a.id===area)?.label}</span>
-              <span className="bdg bg" style={{fontSize:8,flexShrink:0}}>LIVE</span>
-            </div>
-            <div style={{display:'flex',gap:4,flexShrink:0}}>
-              {[{k:'mobile',l:'📲 Mobile'},{k:'tablet',l:'📱 Tablet'},{k:'desktop',l:'🖥 Desktop'}].map(v=>(
-                <button key={v.k} className={`vp-btn ${prevVp===v.k?'on':''}`} onClick={()=>setPrevVp(v.k)}>{v.l}</button>
-              ))}
-            </div>
-            <button
-              className="btn btd sm"
-              onClick={()=>setModal(null)}
-              style={{flexShrink:0,marginLeft:6}}
-            >✕ Cerrar</button>
-          </div>
-          <div className="prev-body">
-            <div className="prev-frame" style={{maxWidth:prevMw,marginBottom:40}}>
-              {blocks.filter(b=>b.active).map(blk=>(
-                <BlockPreview key={blk.id} blk={blk} vp={prevVp}/>
-              ))}
-              {blocks.filter(b=>b.active).length===0&&(
-                <div style={{padding:'60px 24px',textAlign:'center',color:'var(--tx3)'}}>
-                  <div style={{fontSize:32,marginBottom:12,opacity:.2}}>◫</div>
-                  <div style={{fontSize:13}}>No hay bloques visibles en esta página</div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ── Overview ──────────────────────────────────────────────────────────────── */
-/* ── Gráfica con selector de rango de tiempo (Hoy/Semana/Mes/6m/Año/5 años) ──── */
-const RANGES=[{k:'24h',l:'Hoy'},{k:'7d',l:'Semana'},{k:'30d',l:'Mes'},{k:'6m',l:'6 meses'},{k:'1y',l:'Año'},{k:'5y',l:'5 años'}];
-const RSEED=(a,b)=>{let h=(((a+1)*374761393+(b+7)*668265263)>>>0);h=(((h^(h>>13))*1274126177)>>>0);return ((h>>>0)%1000)/1000;};
-const OMONTHS=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
-function omniSeries(rangeKey, base){
-  const now=new Date();
-  const dim=new Date(now.getFullYear(), now.getMonth()+1, 0).getDate(); // días reales del mes actual
-  const cfg={
-    '24h':{n:9, lab:i=>`${String(i*3).padStart(2,'0')}h`},
-    '7d' :{n:7, lab:i=>['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'][i]},
-    '30d':{n:dim, lab:i=>`${i+1}`},
-    '6m' :{n:6, lab:i=>OMONTHS[((now.getMonth()-5+i)%12+12)%12]},
-    '1y' :{n:12,lab:i=>OMONTHS[i]},
-    '5y' :{n:5, lab:i=>`${now.getFullYear()-4+i}`},
-  }[rangeKey]||{n:9,lab:i=>`${i}`};
-  const sb=rangeKey.length;
-  return Array.from({length:cfg.n},(_,i)=>{
-    const wave=0.55+0.45*Math.sin((i/Math.max(1,cfg.n-1))*Math.PI*1.2+sb);
-    const noise=0.75+0.5*RSEED(i,sb);
-    return { x: cfg.lab(i), v: Math.max(1, Math.round(base*wave*noise)) };
-  });
-}
-function RangedChart({title, base, type='area', color='var(--ac)', height=185, defaultRange='24h', suffix='', prefix=''}){
-  const [rk,setRk]=useState(defaultRange);
-  const [open,setOpen]=useState(false);
-  const data=useMemo(()=>omniSeries(rk, base),[rk, base]);
-  const cur=RANGES.find(r=>r.k===rk)||RANGES[0];
-  let gid='gr'; for(let i=0;i<title.length;i++) gid='gr'+((title.charCodeAt(i)+i)%97);
-  return (
-    <div className="card cp">
-      <div className="ch">
-        <span className="ct">{title}</span>
-        <div className="rng-wrap">
-          <button className="rng-btn" onClick={()=>setOpen(o=>!o)}>{cur.l} ▾</button>
-          {open && <>
-            <div onClick={()=>setOpen(false)} style={{position:'fixed',inset:0,zIndex:55}}/>
-            <div className="rng-menu">
-              {RANGES.map(r=><div key={r.k} className={`rng-item ${r.k===rk?'on':''}`} onClick={()=>{setRk(r.k);setOpen(false);}}>{r.l}</div>)}
-            </div>
-          </>}
-        </div>
+    {tab==='delivery' && <div className="card cp">
+      <div className="ch"><span className="ct">Tarjeta principal del Delivery</span></div>
+      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Los textos de la tarjeta grande de la pantalla de Delivery local. El estado (Activo/Inactivo) sale del interruptor real del servicio.</div>
+      <div style={lbl}>Etiqueta superior</div>
+      <input style={inp} value={dl.label||''} onChange={e=>setDel('label',e.target.value)} maxLength={40}/>
+      <div style={lbl}>Subtítulo</div>
+      <input style={inp} value={dl.sub||''} onChange={e=>setDel('sub',e.target.value)} maxLength={70}/>
+      {/* Vista previa compacta */}
+      <div style={{marginTop:14,borderRadius:14,background:'#0C0C10',border:'1px solid var(--bd2)',padding:'14px 15px'}}>
+        <div style={{fontSize:9,color:'rgba(196,152,46,0.6)',letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:8}}>{dl.label||'—'}</div>
+        <div style={{fontSize:20,fontWeight:900,color:'#f0f0f2',lineHeight:1.1}}>Servicio <span style={{color:'#FFC01E'}}>Activo</span></div>
+        <div style={{fontSize:11,color:'rgba(240,240,242,0.55)',marginTop:5}}>{dl.sub||'—'}</div>
       </div>
-      <ResponsiveContainer width="100%" height={height}>
-        {type==='bar'
-          ? <BarChart data={data} barSize={rk==='30d'?6:rk==='1y'?14:22}>
-              <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={.95}/><stop offset="100%" stopColor={color} stopOpacity={.55}/></linearGradient></defs>
-              <XAxis dataKey="x" tick={{fill:'var(--tx3)',fontSize:9}} axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={rk==='30d'?14:5}/>
-              <YAxis hide/><Tooltip cursor={{fill:'var(--ag)'}} allowEscapeViewBox={{x:false,y:true}} content={<Tip/>}/>
-              <Bar dataKey="v" fill={`url(#${gid})`} radius={[4,4,0,0]}/>
-            </BarChart>
-          : type==='line'
-          ? <LineChart data={data}>
-              <XAxis dataKey="x" tick={{fill:'var(--tx3)',fontSize:9}} axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={rk==='30d'?14:5}/>
-              <YAxis hide/><Tooltip allowEscapeViewBox={{x:false,y:true}} content={<Tip/>}/>
-              <Line type="monotone" dataKey="v" stroke={color} strokeWidth={2} dot={false}/>
-            </LineChart>
-          : <AreaChart data={data}>
-              <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={color} stopOpacity={.18}/><stop offset="95%" stopColor={color} stopOpacity={0}/></linearGradient></defs>
-              <XAxis dataKey="x" tick={{fill:'var(--tx3)',fontSize:9}} axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={rk==='30d'?14:5}/>
-              <YAxis hide/><Tooltip allowEscapeViewBox={{x:false,y:true}} content={<Tip/>}/>
-              <Area type="monotone" dataKey="v" stroke={color} strokeWidth={2} fill={`url(#${gid})`} dot={false}/>
-            </AreaChart>}
-      </ResponsiveContainer>
-    </div>
-  );
+    </div>}
+  </>;
 }
 
 function Overview({toast, data={}, go}){
@@ -2759,7 +1698,7 @@ function Economia({toast, data={}}){
   useEffect(() => {
     const ids = [
       ...(promoted || []).map(p => p.seller_id),
-      ...((Array.isArray(ledger) ? ledger : []).map(e => e.user_id || e.seller_id)),
+      ...((Array.isArray(ledger) ? ledger : []).map(e => e.seller_id)),
       ...orders.map(o => o.sellerId || o.seller_id),
     ].filter(Boolean);
     if (!ids.length) return;
@@ -2770,14 +1709,15 @@ function Economia({toast, data={}}){
   // si el ledger no es legible, cae al cálculo desde pedidos (solo comisiones).
   const debts = useMemo(() => {
     if (Array.isArray(ledger)) {
+      // seller_commission_ledger: seller_id · amount_owed · paid · kind
       const m = {};
       ledger.forEach(e => {
-        const uid = e.user_id || e.seller_id; if (!uid) return;
-        if (e.paid === true || e.settled === true || String(e.status || '').toLowerCase() === 'paid' || String(e.status || '').toLowerCase() === 'pagado') return;
-        const amt = Number(e.amount) || 0; if (amt <= 0) return;
-        const kind = String(e.kind || e.type || '').toLowerCase();
+        const uid = e.seller_id; if (!uid) return;
+        if (e.paid === true) return;
+        const amt = Number(e.amount_owed) || 0; if (amt <= 0) return;
+        const kind = String(e.kind || '').toLowerCase();
         if (!m[uid]) m[uid] = { uid, comm: 0, promo: 0 };
-        if (kind.includes('promo')) m[uid].promo += amt; else m[uid].comm += amt;
+        if (kind === 'promotion') m[uid].promo += amt; else m[uid].comm += amt;
       });
       return Object.values(m).map(d => ({ ...d, total: d.comm + d.promo })).filter(d => d.total > 0).sort((a, b) => b.total - a.total);
     }
@@ -2793,7 +1733,7 @@ function Economia({toast, data={}}){
     }
     return [];   // cargando
   }, [ledger, orders]);
-  const promoCharges = (Array.isArray(ledger) ? ledger : []).filter(e => String(e.kind || e.type || '').toLowerCase().includes('promo')).slice(0, 20);
+  const promoCharges = (Array.isArray(ledger) ? ledger : []).filter(e => String(e.kind || '').toLowerCase() === 'promotion').slice(0, 20);
   const unpromote = async (p) => {
     setBusyP(p.id);
     try { await adminSetPromoted(p.id, false); setPromoted(rows => (rows || []).filter(r => r.id !== p.id)); toast(`Destacado retirado a «${p.title}»`); }
@@ -2804,7 +1744,7 @@ function Economia({toast, data={}}){
     const { uid, name } = debtConfirm; setDebtConfirm(null);
     try {
       await adminMarkCommissionPaid(uid);
-      setLedgerRows(rows => Array.isArray(rows) ? rows.map(e => ((e.user_id || e.seller_id) === uid ? { ...e, paid: true } : e)) : rows);
+      setLedgerRows(rows => Array.isArray(rows) ? rows.map(e => (e.seller_id === uid ? { ...e, paid: true } : e)) : rows);
       toast(`✔ Deuda de ${name || 'vendedor'} saldada — se le notificó`);
     } catch (e) { toast('⚠️ ' + (e?.message || 'No se pudo saldar')); }
   };
@@ -3032,9 +1972,9 @@ function Economia({toast, data={}}){
         {promoCharges.map((e,i)=>(
           <div key={e.id||i} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0',borderBottom:'1px solid rgba(128,128,128,.08)'}}>
             <span style={{fontSize:12}}>🪙</span>
-            <span style={{flex:1,fontSize:11.5,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{nameOf(e.user_id||e.seller_id)||'Vendedor'}</span>
+            <span style={{flex:1,fontSize:11.5,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{nameOf(e.seller_id)||'Vendedor'}</span>
             <span style={{fontSize:10,color:'var(--tx3)'}}>{e.created_at?new Date(e.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}):''}</span>
-            <span style={{fontSize:12,fontWeight:800,color:'var(--yw)',fontFamily:'var(--mo)'}}>{fmt(e.amount)}</span>
+            <span style={{fontSize:12,fontWeight:800,color:'var(--yw)',fontFamily:'var(--mo)'}}>{fmt(e.amount_owed)}{e.paid?' · ✓ pagado':''}</span>
           </div>
         ))}
       </>}
@@ -3261,6 +2201,7 @@ const NAV=[
     {id:'modq',icon:'🛡',label:'Moderación'},
     {id:'delivery',icon:'🛵',label:'Delivery local'},
     {id:'users',icon:'◎',label:'Usuarios'},
+    {id:'editor',icon:'◐',label:'Editor Visual'},
   ]},
   {sec:'Control',items:[
     {id:'eco',icon:'◇',label:'Economía'},
@@ -3268,7 +2209,6 @@ const NAV=[
   ]},
   {sec:'Próximamente',items:[
     {id:'support',icon:'💬',label:'Soporte 🔜'},
-    {id:'editor',icon:'◐',label:'Editor Visual 🔜'},
     {id:'intl_es',icon:'✈',label:'España → Cuba 🔜'},
     {id:'intl_us',icon:'✈',label:'EE.UU. → Cuba 🔜'},
   ]},
@@ -3323,7 +2263,6 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
   const cur=NAV.flatMap(g=>g.items).find(i=>i.id===page);
   const gSub=(id,list)=>subs[id]||(list?.[0]??null);
   const nav=(id,sub)=>{setPage(id);if(sub)setSubs(p=>({...p,[id]:sub}));setMnav(false);};
-  const isEd=page==='editor';
   const dk = theme.isDark !== false;
   // Variables del panel mapeadas al tema real de la plataforma (claro/oscuro)
   const omniVars = dk
@@ -3367,14 +2306,14 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
               : <button onClick={() => setViewAs(null)} style={{ background:'var(--ag)', color:'var(--ac)', border:'1px solid var(--ac)', borderRadius:8, fontSize:11, fontWeight:700, padding:'5px 10px', cursor:'pointer' }}>👁 Viendo como {viewAs.name} · salir</button>}
           </div>
         </header>
-        <div className={`cnt ${isEd?'nop':''}`}>
+        <div className="cnt">
           {page==='overview'&&<Overview toast={add} data={data} go={nav}/>}
           {page==='ops'&&<AdminOrders toast={add} onViewProfile={data.onViewProfile}/>}
           {page==='modq'&&<ModeracionPublicaciones toast={add} onViewProfile={data.onViewProfile}/>}
           {page==='delivery'&&<Operaciones solo="Delivery" toast={add} data={data}/>}
           {page==='support'&&<ComingSoon icon="💬" title="Soporte" note="El centro de ayuda tendrá su módulo cuando haya volumen de usuarios. Las quejas y problemas llegarán aquí."/>}
           {page==='users'&&<Usuarios toast={add} data={data}/>}
-          {page==='editor'&&<ComingSoon icon="◐" title="Editor Visual" note="El diseño de pantallas desde el panel llegará en una próxima versión, guardado en el backend para que lo vean todos."/>}
+          {page==='editor'&&<EditorVisualReal toast={add} data={data}/>}
           {page==='eco'&&<Economia toast={add} data={data}/>}
           {page==='intl_es'&&<ComingSoon icon="✈" title="Envíos · España → Cuba" note="Será parte del módulo de envíos internacionales / dropshipping. Su tarifa por libra ya se edita en Economía."/>}
           {page==='intl_us'&&<ComingSoon icon="✈" title="Envíos · EE.UU. → Cuba" note="Será parte del módulo de envíos internacionales / dropshipping. Su tarifa por libra ya se edita en Economía."/>}

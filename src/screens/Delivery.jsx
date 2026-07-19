@@ -298,7 +298,11 @@ function DLLiveTicker() {
 
 function DLHeroSection() {
   const C = useC();
-  const svcOn = usePlatformCfg().deliveryServiceActive !== false;
+  const pCfg = usePlatformCfg();
+  const svcOn = pCfg.deliveryServiceActive !== false;
+  // Textos EDITABLES desde el Editor Visual del panel (config global, en vivo).
+  const heroLabel = pCfg.blocks?.delivery?.label || "RETADOR · MENSAJERÍA URBANA";
+  const heroSub = pCfg.blocks?.delivery?.sub || "Mensajería urbana profesional · toda Cuba";
   return (
     <div style={{ margin:'13px 14px 0', borderRadius:22, overflow:'hidden', position:'relative', minHeight:200 }}>
       <div style={{ position:'absolute', inset:0, background:'#0C0C10' }}/>
@@ -323,7 +327,7 @@ function DLHeroSection() {
       <div style={{ position:'absolute', top:0, left:0, right:0, height:40, background:'linear-gradient(to bottom,rgba(12,12,16,0.48),transparent)' }}/>
       <div style={{ position:'relative', zIndex:2, padding:'15px 17px 18px' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:14 }}>
-          <div style={{ ...T.medium, fontSize:9, color:'rgba(196,152,46,0.48)', letterSpacing:'0.15em', textTransform:'uppercase' }}>RETADOR · MENSAJERÍA URBANA</div>
+          <div style={{ ...T.medium, fontSize:9, color:'rgba(196,152,46,0.48)', letterSpacing:'0.15em', textTransform:'uppercase' }}>{heroLabel}</div>
           <div style={{ display:'flex', alignItems:'center', gap:5.5, background:C.greenDim, border:`1px solid ${C.greenBdr}`, borderRadius:20, padding:'4px 10px 4px 7px' }}>
             <div style={{ position:'relative', width:7, height:7, flexShrink:0 }}>
               <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:svcOn?C.green:'#ef4444', animation:svcOn?'dl-ring 2.2s ease-out infinite':'none' }}/>
@@ -334,16 +338,10 @@ function DLHeroSection() {
         </div>
         <div style={{ marginBottom:16 }}>
           <div style={{ ...T.display, fontSize:27, color:'rgba(240,240,242,0.95)', letterSpacing:'-0.026em', lineHeight:1.06, marginBottom:6 }}>Servicio<br/><span style={{ color:svcOn?C.goldBright:'#ef4444' }}>{svcOn?'Activo':'Inactivo'}</span></div>
-          <div style={{ ...T.body, fontSize:11, color:'rgba(240,240,242,0.55)' }}>Mensajería urbana profesional · Ciudad de México</div>
+          <div style={{ ...T.body, fontSize:11, color:'rgba(240,240,242,0.55)' }}>{heroSub}</div>
         </div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6 }}>
-          {[{v:'8',l:'Mensajeros',g:false},{v:"22'",l:'Respuesta',g:true},{v:'12km',l:'Cobertura',g:false},{v:'98%',l:'Éxito',g:false}].map(({v,l,g})=>(
-            <div key={l} style={{ background:g?C.goldDim:'rgba(255,255,255,0.06)', border:`1px solid ${g?C.goldBorder:'rgba(255,255,255,0.09)'}`, borderRadius:11, padding:'8px 5px', textAlign:'center' }}>
-              <div style={{ ...T.heading, fontSize:14, letterSpacing:'-0.015em', lineHeight:1, color:g?C.goldBright:'rgba(240,240,242,0.92)', marginBottom:3.5 }}>{v}</div>
-              <div style={{ ...T.body, fontSize:8, color:'rgba(240,240,242,0.48)', letterSpacing:'0.03em', textTransform:'uppercase' }}>{l}</div>
-            </div>
-          ))}
-        </div>
+        {/* (Las estadísticas demo — mensajeros/respuesta/cobertura — se quitaron:
+            volverán cuando salgan de datos reales del backend.) */}
       </div>
     </div>
   );

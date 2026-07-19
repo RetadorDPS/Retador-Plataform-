@@ -555,14 +555,14 @@ export const adminListPromoted = async () => {
   if (error) { console.error("adminListPromoted:", error.message); return []; }
   return data || [];
 };
-// Ledger (cargos: comisiones, promociones…). Lectura flexible: prueba los nombres
-// de tabla habituales; si ninguno es legible devuelve null (la UI cae a su fallback).
+// Ledger REAL de cargos: seller_commission_ledger
+// (id, seller_id, order_id, amount_owed, currency, paid, kind 'commission'|'promotion',
+//  ref_auction, created_at). El RLS deja al admin leerlo directo.
 export const listLedger = async (limit = 500) => {
-  for (const table of ["ledger", "ledger_entries", "charges"]) {
-    const { data, error } = await supabase.from(table).select("*").order("created_at", { ascending: false }).limit(limit);
-    if (!error && Array.isArray(data)) return data;
-  }
-  return null;
+  const { data, error } = await supabase.from("seller_commission_ledger")
+    .select("*").order("created_at", { ascending: false }).limit(limit);
+  if (error) { console.error("listLedger:", error.message); return null; }
+  return data || [];
 };
 // Admin: saldar la deuda de comisiones/promociones de un vendedor (lo notifica el backend).
 export const adminMarkCommissionPaid = async (sellerId) => {

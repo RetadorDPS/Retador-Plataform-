@@ -1056,6 +1056,8 @@ const DESTINOS=[
   {v:'mas_vendidos',l:'Más vendidos'},
   {v:'nuevos',l:'Productos nuevos'},
 ];
+// Interruptor Visible/Oculto del bloque seleccionado (usado en el panel derecho).
+const Tog=({on,ch})=><div className={`tog ${on?'ton':'tof'}`} onClick={()=>ch&&ch(!on)}><div className="togth"/></div>;
 
 function EditorVisual({toast, cfg={}, onCfg}){
   const[area,setArea]=useState('inicio');

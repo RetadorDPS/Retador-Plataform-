@@ -91,7 +91,7 @@ export const mkId = (p = "b") => `${p}${Date.now().toString(36)}${(_seq++).toStr
 export const ratioOf = fmt => (FORMATS.find(f => f.v === fmt) || FORMATS[0]).ratio;
 
 export function blankMaster(kind = "banner") {
-  const base = { id: mkId("m"), kind, active: true, format: "3:1", ctaPos: "left", lib: false };
+  const base = { id: mkId("m"), kind, active: true, format: "3:1", ctaPos: "left", lib: false, everyN: 0 };
   if (kind === "carousel") {
     return { ...base, slides: [
       { id: mkId("s"), bg: RET_BGS[0], title: "Slide 1", sub: "Toca para editar", badge: "", cta: "Ver más", ctaAction: "busqueda", image: "" },
@@ -199,7 +199,34 @@ function slotMasters(cfg, screen, from, to) {
   if (from != null && start === 0) return [];
   let end = to == null ? arr.length : arr.findIndex(e => e && e.id === to);
   if (to != null && end < 0) end = arr.length;
-  return arr.slice(start, end).map(e => entryMaster(cfg, e)).filter(m => m && m.active !== false);
+  // Los ANUNCIOS del feed (everyN>0) no se pintan en los slots posicionales:
+  // se intercalan dentro del feed de productos (ver useFeedAds/feedRows).
+  return arr.slice(start, end).map(e => entryMaster(cfg, e)).filter(m => m && m.active !== false && !(Number(m.everyN) > 0));
+}
+
+// Anuncios (banner/carrusel con "repetir cada N") activos de una pantalla, para
+// intercalarlos en el feed de productos. Orden estable = orden en la config.
+export function useFeedAds(screen) {
+  const cfg = usePlatformCfg();
+  const arr = Array.isArray(cfg.blocks?.[screen]) ? cfg.blocks[screen] : [];
+  const ads = [];
+  arr.forEach(e => { if (isAnchor(e)) return; const m = entryMaster(cfg, e); if (m && m.active !== false && Number(m.everyN) > 0) ads.push(m); });
+  return ads;
+}
+
+// Intercala anuncios en la lista de productos por POSICIÓN ABSOLUTA del índice:
+// tras cada N tarjetas sale el anuncio con ese N. Varios N distintos conviven; no
+// duplica el mismo anuncio seguido. Estable con paginación/scroll infinito.
+export function feedRows(products, ads) {
+  const list = Array.isArray(products) ? products : [];
+  if (!ads || !ads.length) return list.map(p => ({ t: "p", p }));
+  const rows = [];
+  list.forEach((p, idx) => {
+    rows.push({ t: "p", p });
+    const i = idx + 1;
+    ads.forEach(a => { const n = Number(a.everyN) || 0; if (n > 0 && i % n === 0) rows.push({ t: "a", m: a, key: `ad_${a.id}_${i}` }); });
+  });
+  return rows;
 }
 
 // TRAMO POSICIONAL entre dos anclas. Cada bloque se pinta individual, apilado.

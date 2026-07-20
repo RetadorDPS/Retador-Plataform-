@@ -1025,7 +1025,7 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
                         onDragStart={() => setDIdx(i)} onDragOver={ev => { ev.preventDefault(); setDOv(i); }} onDrop={ev => { ev.preventDefault(); onDrop(i); }} onDragEnd={() => { setDIdx(null); setDOv(null); }}>
                         <div className="ve-handle">{[0, 1, 2, 3, 4, 5].map(k => <div key={k} className="ve-hdot" />)}</div>
                         <div className="ve-blk-lbl">
-                          {m.kind === "carousel" ? "🎠 Carrusel" : "🖼️ Banner"}{!m.active ? " · oculto" : ""}{pubs.length > 1 ? ` · en ${pubs.length} pantallas` : ""}
+                          {m.kind === "carousel" ? "🎠 Carrusel" : "🖼️ Banner"}{Number(m.everyN) > 0 ? ` · 📢 anuncio cada ${m.everyN}` : ""}{!m.active ? " · oculto" : ""}{pubs.length > 1 ? ` · en ${pubs.length} pantallas` : ""}
                         </div>
                         <div className="ve-blk-bar" onClick={ev => ev.stopPropagation()}>
                           <button className="ve-blk-btn" onClick={() => { setSel(m.id); setShowRight(true); }}>Editar</button>
@@ -1159,6 +1159,24 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
                   <div className="ve-div" />
                   <div className="ve-sec">Posición del botón</div>
                   <Chips options={CTA_POS} value={selM.ctaPos || "left"} onChange={v => patchMaster(selM.id, { ctaPos: v })} />
+
+                  <div className="ve-div" />
+                  <div className="ve-sec">📢 Anuncio en el feed</div>
+                  <div className="ve-field">
+                    <label className="ve-lbl">Repetir cada N productos (0 = no; sale en su posición)</label>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                      {[0, 20, 40, 80].map(n => (
+                        <button key={n} onClick={() => patchMaster(selM.id, { everyN: n })}
+                          style={{ flex: 1, fontSize: 11, fontWeight: 800, padding: "7px 4px", borderRadius: 8, cursor: "pointer",
+                            background: (Number(selM.everyN) || 0) === n ? "var(--ac)" : "var(--bg2)", color: (Number(selM.everyN) || 0) === n ? "#fff" : "var(--tx2)", border: `1px solid ${(Number(selM.everyN) || 0) === n ? "var(--ac)" : "var(--bd2)"}` }}>
+                          {n === 0 ? "No" : n}
+                        </button>
+                      ))}
+                    </div>
+                    <input className="ve-inp" type="number" min="0" value={Number(selM.everyN) || 0}
+                      onChange={ev => { const n = Math.max(0, parseInt(ev.target.value, 10) || 0); patchMaster(selM.id, { everyN: n }); }} placeholder="Número libre" />
+                    <div style={{ fontSize: 10, color: "var(--tx3)", marginTop: 5, lineHeight: 1.4 }}>Se intercala dentro del feed de <b>Inicio</b> y <b>Búsqueda</b> (posición 20, 40, 60…). Con 0 sale una sola vez, donde lo pongas.</div>
+                  </div>
 
                   {!selM.lib && (<>
                     <div className="ve-div" />

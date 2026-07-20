@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, Logo, MarketBanners, Spin, createOrder, densityCols, estimateDeliveryFee, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, Spin, createOrder, densityCols, estimateDeliveryFee, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -499,6 +499,7 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
   const [selectedSubcat, setSelectedSubcat] = useState(null);
   const [searchText, setSearchText] = useState("");
   const [quickFilter, setQuickFilter] = useState("TODOS");
+  const feedAds = useFeedAds("busqueda"); // anuncios intercalados cada N productos
 
   const { cats, subcats: allSubs } = useCatalog();
   const cat = selectedCat ? cats.find(c => c.id === selectedCat) : null;
@@ -523,6 +524,8 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* Tramo: antes de la barra de búsqueda (arriba del todo) */}
+      <LiveSlot page="busqueda" from={null} to="bq_s" onNav={onNav} pad="8px 14px 0" />
       {/* Header con búsqueda — compacto */}
       <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(18px)", borderBottom: `1px solid ${B}`, padding: "8px clamp(14px,2.5vw,40px)" }}>
         <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 50, padding: "8px 14px", display: "flex", alignItems: "center", gap: 8 }}>
@@ -587,8 +590,8 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
             </div>
           )}
 
-          {/* Tramo: anuncios antes de los filtros */}
-          <LiveSlot page="busqueda" from={null} to="bq_f" onNav={onNav} pad="10px 14px 2px" />
+          {/* Tramo: entre la barra de búsqueda y los filtros */}
+          <LiveSlot page="busqueda" from="bq_s" to="bq_f" onNav={onNav} pad="10px 14px 2px" />
 
           {/* QUICK FILTERS */}
           <div style={{ padding: "10px 14px 8px", borderBottom: `1px solid ${B}`, display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
@@ -625,10 +628,14 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
             ) : (
               view === "muro"
                 ? <div style={{ columnCount: densityCols(dMode, isDesktop, isTablet), columnGap: dt.grid.gap }}>
-                    {filtered.map(p => <PCard key={p.id} p={p} view="muro" onClick={() => onProduct(p)} isFav={favorites.has(p.id)} onFav={onFav} />)}
+                    {feedRows(filtered, feedAds).map(it => it.t === "p"
+                      ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
+                      : <div key={it.key} style={{ breakInside: "avoid", columnSpan: "all", margin: "6px 0" }}><BlockView m={it.m} onNav={onNav} /></div>)}
                   </div>
                 : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
-                    {filtered.map(p => <PCard key={p.id} p={p} view="grid" onClick={() => onProduct(p)} isFav={favorites.has(p.id)} onFav={onFav} />)}
+                    {feedRows(filtered, feedAds).map(it => it.t === "p"
+                      ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
+                      : <div key={it.key} style={{ gridColumn: "1 / -1" }}><BlockView m={it.m} onNav={onNav} /></div>)}
                   </div>
             )}
             {/* Tramo: anuncios después de los resultados */}
@@ -905,6 +912,7 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const { tokens: dt, mode: dMode } = useDensity();
   const plusBtnRef = useRef(null);
+  const feedAds = useFeedAds("inicio"); // anuncios intercalados cada N productos
   // Conserva la posición del scroll del feed: se guarda al scrollear y se
   // restaura al volver (entrar a un producto y regresar no salta al inicio).
   const feedRef = useRef(null);
@@ -1005,10 +1013,14 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
               </div>
             : view === "muro"
               ? <div style={{ columnCount: densityCols(dMode, isDesktop, isTablet), columnGap: dt.grid.gap }}>
-                  {products.map(p => <PCard key={p.id} p={p} view="muro" onClick={() => onProduct(p)} isFav={favorites.has(p.id)} onFav={onFav} />)}
+                  {feedRows(products, feedAds).map(it => it.t === "p"
+                    ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
+                    : <div key={it.key} style={{ breakInside: "avoid", columnSpan: "all", margin: "6px 0" }}><BlockView m={it.m} onNav={onNav} /></div>)}
                 </div>
               : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
-                  {products.map(p => <PCard key={p.id} p={p} view="grid" onClick={() => onProduct(p)} isFav={favorites.has(p.id)} onFav={onFav} />)}
+                  {feedRows(products, feedAds).map(it => it.t === "p"
+                    ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
+                    : <div key={it.key} style={{ gridColumn: "1 / -1" }}><BlockView m={it.m} onNav={onNav} /></div>)}
                 </div>
         }
       </div>

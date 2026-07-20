@@ -1065,6 +1065,8 @@ function App({ onBack, onNav }) {
   .bp,.bs,.bn{transition:transform 0.1s,filter 0.1s,box-shadow 0.1s}
 `}</style>
 
+      {/* Tramo: antes del encabezado (arriba del todo) */}
+      <LiveSlot page="delivery_intl" from={null} to="di_h" onNav={onNav} pad="10px 16px 0" />
       {/* Header — compact */}
       <div style={{ background:"var(--is-header)", padding:"9px 16px", position:"sticky", top:0, zIndex:10 }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>

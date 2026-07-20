@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
 import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid } from "../shared/index.js";
+// Editor Visual (renovación): modelo maestros+referencias y render compartido.
+import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
 const OmniPanel = (() => {
 
@@ -613,346 +615,11 @@ const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;4
 // lo que guardes aparece/cambia en la tienda de TODOS los teléfonos al instante.
 // Solo ofrece las páginas que de verdad se renderizan: Marketplace y Delivery.
 /* ══ EDITOR VISUAL ORIGINAL (restaurado de v55) — conectado al guardado GLOBAL ══ */
-const ED_AREAS=[
-  {id:"inicio",label:"Inicio / Tienda",icon:"⌂",group:"Páginas de la plataforma"},
-  {id:"busqueda",label:"Búsqueda",icon:"⌕",group:"Páginas de la plataforma"},
-  {id:"delivery_local",label:"Delivery local",icon:"🛵",group:"Páginas de la plataforma"},
-  {id:"delivery_intl",label:"Envíos internacionales",icon:"✈",group:"Páginas de la plataforma"},
-  {id:"subastas",label:"Subastas",icon:"🔨",group:"Páginas de la plataforma"},
-  {id:"stores",label:"Tiendas premium",icon:"⭐",group:"Páginas de la plataforma"},
-  {id:"banners",label:"Banners",icon:"◐",group:"Contenido"},
-  {id:"promotions",label:"Promociones",icon:"◇",group:"Contenido"},
-];
-const BLK_TYPES=[
-  {type:"hero",label:"Portada principal",icon:"◈",desc:"Imagen grande con título y botón",grad:"linear-gradient(135deg,#4f72ff,#7c3aed)"},
-  {type:"slider",label:"Imágenes deslizables",icon:"◁▷",desc:"Varias imágenes que se deslizan",grad:"linear-gradient(135deg,#22d3a0,#4f72ff)"},
-  {type:"categories",label:"Categorías",icon:"◎",desc:"Cuadrícula de categorías",grad:"linear-gradient(135deg,#7c3aed,#4f72ff)"},
-  {type:"trending",label:"Productos",icon:"⊞",desc:"Cuadrícula de productos",grad:"linear-gradient(135deg,#4f72ff,#22d3a0)"},
-  {type:"productzone",label:"Zona de productos",icon:"▦",desc:"Marca dónde salen los productos reales",grad:"linear-gradient(135deg,#0f2027,#4f72ff)"},
-  {type:"stores",label:"Vitrina de tiendas",icon:"⭐",desc:"Lista de tiendas destacadas",grad:"linear-gradient(135deg,#f5a623,#f05a5a)"},
-  {type:"promo",label:"Banner de promoción",icon:"◇",desc:"Anuncio con descuento u oferta",grad:"linear-gradient(135deg,#f05a5a,#f5a623)"},
-  {type:"delivery",label:"Bloque de entrega",icon:"🛵",desc:"Sección de envío a domicilio",grad:"linear-gradient(135deg,#22d3a0,#0f2027)"},
-  {type:"cta",label:"Llamado a la acción",icon:"→",desc:"Texto con un botón destacado",grad:"linear-gradient(135deg,#4f72ff,#a78bfa)"},
-  {type:"video",label:"Video",icon:"▶",desc:"Sección para subir un video",grad:"linear-gradient(135deg,#1a1a2e,#4f72ff)"},
-];
+// ── Editor viejo ELIMINADO (ED_AREAS/BLK_TYPES/PAGE_DEFAULTS/VERSIONS/BlockPreview).
+//    El Editor Visual se renovó: modelo maestros+referencias, carrusel como TIPO,
+//    formato/posición-CTA, multi-pantalla y biblioteca. Anclas y render compartido
+//    viven en src/shared/liveBlocks.jsx. CategoryManager (Búsqueda) se conserva.
 
-const mkId=()=>`b${Date.now()}_${Math.random().toString(36).slice(2,5)}`;
-const CAT_EMOJIS=["💻","📱","🎮","⌚","📷","👗","👔","👟","👜","🕶","🏠","🛋","🍳","🌿","⚽","🏀","🏊","🚴","🥊","💄","🧴","🌸","🍕","🍔","🍣","🍷","☕","🎂","🚗","✈","📚","🎵","🎬","🎨","🐾","🌱","🐕","🐈","💊","🎁","🛒","💳","📦","🔖"];
-const PAGE_DEFAULTS={
-  inicio:[
-    {id:"in_h",type:"syszone",label:"Encabezado",icon:"⌂",title:"Encabezado — buscar · publicar · notificaciones · mensajes",active:true,bg:"transparent",items:[]},
-    {id:"in_f",type:"syszone",label:"Filtros",icon:"⚑",title:"Filtros — Todos · Más vendidos · Nuevos · Ofertas · Favoritos",active:true,bg:"transparent",items:[]},
-    {id:"in_p",type:"productzone",label:"Productos",active:true,bg:"transparent",count:40,title:"",sub:"",cta:"",badge:"",campaign:null,items:[]},
-  ],
-  // (Página "marketplace" ELIMINADA: era una página oculta —no está en el menú del
-  //  editor— cuyos bloques (mk_hero/mk_oferta) se colaban en la tienda sin que el dueño
-  //  pudiera verlos ni editarlos. La tienda ahora solo lee páginas visibles del editor.)
-  delivery_local:[
-    {id:"dl_h",type:"syszone",label:"Encabezado",icon:"🛵",title:"Encabezado + cinta de avisos (texto en movimiento)",active:true,bg:"transparent",items:[]},
-    {id:"dl_hero",type:"syszone",label:"Tarjeta principal",icon:"🟢",title:"Tarjeta principal — Retador mensajería (servicio activo)",active:true,bg:"transparent",items:[]},
-    {id:"dl_cta",type:"syszone",label:"Crear envío",icon:"➕",title:"Botón — Crear envío",active:true,bg:"transparent",items:[]},
-    {id:"dl_act",type:"syszone",label:"En curso",icon:"📦",title:"En curso — pedidos activos",active:true,bg:"transparent",items:[]},
-    {id:"dl_stats",type:"syszone",label:"Rendimiento",icon:"📊",title:"Rendimiento — estadísticas",active:true,bg:"transparent",items:[]},
-    {id:"dl_hist",type:"syszone",label:"Historial",icon:"🕓",title:"Historial",active:true,bg:"transparent",items:[]},
-  ],
-  delivery_intl:[
-    {id:"di_h",type:"syszone",label:"Encabezado",icon:"✈️",title:"Encabezado — Centro de Envíos (Internacional)",active:true,bg:"transparent",items:[]},
-    {id:"di_create",type:"syszone",label:"Crear nuevo envío",icon:"➕",title:"Crear nuevo envío — tarjetas EE.UU. / España (aéreo · marítimo)",active:true,bg:"transparent",items:[]},
-    {id:"di_tabs",type:"syszone",label:"Pestañas",icon:"⇆",title:"Pestañas — Mis envíos / Historial",active:true,bg:"transparent",items:[]},
-    {id:"di_list",type:"syszone",label:"Lista de envíos",icon:"📋",title:"Lista de envíos",active:true,bg:"transparent",items:[]},
-  ],
-  subastas:[
-    {id:"su_h",type:"syszone",label:"Encabezado",icon:"🔨",title:"Encabezado — SUBASTAS (seguir · buscar · Nueva) + activas/finalizan/VIP",active:true,bg:"transparent",items:[]},
-    {id:"su_dest",type:"syszone",label:"Destacadas",icon:"⭐",title:"Destacadas — carrusel horizontal",active:true,bg:"transparent",items:[]},
-    {id:"su_vip",type:"syszone",label:"VIP Access",icon:"🔒",title:"VIP Access — banda horizontal",active:true,bg:"transparent",items:[]},
-    {id:"su_filt",type:"syszone",label:"Filtros",icon:"⚑",title:"Filtros — Todas · 🔥 Hot · ⏳ Finalizan · ✨ Nuevas · 🔒 VIP",active:true,bg:"transparent",items:[]},
-    {id:"su_feed",type:"productzone",label:"Feed de subastas",active:true,bg:"transparent",zlabel:"subastas",count:12,title:"",sub:"",cta:"",badge:"",campaign:null,items:[]},
-  ],
-  busqueda:[
-    {id:"bq_s",type:"syszone",label:"Barra de búsqueda",icon:"⌕",title:"Barra de búsqueda",active:true,bg:"transparent",items:[]},
-    {id:"bq_f",type:"syszone",label:"Filtros",icon:"⚑",title:"Filtros — Todos · 🔥 Ofertas · Nuevos · Más vendidos",active:true,bg:"transparent",items:[]},
-    {id:"bq_c",type:"syszone",label:"Categorías",icon:"◎",title:"Categorías (barra lateral) — edítalas con el botón ◎ Categorías",active:true,bg:"transparent",items:[]},
-    {id:"bq_p",type:"productzone",label:"Resultados",active:true,bg:"transparent",count:40,title:"",sub:"",cta:"",badge:"",campaign:null,items:[]},
-  ],
-  stores:[
-    {id:"st1",type:"hero",label:"Hero Tiendas",active:true,bg:"linear-gradient(135deg,#1a0533,#f5a623)",title:"⭐ Tiendas Premium",sub:"Los mejores negocios verificados",cta:"Explorar tiendas",badge:"VERIFICADAS",campaign:null,items:[]},
-    {id:"st2",type:"stores",label:"Featured Stores",active:true,bg:"transparent",title:"Tiendas Destacadas",sub:"",cta:"",badge:"",campaign:null,items:["TechStore MX","Moda Élite","GadgetWorld","SportZone","FoodHub","BeautyBox"]},
-    {id:"st3",type:"cta",label:"CTA Vendedor",active:true,bg:"transparent",title:"¿Quieres vender aquí?",sub:"Únete a más de 2,800 negocios exitosos",cta:"Crear mi tienda",badge:"",campaign:null,items:[]},
-  ],
-  categories:[
-    {id:"ca1",type:"hero",label:"Hero Categorías",active:true,bg:"linear-gradient(135deg,#0d1526,#7c3aed)",title:"◎ Explora todo",sub:"Encuentra exactamente lo que buscas",cta:"Explorar",badge:"",campaign:null,items:[]},
-    {id:"ca2",type:"categories",label:"Todas las Categorías",active:true,bg:"transparent",title:"Todas las Categorías",sub:"",cta:"",badge:"",campaign:null,items:[{icon:"💻",name:"Tecnología"},{icon:"👗",name:"Moda"},{icon:"🏠",name:"Hogar"},{icon:"⚽",name:"Deportes"},{icon:"💄",name:"Belleza"},{icon:"🍕",name:"Alimentos"},{icon:"🚗",name:"Autos"},{icon:"📚",name:"Libros"},{icon:"🎮",name:"Gaming"},{icon:"🌱",name:"Jardín"}]},
-  ],
-  campaigns:[
-    {id:"cmp1",type:"hero",label:"Banner Campaña",active:true,bg:"linear-gradient(135deg,#f05a5a,#f5a623)",title:"🎯 Black Friday 2026",sub:"Las mejores ofertas del año",cta:"Ver todas las ofertas",badge:"BLACK FRIDAY",campaign:"Black Friday",items:[]},
-    {id:"cmp2",type:"promo",label:"Promo Secundaria",active:true,bg:"linear-gradient(135deg,#4f72ff,#7c3aed)",title:"🛍️ Cyber Monday",sub:"Solo por 24 horas",cta:"Ir ahora",badge:"24H",campaign:"Black Friday",items:[]},
-  ],
-  // Plantillas de ejemplo APAGADAS por defecto (borradores): visibles y editables en
-  // el editor, pero NO se pintan en la tienda hasta que el dueño las active. Así la
-  // tienda nunca muestra un banner que el dueño no encendió a propósito.
-  banners:[
-    {id:"bn1",type:"hero",label:"Banner Top (ejemplo)",active:false,bg:"linear-gradient(135deg,#0d1526,#4f72ff)",title:"📣 Bienvenido a RETADOR",sub:"Descubre las últimas novedades",cta:"Explorar",badge:"NUEVO",campaign:null,items:[]},
-    {id:"bn2",type:"slider",label:"Slider Banners (ejemplo)",active:false,bg:"linear-gradient(135deg,#1a1a2e,#4f72ff)",title:"Banners Rotativos",sub:"",cta:"",badge:"",campaign:null,items:[]},
-  ],
-  promotions:[
-    {id:"pr1",type:"promo",label:"Promo Principal (ejemplo)",active:false,bg:"linear-gradient(135deg,#f05a5a,#f5a623)",title:"🔥 Oferta del día",sub:"Hasta 50% OFF en productos seleccionados",cta:"Ver oferta",badge:"HOY",campaign:null,items:[]},
-    {id:"pr2",type:"promo",label:"Promo MSI (ejemplo)",active:false,bg:"linear-gradient(135deg,#4f72ff,#22d3a0)",title:"💳 Paga en 12 MSI",sub:"Sin intereses con tarjetas participantes",cta:"Ver condiciones",badge:"MSI",campaign:null,items:[]},
-    {id:"pr3",type:"cta",label:"CTA Registro (ejemplo)",active:false,bg:"transparent",title:"🎁 Regístrate y recibe $100",sub:"Solo para nuevos usuarios",cta:"Registrarme gratis",badge:"NUEVO",campaign:null,items:[]},
-  ],
-  nav2:[{id:"nv1",type:"text",label:"Menú Principal",active:true,bg:"transparent",title:"Navegación Global",sub:"Gestiona los ítems del menú principal",cta:"",badge:"",campaign:null,items:["Homepage","Marketplace","Delivery","Tiendas","Categorías","Ofertas","Mi cuenta"]}],
-  footer2:[{id:"ft1",type:"footer",label:"Footer Global",active:true,bg:"#0a0c14",title:"RETADOR",sub:"© 2026 · La plataforma que conecta compradores y vendedores",cta:"",badge:"",campaign:null,items:["Términos","Privacidad","Soporte","Blog","API","Sobre nosotros"]}],
-  widgets:[
-    {id:"wg1",type:"cta",label:"Widget App",active:true,bg:"linear-gradient(135deg,#0d1526,#4f72ff)",title:"📱 Descarga la App",sub:"Disponible en iOS y Android",cta:"Descargar gratis",badge:"APP",campaign:null,items:[]},
-    {id:"wg2",type:"text",label:"Newsletter",active:true,bg:"transparent",title:"📧 Suscríbete",sub:"Recibe las mejores ofertas en tu correo",cta:"Suscribirme",badge:"",campaign:null,items:[]},
-  ],
-};
-const VERSIONS=[
-  {id:"v4",label:"v4 — Actual",time:"hace 2m",author:"Rafael A.",current:true},
-  {id:"v3",label:"v3 — Pre-Flash Sale",time:"hace 3h",author:"Rafael A.",current:false},
-  {id:"v2",label:"v2 — Navidad",time:"hace 1d",author:"Sofía V.",current:false},
-  {id:"v1",label:"v1 — Base inicial",time:"hace 5d",author:"Rafael A.",current:false},
-];
-function BlockPreview({blk,vp}){
-  const mob=vp==='mobile';
-  const t={};
-  t.hero=()=>(
-    <div style={{background:blk.bg||'linear-gradient(135deg,#0d1526,#1a2a5e)',padding:mob?'28px 16px':'40px 28px',position:'relative',overflow:'hidden',minHeight:mob?140:180}}>
-      {blk.image
-        ? <><div style={{position:'absolute',inset:0,backgroundImage:`url(${blk.image})`,backgroundSize:'cover',backgroundPosition:'center'}}/><div style={{position:'absolute',inset:0,background:'linear-gradient(180deg,rgba(0,0,0,.32),rgba(0,0,0,.68))'}}/></>
-        : <><div style={{position:'absolute',inset:0,opacity:.05,backgroundImage:'radial-gradient(circle,#fff 1px,transparent 1px)',backgroundSize:'22px 22px'}}/><div style={{position:'absolute',top:-40,right:-40,width:180,height:180,borderRadius:'50%',background:'rgba(79,114,255,.08)',filter:'blur(40px)'}}/></>}
-      <div style={{position:'relative'}}>
-        {blk.badge&&<div style={{display:'inline-flex',alignItems:'center',fontSize:9,fontWeight:800,letterSpacing:1.5,color:'#fff',background:'rgba(255,255,255,.1)',padding:'3px 9px',borderRadius:20,marginBottom:10,border:'1px solid rgba(255,255,255,.15)'}}>{blk.badge}</div>}
-        <div style={{fontSize:mob?16:22,fontWeight:800,color:'#fff',marginBottom:8,lineHeight:1.2}}>{blk.title||'Banner Hero'}</div>
-        <div style={{fontSize:11,color:'rgba(255,255,255,.6)',marginBottom:16,maxWidth:400}}>{blk.sub||'Subtítulo del banner'}</div>
-        <div style={{display:'flex',gap:8}}>
-          <span style={{background:'#fff',color:'#0d1526',fontSize:10,fontWeight:700,padding:'6px 16px',borderRadius:20,cursor:'pointer'}}>{blk.cta||'Ver más'}</span>
-          {blk.cta2&&<span style={{border:'1px solid rgba(255,255,255,.3)',color:'rgba(255,255,255,.8)',fontSize:10,fontWeight:600,padding:'6px 14px',borderRadius:20,cursor:'pointer'}}>{blk.cta2}</span>}
-        </div>
-      </div>
-    </div>
-  );
-  const getStr=x=>typeof x==='string'?x:x?.name||'';
-  const getIcon=x=>typeof x==='string'?'📦':x?.icon||'📦';
-  const isImgIcon=icon=>typeof icon==='string'&&(icon.startsWith('data:')||icon.startsWith('http')||icon.startsWith('/'));
-  const renderIcon=(x,size=22)=>{
-    const icon=getIcon(x);
-    return isImgIcon(icon)
-      ?<img src={icon} style={{width:size,height:size,borderRadius:4,objectFit:'cover',display:'block'}} alt=""/>
-      :<span style={{fontSize:size}}>{icon}</span>;
-  };
-  const getPrice=x=>typeof x==='object'?x?.price:null;
-  t.categories=()=>{const items=blk.items||[];return(
-    <div style={{padding:'18px 16px',background:'var(--bg1)'}}>
-      <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',marginBottom:12}}>{blk.title||'Categorías'}</div>
-      <div style={{display:'grid',gridTemplateColumns:`repeat(${mob?3:Math.min(6,items.length||6)},1fr)`,gap:7}}>
-        {items.slice(0,mob?18:24).map((x,i)=>(
-          <div key={i} style={{background:'var(--bg2)',borderRadius:10,padding:'10px 4px',display:'flex',flexDirection:'column',alignItems:'center',gap:5,border:'1px solid var(--bd)',cursor:'pointer'}}>
-            {renderIcon(x,22)}
-            <span style={{fontSize:9,fontWeight:600,color:'var(--tx3)',textAlign:'center',lineHeight:1.2}}>{getStr(x)}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );};
-  t.stores=()=>(
-    <div style={{padding:'18px 16px',background:'var(--bg)'}}>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:700,color:'var(--tx)'}}>{blk.title||'Tiendas'}</div>
-        <span style={{fontSize:10,color:'var(--ac2)',cursor:'pointer'}}>Ver todas →</span>
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:`repeat(${mob?2:4},1fr)`,gap:8}}>
-        {(blk.items||[]).slice(0,4).map((x,i)=>(
-          <div key={i} style={{background:'var(--bg2)',borderRadius:10,padding:'12px 8px',border:'1px solid var(--bd)',textAlign:'center',cursor:'pointer'}}>
-            <div style={{width:36,height:36,borderRadius:8,margin:'0 auto 8px',background:['linear-gradient(135deg,#4f72ff,#7c3aed)','linear-gradient(135deg,#22d3a0,#4f72ff)','linear-gradient(135deg,#f5a623,#f05a5a)','linear-gradient(135deg,#a78bfa,#4f72ff)'][i%4],display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:800,color:'#fff'}}>{x[0]}</div>
-            <div style={{fontSize:10,fontWeight:600,color:'var(--tx)',marginBottom:2}}>{x}</div>
-            <div style={{fontSize:9,color:'#f5a623'}}>★★★★★</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-  t.trending=()=>{const items=blk.items||[];return(
-    <div style={{padding:'18px 16px',background:'var(--bg1)'}}>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:700,color:'var(--tx)'}}>{blk.title||'Tendencia'}</div>
-        <span className="bdg bb" style={{fontSize:8}}>TRENDING</span>
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:`repeat(${mob?2:Math.min(4,items.length||4)},1fr)`,gap:8}}>
-        {items.slice(0,4).map((x,i)=>(
-          <div key={i} style={{background:'var(--bg2)',borderRadius:10,overflow:'hidden',border:'1px solid var(--bd)',cursor:'pointer'}}>
-            <div style={{height:56,background:['linear-gradient(135deg,#1a1a2e,#16213e)','linear-gradient(135deg,#0f3460,#533483)','linear-gradient(135deg,#1a1a2e,#4f72ff)','linear-gradient(135deg,#0d1117,#1a1a2e)'][i%4],display:'flex',alignItems:'center',justifyContent:'center'}}>{renderIcon(x,28)}</div>
-            <div style={{padding:'8px 8px'}}>
-              <div style={{fontSize:9,fontWeight:600,color:'var(--tx2)',marginBottom:3}}>{getStr(x)}</div>
-              {getPrice(x)&&<div style={{fontSize:12,fontWeight:800,color:'var(--ac2)'}}>{getPrice(x)}</div>}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );};
-  t.promo=()=>(
-    <div style={{background:blk.image?'#000':(blk.bg||'linear-gradient(135deg,#f05a5a,#f5a623)'),padding:'24px 20px',textAlign:'center',position:'relative',overflow:'hidden',minHeight:100}}>
-      {blk.image
-        ? <><div style={{position:'absolute',inset:0,backgroundImage:`url(${blk.image})`,backgroundSize:'cover',backgroundPosition:'center'}}/><div style={{position:'absolute',inset:0,background:'rgba(0,0,0,.45)'}}/></>
-        : <div style={{position:'absolute',inset:0,opacity:.06,background:'radial-gradient(circle,#fff 1px,transparent 1px)',backgroundSize:'18px 18px'}}/>}
-      <div style={{position:'relative'}}>
-        {blk.badge&&<div style={{fontSize:9,fontWeight:800,letterSpacing:2,color:'rgba(255,255,255,.85)',marginBottom:6,textTransform:'uppercase'}}>{blk.badge}</div>}
-        <div style={{fontSize:mob?16:20,fontWeight:800,color:'#fff',marginBottom:5}}>{blk.title||'Promoción'}</div>
-        <div style={{fontSize:11,color:'rgba(255,255,255,.8)',marginBottom:12}}>{blk.sub||'Subtítulo'}</div>
-        <div style={{display:'flex',gap:8,justifyContent:'center',flexWrap:'wrap'}}>
-          <span style={{background:'#fff',color:'#c0392b',fontSize:10,fontWeight:800,padding:'7px 18px',borderRadius:20,cursor:'pointer'}}>{blk.cta||'Ver más'}</span>
-          {blk.cta2&&<span style={{background:'rgba(255,255,255,.18)',color:'#fff',border:'1px solid rgba(255,255,255,.4)',fontSize:10,fontWeight:700,padding:'7px 16px',borderRadius:20,cursor:'pointer'}}>{blk.cta2}</span>}
-        </div>
-      </div>
-    </div>
-  );
-  t.delivery=()=>(
-    <div style={{background:blk.image?'#000':(blk.bg||'linear-gradient(135deg,#0f2027,#203a43)'),padding:'22px 20px',position:'relative',overflow:'hidden',minHeight:100}}>
-      {blk.image&&<><div style={{position:'absolute',inset:0,backgroundImage:`url(${blk.image})`,backgroundSize:'cover',backgroundPosition:'center'}}/><div style={{position:'absolute',inset:0,background:'rgba(0,0,0,.5)'}}/></>}
-      <div style={{position:'relative',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
-        <div>
-          {blk.badge&&<span style={{fontSize:9,fontWeight:800,color:'#22d3a0',background:'rgba(34,211,160,.1)',padding:'3px 8px',borderRadius:20,border:'1px solid rgba(34,211,160,.2)',display:'inline-block',marginBottom:7}}>{blk.badge}</span>}
-          <div style={{fontSize:mob?14:18,fontWeight:800,color:'#fff',marginBottom:6}}>{blk.title||'Delivery'}</div>
-          <div style={{fontSize:11,color:'rgba(255,255,255,.6)',marginBottom:10}}>{blk.sub||'Entrega express'}</div>
-          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-            <span style={{background:'var(--gn)',color:'#0a0c14',fontSize:10,fontWeight:700,padding:'6px 14px',borderRadius:20,cursor:'pointer'}}>{blk.cta||'Pedir'}</span>
-            {blk.cta2&&<span style={{background:'rgba(255,255,255,.16)',color:'#fff',border:'1px solid rgba(255,255,255,.35)',fontSize:10,fontWeight:700,padding:'6px 14px',borderRadius:20,cursor:'pointer'}}>{blk.cta2}</span>}
-          </div>
-        </div>
-        <div style={{fontSize:48,flexShrink:0,filter:'drop-shadow(0 4px 12px rgba(34,211,160,.3))'}}>🛵</div>
-      </div>
-    </div>
-  );
-  t.carousel=()=>(
-    <div style={{padding:'16px',background:'var(--bg)'}}>
-      <div style={{fontSize:11,fontWeight:700,color:'var(--tx)',marginBottom:10}}>{blk.title||'Marcas'}</div>
-      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-        {(blk.items||[]).map((x,i)=>(
-          <div key={i} style={{background:'var(--bg2)',borderRadius:8,padding:'7px 14px',border:'1px solid var(--bd)',cursor:'pointer',transition:'all .15s'}}>
-            <span style={{fontSize:10,fontWeight:600,color:'var(--tx2)'}}>{x}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-  t.footer=()=>(
-    <div style={{background:blk.bg||'#0a0c14',padding:'18px 16px',borderTop:'1px solid rgba(255,255,255,.06)'}}>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
-        <div>
-          <div style={{fontSize:13,fontWeight:800,color:'var(--tx)',marginBottom:3}}>{blk.title||'RETADOR'}</div>
-          <div style={{fontSize:9,color:'var(--tx3)'}}>{blk.sub||'© 2026'}</div>
-        </div>
-        <div style={{display:'flex',gap:12}}>
-          {['Términos','Privacidad','Soporte'].map(l=><span key={l} style={{fontSize:10,color:'var(--tx3)',cursor:'pointer'}}>{l}</span>)}
-        </div>
-      </div>
-    </div>
-  );
-  t.slider=()=>(
-    <div style={{background:'linear-gradient(135deg,#0d1526,#1a3a5e)',padding:'28px 20px',position:'relative',overflow:'hidden',minHeight:120}}>
-      <div style={{position:'absolute',inset:0,opacity:.04,backgroundImage:'linear-gradient(var(--ac) 1px,transparent 1px),linear-gradient(90deg,var(--ac) 1px,transparent 1px)',backgroundSize:'30px 30px'}}/>
-      <div style={{fontSize:11,fontWeight:700,color:'rgba(255,255,255,.5)',marginBottom:8,letterSpacing:1}}>SLIDE 1 / 3</div>
-      <div style={{fontSize:mob?15:20,fontWeight:800,color:'#fff',marginBottom:6}}>Colección Primavera 2026</div>
-      <div style={{fontSize:11,color:'rgba(255,255,255,.6)',marginBottom:14}}>Descubre las últimas tendencias</div>
-      <div style={{display:'flex',gap:10,alignItems:'center'}}>
-        <span style={{background:'var(--ac)',color:'#fff',fontSize:10,fontWeight:700,padding:'6px 14px',borderRadius:20}}>Explorar</span>
-        <div style={{display:'flex',gap:5}}>{[0,1,2].map(i=><div key={i} style={{width:i===0?18:6,height:6,borderRadius:3,background:i===0?'#fff':'rgba(255,255,255,.3)'}}/>)}</div>
-      </div>
-    </div>
-  );
-  t.video=()=>(
-    <div style={{background:'#0a0c14',padding:'0',position:'relative',overflow:'hidden',minHeight:120,display:'flex',alignItems:'center',justifyContent:'center'}}>
-      <div style={{position:'absolute',inset:0,background:'linear-gradient(135deg,#1a1a2e,#0d0f18)',opacity:.95}}/>
-      <div style={{position:'relative',textAlign:'center',zIndex:2}}>
-        <div style={{width:52,height:52,borderRadius:'50%',background:'rgba(79,114,255,.2)',border:'2px solid rgba(79,114,255,.5)',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 10px',cursor:'pointer',fontSize:18}}>▶</div>
-        <div style={{fontSize:11,color:'rgba(255,255,255,.6)'}}>{blk.title||'Video Destacado'}</div>
-      </div>
-    </div>
-  );
-  t.cta=()=>(
-    <div style={{padding:'28px 24px',background:'linear-gradient(135deg,var(--bg2),var(--bg3))',textAlign:'center',border:'1px solid var(--bd)',borderLeft:'none',borderRight:'none'}}>
-      <div style={{fontSize:mob?14:17,fontWeight:700,color:'var(--tx)',marginBottom:6}}>{blk.title||'¿Listo para comenzar?'}</div>
-      <div style={{fontSize:11,color:'var(--tx3)',marginBottom:14}}>{blk.sub||'Únete a miles de usuarios'}</div>
-      <div style={{display:'flex',gap:9,justifyContent:'center'}}>
-        <span style={{background:'var(--ac)',color:'#fff',fontSize:11,fontWeight:700,padding:'8px 20px',borderRadius:20,cursor:'pointer'}}>{blk.cta||'Comenzar gratis'}</span>
-        {blk.cta2&&<span style={{border:'1px solid var(--bd2)',color:'var(--tx2)',fontSize:11,fontWeight:600,padding:'8px 16px',borderRadius:20,cursor:'pointer'}}>{blk.cta2}</span>}
-      </div>
-    </div>
-  );
-  t.text=()=>(
-    <div style={{padding:'22px 24px',background:'var(--bg1)'}}>
-      <div style={{fontSize:mob?13:16,fontWeight:700,color:'var(--tx)',marginBottom:8}}>{blk.title||'Título del artículo'}</div>
-      <div style={{fontSize:11,color:'var(--tx2)',lineHeight:1.7,marginBottom:12}}>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Descubre cómo RETADOR está revolucionando el comercio digital en México con tecnología de punta...</div>
-      <span style={{fontSize:10,color:'var(--ac2)',cursor:'pointer',fontWeight:600}}>Leer más →</span>
-    </div>
-  );
-  t.events=()=>(
-    <div style={{padding:'18px 16px',background:'var(--bg)'}}>
-      <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',marginBottom:12}}>{blk.title||'Próximos Eventos'}</div>
-      <div style={{display:'flex',flexDirection:'column',gap:8}}>
-        {[{d:'15 JUN',n:'Flash Sale 24h',c:'var(--rd)'},{d:'21 JUN',n:'Día del Padre',c:'var(--yw)'},{d:'30 JUN',n:'Rebajas Verano',c:'var(--ac2)'}].map((e,i)=>(
-          <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:'var(--bg2)',borderRadius:8,border:'1px solid var(--bd)',cursor:'pointer'}}>
-            <div style={{width:36,flexShrink:0,textAlign:'center'}}>
-              <div style={{fontSize:14,fontWeight:800,color:e.c,lineHeight:1}}>{e.d.split(' ')[0]}</div>
-              <div style={{fontSize:8,color:'var(--tx3)',fontWeight:600}}>{e.d.split(' ')[1]}</div>
-            </div>
-            <div style={{width:'1px',height:28,background:'var(--bd2)'}}/>
-            <div style={{fontSize:11,fontWeight:600,color:'var(--tx)'}}>{e.n}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-  t.productzone=()=>{
-    const n=blk.count||20;
-    const lbl=blk.zlabel||'productos';
-    const cards=mob?4:6;
-    return(
-      <div style={{padding:'16px',background:'var(--bg1)',borderTop:'2px dashed var(--bd2)',borderBottom:'2px dashed var(--bd2)'}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
-          <span style={{fontSize:9,fontWeight:800,letterSpacing:1,color:'var(--ac2)',background:'var(--ag)',padding:'4px 10px',borderRadius:20}}>▦ ZONA DE {lbl.toUpperCase()}</span>
-          <span style={{fontSize:10,color:'var(--tx3)'}}>≈ {n} {lbl} aquí</span>
-        </div>
-        <div style={{display:'grid',gridTemplateColumns:`repeat(${mob?2:3},1fr)`,gap:8}}>
-          {Array.from({length:cards}).map((_,i)=>(
-            <div key={i} style={{background:'var(--bg2)',border:'1px dashed var(--bd2)',borderRadius:10,overflow:'hidden'}}>
-              <div style={{height:mob?66:82,background:'var(--bg3)'}}/>
-              <div style={{padding:8}}>
-                <div style={{height:7,width:'80%',background:'var(--bd2)',borderRadius:4,marginBottom:5}}/>
-                <div style={{height:7,width:'50%',background:'var(--bd)',borderRadius:4}}/>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div style={{textAlign:'center',fontSize:9,color:'var(--tx3)',marginTop:10,lineHeight:1.4}}>{lbl==='subastas'?'Las subastas reales salen aquí':'Los productos reales salen aquí'} en la app · esto es solo una guía para ubicar tus bloques en el flujo</div>
-      </div>
-    );
-  };
-  t.syszone=()=>(
-    <div style={{padding:'13px 14px',background:'var(--bg2)',borderLeft:'3px solid var(--ac)',display:'flex',alignItems:'center',gap:10}}>
-      <span style={{fontSize:16,flexShrink:0,opacity:.85}}>{blk.icon||'▦'}</span>
-      <div style={{flex:1,minWidth:0}}>
-        <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',overflow:'hidden',textOverflow:'ellipsis'}}>{blk.title||'Sección de la pantalla'}</div>
-        <div style={{fontSize:9,color:'var(--tx3)',marginTop:2}}>Parte fija de la app · guía de posición, aquí no se edita</div>
-      </div>
-      <span style={{fontSize:8,fontWeight:800,letterSpacing:.5,color:'var(--tx3)',background:'var(--bg3)',padding:'3px 7px',borderRadius:20,flexShrink:0}}>SISTEMA</span>
-    </div>
-  );
-  const render=t[blk.type];
-  if(render)return render();
-  return(
-    <div style={{padding:'16px',background:'var(--bg2)',display:'flex',alignItems:'center',gap:10,minHeight:64}}>
-      <div style={{width:6,height:32,background:'var(--ac)',borderRadius:3}}/>
-      <div>
-        <div style={{fontSize:12,fontWeight:600,color:'var(--tx)'}}>{blk.label}</div>
-        <div style={{fontSize:9,color:'var(--tx3)',marginTop:2}}>{blk.type}</div>
-      </div>
-    </div>
-  );
-}
-
-/* ── EDITOR VISUAL ─────────────────────────────────────────────────────────── */
-/* ── Editor de categorías (Búsqueda) — limpio, reordenable, enlazado a la plataforma ── */
 function CategoryManager(){
   const {cats, subcats, addCat, removeCat, renameCat, addSub, removeSub, renameSub, reorderCats} = useCatalog();
   const [sel,setSel]=useState(null);
@@ -1058,470 +725,454 @@ const DESTINOS=[
 // Interruptor Visible/Oculto del bloque seleccionado (usado en el panel derecho).
 const Tog=({on,ch})=><div className={`tog ${on?'ton':'tof'}`} onClick={()=>ch&&ch(!on)}><div className="togth"/></div>;
 
-function EditorVisual({toast, cfg={}, onCfg}){
-  const[area,setArea]=useState('inicio');
-  const[pageBlocks,setPageBlocks]=useState(()=>{
-    const d={};
-    Object.keys(PAGE_DEFAULTS).forEach(k=>{d[k]=JSON.parse(JSON.stringify(PAGE_DEFAULTS[k]));});
-    // Fuente de verdad: la config GLOBAL (cfg.blocks). localStorage solo como caché.
-    try{ const r=localStorage.getItem('retador_editor'); if(r){const saved=JSON.parse(r); Object.keys(saved).forEach(k=>{ if(saved[k]) d[k]=saved[k]; });} }catch{}
-    try{ const g=cfg&&cfg.blocks; if(g&&typeof g==='object'){ Object.keys(g).forEach(k=>{ if(g[k]) d[k]=g[k]; }); } }catch{}
-    // Descarta la página oculta heredada "marketplace" si viniera en el caché o en la
-    // config: no está en el menú del editor y sus bloques se colaban en la tienda sin
-    // que el dueño los viera. La tienda solo lee páginas visibles (inicio/banners/promotions).
-    delete d.marketplace;
-    return d;
+// ═══════════════ EDITOR VISUAL (renovado) ═══════════════
+// Modelo: masters (contenido, fuente única) + layout por pantalla (anclas + refs,
+// posición local). Carrusel = tipo. Formato (aspect-ratio), posición del CTA,
+// publicar en varias pantallas, biblioteca de contenido. Fluido (inputs con commit
+// al soltar; previews memoizados). Sin "Vista previa" ni "Versiones".
+
+// Input con estado local: hace commit al soltar (no re-renderiza el lienzo por tecla).
+const CommitInput = memo(function CommitInput({ value, onCommit, textarea, ...rest }) {
+  const [v, setV] = useState(value ?? "");
+  const dirty = useRef(false);
+  useEffect(() => { if (!dirty.current) setV(value ?? ""); }, [value]);
+  const commit = () => { dirty.current = false; if ((v ?? "") !== (value ?? "")) onCommit(v); };
+  const props = { className: "ve-inp", value: v,
+    onChange: e => { dirty.current = true; setV(e.target.value); },
+    onBlur: commit,
+    onKeyDown: e => { if (!textarea && e.key === "Enter") e.currentTarget.blur(); }, ...rest };
+  return textarea ? <textarea rows={2} {...props} /> : <input {...props} />;
+});
+
+// Preview de un master en el lienzo (memoizado, sin navegación ni auto-avance molesto).
+const PreviewBlock = memo(function PreviewBlock({ m }) {
+  return <div style={{ pointerEvents: "none" }}><BlockView m={{ ...m, active: true }} onNav={null} /></div>;
+});
+
+// Chips de opción (formato / posición del botón).
+function Chips({ options, value, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {options.map(o => (
+        <button key={o.v} onClick={() => onChange(o.v)}
+          style={{ flex: "1 1 auto", minWidth: 0, fontSize: 11, fontWeight: 700, padding: "7px 9px", borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
+            background: value === o.v ? "var(--ac)" : "var(--bg2)", color: value === o.v ? "#fff" : "var(--tx2)", border: `1px solid ${value === o.v ? "var(--ac)" : "var(--bd2)"}` }}>
+          {o.l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Selector de pantallas (casillas) reutilizable.
+function ScreenChecks({ selected, onToggle }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {SCREENS.map(sc => {
+        const on = selected.includes(sc.id);
+        return (
+          <button key={sc.id} onClick={() => onToggle(sc.id)}
+            style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", borderRadius: 9, cursor: "pointer", textAlign: "left",
+              background: on ? "var(--ag)" : "var(--bg2)", border: `1px solid ${on ? "var(--ac)" : "var(--bd2)"}`, color: "var(--tx)" }}>
+            <span style={{ width: 17, height: 17, borderRadius: 5, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900,
+              background: on ? "var(--ac)" : "transparent", border: `1.5px solid ${on ? "var(--ac)" : "var(--bd2)"}`, color: "#fff" }}>{on ? "✓" : ""}</span>
+            <span style={{ fontSize: 12 }}>{sc.icon} {sc.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function normalizeCfg(cfg) {
+  const masters = {};
+  Object.entries((cfg && cfg.masters) || {}).forEach(([id, m]) => { if (m && typeof m === "object") masters[id] = { ...m }; });
+  const legacyBanner = (e, lib) => {
+    const mid = mkId("m");
+    masters[mid] = { id: mid, kind: "banner", active: lib ? false : (e.active !== false), format: e.format || "3:1", ctaPos: e.ctaPos || "left", lib: !!lib,
+      title: e.title || "", sub: e.sub || "", badge: e.badge || "", bg: e.bg || RET_BGS[0], image: e.image || "",
+      cta: e.cta || "", ctaAction: e.ctaAction || "", cta2: e.cta2 || "", cta2Action: e.cta2Action || "" };
+    return mid;
+  };
+  const layout = {};
+  SCREENS.forEach(sc => {
+    const canon = SCREEN_ANCHORS[sc.id];
+    const canonIds = new Set(canon.map(a => a.id));
+    const existing = Array.isArray(cfg && cfg.blocks && cfg.blocks[sc.id]) ? cfg.blocks[sc.id] : [];
+    const out = []; const seen = new Set();
+    existing.forEach(e => {
+      if (!e) return;
+      if (isAnchor(e)) { if (canonIds.has(e.id) && !seen.has(e.id)) { out.push({ ...canon.find(a => a.id === e.id) }); seen.add(e.id); } return; }
+      if (e.ref) { if (masters[e.ref]) out.push({ id: e.id || mkId("e"), ref: e.ref }); return; }
+      if ((e.title || e.image) && ["hero", "promo", "slider", "cta"].includes(e.type)) out.push({ id: mkId("e"), ref: legacyBanner(e, false) });
+    });
+    canon.forEach((a, ai) => {
+      if (seen.has(a.id)) return;
+      let at = out.length;
+      for (let j = ai + 1; j < canon.length; j++) { const k = out.findIndex(x => x.id === canon[j].id); if (k >= 0) { at = k; break; } }
+      out.splice(at, 0, { ...a }); seen.add(a.id);
+    });
+    layout[sc.id] = out;
   });
-  useEffect(()=>{ try{localStorage.setItem('retador_editor',JSON.stringify(pageBlocks));}catch{} },[pageBlocks]);
-  const[sel,setSel]=useState(null);
-  const[vp,setVp]=useState('mobile');
-  const[prevVp,setPrevVp]=useState('mobile');
-  const[modal,setModal]=useState(null);
-  const[dirty,setDirty]=useState(false);
-  const[saving,setSaving]=useState(false);
-  const[dIdx,setDIdx]=useState(null);
-  const[dOv,setDOv]=useState(null);
-  const[gCol,setGCol]=useState({primary:'#4f72ff',accent:'#22d3a0'});
-  const[showLeft,setShowLeft]=useState(true);
-  const[showRight,setShowRight]=useState(true);
-  const[showCats,setShowCats]=useState(false);
-  const[epick,setEpick]=useState(null);
-  const uploadRef=useRef(null);
-  const uploadTarget=useRef(null); // {id, idx}
-  const handleImageUpload=e=>{
-    const file=e.target.files?.[0];
-    if(!file||!uploadTarget.current)return;
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      const t=uploadTarget.current;
-      if(t.field!==undefined) updFieldDirect(t.id,t.field,ev.target.result);
-      else updItemDirect(t.id,t.idx,'icon',ev.target.result);
-      uploadTarget.current=null;
-    };
-    reader.readAsDataURL(file);
-    e.target.value='';
-  };
-  // undo/redo history per page
-  const histRef=useRef({});
-  const histIdxRef=useRef({});
-  const inHistRef=useRef(false);
-  const getHist=useCallback(a=>{
-    if(!histRef.current[a]){histRef.current[a]=[];histIdxRef.current[a]=-1;}
-    return histRef.current[a];
-  },[]);
-  const pushHist=useCallback((a,blks)=>{
-    if(inHistRef.current)return;
-    const h=getHist(a);
-    const idx=histIdxRef.current[a]??-1;
-    const t=h.slice(0,idx+1);
-    t.push(JSON.stringify(blks));
-    histRef.current[a]=t;
-    histIdxRef.current[a]=t.length-1;
-  },[getHist]);
-  useEffect(()=>{
-    const h=getHist(area);
-    if(h.length===0&&pageBlocks[area])pushHist(area,pageBlocks[area]);
-    setSel(null);
-  },[area]);
-  const canUndo=()=>(histIdxRef.current[area]??-1)>0;
-  const canRedo=()=>{const h=getHist(area);return(histIdxRef.current[area]??-1)<h.length-1;};
-  const undo=()=>{
-    const h=getHist(area);const idx=histIdxRef.current[area]??-1;
-    if(idx<=0)return;
-    const ni=idx-1;histIdxRef.current[area]=ni;
-    inHistRef.current=true;
-    setPageBlocks(p=>({...p,[area]:JSON.parse(h[ni])}));
-    inHistRef.current=false;setDirty(true);toast('↩ Deshecho');
-  };
-  const redo=()=>{
-    const h=getHist(area);const idx=histIdxRef.current[area]??-1;
-    if(idx>=h.length-1)return;
-    const ni=idx+1;histIdxRef.current[area]=ni;
-    inHistRef.current=true;
-    setPageBlocks(p=>({...p,[area]:JSON.parse(h[ni])}));
-    inHistRef.current=false;setDirty(true);toast('↪ Rehecho');
-  };
+  // Migra páginas viejas "Banners"/"Promociones" a la biblioteca (apagadas).
+  ["banners", "promotions"].forEach(pg => {
+    (Array.isArray(cfg && cfg.blocks && cfg.blocks[pg]) ? cfg.blocks[pg] : []).forEach(e => {
+      if (e && (e.title || e.image) && !e.ref) legacyBanner(e, true);
+    });
+  });
+  return { masters, layout };
+}
 
-  const blocks=pageBlocks[area]||[];
-  const selBlk=blocks.find(b=>b.id===sel);
-  const groups=ED_AREAS.reduce((a,x)=>{(a[x.group]=a[x.group]||[]).push(x);return a;},{});
-  const GRADS=[
-    // Fondos RETADOR (identidad) — opciones rápidas al frente
-    'linear-gradient(135deg,#181203 0%,#3d2f07 100%)',
-    '#0d0d0d',
-    'linear-gradient(135deg,#03150d 0%,#0b3a26 100%)',
-    'linear-gradient(135deg,#230505 0%,#5c1010 100%)',
-    'linear-gradient(135deg,#0d1526,#1a2a5e)',
-    'linear-gradient(135deg,#4f72ff,#7c3aed)',
-    'linear-gradient(135deg,#22d3a0,#4f72ff)',
-    'linear-gradient(135deg,#f05a5a,#f5a623)',
-    'linear-gradient(135deg,#f5a623,#22d3a0)',
-    'linear-gradient(135deg,#a78bfa,#4f72ff)',
-    'linear-gradient(135deg,#0f2027,#203a43)',
-    'transparent',
-  ];
-  const mutate=(a,nb)=>{
-    setPageBlocks(p=>{pushHist(a,nb);return{...p,[a]:nb};});
-    setDirty(true);
-  };
-  const upd=(id,k,v)=>mutate(area,blocks.map(b=>b.id===id?{...b,[k]:v}:b));
-  const togVis=id=>{mutate(area,blocks.map(b=>b.id===id?{...b,active:!b.active}:b));toast('Visibilidad actualizada');};
-  const delBlk=id=>{if(blocks.find(b=>b.id===id)?.type==='syszone')return;mutate(area,blocks.filter(b=>b.id!==id));if(sel===id)setSel(null);toast('Bloque eliminado');};
-  const dupBlk=id=>{const i=blocks.findIndex(b=>b.id===id);if(blocks[i]?.type==='syszone')return;const cl={...blocks[i],id:mkId(),label:blocks[i].label+' (copia)'};const nx=[...blocks];nx.splice(i+1,0,cl);mutate(area,nx);toast('Bloque duplicado');};
-  const addBlk=type=>{
-    const tpl=BLK_TYPES.find(x=>x.type===type);
-    const defItems={categories:[{icon:"💻",name:"Nueva categoría"}],stores:["Nueva tienda"],trending:[{icon:"📦",name:"Nuevo producto",price:"$0"}],carousel:["Marca"],footer:["Link"]};
-    const nb={id:mkId(),type,label:tpl.label,active:true,bg:tpl.grad,title:tpl.label,sub:'Subtítulo editable',cta:'Ver más',badge:'',items:defItems[type]||[],campaign:null,count:type==='productzone'?20:undefined};
-    mutate(area,[...blocks,nb]);setSel(nb.id);setModal(null);toast(`✦ "${tpl.label}" añadido`);
-  };
-  const updItem=(id,idx,field,val)=>mutate(area,blocks.map(b=>{
-    if(b.id!==id)return b;
-    const its=[...(b.items||[])];
-    its[idx]=typeof its[idx]==='string'?val:{...its[idx],[field]:val};
-    return{...b,items:its};
-  }));
-  // Direct version usable in async callbacks (uses latest pageBlocks via functional update)
-  const updItemDirect=(id,idx,field,val)=>{
-    setPageBlocks(prev=>{
-      const blks=(prev[area]||[]).map(b=>{
-        if(b.id!==id)return b;
-        const its=[...(b.items||[])];
-        its[idx]=typeof its[idx]==='string'?val:{...its[idx],[field]:val};
-        return{...b,items:its};
+function EditorVisual({ toast, cfg = {}, onCfg }) {
+  const initRef = useRef(null);
+  if (!initRef.current) initRef.current = normalizeCfg(cfg);
+  const [masters, setMasters] = useState(initRef.current.masters);
+  const [layout, setLayout] = useState(initRef.current.layout);
+  const [screen, setScreen] = useState("inicio"); // id de pantalla o 'library'
+  const [sel, setSel] = useState(null);           // master id seleccionado
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showLeft, setShowLeft] = useState(true);
+  const [showRight, setShowRight] = useState(true);
+  const [showCats, setShowCats] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [useLib, setUseLib] = useState(null);      // {mid} → modal "Usar en"
+  const [slide, setSlide] = useState(0);           // slide seleccionado del carrusel
+  const [dIdx, setDIdx] = useState(null);
+  const [dOv, setDOv] = useState(null);
+  const uploadRef = useRef(null);
+  const uploadTgt = useRef(null);                  // {mid, field} | {mid, slide, field}
+
+  const touch = () => setDirty(true);
+  const selM = sel ? masters[sel] : null;
+  useEffect(() => { setSlide(0); }, [sel]);
+
+  // ── Mutaciones de contenido (masters) ──
+  const patchMaster = (id, patch) => { setMasters(m => ({ ...m, [id]: { ...m[id], ...patch } })); touch(); };
+  const patchSlide = (id, i, patch) => setMasters(m => {
+    const mm = m[id]; const sl = [...(mm.slides || [])]; sl[i] = { ...sl[i], ...patch };
+    return { ...m, [id]: { ...mm, slides: sl } };
+  });
+  const slideMut = (id, fn) => { setMasters(m => { const mm = m[id]; return { ...m, [id]: { ...mm, slides: fn([...(mm.slides || [])]) } }; }); touch(); };
+  const addSlide = id => slideMut(id, sl => [...sl, { id: mkId("s"), bg: RET_BGS[sl.length % RET_BGS.length], title: "Nuevo slide", sub: "", badge: "", cta: "Ver más", ctaAction: "busqueda", image: "" }]);
+  const delSlide = (id, i) => slideMut(id, sl => sl.filter((_, k) => k !== i));
+  const moveSlide = (id, i, dir) => slideMut(id, sl => { const j = i + dir; if (j < 0 || j >= sl.length) return sl; const n = [...sl]; const [x] = n.splice(i, 1); n.splice(j, 0, x); return n; });
+
+  // ── Pantallas donde está publicado un master ──
+  const screensOf = id => SCREENS.filter(sc => (layout[sc.id] || []).some(e => e.ref === id)).map(sc => sc.id);
+  const setScreensFor = (id, wanted) => {
+    setLayout(prev => {
+      const next = { ...prev };
+      SCREENS.forEach(sc => {
+        const has = (next[sc.id] || []).some(e => e.ref === id);
+        const want = wanted.includes(sc.id);
+        if (want && !has) next[sc.id] = [...next[sc.id], { id: mkId("e"), ref: id }];
+        else if (!want && has) next[sc.id] = next[sc.id].filter(e => e.ref !== id);
       });
-      pushHist(area,blks);
-      return{...prev,[area]:blks};
+      return next;
     });
-    setDirty(true);
-    toast('🖼 Imagen aplicada');
+    touch();
   };
-  const updFieldDirect=(id,field,val)=>{
-    setPageBlocks(prev=>{
-      const blks=(prev[area]||[]).map(b=>b.id===id?{...b,[field]:val}:b);
-      pushHist(area,blks);
-      return{...prev,[area]:blks};
-    });
-    setDirty(true);
-    toast(field==='image'?'🖼 Imagen aplicada':'Actualizado');
-  };
-  const addItem=id=>{
-    const blk=blocks.find(b=>b.id===id);
-    const isObj=blk?.items?.length>0&&typeof blk.items[0]==='object';
-    const def=blk?.type==='categories'?{icon:'📦',name:'Nueva categoría'}:blk?.type==='trending'?{icon:'📦',name:'Nuevo producto',price:'$0'}:isObj?{icon:'📦',name:'Nuevo ítem'}:'Nuevo ítem';
-    mutate(area,blocks.map(b=>b.id===id?{...b,items:[...(b.items||[]),def]}:b));
-  };
-  const removeItem=(id,idx)=>mutate(area,blocks.map(b=>b.id===id?{...b,items:(b.items||[]).filter((_,i)=>i!==idx)}:b));
-  const saveAndPublish=()=>{ if(!onCfg){toast('⚠️ No se pudo guardar');return;} setSaving(true); try{ onCfg({ blocks: pageBlocks }); }catch(e){} setTimeout(()=>{setSaving(false);setDirty(false);toast('🚀 Guardado y publicado — en vivo para todos');},600); };
-  const ds=(e,i)=>{setDIdx(i);e.dataTransfer.effectAllowed='move';};
-  const dov=(e,i)=>{e.preventDefault();setDOv(i);};
-  const dd=(e,i)=>{e.preventDefault();if(dIdx===null||dIdx===i){setDIdx(null);setDOv(null);return;}const nx=[...blocks];const[m]=nx.splice(dIdx,1);nx.splice(i,0,m);mutate(area,nx);setDIdx(null);setDOv(null);toast('Orden actualizado');};
-  const de=()=>{setDIdx(null);setDOv(null);};
-  const mw=vp==='mobile'?375:vp==='tablet'?620:860;
-  const prevMw=prevVp==='mobile'?375:prevVp==='tablet'?620:860;
-  const hasItems=selBlk&&selBlk.items!==undefined&&['categories','stores','trending','carousel','footer','nav2','text'].includes(selBlk.type);
-  const isObjItems=selBlk&&selBlk.items?.length>0&&typeof selBlk.items[0]==='object';
 
-  return(
+  // ── Añadir / quitar / duplicar bloques en la pantalla actual ──
+  const isScreen = screen !== "library";
+  const entries = isScreen ? (layout[screen] || []) : [];
+  const addBlock = kind => {
+    const m = blankMaster(kind);
+    setMasters(mm => ({ ...mm, [m.id]: m }));
+    setLayout(prev => ({ ...prev, [screen]: [...(prev[screen] || []), { id: mkId("e"), ref: m.id }] }));
+    setSel(m.id); setAddOpen(false); touch();
+    toast(kind === "carousel" ? "🎠 Carrusel añadido" : "🖼️ Banner añadido");
+  };
+  const removeRef = (entryId, mid) => {
+    setLayout(prev => ({ ...prev, [screen]: prev[screen].filter(e => e.id !== entryId) }));
+    // si el master no queda referenciado en ninguna pantalla y no es de biblioteca → bórralo
+    setTimeout(() => setMasters(prev => {
+      const used = SCREENS.some(sc => (layout[sc.id] || []).some(e => e.ref === mid && e.id !== entryId));
+      if (!used && prev[mid] && !prev[mid].lib) { const n = { ...prev }; delete n[mid]; return n; }
+      return prev;
+    }), 0);
+    if (sel === mid) setSel(null);
+    touch(); toast("Bloque quitado de esta pantalla");
+  };
+  const dupBlock = mid => {
+    const src = masters[mid]; if (!src) return;
+    const nid = mkId("m"); const copy = { ...JSON.parse(JSON.stringify(src)), id: nid, lib: false };
+    setMasters(mm => ({ ...mm, [nid]: copy }));
+    setLayout(prev => ({ ...prev, [screen]: [...prev[screen], { id: mkId("e"), ref: nid }] }));
+    setSel(nid); touch(); toast("Bloque duplicado");
+  };
+
+  // ── Biblioteca de contenido ──
+  const libItems = Object.values(masters).filter(m => m && m.lib);
+  const saveToLibrary = mid => {
+    const src = masters[mid]; if (!src) return;
+    const nid = mkId("m"); setMasters(mm => ({ ...mm, [nid]: { ...JSON.parse(JSON.stringify(src)), id: nid, lib: true, active: false } }));
+    touch(); toast("📚 Guardado en Contenido");
+  };
+  const useFromLibrary = (mid, wanted) => {
+    const src = masters[mid]; if (!src || !wanted.length) return;
+    const nid = mkId("m"); const copy = { ...JSON.parse(JSON.stringify(src)), id: nid, lib: false, active: true };
+    setMasters(mm => ({ ...mm, [nid]: copy }));
+    setLayout(prev => { const next = { ...prev }; wanted.forEach(s => { next[s] = [...(next[s] || []), { id: mkId("e"), ref: nid }]; }); return next; });
+    setUseLib(null); touch(); toast("Insertado en las pantallas elegidas");
+  };
+  const delLibItem = mid => { setMasters(prev => { const n = { ...prev }; delete n[mid]; return n; }); if (sel === mid) setSel(null); touch(); toast("Eliminado de Contenido"); };
+
+  // ── Drag & drop (reordenar refs en la pantalla; anclas fijas) ──
+  const onDrop = i => {
+    if (dIdx === null || dIdx === i) { setDIdx(null); setDOv(null); return; }
+    setLayout(prev => { const arr = [...prev[screen]]; const [m] = arr.splice(dIdx, 1); arr.splice(i, 0, m); return { ...prev, [screen]: arr }; });
+    setDIdx(null); setDOv(null); touch(); toast("Posición actualizada");
+  };
+
+  // ── Imagen ──
+  const pickImage = tgt => { uploadTgt.current = tgt; uploadRef.current && uploadRef.current.click(); };
+  const onImage = e => {
+    const f = e.target.files && e.target.files[0]; const t = uploadTgt.current;
+    if (!f || !t) return;
+    const r = new FileReader();
+    r.onload = ev => {
+      if (t.slide != null) patchSlide(t.mid, t.slide, { image: ev.target.result });
+      else patchMaster(t.mid, { image: ev.target.result });
+      touch(); toast("🖼 Imagen aplicada"); uploadTgt.current = null;
+    };
+    r.readAsDataURL(f); e.target.value = "";
+  };
+
+  // ── Guardar y publicar ──
+  const save = () => {
+    if (!onCfg) { toast("⚠️ No se pudo guardar"); return; }
+    setSaving(true);
+    try { onCfg({ blocks: layout, masters }); } catch (e) {}
+    setTimeout(() => { setSaving(false); setDirty(false); toast("🚀 Guardado y publicado — en vivo para todos"); }, 550);
+  };
+
+  const DEST = DESTINOS;
+
+  return (
     <div className="ve-root">
-      {/* TOOLBAR SUPERIOR */}
-      <div className="ve-tb" onClick={()=>setEpick(null)}>
-        {dirty&&<span className="ve-unsv">SIN GUARDAR</span>}
-        <div className="ve-sep"/>
-        <button className="vp-btn" disabled={!canUndo()} onClick={undo} title="Deshacer">↩ Deshacer</button>
-        <button className="vp-btn" disabled={!canRedo()} onClick={redo} title="Rehacer">↪ Rehacer</button>
-        <div className="ve-sep"/>
-        {[{k:'mobile',l:'📲 Mobile'},{k:'tablet',l:'📱 Tablet'},{k:'desktop',l:'🖥 Desktop'}].map(v=>(
-          <button key={v.k} className={`vp-btn ${vp===v.k?'on':''}`} onClick={()=>setVp(v.k)}>{v.l}</button>
-        ))}
-        <div className="ve-sep"/>
-        <button className="vp-btn" onClick={()=>setModal('history')}>◷ Versiones</button>
-        <div style={{flex:1}}/>
-        <button className="btn btg sm" onClick={()=>setModal('preview')} style={{flexShrink:0}}>◎ Vista previa</button>
-        <button className="btn btp sm" onClick={saveAndPublish} disabled={saving} style={{flexShrink:0}}>
-          {saving?<span className="spin">↻</span>:'🚀'} {saving?'Guardando…':'Guardar y Publicar'}
+      {/* TOOLBAR */}
+      <div className="ve-tb">
+        {dirty && <span className="ve-unsv">SIN GUARDAR</span>}
+        <div style={{ flex: 1 }} />
+        <button className="btn btp sm" onClick={save} disabled={saving} style={{ flexShrink: 0 }}>
+          {saving ? <span className="spin">↻</span> : "🚀"} {saving ? "Guardando…" : "Guardar y Publicar"}
         </button>
       </div>
 
-      {/* CUERPO */}
       <div className="ve-body">
-
-        {/* PANEL IZQUIERDO */}
-        <div className={`ve-left ${showLeft?'':'collapsed'}`}>
+        {/* IZQUIERDA: pantallas + biblioteca */}
+        <div className={`ve-left ${showLeft ? "" : "collapsed"}`}>
           <div className="ve-left-inner">
-            <div className="ve-left-scroll" style={{paddingTop:6}}>
-              {Object.entries(groups).map(([grp,items])=>(
-                <div key={grp}>
-                  <div className="ve-grp">{grp}</div>
-                  {items.map(a=>(
-                    <div key={a.id} className={`ve-area ${area===a.id?'on':''}`} onClick={()=>setArea(a.id)}>
-                      <span className="ve-ai">{a.icon}</span>
-                      <span className="ve-al">{a.label}</span>
-                      <span style={{marginLeft:'auto',fontSize:9,color:'var(--tx3)',flexShrink:0}}>{(pageBlocks[a.id]||[]).length}</span>
-                    </div>
-                  ))}
+            <div className="ve-left-scroll" style={{ paddingTop: 6 }}>
+              <div className="ve-grp">Pantallas de la plataforma</div>
+              {SCREENS.map(sc => (
+                <div key={sc.id} className={`ve-area ${screen === sc.id ? "on" : ""}`} onClick={() => { setScreen(sc.id); setSel(null); }}>
+                  <span className="ve-ai">{sc.icon}</span>
+                  <span className="ve-al">{sc.label}</span>
+                  <span style={{ marginLeft: "auto", fontSize: 9, color: "var(--tx3)", flexShrink: 0 }}>{(layout[sc.id] || []).filter(e => e.ref).length}</span>
                 </div>
               ))}
-              <div style={{height:12}}/>
+              <div className="ve-grp">Contenido</div>
+              <div className={`ve-area ${screen === "library" ? "on" : ""}`} onClick={() => { setScreen("library"); setSel(null); }}>
+                <span className="ve-ai">📚</span>
+                <span className="ve-al">Contenido guardado</span>
+                <span style={{ marginLeft: "auto", fontSize: 9, color: "var(--tx3)", flexShrink: 0 }}>{libItems.length}</span>
+              </div>
+              <div style={{ height: 12 }} />
             </div>
           </div>
         </div>
 
-        {/* CANVAS CENTRAL */}
+        {/* CANVAS */}
         <div className="ve-canvas">
           <div className="ve-canvas-bar">
-            <button className="vp-btn" style={{flexShrink:0,padding:'5px 10px',fontSize:13,fontWeight:800}} onClick={()=>setShowLeft(v=>!v)} title={showLeft?'Ocultar páginas':'Mostrar páginas'}>{showLeft?'◀':'☰'}</button>
-            <div style={{display:'flex',alignItems:'center',gap:5,flex:1,minWidth:0,overflow:'hidden'}}>
-              <span style={{fontSize:11,fontWeight:700,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                {ED_AREAS.find(a=>a.id===area)?.label||'Homepage'}
+            <button className="vp-btn" style={{ flexShrink: 0, padding: "5px 10px", fontSize: 13, fontWeight: 800 }} onClick={() => setShowLeft(v => !v)}>{showLeft ? "◀" : "☰"}</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, overflow: "hidden" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {isScreen ? (SCREENS.find(s => s.id === screen) || {}).label : "📚 Contenido guardado"}
               </span>
-              <span className="bdg bg" style={{fontSize:8,flexShrink:0}}>LIVE</span>
-              {vp!=='desktop'&&<span className="bdg bb" style={{fontSize:8,flexShrink:0}}>{vp==='tablet'?'640':'375'}px</span>}
-              <span style={{fontSize:9,color:'var(--tx3)',flexShrink:0,whiteSpace:'nowrap'}}>{blocks.length} bloques</span>
+              <span className="bdg bg" style={{ fontSize: 8, flexShrink: 0 }}>LIVE</span>
             </div>
-            {area==='busqueda'&&<button className="btn btg sm" onClick={()=>setShowCats(true)} style={{flexShrink:0,fontSize:11,padding:'4px 9px',whiteSpace:'nowrap'}} title="Editar categorías de la plataforma">◎ Categorías</button>}
-            <button className="btn btp sm" onClick={()=>setModal('add')} style={{flexShrink:0,fontSize:11,padding:'4px 11px',whiteSpace:'nowrap'}}>+ Añadir</button>
+            {screen === "busqueda" && <button className="btn btg sm" onClick={() => setShowCats(true)} style={{ flexShrink: 0, fontSize: 11, padding: "4px 9px" }}>◎ Categorías</button>}
+            {isScreen && <button className="btn btp sm" onClick={() => setAddOpen(true)} style={{ flexShrink: 0, fontSize: 11, padding: "4px 11px" }}>+ Añadir</button>}
           </div>
-          <div className="ve-canvas-scroll">
-            <div className="ve-frame" style={{maxWidth:mw}}>
-              {blocks.map((blk,idx)=>{const isSys=blk.type==='syszone';return(
-                <div
-                  key={blk.id}
-                  draggable={!isSys}
-                  className={[
-                    've-blk',
-                    isSys?'sys-blk':'',
-                    sel===blk.id?'sel':'',
-                    !blk.active?'hidden-blk':'',
-                    dIdx===idx?'dragging':'',
-                    dOv===idx&&dIdx!==idx?'dragover':'',
-                  ].filter(Boolean).join(' ')}
-                  onClick={()=>{if(!isSys)setSel(blk.id);}}
-                  onDragStart={e=>{if(!isSys)ds(e,idx);}}
-                  onDragOver={e=>dov(e,idx)}
-                  onDrop={e=>dd(e,idx)}
-                  onDragEnd={de}
-                >
-                  {!isSys&&<div className="ve-handle">
-                    {[0,1,2,3,4,5].map(i=><div key={i} className="ve-hdot"/>)}
-                  </div>}
-                  {/* Label */}
-                  <div className="ve-blk-lbl">
-                    {blk.label}{isSys?' · fijo':''}{!blk.active?' · oculto':''}{blk.campaign?` · ${blk.campaign}`:''}
-                  </div>
-                  {/* Action bar */}
-                  {isSys
-                    ? <div className="ve-blk-bar" onClick={e=>e.stopPropagation()}><span style={{fontSize:9,color:'var(--tx3)',padding:'2px 4px'}}>🔒 Parte fija del sistema · no se edita</span></div>
-                    : <div className="ve-blk-bar" onClick={e=>e.stopPropagation()}>
-                        <button className="ve-blk-btn" onClick={()=>{setSel(blk.id);setShowRight(true);}}>Editar</button>
-                        <button className="ve-blk-btn" onClick={()=>togVis(blk.id)}>{blk.active?'Ocultar':'Mostrar'}</button>
-                        <button className="ve-blk-btn" onClick={()=>dupBlk(blk.id)}>Duplicar</button>
-                        <button className="ve-blk-btn" onClick={()=>{setSel(blk.id);setModal('schedule');}}>Programar</button>
-                        <button className="ve-blk-btn del" onClick={e=>{e.stopPropagation();delBlk(blk.id);}}>✕</button>
-                      </div>}
-                  {/* Preview */}
-                  <BlockPreview blk={blk} vp={vp}/>
-                </div>
-              )})}
-              <div className="ve-add-btn" onClick={()=>setModal('add')}>
-                <span style={{fontSize:16}}>+</span>
-                Crear nueva sección
-              </div>
-            </div>
-            <div style={{height:40}}/>
-          </div>
-        </div>
 
-        {/* PANEL DERECHO */}
-        <div className={`ve-right ${showRight?'':'collapsed'}`}>
-          <div className="ve-right-toggle" onClick={()=>setShowRight(v=>!v)}>
-            {showRight?'›':'‹'}
-          </div>
-          <div className="ve-right-inner">
-            {!selBlk?(
-              <>
-                <div className="ve-ph">
-                  <div className="ve-pt">Propiedades</div>
-                  <div className="ve-ps">Sin bloque seleccionado</div>
-                </div>
-                <div className="ve-empty">
-                  <div style={{fontSize:32,marginBottom:10,opacity:.2}}>◫</div>
-                  <div style={{fontSize:12,fontWeight:600,color:'var(--tx)',marginBottom:6}}>Sin selección</div>
-                  <div className="ve-empty-hint">
-                    Haz clic sobre cualquier bloque de la vista previa central para editarlo aquí
-                  </div>
-                </div>
-                <div style={{padding:'14px',borderTop:'1px solid var(--bd)',flexShrink:0}}>
-                  <div className="ve-sec" style={{marginBottom:10}}>Colores Globales</div>
-                  {[{l:'Primario',k:'primary'},{l:'Acento',k:'accent'}].map(c=>(
-                    <div key={c.k} style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
-                      <span style={{fontSize:12,color:'var(--tx)'}}>{c.l}</span>
-                      <div style={{display:'flex',alignItems:'center',gap:7}}>
-                        <span style={{fontSize:9,fontFamily:'var(--mo)',color:'var(--tx3)'}}>{gCol[c.k]}</span>
-                        <input type="color" value={gCol[c.k]}
-                          onChange={e=>setGCol(p=>({...p,[c.k]:e.target.value}))}
-                          style={{width:28,height:22,borderRadius:5,border:'1px solid var(--bd2)',cursor:'pointer',background:'none'}}/>
+          <div className="ve-canvas-scroll">
+            <div className="ve-frame" style={{ maxWidth: 430 }}>
+              {isScreen ? (
+                <>
+                  {entries.map((e, i) => {
+                    if (isAnchor(e)) return (
+                      <div key={e.id} className="ve-blk sys-blk" style={{ opacity: .96 }}>
+                        <div className="ve-blk-lbl">{e.title} · fijo</div>
+                        <div style={{ padding: "12px 14px", background: "var(--bg2)", borderLeft: "3px solid var(--ac)", display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ fontSize: 15, opacity: .85 }}>{e.icon || "▦"}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--tx)" }}>{e.title}</div>
+                            <div style={{ fontSize: 9, color: "var(--tx3)", marginTop: 2 }}>Parte fija de la app · posición fija · aquí no se edita</div>
+                          </div>
+                          <span style={{ fontSize: 8, fontWeight: 800, color: "var(--tx3)", background: "var(--bg3)", padding: "3px 7px", borderRadius: 20 }}>SISTEMA</span>
+                        </div>
                       </div>
+                    );
+                    const m = masters[e.ref]; if (!m) return null;
+                    const pubs = screensOf(m.id);
+                    return (
+                      <div key={e.id} draggable className={["ve-blk", sel === m.id ? "sel" : "", !m.active ? "hidden-blk" : "", dOv === i && dIdx !== i ? "dragover" : ""].filter(Boolean).join(" ")}
+                        onClick={() => { setSel(m.id); setShowRight(true); }}
+                        onDragStart={() => setDIdx(i)} onDragOver={ev => { ev.preventDefault(); setDOv(i); }} onDrop={ev => { ev.preventDefault(); onDrop(i); }} onDragEnd={() => { setDIdx(null); setDOv(null); }}>
+                        <div className="ve-handle">{[0, 1, 2, 3, 4, 5].map(k => <div key={k} className="ve-hdot" />)}</div>
+                        <div className="ve-blk-lbl">
+                          {m.kind === "carousel" ? "🎠 Carrusel" : "🖼️ Banner"}{!m.active ? " · oculto" : ""}{pubs.length > 1 ? ` · en ${pubs.length} pantallas` : ""}
+                        </div>
+                        <div className="ve-blk-bar" onClick={ev => ev.stopPropagation()}>
+                          <button className="ve-blk-btn" onClick={() => { setSel(m.id); setShowRight(true); }}>Editar</button>
+                          <button className="ve-blk-btn" onClick={() => { patchMaster(m.id, { active: !m.active }); }}>{m.active ? "Ocultar" : "Mostrar"}</button>
+                          <button className="ve-blk-btn" onClick={() => dupBlock(m.id)}>Duplicar</button>
+                          <button className="ve-blk-btn" onClick={() => saveToLibrary(m.id)}>Guardar en Contenido</button>
+                          <button className="ve-blk-btn del" onClick={ev => { ev.stopPropagation(); removeRef(e.id, m.id); }}>✕</button>
+                        </div>
+                        <div style={{ padding: "8px 8px 10px" }}><PreviewBlock m={m} /></div>
+                      </div>
+                    );
+                  })}
+                  <div className="ve-add-btn" onClick={() => setAddOpen(true)}><span style={{ fontSize: 16 }}>+</span> Añadir banner o carrusel</div>
+                </>
+              ) : (
+                // BIBLIOTECA
+                <div>
+                  <div style={{ fontSize: 11, color: "var(--tx2)", lineHeight: 1.5, padding: "4px 4px 12px" }}>
+                    Bloques reutilizables. No se pintan en ninguna pantalla por sí mismos. Usa “Usar en…” para insertarlos como copia independiente.
+                  </div>
+                  {libItems.length === 0 && <div className="ve-empty"><div style={{ fontSize: 32, marginBottom: 10, opacity: .2 }}>📚</div><div style={{ fontSize: 12, color: "var(--tx)" }}>Biblioteca vacía</div><div className="ve-empty-hint">Desde cualquier bloque, toca “Guardar en Contenido”.</div></div>}
+                  {libItems.map(m => (
+                    <div key={m.id} className={`ve-blk ${sel === m.id ? "sel" : ""}`} onClick={() => { setSel(m.id); setShowRight(true); }}>
+                      <div className="ve-blk-lbl">{m.kind === "carousel" ? "🎠 Carrusel" : "🖼️ Banner"} · en biblioteca</div>
+                      <div className="ve-blk-bar" onClick={ev => ev.stopPropagation()}>
+                        <button className="ve-blk-btn" onClick={() => { setSel(m.id); setShowRight(true); }}>Editar</button>
+                        <button className="ve-blk-btn" onClick={() => setUseLib({ mid: m.id })}>Usar en…</button>
+                        <button className="ve-blk-btn del" onClick={ev => { ev.stopPropagation(); delLibItem(m.id); }}>✕</button>
+                      </div>
+                      <div style={{ padding: "8px 8px 10px" }}><PreviewBlock m={m} /></div>
                     </div>
                   ))}
                 </div>
+              )}
+              <div style={{ height: 40 }} />
+            </div>
+          </div>
+        </div>
+
+        {/* DERECHA: propiedades */}
+        <div className={`ve-right ${showRight ? "" : "collapsed"}`}>
+          <div className="ve-right-toggle" onClick={() => setShowRight(v => !v)}>{showRight ? "›" : "‹"}</div>
+          <div className="ve-right-inner">
+            {!selM ? (
+              <>
+                <div className="ve-ph"><div className="ve-pt">Propiedades</div><div className="ve-ps">Sin bloque seleccionado</div></div>
+                <div className="ve-empty"><div style={{ fontSize: 32, marginBottom: 10, opacity: .2 }}>◫</div><div style={{ fontSize: 12, fontWeight: 600, color: "var(--tx)", marginBottom: 6 }}>Sin selección</div><div className="ve-empty-hint">Toca un bloque del lienzo para editarlo aquí.</div></div>
               </>
-            ):(
+            ) : (
               <>
                 <div className="ve-ph">
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-                    <div className="ve-pt">{selBlk.label}</div>
-                    <button style={{background:'none',border:'none',color:'var(--tx3)',cursor:'pointer',fontSize:18,lineHeight:1,padding:'0 2px'}} onClick={()=>setSel(null)}>×</button>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <div className="ve-pt">{selM.kind === "carousel" ? "🎠 Carrusel" : "🖼️ Banner"}</div>
+                    <button style={{ background: "none", border: "none", color: "var(--tx3)", cursor: "pointer", fontSize: 18, lineHeight: 1 }} onClick={() => setSel(null)}>×</button>
                   </div>
-                  <div className="ve-ps">type: {selBlk.type}</div>
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginTop:10}}>
-                    <Tog on={selBlk.active} ch={()=>togVis(selBlk.id)}/>
-                    <span style={{fontSize:11,color:selBlk.active?'var(--gn)':'var(--tx3)'}}>
-                      {selBlk.active?'Visible':'Oculto'}
-                    </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Tog on={selM.active} ch={() => patchMaster(selM.id, { active: !selM.active })} />
+                    <span style={{ fontSize: 11, color: selM.active ? "var(--gn)" : "var(--tx3)" }}>{selM.active ? "Visible" : "Oculto"}</span>
                   </div>
                 </div>
                 <div className="ve-pb">
-                  <div className="ve-sec">Contenido</div>
-                  {selBlk.type==='productzone'&&(
-                    <div className="ve-field">
-                      <label className="ve-lbl">Cantidad de productos en esta zona</label>
-                      <input className="ve-inp" type="number" min="1" value={selBlk.count==null?20:selBlk.count} onChange={e=>upd(selBlk.id,'count',e.target.value)} onBlur={e=>{const n=parseInt(e.target.value,10);upd(selBlk.id,'count',(isNaN(n)||n<1)?20:n);}}/>
-                      <div style={{fontSize:10,color:'var(--tx3)',marginTop:5}}>Cuántos productos se muestran aquí antes del siguiente bloque.</div>
-                    </div>
-                  )}
-                  <div className="ve-field">
-                    <label className="ve-lbl">Título</label>
-                    <input className="ve-inp" value={selBlk.title||''} onChange={e=>upd(selBlk.id,'title',e.target.value)}/>
-                  </div>
-                  {selBlk.sub!==undefined&&(
-                    <div className="ve-field">
-                      <label className="ve-lbl">Subtítulo</label>
-                      <textarea className="ve-inp" rows={2} value={selBlk.sub||''} onChange={e=>upd(selBlk.id,'sub',e.target.value)}/>
-                    </div>
-                  )}
-                  {selBlk.cta!==undefined&&!['hero','promo','delivery','cta','slider','video'].includes(selBlk.type)&&(
-                    <div className="ve-field">
-                      <label className="ve-lbl">Botón CTA</label>
-                      <input className="ve-inp" value={selBlk.cta||''} onChange={e=>upd(selBlk.id,'cta',e.target.value)}/>
-                    </div>
-                  )}
-                  {selBlk.badge!==undefined&&(
-                    <div className="ve-field">
-                      <label className="ve-lbl">Badge / Etiqueta</label>
-                      <input className="ve-inp" value={selBlk.badge||''} onChange={e=>upd(selBlk.id,'badge',e.target.value)} placeholder="Ej: NUEVO, HOY, 30 MIN"/>
-                    </div>
-                  )}
-                  {/* IMAGEN del bloque */}
-                  {['hero','slider','promo','video','delivery','cta','stores'].includes(selBlk.type)&&(
-                    <div className="ve-field">
-                      <label className="ve-lbl">Imagen</label>
-                      {selBlk.image&&(
-                        <div style={{position:'relative',borderRadius:8,overflow:'hidden',marginBottom:7}}>
-                          <img src={selBlk.image} alt="" style={{width:'100%',height:90,objectFit:'cover',display:'block'}}/>
-                          <button onClick={()=>upd(selBlk.id,'image','')} style={{position:'absolute',top:6,right:6,background:'rgba(0,0,0,.6)',color:'#fff',border:'none',borderRadius:6,fontSize:11,padding:'3px 8px',cursor:'pointer'}}>Quitar</button>
-                        </div>
-                      )}
-                      <button className="btn btg sm" style={{width:'100%',justifyContent:'center'}} onClick={()=>{uploadTarget.current={id:selBlk.id,field:'image'};uploadRef.current?.click();}}>↑ {selBlk.image?'Cambiar imagen':'Subir imagen'}</button>
-                    </div>
-                  )}
-                  {/* BOTONES + DESTINO */}
-                  {['hero','promo','delivery','cta','slider','video'].includes(selBlk.type)&&(
+                  {selM.kind === "carousel" ? (
                     <>
-                      <div className="ve-div"/>
-                      <div className="ve-sec">Botones y acciones</div>
-                      <div className="ve-field">
-                        <label className="ve-lbl">Botón principal — texto</label>
-                        <input className="ve-inp" value={selBlk.cta||''} onChange={e=>upd(selBlk.id,'cta',e.target.value)} placeholder="Ej: Ver más"/>
-                      </div>
-                      <div className="ve-field">
-                        <label className="ve-lbl">Botón principal — a dónde lleva</label>
-                        <select className="ve-inp" value={selBlk.ctaAction||''} onChange={e=>upd(selBlk.id,'ctaAction',e.target.value)}>
-                          {DESTINOS.map(d=><option key={d.v} value={d.v}>{d.l}</option>)}
-                        </select>
-                      </div>
-                      <div className="ve-field">
-                        <label className="ve-lbl">Segundo botón — texto (opcional)</label>
-                        <input className="ve-inp" value={selBlk.cta2||''} onChange={e=>upd(selBlk.id,'cta2',e.target.value)} placeholder="Vacío = sin segundo botón"/>
-                      </div>
-                      {selBlk.cta2&&(
-                        <div className="ve-field">
-                          <label className="ve-lbl">Segundo botón — a dónde lleva</label>
-                          <select className="ve-inp" value={selBlk.cta2Action||''} onChange={e=>upd(selBlk.id,'cta2Action',e.target.value)}>
-                            {DESTINOS.map(d=><option key={d.v} value={d.v}>{d.l}</option>)}
-                          </select>
-                        </div>
-                      )}
-                    </>
-                  )}
-                  {/* ITEMS EDITOR — categorías, tiendas, productos, marcas, etc */}
-                  {hasItems&&(
-                    <>
-                      <div className="ve-div"/>
-                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
-                        <div className="ve-sec" style={{marginBottom:0}}>
-                          {selBlk.type==='categories'?'Categorías':selBlk.type==='stores'?'Tiendas':selBlk.type==='trending'?'Productos':selBlk.type==='carousel'?'Marcas':selBlk.type==='footer'?'Links':selBlk.type==='nav2'||selBlk.type==='text'?'Ítems':'Elementos'}
-                        </div>
-                        <span style={{fontSize:9,color:'var(--tx3)',fontFamily:'var(--mo)'}}>{(selBlk.items||[]).length}</span>
-                      </div>
-                      {(selBlk.items||[]).map((item,i)=>(
-                        <div key={i} className="item-row">
-                          {isObjItems&&(
-                            <div style={{display:'flex',gap:3,flexShrink:0}}>
-                              <button className="emoji-btn" title="Elegir emoji" onClick={e=>{e.stopPropagation();const r=e.target.getBoundingClientRect();setEpick(epick?.id===selBlk.id&&epick?.i===i?null:{id:selBlk.id,i,rect:r});}}>
-                                {typeof item==='object'&&item.icon&&(item.icon.startsWith('data:')||item.icon.startsWith('http'))
-                                  ?<img src={typeof item==='object'?item.icon:'📦'} className="icon-img" alt=""/>
-                                  :(typeof item==='object'?item.icon||'📦':'📦')
-                                }
-                              </button>
-                              <button className="upload-btn" title="Subir imagen" onClick={e=>{e.stopPropagation();uploadTarget.current={id:selBlk.id,idx:i};uploadRef.current?.click();}}>↑</button>
+                      <div className="ve-sec">Slides del carrusel</div>
+                      <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8, marginBottom: 8 }}>
+                        {(selM.slides || []).map((s, i) => (
+                          <div key={s.id} onClick={() => setSlide(i)} style={{ flex: "0 0 auto", cursor: "pointer", width: i === slide ? 92 : 58 }}>
+                            <div style={{ width: "100%", aspectRatio: "16 / 9", borderRadius: 8, overflow: "hidden", border: `2px solid ${i === slide ? "var(--ac)" : "var(--bd2)"}`, background: s.image ? `center/cover url(${s.image})` : (s.bg || RET_BGS[0]), display: "flex", alignItems: "flex-end", padding: 4 }}>
+                              <span style={{ fontSize: 8, fontWeight: 800, color: "#fff", textShadow: "0 1px 3px #000", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", maxWidth: "100%" }}>{s.title || `Slide ${i + 1}`}</span>
                             </div>
-                          )}
-                          <input className="item-inp"
-                            value={typeof item==='string'?item:item?.name||''}
-                            onChange={e=>updItem(selBlk.id,i,'name',e.target.value)}
-                            placeholder="Nombre"
-                          />
-                          {typeof item==='object'&&item?.price!==undefined&&(
-                            <input className="price-inp"
-                              value={item.price||''}
-                              onChange={e=>updItem(selBlk.id,i,'price',e.target.value)}
-                              placeholder="$0"
-                            />
-                          )}
-                          <button className="item-del" onClick={()=>removeItem(selBlk.id,i)}>✕</button>
+                          </div>
+                        ))}
+                        <button onClick={() => addSlide(selM.id)} style={{ flex: "0 0 auto", width: 40, aspectRatio: "16 / 9", borderRadius: 8, border: "1.5px dashed var(--bd2)", background: "var(--bg2)", color: "var(--ac2)", fontSize: 18, cursor: "pointer" }}>+</button>
+                      </div>
+                      {selM.slides && selM.slides[slide] && (() => { const s = selM.slides[slide]; const i = slide; return (
+                        <div style={{ background: "var(--bg2)", border: "1px solid var(--bd)", borderRadius: 10, padding: 10, marginBottom: 6 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                            <span style={{ fontSize: 11, fontWeight: 800, color: "var(--tx)" }}>Slide {i + 1} de {selM.slides.length}</span>
+                            <div style={{ display: "flex", gap: 4 }}>
+                              <button className="ve-blk-btn" onClick={() => moveSlide(selM.id, i, -1)} disabled={i === 0}>↑</button>
+                              <button className="ve-blk-btn" onClick={() => moveSlide(selM.id, i, 1)} disabled={i === selM.slides.length - 1}>↓</button>
+                              <button className="ve-blk-btn del" onClick={() => { delSlide(selM.id, i); setSlide(Math.max(0, i - 1)); }} disabled={selM.slides.length <= 1}>✕</button>
+                            </div>
+                          </div>
+                          <div className="ve-field"><label className="ve-lbl">Imagen del slide</label>
+                            {s.image && <div style={{ position: "relative", marginBottom: 6 }}><img src={s.image} alt="" style={{ width: "100%", height: 70, objectFit: "cover", borderRadius: 6 }} /><button onClick={() => patchSlide(selM.id, i, { image: "" })} style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,.6)", color: "#fff", border: "none", borderRadius: 5, fontSize: 10, padding: "2px 6px", cursor: "pointer" }}>Quitar</button></div>}
+                            <button className="btn btg sm" style={{ width: "100%", justifyContent: "center" }} onClick={() => pickImage({ mid: selM.id, slide: i, field: "image" })}>↑ {s.image ? "Cambiar" : "Subir imagen"}</button>
+                          </div>
+                          {!s.image && <div className="ve-field"><label className="ve-lbl">Fondo (sin imagen)</label>
+                            <div className="sw-grid">{RET_BGS.concat(["transparent"]).map((g, k) => <div key={k} className={`sw ${s.bg === g ? "active" : ""}`} style={{ background: g === "transparent" ? "var(--bg3)" : g }} onClick={() => patchSlide(selM.id, i, { bg: g })} />)}</div>
+                          </div>}
+                          <div className="ve-field"><label className="ve-lbl">Título</label><CommitInput value={s.title} onCommit={v => patchSlide(selM.id, i, { title: v })} /></div>
+                          <div className="ve-field"><label className="ve-lbl">Subtítulo</label><CommitInput textarea value={s.sub} onCommit={v => patchSlide(selM.id, i, { sub: v })} /></div>
+                          <div className="ve-field"><label className="ve-lbl">Badge</label><CommitInput value={s.badge} onCommit={v => patchSlide(selM.id, i, { badge: v })} /></div>
+                          <div className="ve-field"><label className="ve-lbl">Botón (texto)</label><CommitInput value={s.cta} onCommit={v => patchSlide(selM.id, i, { cta: v })} /></div>
+                          <div className="ve-field"><label className="ve-lbl">Botón — a dónde lleva</label>
+                            <select className="ve-inp" value={s.ctaAction || ""} onChange={ev => patchSlide(selM.id, i, { ctaAction: ev.target.value })}>{DEST.map(d => <option key={d.v} value={d.v}>{d.l}</option>)}</select>
+                          </div>
                         </div>
-                      ))}
-                      <button className="btn btg sm" style={{width:'100%',marginTop:4,justifyContent:'center'}} onClick={()=>addItem(selBlk.id)}>+ Añadir elemento</button>
+                      ); })()}
+                    </>
+                  ) : (
+                    <>
+                      <div className="ve-sec">Contenido</div>
+                      <div className="ve-field"><label className="ve-lbl">Imagen</label>
+                        {selM.image && <div style={{ position: "relative", marginBottom: 6 }}><img src={selM.image} alt="" style={{ width: "100%", height: 80, objectFit: "cover", borderRadius: 6 }} /><button onClick={() => patchMaster(selM.id, { image: "" })} style={{ position: "absolute", top: 5, right: 5, background: "rgba(0,0,0,.6)", color: "#fff", border: "none", borderRadius: 5, fontSize: 10, padding: "2px 6px", cursor: "pointer" }}>Quitar</button></div>}
+                        <button className="btn btg sm" style={{ width: "100%", justifyContent: "center" }} onClick={() => pickImage({ mid: selM.id, field: "image" })}>↑ {selM.image ? "Cambiar imagen" : "Subir imagen"}</button>
+                      </div>
+                      {!selM.image && <div className="ve-field"><label className="ve-lbl">Fondo (sin imagen)</label>
+                        <div className="sw-grid">{RET_BGS.concat(["transparent"]).map((g, k) => <div key={k} className={`sw ${selM.bg === g ? "active" : ""}`} style={{ background: g === "transparent" ? "var(--bg3)" : g }} onClick={() => patchMaster(selM.id, { bg: g })} />)}</div>
+                      </div>}
+                      <div className="ve-field"><label className="ve-lbl">Título</label><CommitInput value={selM.title} onCommit={v => patchMaster(selM.id, { title: v })} /></div>
+                      <div className="ve-field"><label className="ve-lbl">Subtítulo</label><CommitInput textarea value={selM.sub} onCommit={v => patchMaster(selM.id, { sub: v })} /></div>
+                      <div className="ve-field"><label className="ve-lbl">Badge / Etiqueta</label><CommitInput value={selM.badge} onCommit={v => patchMaster(selM.id, { badge: v })} placeholder="Ej: NUEVO, HOY" /></div>
+                      <div className="ve-div" />
+                      <div className="ve-sec">Botón principal</div>
+                      <div className="ve-field"><label className="ve-lbl">Texto</label><CommitInput value={selM.cta} onCommit={v => patchMaster(selM.id, { cta: v })} placeholder="Ej: Ver más" /></div>
+                      <div className="ve-field"><label className="ve-lbl">A dónde lleva</label>
+                        <select className="ve-inp" value={selM.ctaAction || ""} onChange={ev => patchMaster(selM.id, { ctaAction: ev.target.value })}>{DEST.map(d => <option key={d.v} value={d.v}>{d.l}</option>)}</select>
+                      </div>
+                      <div className="ve-field"><label className="ve-lbl">Segundo botón (opcional)</label><CommitInput value={selM.cta2} onCommit={v => patchMaster(selM.id, { cta2: v })} placeholder="Vacío = sin segundo botón" /></div>
+                      {selM.cta2 ? <div className="ve-field"><label className="ve-lbl">Segundo botón — a dónde lleva</label>
+                        <select className="ve-inp" value={selM.cta2Action || ""} onChange={ev => patchMaster(selM.id, { cta2Action: ev.target.value })}>{DEST.map(d => <option key={d.v} value={d.v}>{d.l}</option>)}</select>
+                      </div> : null}
                     </>
                   )}
-                  <div className="ve-div"/>
-                  <div className="ve-sec">Tema de Color</div>
-                  <div className="sw-grid">
-                    {GRADS.map((g,i)=>(
-                      <div key={i} className={`sw ${selBlk.bg===g?'active':''}`}
-                        style={{background:g==='transparent'?'var(--bg3)':g}}
-                        onClick={()=>upd(selBlk.id,'bg',g)}>
-                        {g==='transparent'&&<div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:8,color:'var(--tx3)'}}>∅</div>}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="ve-div"/>
-                  <div className="ve-sec">Campaña</div>
-                  <div className="ve-field">
-                    <select className="ve-inp" value={selBlk.campaign||''} onChange={e=>upd(selBlk.id,'campaign',e.target.value||null)}>
-                      <option value="">Siempre visible</option>
-                      <option value="Black Friday">Black Friday</option>
-                      <option value="Navidad">Navidad 2026</option>
-                      <option value="Rebajas">Rebajas Enero</option>
-                      <option value="Verano">Verano 2026</option>
-                    </select>
-                  </div>
-                  <div className="ve-div"/>
+
+                  <div className="ve-div" />
+                  <div className="ve-sec">Formato (forma)</div>
+                  <Chips options={FORMATS} value={selM.format || "3:1"} onChange={v => patchMaster(selM.id, { format: v })} />
+                  <div className="ve-div" />
+                  <div className="ve-sec">Posición del botón</div>
+                  <Chips options={CTA_POS} value={selM.ctaPos || "left"} onChange={v => patchMaster(selM.id, { ctaPos: v })} />
+
+                  {!selM.lib && (<>
+                    <div className="ve-div" />
+                    <div className="ve-sec">📍 Publicar en</div>
+                    <ScreenChecks selected={screensOf(selM.id)} onToggle={id => { const cur = screensOf(selM.id); setScreensFor(selM.id, cur.includes(id) ? cur.filter(x => x !== id) : cur.concat(id)); }} />
+                    <div style={{ fontSize: 10, color: "var(--tx3)", marginTop: 6, lineHeight: 1.4 }}>El contenido es uno solo; la posición es propia de cada pantalla (entra a esa pantalla y arrástralo).</div>
+                  </>)}
+
+                  <div className="ve-div" />
                   <div className="ve-sec">Acciones</div>
-                  <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                    <button className="btn btg sm" style={{justifyContent:'flex-start',width:'100%'}} onClick={()=>dupBlk(selBlk.id)}>◈ Duplicar bloque</button>
-                    <button className="btn btg sm" style={{justifyContent:'flex-start',width:'100%'}} onClick={()=>setModal('schedule')}>◷ Programar activación</button>
-                    <button className="btn btd sm" style={{justifyContent:'flex-start',width:'100%'}} onClick={()=>delBlk(selBlk.id)}>✕ Eliminar bloque</button>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {!selM.lib && <button className="btn btg sm" style={{ justifyContent: "flex-start", width: "100%" }} onClick={() => saveToLibrary(selM.id)}>📚 Guardar en Contenido</button>}
+                    {selM.lib && <button className="btn btg sm" style={{ justifyContent: "flex-start", width: "100%" }} onClick={() => setUseLib({ mid: selM.id })}>➕ Usar en pantalla(s)…</button>}
+                    <button className="btn btd sm" style={{ justifyContent: "flex-start", width: "100%" }} onClick={() => { if (selM.lib) delLibItem(selM.id); else { const e = (layout[screen] || []).find(x => x.ref === selM.id); if (e) removeRef(e.id, selM.id); else setSel(null); } }}>✕ Eliminar</button>
                   </div>
                 </div>
               </>
@@ -1530,147 +1181,69 @@ function EditorVisual({toast, cfg={}, onCfg}){
         </div>
       </div>
 
-      {/* OVERLAY — CATEGORÍAS (desplegable desde el botón discreto) */}
-      {showCats&&(
-        <div className="mo" onClick={()=>setShowCats(false)} style={{alignItems:'flex-start'}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'var(--bg1)',border:'1px solid var(--bd2)',borderRadius:16,padding:'16px 16px 20px',maxWidth:480,width:'100%',margin:'36px auto 20px',boxShadow:'0 20px 70px rgba(0,0,0,.5)',position:'relative',maxHeight:'calc(100% - 56px)',overflowY:'auto'}}>
-            <button onClick={()=>setShowCats(false)} style={{position:'absolute',top:12,right:14,background:'none',border:'none',color:'var(--tx2)',fontSize:20,cursor:'pointer',lineHeight:1,zIndex:2}}>×</button>
-            <CategoryManager/>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL — AÑADIR */}
-      {modal==='add'&&(
-        <div className="mo" onClick={()=>setModal(null)}>
-          <div className="mb" style={{width:520}} onClick={e=>e.stopPropagation()}>
-            <div className="mt">Añadir nueva sección</div>
-            <div className="ms">Elige el tipo de bloque a insertar</div>
+      {/* MODAL: Añadir */}
+      {addOpen && (
+        <div className="mo" onClick={() => setAddOpen(false)}>
+          <div className="mb" style={{ width: 460 }} onClick={e => e.stopPropagation()}>
+            <div className="mt">Añadir a esta pantalla</div>
+            <div className="ms">Elige qué insertar</div>
             <div className="amgrid">
-              {BLK_TYPES.map(tp=>(
-                <div key={tp.type} className="amcard" onClick={()=>addBlk(tp.type)}>
-                  <div className="amprev" style={{background:tp.grad}}>
-                    <span style={{fontSize:16}}>{tp.icon}</span>
-                  </div>
-                  <div className="aminfo">
-                    <div className="amname">{tp.label}</div>
-                    <div className="amdesc">{tp.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mact">
-              <button className="btn btg sm" onClick={()=>setModal(null)}>Cancelar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL — HISTORIAL */}
-      {modal==='history'&&(
-        <div className="mo" onClick={()=>setModal(null)}>
-          <div className="mb" onClick={e=>e.stopPropagation()}>
-            <div className="mt">Historial de versiones</div>
-            <div className="ms">Restaura cualquier versión guardada</div>
-            {VERSIONS.map(v=>(
-              <div key={v.id} className={`histitem ${v.current?'histcur':''}`}>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:12,fontWeight:700,color:v.current?'var(--ac2)':'var(--tx)',marginBottom:2}}>{v.label}</div>
-                  <div style={{fontSize:10,color:'var(--tx3)'}}>{v.time} · {v.author}</div>
-                </div>
-                {v.current
-                  ?<span className="bdg bg" style={{fontSize:8}}>ACTUAL</span>
-                  :<button className="btn btg sm" onClick={()=>{toast(`Restaurando ${v.label}…`);setModal(null);}}>Restaurar</button>
-                }
+              <div className="amcard" onClick={() => addBlock("banner")}>
+                <div className="amprev" style={{ background: RET_BGS[0] }}><span style={{ fontSize: 16 }}>🖼️</span></div>
+                <div className="aminfo"><div className="amname">Banner</div><div className="amdesc">Imagen o color, título, botón. Se pinta individual.</div></div>
               </div>
-            ))}
-            <div className="mact">
-              <button className="btn btg sm" onClick={()=>setModal(null)}>Cerrar</button>
-              <button className="btn btp sm" onClick={()=>{toast('Nueva versión guardada');setModal(null);}}>Guardar versión</button>
+              <div className="amcard" onClick={() => addBlock("carousel")}>
+                <div className="amprev" style={{ background: RET_BGS[2] }}><span style={{ fontSize: 16 }}>🎠</span></div>
+                <div className="aminfo"><div className="amname">Carrusel deslizable</div><div className="amdesc">Varios slides, cada uno con su imagen y su botón.</div></div>
+              </div>
             </div>
+            <div className="mact"><button className="btn btg sm" onClick={() => setAddOpen(false)}>Cancelar</button></div>
           </div>
         </div>
       )}
 
-      {/* MODAL — PROGRAMAR */}
-      {modal==='schedule'&&(
-        <div className="mo" onClick={()=>setModal(null)}>
-          <div className="mb" onClick={e=>e.stopPropagation()}>
-            <div className="mt">Programar publicación</div>
-            <div className="ms">{selBlk?.label||'Bloque'} · Configura cuándo será visible</div>
-            <div style={{marginBottom:12}}><label className="lbl">Fecha inicio</label><input type="date" className="inp" defaultValue="2026-06-01"/></div>
-            <div style={{marginBottom:12}}><label className="lbl">Fecha fin (opcional)</label><input type="date" className="inp" defaultValue="2026-06-30"/></div>
-            <div style={{marginBottom:12}}><label className="lbl">Campaña asociada</label>
-              <select className="inp">
-                <option>Ninguna</option><option>Black Friday 2026</option><option>Navidad 2026</option><option>Rebajas Enero</option>
-              </select>
-            </div>
-            <div className="mact">
-              <button className="btn btg sm" onClick={()=>setModal(null)}>Cancelar</button>
-              <button className="btn btp sm" onClick={()=>{toast('📅 Programación guardada');setModal(null);}}>Confirmar</button>
-            </div>
+      {/* MODAL: Usar en (biblioteca) */}
+      {useLib && (
+        <div className="mo" onClick={() => setUseLib(null)}>
+          <div className="mb" style={{ width: 380 }} onClick={e => e.stopPropagation()}>
+            <div className="mt">Usar en pantalla(s)</div>
+            <div className="ms">Se inserta una copia independiente en las pantallas marcadas.</div>
+            <UseInPicker onConfirm={ids => useFromLibrary(useLib.mid, ids)} onCancel={() => setUseLib(null)} />
           </div>
         </div>
       )}
 
-      {/* HIDDEN FILE INPUT for image upload */}
-      <input
-        ref={uploadRef}
-        type="file"
-        accept="image/*"
-        style={{display:'none'}}
-        onChange={handleImageUpload}
-      />
-
-      {/* EMOJI PICKER */}
-      {epick&&(
-        <div className="epick" style={{top:Math.min(epick.rect.bottom+6,window.innerHeight-220),left:Math.min(epick.rect.left,window.innerWidth-240)}} onClick={e=>e.stopPropagation()}>
-          <div className="epick-g">
-            {CAT_EMOJIS.map(em=>(
-              <div key={em} className="ep" onClick={()=>{updItem(epick.id,epick.i,'icon',em);setEpick(null);}}>{em}</div>
-            ))}
+      {/* OVERLAY: Categorías (Búsqueda) */}
+      {showCats && (
+        <div className="mo" onClick={() => setShowCats(false)} style={{ alignItems: "flex-start" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--bd2)", borderRadius: 16, padding: "16px 16px 20px", maxWidth: 480, width: "100%", margin: "36px auto 20px", position: "relative", maxHeight: "calc(100% - 56px)", overflowY: "auto" }}>
+            <button onClick={() => setShowCats(false)} style={{ position: "absolute", top: 12, right: 14, background: "none", border: "none", color: "var(--tx2)", fontSize: 20, cursor: "pointer", zIndex: 2 }}>×</button>
+            <CategoryManager />
           </div>
         </div>
       )}
 
-      {/* MODAL VISTA PREVIA */}
-      {modal==='preview'&&(
-        <div className="prev-modal">
-          <div className="prev-hdr">
-            <div style={{flex:1,display:'flex',alignItems:'center',gap:8,minWidth:0}}>
-              <span style={{fontSize:13,fontWeight:700,color:'var(--tx)',whiteSpace:'nowrap'}}>Vista Previa</span>
-              <span style={{fontSize:11,color:'var(--tx3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>— {ED_AREAS.find(a=>a.id===area)?.label}</span>
-              <span className="bdg bg" style={{fontSize:8,flexShrink:0}}>LIVE</span>
-            </div>
-            <div style={{display:'flex',gap:4,flexShrink:0}}>
-              {[{k:'mobile',l:'📲 Mobile'},{k:'tablet',l:'📱 Tablet'},{k:'desktop',l:'🖥 Desktop'}].map(v=>(
-                <button key={v.k} className={`vp-btn ${prevVp===v.k?'on':''}`} onClick={()=>setPrevVp(v.k)}>{v.l}</button>
-              ))}
-            </div>
-            <button
-              className="btn btd sm"
-              onClick={()=>setModal(null)}
-              style={{flexShrink:0,marginLeft:6}}
-            >✕ Cerrar</button>
-          </div>
-          <div className="prev-body">
-            <div className="prev-frame" style={{maxWidth:prevMw,marginBottom:40}}>
-              {blocks.filter(b=>b.active).map(blk=>(
-                <BlockPreview key={blk.id} blk={blk} vp={prevVp}/>
-              ))}
-              {blocks.filter(b=>b.active).length===0&&(
-                <div style={{padding:'60px 24px',textAlign:'center',color:'var(--tx3)'}}>
-                  <div style={{fontSize:32,marginBottom:12,opacity:.2}}>◫</div>
-                  <div style={{fontSize:13}}>No hay bloques visibles en esta página</div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <input ref={uploadRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onImage} />
     </div>
   );
 }
+
+// Picker de pantallas para "Usar en…"
+function UseInPicker({ onConfirm, onCancel }) {
+  const [sel, setSel] = useState(["inicio"]);
+  return (
+    <div>
+      <div style={{ margin: "10px 0" }}>
+        <ScreenChecks selected={sel} onToggle={id => setSel(s => s.includes(id) ? s.filter(x => x !== id) : s.concat(id))} />
+      </div>
+      <div className="mact">
+        <button className="btn btg sm" onClick={onCancel}>Cancelar</button>
+        <button className="btn btp sm" disabled={!sel.length} onClick={() => onConfirm(sel)}>Insertar</button>
+      </div>
+    </div>
+  );
+}
+
 
 function Overview({toast, data={}, go}){
   const [stats, setStats] = useState(null);

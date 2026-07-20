@@ -270,8 +270,9 @@ function AppShell({ sessionUser }) {
         { id: 'premium', name: 'Premium', price: 12, promo: false, promoPrice: 0, features: ['Todo lo del Pro', 'Aparecer en Tiendas Premium', 'Soporte prioritario', 'Destacar productos'] },
       ],
       team: [],
-      // Editor Visual: bloques/banners de la tienda (guardado GLOBAL en la config).
+      // Editor Visual: layout por pantalla (anclas + refs) y masters (contenido).
       blocks: DEFAULT_BLOCKS,
+      masters: {},
     };
     try { const r = localStorage.getItem("retador_admincfg"); if (r) return { ...defaults, ...JSON.parse(r) }; } catch {}
     return defaults;

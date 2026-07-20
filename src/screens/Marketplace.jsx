@@ -914,6 +914,8 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
 
   return (
     <div ref={feedRef} onScroll={e => { if (scrollKeeper) scrollKeeper.current = e.currentTarget.scrollTop; }} style={{ flex: 1, overflowY: "auto" }}>
+      {/* Tramo: lo que pusiste ANTES del Encabezado (arriba del todo) */}
+      <LiveSlot page="inicio" from={null} to="in_h" onNav={onNav} pad="12px 16px 0" />
       {/* Header */}
       <div style={{ position: "sticky", top: 0, zIndex: 52, background: isDark ? "rgba(8,8,8,.78)" : "rgba(255,255,255,.8)", backdropFilter: "blur(14px) saturate(1.4)", WebkitBackdropFilter: "blur(14px) saturate(1.4)", borderBottom: "none", padding: isDesktop ? "8px 36px" : "8px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, transform: hidden ? "translateY(-115%)" : "translateY(0)", transition: "transform .28s cubic-bezier(.4,0,.2,1)", willChange: "transform" }}>
         {!isDesktop && <Logo size={19} />}
@@ -967,7 +969,8 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
       </div>
 
 
-      {/* BANNERS REALES del Editor Visual (config global, en vivo). El CTA navega. */}
+      {/* Hueco SUPERIOR (entre Encabezado y Filtros): banners de inicio en ese hueco
+          + páginas Banners/Promociones. Config global, en vivo. El CTA navega. */}
       <MarketBanners onNav={onNav} />
 
       {/* Filtros - Ahora con sticky */}
@@ -978,6 +981,9 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
         {/* Entrada a SERVICIOS (mundo aparte) */}
         {onServices && <button onClick={onServices} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: isDark ? "#0e0e0e" : S, color: G, border: `1.5px solid ${G}55`, borderRadius: 999, padding: "7px 13px", fontSize: 10 * ts, fontWeight: 800, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>🛠️ Servicios</button>}
       </div>
+
+      {/* Tramo: lo que pusiste entre los Filtros y la Zona de productos */}
+      <LiveSlot page="inicio" from="in_f" to="in_p" onNav={onNav} pad="12px 16px 0" />
 
       {/* Grid de productos */}
       <div style={{ padding: "0 18px 80px" }}>

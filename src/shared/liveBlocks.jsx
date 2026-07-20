@@ -1,9 +1,15 @@
 // ═════════════════════════════════════════════════════════════════════════════
-// BLOQUES EN VIVO — banners del Editor Visual ORIGINAL, guardados en la CONFIG
-// GLOBAL (platform_config.config.blocks). El admin los edita en el panel → llegan
-// por realtime a todos los teléfonos y la tienda los pinta al instante.
-// Estructura de bloque (la del editor original): { id, type, active, bg, image,
-//   title, sub, cta, badge, ctaAction, cta2, cta2Action, campaign, items }.
+// BLOQUES EN VIVO — banners del Editor Visual, guardados en la CONFIG GLOBAL
+// (platform_config.config.blocks) y servidos por realtime a todos los teléfonos.
+//
+// RENDER POSICIONAL: cada página del editor es una LISTA ORDENADA de bloques. Los
+// bloques de SISTEMA (syszone: encabezado, filtros… / productzone: zona de productos)
+// son ANCLAS de las partes reales de la pantalla y NUNCA se pintan como banner. Los
+// banners (hero/promo/slider/cta) activos se pintan EXACTAMENTE en el hueco donde el
+// dueño los colocó dentro de esa lista. Reordenar en el editor (drag&drop) cambia el
+// orden guardado → la tienda refleja la nueva posición en vivo.
+// Estructura de bloque: { id, type, active, bg, image, title, sub, cta, badge,
+//   ctaAction, cta2, cta2Action, campaign, items }.
 // ═════════════════════════════════════════════════════════════════════════════
 import { useState } from "react";
 import { usePlatformCfg } from "./theme.jsx";
@@ -16,20 +22,12 @@ export const BLOCK_BG_PRESETS = {
   oferta: { name: "Rojo oferta",    bg: "linear-gradient(135deg,#230505 0%,#5c1010 100%)", accent: "#F87171" },
 };
 // SIN contenido inicial inventado. La tienda pinta ÚNICAMENTE los bloques que el
-// dueño crea y guarda en su Editor Visual (config global). Si la config no tiene
-// banners activos, la tienda no pinta ninguno — cero banners fantasma.
-// (El texto del bloque de Delivery cae a su valor por defecto honesto en Delivery.jsx
-//  cuando el dueño aún no lo ha configurado.)
+// dueño crea y guarda en su Editor Visual. Si no hay banners activos, no pinta ninguno.
 export const DEFAULT_BLOCKS = {};
 
-// Tipos de bloque que se pintan como banner arriba del feed (los demás son
-// estructurales — zonas de productos, filtros — y se ignoran aquí).
+// Tipos que se pintan como banner. Los demás (syszone/productzone) son ANCLAS de
+// posición de la pantalla real y nunca se pintan como banner.
 const RENDERABLE = new Set(["hero", "promo", "slider", "cta"]);
-// Páginas del editor cuyos banners salen en el TOP del marketplace. IMPORTANTE:
-// deben ser EXACTAMENTE páginas que el dueño ve y edita en su Editor Visual
-// (ED_AREAS): Inicio, Banners y Promociones. NO se lee ninguna página oculta
-// (como la vieja "marketplace"), para que no haya banners que el dueño no pueda tocar.
-const MARKET_PAGES = ["inicio", "banners", "promotions"];
 
 // Tarjeta de banner (misma en la tienda y en la vista previa del editor).
 export function BannerCard({ b, onNav }) {
@@ -48,32 +46,18 @@ export function BannerCard({ b, onNav }) {
   );
 }
 
-// Recolecta los banners renderables y activos del marketplace desde la config global.
-function marketBlocks(cfg) {
-  const blocks = cfg.blocks || {};
-  const out = [];
-  MARKET_PAGES.forEach(pg => {
-    (Array.isArray(blocks[pg]) ? blocks[pg] : []).forEach(b => {
-      if (b && b.active && RENDERABLE.has(b.type) && (b.title || b.image)) out.push(b);
-    });
-  });
-  return out;
-}
-
-// Carrusel de banners del MARKETPLACE. 1 activo → tarjeta simple; varios →
-// deslizable con puntitos. 0 → no ocupa espacio.
-export function MarketBanners({ onNav }) {
-  const cfg = usePlatformCfg();
-  const blocks = marketBlocks(cfg);
+// Carrusel reutilizable de un HUECO: 0 banners → no ocupa espacio; 1 → tarjeta simple;
+// varios (contiguos en el mismo hueco) → deslizable con puntitos.
+function BannerCarousel({ blocks, onNav, pad = "12px 16px 4px" }) {
   const [idx, setIdx] = useState(0);
-  if (!blocks.length) return null;
-  if (blocks.length === 1) return <div style={{ padding: "12px 16px 4px" }}><BannerCard b={blocks[0]} onNav={onNav} /></div>;
+  if (!blocks || !blocks.length) return null;
+  if (blocks.length === 1) return <div style={{ padding: pad }}><BannerCard b={blocks[0]} onNav={onNav} /></div>;
   return (
-    <div style={{ padding: "12px 0 4px" }}>
-      <div onScroll={e => { const el = e.currentTarget; setIdx(Math.round(el.scrollLeft / el.clientWidth)); }}
+    <div style={{ padding: pad }}>
+      <div onScroll={e => { const el = e.currentTarget; setIdx(Math.round(el.scrollLeft / Math.max(1, el.clientWidth))); }}
         style={{ display: "flex", overflowX: "auto", scrollSnapType: "x mandatory", scrollbarWidth: "none" }}>
         {blocks.map(b => (
-          <div key={b.id} style={{ flex: "0 0 100%", scrollSnapAlign: "center", padding: "0 16px", boxSizing: "border-box" }}>
+          <div key={b.id} style={{ flex: "0 0 100%", scrollSnapAlign: "center", boxSizing: "border-box" }}>
             <BannerCard b={b} onNav={onNav} />
           </div>
         ))}
@@ -85,8 +69,48 @@ export function MarketBanners({ onNav }) {
   );
 }
 
-// ── Compatibilidad con pantallas antiguas ────────────────────────────────────
+const isBanner = b => b && b.active && RENDERABLE.has(b.type) && (b.title || b.image);
+
+// Banners activos y renderables de `page` que caen ENTRE la ancla `from` y la `to`,
+// respetando el ORDEN guardado en la config global. from=null → desde el principio;
+// to=null → hasta el final. Si la ancla `from` no existe, devuelve [] (no adivina).
+function slotBlocks(cfg, page, from, to) {
+  const arr = Array.isArray(cfg.blocks?.[page]) ? cfg.blocks[page] : [];
+  if (!arr.length) return [];
+  let start = from == null ? 0 : arr.findIndex(b => b && b.id === from) + 1;
+  if (from != null && start === 0) return []; // ancla de inicio no encontrada
+  let end = to == null ? arr.length : arr.findIndex(b => b && b.id === to);
+  if (to != null && end < 0) end = arr.length;
+  return arr.slice(start, end).filter(isBanner);
+}
+
+// Todos los banners activos de una página completa (para páginas sin anclas: Banners/Promociones).
+function pageBanners(cfg, page) {
+  return (Array.isArray(cfg.blocks?.[page]) ? cfg.blocks[page] : []).filter(isBanner);
+}
+
+// TRAMO POSICIONAL: pinta los banners que el dueño colocó ENTRE dos anclas de una
+// página, en su posición real dentro de la pantalla. No ocupa espacio si está vacío.
+export function LiveSlot({ page, from = null, to = null, onNav, pad = "12px 16px 4px" }) {
+  const cfg = usePlatformCfg();
+  return <BannerCarousel blocks={slotBlocks(cfg, page, from, to)} onNav={onNav} pad={pad} />;
+}
+
+// GRUPO SUPERIOR del inicio (entre el Encabezado y los Filtros): banners que el dueño
+// puso en ese hueco de la página "inicio" + las páginas "Banners" y "Promociones"
+// (que se pintan arriba del feed). Varios → carrusel en ese mismo hueco.
+export function MarketBanners({ onNav }) {
+  const cfg = usePlatformCfg();
+  const blocks = [
+    ...slotBlocks(cfg, "inicio", "in_h", "in_f"),
+    ...pageBanners(cfg, "banners"),
+    ...pageBanners(cfg, "promotions"),
+  ];
+  return <BannerCarousel blocks={blocks} onNav={onNav} pad="12px 16px 4px" />;
+}
+
+// ── Compatibilidad ───────────────────────────────────────────────────────────
+// La fuente de verdad es la config global (usePlatformCfg), no localStorage.
 export function getPageLayout() { return []; }
 export function liveSlot() { return []; }
-export function LiveBlock() { return null; }
-export function LiveSlot() { return null; }
+export const LiveBlock = BannerCard;

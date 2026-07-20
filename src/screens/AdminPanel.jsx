@@ -691,14 +691,17 @@ const PAGE_DEFAULTS={
     {id:"cmp1",type:"hero",label:"Banner Campaña",active:true,bg:"linear-gradient(135deg,#f05a5a,#f5a623)",title:"🎯 Black Friday 2026",sub:"Las mejores ofertas del año",cta:"Ver todas las ofertas",badge:"BLACK FRIDAY",campaign:"Black Friday",items:[]},
     {id:"cmp2",type:"promo",label:"Promo Secundaria",active:true,bg:"linear-gradient(135deg,#4f72ff,#7c3aed)",title:"🛍️ Cyber Monday",sub:"Solo por 24 horas",cta:"Ir ahora",badge:"24H",campaign:"Black Friday",items:[]},
   ],
+  // Plantillas de ejemplo APAGADAS por defecto (borradores): visibles y editables en
+  // el editor, pero NO se pintan en la tienda hasta que el dueño las active. Así la
+  // tienda nunca muestra un banner que el dueño no encendió a propósito.
   banners:[
-    {id:"bn1",type:"hero",label:"Banner Top",active:true,bg:"linear-gradient(135deg,#0d1526,#4f72ff)",title:"📣 Bienvenido a RETADOR",sub:"Descubre las últimas novedades",cta:"Explorar",badge:"NUEVO",campaign:null,items:[]},
-    {id:"bn2",type:"slider",label:"Slider Banners",active:true,bg:"linear-gradient(135deg,#1a1a2e,#4f72ff)",title:"Banners Rotativos",sub:"",cta:"",badge:"",campaign:null,items:[]},
+    {id:"bn1",type:"hero",label:"Banner Top (ejemplo)",active:false,bg:"linear-gradient(135deg,#0d1526,#4f72ff)",title:"📣 Bienvenido a RETADOR",sub:"Descubre las últimas novedades",cta:"Explorar",badge:"NUEVO",campaign:null,items:[]},
+    {id:"bn2",type:"slider",label:"Slider Banners (ejemplo)",active:false,bg:"linear-gradient(135deg,#1a1a2e,#4f72ff)",title:"Banners Rotativos",sub:"",cta:"",badge:"",campaign:null,items:[]},
   ],
   promotions:[
-    {id:"pr1",type:"promo",label:"Promo Principal",active:true,bg:"linear-gradient(135deg,#f05a5a,#f5a623)",title:"🔥 Oferta del día",sub:"Hasta 50% OFF en productos seleccionados",cta:"Ver oferta",badge:"HOY",campaign:null,items:[]},
-    {id:"pr2",type:"promo",label:"Promo MSI",active:false,bg:"linear-gradient(135deg,#4f72ff,#22d3a0)",title:"💳 Paga en 12 MSI",sub:"Sin intereses con tarjetas participantes",cta:"Ver condiciones",badge:"MSI",campaign:null,items:[]},
-    {id:"pr3",type:"cta",label:"CTA Registro",active:true,bg:"transparent",title:"🎁 Regístrate y recibe $100",sub:"Solo para nuevos usuarios",cta:"Registrarme gratis",badge:"NUEVO",campaign:null,items:[]},
+    {id:"pr1",type:"promo",label:"Promo Principal (ejemplo)",active:false,bg:"linear-gradient(135deg,#f05a5a,#f5a623)",title:"🔥 Oferta del día",sub:"Hasta 50% OFF en productos seleccionados",cta:"Ver oferta",badge:"HOY",campaign:null,items:[]},
+    {id:"pr2",type:"promo",label:"Promo MSI (ejemplo)",active:false,bg:"linear-gradient(135deg,#4f72ff,#22d3a0)",title:"💳 Paga en 12 MSI",sub:"Sin intereses con tarjetas participantes",cta:"Ver condiciones",badge:"MSI",campaign:null,items:[]},
+    {id:"pr3",type:"cta",label:"CTA Registro (ejemplo)",active:false,bg:"transparent",title:"🎁 Regístrate y recibe $100",sub:"Solo para nuevos usuarios",cta:"Registrarme gratis",badge:"NUEVO",campaign:null,items:[]},
   ],
   nav2:[{id:"nv1",type:"text",label:"Menú Principal",active:true,bg:"transparent",title:"Navegación Global",sub:"Gestiona los ítems del menú principal",cta:"",badge:"",campaign:null,items:["Homepage","Marketplace","Delivery","Tiendas","Categorías","Ofertas","Mi cuenta"]}],
   footer2:[{id:"ft1",type:"footer",label:"Footer Global",active:true,bg:"#0a0c14",title:"RETADOR",sub:"© 2026 · La plataforma que conecta compradores y vendedores",cta:"",badge:"",campaign:null,items:["Términos","Privacidad","Soporte","Blog","API","Sobre nosotros"]}],
@@ -1067,6 +1070,10 @@ function EditorVisual({toast, cfg={}, onCfg}){
     // Fuente de verdad: la config GLOBAL (cfg.blocks). localStorage solo como caché.
     try{ const r=localStorage.getItem('retador_editor'); if(r){const saved=JSON.parse(r); Object.keys(saved).forEach(k=>{ if(saved[k]) d[k]=saved[k]; });} }catch{}
     try{ const g=cfg&&cfg.blocks; if(g&&typeof g==='object'){ Object.keys(g).forEach(k=>{ if(g[k]) d[k]=g[k]; }); } }catch{}
+    // Barre los banners fantasma inyectados por error en v56/v57 (ids fijos), por si
+    // quedaron en el caché del editor. No toca ningún bloque real del dueño.
+    const PHANTOM=new Set(['bn_ret','pr_ret']);
+    Object.keys(d).forEach(k=>{ if(Array.isArray(d[k])) d[k]=d[k].filter(b=>!(b&&PHANTOM.has(b.id))); });
     return d;
   });
   useEffect(()=>{ try{localStorage.setItem('retador_editor',JSON.stringify(pageBlocks));}catch{} },[pageBlocks]);

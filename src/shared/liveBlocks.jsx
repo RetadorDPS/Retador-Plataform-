@@ -15,23 +15,21 @@ export const BLOCK_BG_PRESETS = {
   exito:  { name: "Verde éxito",    bg: "linear-gradient(135deg,#03150d 0%,#0b3a26 100%)", accent: "#22C55E" },
   oferta: { name: "Rojo oferta",    bg: "linear-gradient(135deg,#230505 0%,#5c1010 100%)", accent: "#F87171" },
 };
-// Contenido inicial RETADOR (neutro): un hero activo + una oferta desactivada de
-// ejemplo. El admin lo edita en el Editor Visual (grupo "Banners" / "Promociones").
-export const DEFAULT_BLOCKS = {
-  banners: [
-    { id: "bn_ret", type: "hero", active: true, bg: "linear-gradient(135deg,#181203 0%,#3d2f07 100%)", title: "Bienvenido a RETADOR — todo en un lugar", sub: "Compra, vende y recibe en tu puerta.", cta: "Explorar", ctaAction: "busqueda", badge: "RETADOR", campaign: null, items: [] },
-  ],
-  promotions: [
-    { id: "pr_ret", type: "promo", active: false, bg: "linear-gradient(135deg,#230505 0%,#5c1010 100%)", title: "Ofertas de la semana", sub: "Descuentos reales de vendedores de la plataforma.", cta: "Ver ofertas", ctaAction: "ofertas", badge: "OFERTA", campaign: null, items: [] },
-  ],
-  delivery: { label: "RETADOR · MENSAJERÍA URBANA", sub: "Mensajería urbana profesional · toda Cuba" },
-};
+// SIN contenido inicial inventado. La tienda pinta ÚNICAMENTE los bloques que el
+// dueño crea y guarda en su Editor Visual (config global). Si la config no tiene
+// banners activos, la tienda no pinta ninguno — cero banners fantasma.
+// (El texto del bloque de Delivery cae a su valor por defecto honesto en Delivery.jsx
+//  cuando el dueño aún no lo ha configurado.)
+export const DEFAULT_BLOCKS = {};
 
 // Tipos de bloque que se pintan como banner arriba del feed (los demás son
 // estructurales — zonas de productos, filtros — y se ignoran aquí).
 const RENDERABLE = new Set(["hero", "promo", "slider", "cta"]);
-// Páginas del editor cuyos banners salen en el TOP del marketplace.
-const MARKET_PAGES = ["inicio", "marketplace", "banners", "promotions"];
+// Páginas del editor cuyos banners salen en el TOP del marketplace. IMPORTANTE:
+// deben ser EXACTAMENTE páginas que el dueño ve y edita en su Editor Visual
+// (ED_AREAS): Inicio, Banners y Promociones. NO se lee ninguna página oculta
+// (como la vieja "marketplace"), para que no haya banners que el dueño no pueda tocar.
+const MARKET_PAGES = ["inicio", "banners", "promotions"];
 
 // Tarjeta de banner (misma en la tienda y en la vista previa del editor).
 export function BannerCard({ b, onNav }) {

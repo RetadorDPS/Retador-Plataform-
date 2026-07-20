@@ -644,13 +644,9 @@ const PAGE_DEFAULTS={
     {id:"in_f",type:"syszone",label:"Filtros",icon:"⚑",title:"Filtros — Todos · Más vendidos · Nuevos · Ofertas · Favoritos",active:true,bg:"transparent",items:[]},
     {id:"in_p",type:"productzone",label:"Productos",active:true,bg:"transparent",count:40,title:"",sub:"",cta:"",badge:"",campaign:null,items:[]},
   ],
-  marketplace:[
-    {id:"mk1",type:"hero",label:"Hero Marketplace",active:true,bg:"linear-gradient(135deg,#1a0533,#4f72ff)",title:"🛒 Todo en un lugar",sub:"Miles de productos de los mejores vendedores",cta:"Comprar ahora",badge:"TOP VENDEDORES",campaign:null,items:[]},
-    {id:"mk2",type:"categories",label:"Categorías",active:true,bg:"transparent",title:"Comprar por categoría",sub:"",cta:"",badge:"",campaign:null,items:[{icon:"📱",name:"Electrónica"},{icon:"👔",name:"Ropa"},{icon:"🏡",name:"Casa"},{icon:"🎮",name:"Gaming"},{icon:"🚗",name:"Autos"},{icon:"📚",name:"Libros"}]},
-    {id:"mk3",type:"trending",label:"Más vendidos",active:true,bg:"transparent",title:"Más vendidos esta semana",sub:"",cta:"",badge:"",campaign:null,items:[{icon:"📱",name:"Galaxy S25",price:"$999"},{icon:"🎮",name:"PS6 Controller",price:"$79"},{icon:"👟",name:"Ultraboost 25",price:"$220"},{icon:"⌚",name:"Apple Watch 12",price:"$499"}]},
-    {id:"mk4",type:"slider",label:"Slider Ofertas",active:true,bg:"linear-gradient(135deg,#0d1526,#1a3a5e)",title:"Ofertas del día",sub:"Solo por tiempo limitado",cta:"Ver todas",badge:"LIMITADO",campaign:null,items:[]},
-    {id:"mk5",type:"stores",label:"Tiendas Verificadas",active:true,bg:"transparent",title:"Vendedores Verificados",sub:"",cta:"",badge:"",campaign:null,items:["TechStore MX","Moda Élite","GadgetWorld","SportZone","FoodHub"]},
-  ],
+  // (Página "marketplace" ELIMINADA: era una página oculta —no está en el menú del
+  //  editor— cuyos bloques (mk_hero/mk_oferta) se colaban en la tienda sin que el dueño
+  //  pudiera verlos ni editarlos. La tienda ahora solo lee páginas visibles del editor.)
   delivery_local:[
     {id:"dl_h",type:"syszone",label:"Encabezado",icon:"🛵",title:"Encabezado + cinta de avisos (texto en movimiento)",active:true,bg:"transparent",items:[]},
     {id:"dl_hero",type:"syszone",label:"Tarjeta principal",icon:"🟢",title:"Tarjeta principal — Retador mensajería (servicio activo)",active:true,bg:"transparent",items:[]},
@@ -1070,10 +1066,10 @@ function EditorVisual({toast, cfg={}, onCfg}){
     // Fuente de verdad: la config GLOBAL (cfg.blocks). localStorage solo como caché.
     try{ const r=localStorage.getItem('retador_editor'); if(r){const saved=JSON.parse(r); Object.keys(saved).forEach(k=>{ if(saved[k]) d[k]=saved[k]; });} }catch{}
     try{ const g=cfg&&cfg.blocks; if(g&&typeof g==='object'){ Object.keys(g).forEach(k=>{ if(g[k]) d[k]=g[k]; }); } }catch{}
-    // Barre los banners fantasma inyectados por error en v56/v57 (ids fijos), por si
-    // quedaron en el caché del editor. No toca ningún bloque real del dueño.
-    const PHANTOM=new Set(['bn_ret','pr_ret']);
-    Object.keys(d).forEach(k=>{ if(Array.isArray(d[k])) d[k]=d[k].filter(b=>!(b&&PHANTOM.has(b.id))); });
+    // Descarta la página oculta heredada "marketplace" si viniera en el caché o en la
+    // config: no está en el menú del editor y sus bloques se colaban en la tienda sin
+    // que el dueño los viera. La tienda solo lee páginas visibles (inicio/banners/promotions).
+    delete d.marketplace;
     return d;
   });
   useEffect(()=>{ try{localStorage.setItem('retador_editor',JSON.stringify(pageBlocks));}catch{} },[pageBlocks]);

@@ -251,19 +251,6 @@ function AppShell({ sessionUser }) {
   // Panel de administración: SOLO para cuentas con rol real de admin en el backend
   // (el dueño ya tiene role='admin' en profiles). Ya no está abierto para todos.
   const isOwner = user?.role === "admin";
-  // Limpieza de banners FANTASMA: ids inyectados por error en v56/v57 como "contenido
-  // inicial" fuera del editor. Se eliminan de cualquier config (caché local o backend)
-  // para que la tienda muestre SOLO lo que el dueño creó y ve en su Editor Visual.
-  // No toca ningún bloque real del dueño (sus ids son b<timestamp>_<rnd>).
-  const PHANTOM_BLOCK_IDS = new Set(["bn_ret", "pr_ret"]);
-  const stripPhantomBlocks = (cfg) => {
-    if (!cfg || typeof cfg !== "object" || !cfg.blocks || typeof cfg.blocks !== "object") return cfg;
-    const blocks = {};
-    for (const [page, arr] of Object.entries(cfg.blocks)) {
-      blocks[page] = Array.isArray(arr) ? arr.filter((b) => !(b && PHANTOM_BLOCK_IDS.has(b.id))) : arr;
-    }
-    return { ...cfg, blocks };
-  };
   // Configuración editable de la plataforma (controlada desde el panel admin, persiste)
   const [adminCfg, setAdminCfg] = useState(() => {
     const defaults = {
@@ -286,7 +273,7 @@ function AppShell({ sessionUser }) {
       // Editor Visual: bloques/banners de la tienda (guardado GLOBAL en la config).
       blocks: DEFAULT_BLOCKS,
     };
-    try { const r = localStorage.getItem("retador_admincfg"); if (r) return stripPhantomBlocks({ ...defaults, ...JSON.parse(r) }); } catch {}
+    try { const r = localStorage.getItem("retador_admincfg"); if (r) return { ...defaults, ...JSON.parse(r) }; } catch {}
     return defaults;
   });
   useEffect(() => { try { localStorage.setItem("retador_admincfg", JSON.stringify(adminCfg)); } catch {} }, [adminCfg]);
@@ -306,7 +293,7 @@ function AppShell({ sessionUser }) {
     getPlatformConfig().then(res => {
       if (!alive || !res) return;
       cfgFromBackend.current = true;
-      setAdminCfg(prev => stripPhantomBlocks({ ...prev, ...res.config }));
+      setAdminCfg(prev => ({ ...prev, ...res.config }));
       if (res.updatedAt) setCfgUpdatedAt(res.updatedAt);
     }).catch(() => {});
     return () => { alive = false; };

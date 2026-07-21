@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
+import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo, Fragment } from "react";
 import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
@@ -425,6 +425,20 @@ const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;4
 .omni .ve-blk:hover .ve-handle{display:flex}
 .omni .ve-hdot{width:3px;height:3px;background:rgba(255,255,255,.5);border-radius:50%}
 
+/* Asa de arrastre (táctil + PC): siempre visible en cada banner/carrusel */
+.omni .ve-grip{
+  position:absolute;top:8px;left:8px;z-index:30;
+  display:flex;align-items:center;gap:5px;
+  padding:5px 10px;border-radius:8px;
+  background:var(--ac);color:#fff;
+  cursor:grab;user-select:none;-webkit-user-select:none;
+  box-shadow:0 2px 8px rgba(0,0,0,.35);
+}
+.omni .ve-grip:active{cursor:grabbing}
+.omni .ve-blk.dragging{opacity:.45}
+/* Línea que marca dónde caerá el bloque al soltar */
+.omni .ve-dropline{height:4px;margin:3px 6px;border-radius:3px;background:var(--gn);box-shadow:0 0 10px var(--gn)}
+
 
 .omni .ve-blk-bar{
   position:absolute;
@@ -833,13 +847,16 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showLeft, setShowLeft] = useState(true);
-  const [showRight, setShowRight] = useState(true);
+  const [showRight, setShowRight] = useState(false); // el panel de edición abre solo con "Editar"
   const [showCats, setShowCats] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [useLib, setUseLib] = useState(null);      // {mid} → modal "Usar en"
   const [slide, setSlide] = useState(0);           // slide seleccionado del carrusel
-  const [dIdx, setDIdx] = useState(null);
-  const [dOv, setDOv] = useState(null);
+  const [dragEid, setDragEid] = useState(null);    // entrada que se está arrastrando (para pintar)
+  const [dropIdx, setDropIdx] = useState(null);    // posición donde caería (índice de inserción)
+  const dragRef = useRef(null);                    // id activo (fuente fiable en los eventos)
+  const dropRef = useRef(null);                    // posición de caída (fuente fiable al soltar)
+  const dragMoved = useRef(false);                 // hubo arrastre real (para no togglear selección)
   const uploadRef = useRef(null);
   const uploadTgt = useRef(null);                  // {mid, field} | {mid, slide, field}
 
@@ -881,7 +898,7 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
     const m = blankMaster(kind);
     setMasters(mm => ({ ...mm, [m.id]: m }));
     setLayout(prev => ({ ...prev, [screen]: [...(prev[screen] || []), { id: mkId("e"), ref: m.id }] }));
-    setSel(m.id); setAddOpen(false); touch();
+    setSel(m.id); setShowRight(true); setAddOpen(false); touch(); // recién creado → abre el editor
     toast(kind === "carousel" ? "🎠 Carrusel añadido" : "🖼️ Banner añadido");
   };
   const removeRef = (entryId, mid) => {
@@ -920,10 +937,47 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
   const delLibItem = mid => { setMasters(prev => { const n = { ...prev }; delete n[mid]; return n; }); if (sel === mid) setSel(null); touch(); toast("Eliminado de Contenido"); };
 
   // ── Drag & drop (reordenar refs en la pantalla; anclas fijas) ──
-  const onDrop = i => {
-    if (dIdx === null || dIdx === i) { setDIdx(null); setDOv(null); return; }
-    setLayout(prev => { const arr = [...prev[screen]]; const [m] = arr.splice(dIdx, 1); arr.splice(i, 0, m); return { ...prev, [screen]: arr }; });
-    setDIdx(null); setDOv(null); touch(); toast("Posición actualizada");
+  // ── ARRASTRAR Y SOLTAR con eventos de puntero (funciona igual en TÁCTIL y en PC).
+  // Se agarra el banner por su asa (⠿) y se suelta donde se quiera, entre cualquier
+  // parte de la pantalla. Se calcula la posición de caída con la posición del dedo/ratón.
+  const dragStart = (ev, eid) => {
+    ev.stopPropagation();
+    try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch (e) {}
+    dragMoved.current = false; dragRef.current = eid;
+    setDragEid(eid);
+    const arr = layout[screen] || []; const si = arr.findIndex(x => x.id === eid); dropRef.current = si; setDropIdx(si);
+  };
+  const dragMove = (ev) => {
+    if (!dragRef.current) return;
+    dragMoved.current = true;
+    const y = ev.clientY;
+    const frame = ev.currentTarget.closest(".ve-frame");
+    const nodes = frame ? frame.querySelectorAll("[data-eid]") : [];
+    let idx = nodes.length;
+    for (let k = 0; k < nodes.length; k++) {
+      const r = nodes[k].getBoundingClientRect();
+      if (y < r.top + r.height / 2) { idx = k; break; }
+    }
+    dropRef.current = idx; setDropIdx(idx);
+  };
+  const dragEnd = (ev) => {
+    const eid = dragRef.current; dragRef.current = null;
+    if (!eid) return;
+    try { ev.currentTarget.releasePointerCapture(ev.pointerId); } catch (e) {}
+    const target = dropRef.current;
+    setLayout(prev => {
+      const arr = [...(prev[screen] || [])];
+      const from = arr.findIndex(x => x.id === eid);
+      if (from < 0 || target == null) return prev;
+      let to = target; const [x] = arr.splice(from, 1);
+      if (to > from) to -= 1;
+      to = Math.max(0, Math.min(arr.length, to));
+      arr.splice(to, 0, x);
+      return { ...prev, [screen]: arr };
+    });
+    if (dragMoved.current) { touch(); toast("Posición actualizada"); }
+    setDragEid(null); setDropIdx(null);
+    setTimeout(() => { dragMoved.current = false; }, 0);
   };
 
   // ── Imagen ──
@@ -1004,40 +1058,51 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
               {isScreen ? (
                 <>
                   {entries.map((e, i) => {
+                    const line = dragEid && dropIdx === i ? <div className="ve-dropline" /> : null;
                     if (isAnchor(e)) return (
-                      <div key={e.id} className="ve-blk sys-blk" style={{ opacity: .96 }}>
-                        <div className="ve-blk-lbl">{e.title} · fijo</div>
-                        <div style={{ padding: "12px 14px", background: "var(--bg2)", borderLeft: "3px solid var(--ac)", display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ fontSize: 15, opacity: .85 }}>{e.icon || "▦"}</span>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--tx)" }}>{e.title}</div>
-                            <div style={{ fontSize: 9, color: "var(--tx3)", marginTop: 2 }}>Parte fija de la app · posición fija · aquí no se edita</div>
+                      <Fragment key={e.id}>
+                        {line}
+                        <div data-eid={e.id} className="ve-blk sys-blk" style={{ opacity: .96 }}>
+                          <div className="ve-blk-lbl">{e.title} · fijo</div>
+                          <div style={{ padding: "12px 14px", background: "var(--bg2)", borderLeft: "3px solid var(--ac)", display: "flex", alignItems: "center", gap: 10 }}>
+                            <span style={{ fontSize: 15, opacity: .85 }}>{e.icon || "▦"}</span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--tx)" }}>{e.title}</div>
+                              <div style={{ fontSize: 9, color: "var(--tx3)", marginTop: 2 }}>Parte fija de la app · posición fija · aquí no se edita</div>
+                            </div>
+                            <span style={{ fontSize: 8, fontWeight: 800, color: "var(--tx3)", background: "var(--bg3)", padding: "3px 7px", borderRadius: 20 }}>SISTEMA</span>
                           </div>
-                          <span style={{ fontSize: 8, fontWeight: 800, color: "var(--tx3)", background: "var(--bg3)", padding: "3px 7px", borderRadius: 20 }}>SISTEMA</span>
                         </div>
-                      </div>
+                      </Fragment>
                     );
-                    const m = masters[e.ref]; if (!m) return null;
+                    const m = masters[e.ref]; if (!m) return <Fragment key={e.id}>{line}</Fragment>;
                     const pubs = screensOf(m.id);
                     return (
-                      <div key={e.id} draggable className={["ve-blk", sel === m.id ? "sel" : "", !m.active ? "hidden-blk" : "", dOv === i && dIdx !== i ? "dragover" : ""].filter(Boolean).join(" ")}
-                        onClick={() => { setSel(m.id); setShowRight(true); }}
-                        onDragStart={() => setDIdx(i)} onDragOver={ev => { ev.preventDefault(); setDOv(i); }} onDrop={ev => { ev.preventDefault(); onDrop(i); }} onDragEnd={() => { setDIdx(null); setDOv(null); }}>
-                        <div className="ve-handle">{[0, 1, 2, 3, 4, 5].map(k => <div key={k} className="ve-hdot" />)}</div>
-                        <div className="ve-blk-lbl">
-                          {m.kind === "carousel" ? "🎠 Carrusel" : "🖼️ Banner"}{Number(m.everyN) > 0 ? ` · 📢 anuncio cada ${m.everyN}` : ""}{!m.active ? " · oculto" : ""}{pubs.length > 1 ? ` · en ${pubs.length} pantallas` : ""}
+                      <Fragment key={e.id}>
+                        {line}
+                        <div data-eid={e.id} className={["ve-blk", sel === m.id ? "sel" : "", !m.active ? "hidden-blk" : "", dragEid === e.id ? "dragging" : ""].filter(Boolean).join(" ")}
+                          onClick={() => { if (dragMoved.current) { dragMoved.current = false; return; } setSel(sel === m.id ? null : m.id); }}>
+                          {/* ASA para arrastrar — agárrala y suelta donde quieras (táctil y PC) */}
+                          <div className="ve-grip" style={{ touchAction: "none" }} title="Arrastra para mover"
+                            onPointerDown={ev => dragStart(ev, e.id)} onPointerMove={dragMove} onPointerUp={dragEnd} onPointerCancel={dragEnd}>
+                            <span style={{ fontSize: 15, lineHeight: 1 }}>⠿</span><span style={{ fontSize: 9, fontWeight: 700 }}>Mover</span>
+                          </div>
+                          <div className="ve-blk-lbl">
+                            {m.kind === "carousel" ? "🎠 Carrusel" : "🖼️ Banner"}{Number(m.everyN) > 0 ? ` · 📢 anuncio cada ${m.everyN}` : ""}{!m.active ? " · oculto" : ""}{pubs.length > 1 ? ` · en ${pubs.length} pantallas` : ""}
+                          </div>
+                          <div className="ve-blk-bar" onClick={ev => ev.stopPropagation()}>
+                            <button className="ve-blk-btn" style={{ color: "var(--ac2)", fontWeight: 800 }} onClick={() => { setSel(m.id); setShowRight(true); }}>Editar</button>
+                            <button className="ve-blk-btn" onClick={() => { patchMaster(m.id, { active: !m.active }); }}>{m.active ? "Ocultar" : "Mostrar"}</button>
+                            <button className="ve-blk-btn" onClick={() => dupBlock(m.id)}>Duplicar</button>
+                            <button className="ve-blk-btn" onClick={() => saveToLibrary(m.id)}>Guardar</button>
+                            <button className="ve-blk-btn del" onClick={ev => { ev.stopPropagation(); removeRef(e.id, m.id); }}>✕</button>
+                          </div>
+                          <div style={{ padding: "8px 8px 10px" }}><PreviewBlock m={m} /></div>
                         </div>
-                        <div className="ve-blk-bar" onClick={ev => ev.stopPropagation()}>
-                          <button className="ve-blk-btn" onClick={() => { setSel(m.id); setShowRight(true); }}>Editar</button>
-                          <button className="ve-blk-btn" onClick={() => { patchMaster(m.id, { active: !m.active }); }}>{m.active ? "Ocultar" : "Mostrar"}</button>
-                          <button className="ve-blk-btn" onClick={() => dupBlock(m.id)}>Duplicar</button>
-                          <button className="ve-blk-btn" onClick={() => saveToLibrary(m.id)}>Guardar en Contenido</button>
-                          <button className="ve-blk-btn del" onClick={ev => { ev.stopPropagation(); removeRef(e.id, m.id); }}>✕</button>
-                        </div>
-                        <div style={{ padding: "8px 8px 10px" }}><PreviewBlock m={m} /></div>
-                      </div>
+                      </Fragment>
                     );
                   })}
+                  {dragEid && dropIdx === entries.length && <div className="ve-dropline" />}
                   <div className="ve-add-btn" onClick={() => setAddOpen(true)}><span style={{ fontSize: 16 }}>+</span> Añadir banner o carrusel</div>
                 </>
               ) : (
@@ -1048,7 +1113,7 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
                   </div>
                   {libItems.length === 0 && <div className="ve-empty"><div style={{ fontSize: 32, marginBottom: 10, opacity: .2 }}>📚</div><div style={{ fontSize: 12, color: "var(--tx)" }}>Biblioteca vacía</div><div className="ve-empty-hint">Desde cualquier bloque, toca “Guardar en Contenido”.</div></div>}
                   {libItems.map(m => (
-                    <div key={m.id} className={`ve-blk ${sel === m.id ? "sel" : ""}`} onClick={() => { setSel(m.id); setShowRight(true); }}>
+                    <div key={m.id} className={`ve-blk ${sel === m.id ? "sel" : ""}`} onClick={() => setSel(sel === m.id ? null : m.id)}>
                       <div className="ve-blk-lbl">{m.kind === "carousel" ? "🎠 Carrusel" : "🖼️ Banner"} · en biblioteca</div>
                       <div className="ve-blk-bar" onClick={ev => ev.stopPropagation()}>
                         <button className="ve-blk-btn" onClick={() => { setSel(m.id); setShowRight(true); }}>Editar</button>
@@ -1079,7 +1144,7 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
                 <div className="ve-ph">
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                     <div className="ve-pt">{selM.kind === "carousel" ? "🎠 Carrusel" : "🖼️ Banner"}</div>
-                    <button style={{ background: "none", border: "none", color: "var(--tx3)", cursor: "pointer", fontSize: 18, lineHeight: 1 }} onClick={() => setSel(null)}>×</button>
+                    <button style={{ background: "none", border: "none", color: "var(--tx3)", cursor: "pointer", fontSize: 18, lineHeight: 1 }} onClick={() => setShowRight(false)}>×</button>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <Tog on={selM.active} ch={() => patchMaster(selM.id, { active: !selM.active })} />

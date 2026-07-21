@@ -19,7 +19,7 @@ import {
   getUserById, getUserName, updateUserName,
   mapProduct, loadProducts, loadServices, getFeed, saveProduct, deleteProduct, getProductsBySeller, uploadImage, DEMO_PRODUCT,
   sendMessage, loadMessages, markRead, getMyConversations,
-  toggleFavorite, getMyFavorites, getPlatformStats, getPlatformConfig, setPlatformConfig, promoteProduct,
+  toggleFavorite, getMyFavorites, getPlatformStats, getPlatformConfig, setPlatformConfig, setPlatformBlocks, myPermissions, promoteProduct,
   getLedgerEntries, createEscrow, releaseEscrow, getSystemStatus,
   CURRENCIES, CURRENCY_CODES, DEFAULT_CURRENCY, money,
   createOrder, estimateDeliveryFee,
@@ -251,6 +251,16 @@ function AppShell({ sessionUser }) {
   // Panel de administración: SOLO para cuentas con rol real de admin en el backend
   // (el dueño ya tiene role='admin' en profiles). Ya no está abierto para todos.
   const isOwner = user?.role === "admin";
+  // Permisos A LA CARTA del panel: "ALL" (admin) o { seccion: none|view|manage }.
+  // null = aún cargando. Se refresca en vivo con notificaciones kind='account'.
+  const [adminPerms, setAdminPerms] = useState(null);
+  const loadPerms = useCallback(() => {
+    if (!user?.id) { setAdminPerms(null); return; }
+    myPermissions().then(p => setAdminPerms(p)).catch(() => setAdminPerms({}));
+  }, [user?.id]);
+  useEffect(() => { loadPerms(); }, [loadPerms]);
+  // ¿Puede abrir el panel? Admin (ALL) o al menos una sección distinta de "none".
+  const hasPanel = adminPerms === "ALL" || (adminPerms && typeof adminPerms === "object" && Object.values(adminPerms).some(v => v && v !== "none"));
   // Configuración editable de la plataforma (controlada desde el panel admin, persiste)
   const [adminCfg, setAdminCfg] = useState(() => {
     const defaults = {
@@ -802,7 +812,8 @@ function AppShell({ sessionUser }) {
           // re-consultamos el backend y bloqueamos/liberamos sin reinstalar.
           if (n.kind === "account") {
             isSuspendedUser().then(s => setSuspended(!!s)).catch(() => {});
-            refreshSessionProfile(user.id).then(p => { if (p) setUser(prev => prev ? { ...prev, verified: p.verified, suspended: p.suspended } : prev); }).catch(() => {});
+            refreshSessionProfile(user.id).then(p => { if (p) setUser(prev => prev ? { ...prev, verified: p.verified, suspended: p.suspended, role: p.role } : prev); }).catch(() => {});
+            loadPerms(); // permisos del panel EN VIVO: aparece/cambia/desaparece sin reinstalar
           }
           // Verificación aprobada/rechazada o PLAN cambiado: refresca el perfil en vivo
           // (insignia verificada real, plan real) — igual que con 'courier'.
@@ -1263,6 +1274,11 @@ function AppShell({ sessionUser }) {
         onCollectDebt: (sellerId, sellerName, message) => { openChat(sellerId, sellerName, null, message); },
         orders, cfg: adminCfg,
         onCfg: handleCfgChange,
+        // Permisos a la carta del usuario actual (ALL o {seccion:nivel}).
+        perms: adminPerms,
+        // Editor Visual: publica SOLO bloques/masters (no tarifas) vía set_platform_blocks.
+        // Además refleja el cambio en la config local para que la tienda lo muestre en vivo.
+        onPublishBlocks: (payload) => { setAdminCfg(prev => ({ ...prev, ...payload })); return setPlatformBlocks(payload); },
         onOrderAction: (id, action) => setOrders(prev => prev.map(o => o.id === id ? { ...o, status: action === 'cancel' ? 'cancelado' : action === 'approve' ? 'confirmado' : o.status, flagged: action === 'flag' ? true : (action === 'cancel' || action === 'approve' ? false : o.flagged) } : o)),
         onDisputeAction: (id, action) => setOrders(prev => prev.map(o => o.id === id ? { ...o, status: action === 'resolve' ? 'confirmado' : action === 'freeze' ? 'congelado' : action === 'escalate' ? 'escalado' : o.status, disputeState: action } : o)),
         reports, onReportAction: (id, action) => setReports(prev => prev.map(r => r.id === id ? { ...r, state: action } : r)),
@@ -1377,7 +1393,7 @@ function AppShell({ sessionUser }) {
           )}
 
           {tab === "perfil" && <>
-            {pScr === "main"         && <ProfileMain user={user} onMessages={openMessages} onSettings={() => setPScr("settings")} onOrders={() => setPScr("orders")} onViewProfile={() => setPScr("profile-full")} onAdmin={() => setShowAdmin(true)} onWallet={() => setShowWallet(true)} onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} isOwner={isOwner} profileData={profileData} ordersBadge={ordersUnseen} messagesBadge={chatUnread} adminBadge={courierApps.length} />}
+            {pScr === "main"         && <ProfileMain user={user} onMessages={openMessages} onSettings={() => setPScr("settings")} onOrders={() => setPScr("orders")} onViewProfile={() => setPScr("profile-full")} onAdmin={() => setShowAdmin(true)} onWallet={() => setShowWallet(true)} onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} isOwner={hasPanel} profileData={profileData} ordersBadge={ordersUnseen} messagesBadge={chatUnread} adminBadge={courierApps.length} />}
             {pScr === "profile-full" && (() => {
               const me = profileData?.name || user?.name;
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);

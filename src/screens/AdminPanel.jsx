@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -1375,7 +1375,7 @@ function Overview({toast, data={}, go}){
 // Hoy solo se usa para DELIVERY LOCAL (solo='Delivery'): interruptor real del
 // servicio, surge, valoraciones y el registro de mensajeros. Las antiguas
 // sub-pestañas (Órdenes/Disputas/Moderación demo) se eliminaron en el cierre.
-function Operaciones({toast,data={},solo}){
+function Operaciones({toast,data={},solo,ro}){
   const sub2 = solo;
   const[confirm,setConfirm]=useState(null);    // diálogo de confirmación {title,msg,danger,yes,onYes}
   const couriers = data.couriers || [];
@@ -1400,7 +1400,7 @@ function Operaciones({toast,data={},solo}){
               </div>
               <div style={{fontSize:11,color:'var(--tx3)',marginTop:4}}>{on?'Los clientes ven el delivery local disponible y pueden pedir.':'Los clientes lo ven como no disponible. Útil antes del lanzamiento o en días de descanso.'}</div>
             </div>
-            <button className="btn" onClick={()=>{ data.onCfg&&data.onCfg({deliveryServiceActive:!on}); toast(on?'Servicio puesto INACTIVO':'Servicio puesto ACTIVO'); }} style={{fontWeight:800,padding:'10px 18px',flexShrink:0,border:`1px solid ${on?'var(--rd)':'var(--gn)'}`,color:on?'var(--rd)':'var(--gn)',background:'transparent',borderRadius:10,cursor:'pointer'}}>{on?'Desactivar':'Activar'}</button>
+            {!ro && <button className="btn" onClick={()=>{ data.onCfg&&data.onCfg({deliveryServiceActive:!on}); toast(on?'Servicio puesto INACTIVO':'Servicio puesto ACTIVO'); }} style={{fontWeight:800,padding:'10px 18px',flexShrink:0,border:`1px solid ${on?'var(--rd)':'var(--gn)'}`,color:on?'var(--rd)':'var(--gn)',background:'transparent',borderRadius:10,cursor:'pointer'}}>{on?'Desactivar':'Activar'}</button>}
           </div>
         </div>
       ); })()}
@@ -1409,9 +1409,9 @@ function Operaciones({toast,data={},solo}){
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'9px 0',borderTop:'1px solid var(--bd)'}}>
             <span style={{fontSize:12,color:'var(--tx2)',flex:1}}>{label}</span>
             <div style={{display:'flex',alignItems:'center',gap:6}}>
-              <button onClick={()=>{ const nv=Math.max(min,(Number(val)||min)-(keyName==='surgeIntervalMin'?5:5)); data.onCfg&&data.onCfg({[keyName]:nv}); }} style={{width:30,height:30,borderRadius:8,border:'1px solid var(--bd)',background:'transparent',color:'var(--tx)',fontSize:16,fontWeight:800,cursor:'pointer'}}>−</button>
+              {!ro && <button onClick={()=>{ const nv=Math.max(min,(Number(val)||min)-(keyName==='surgeIntervalMin'?5:5)); data.onCfg&&data.onCfg({[keyName]:nv}); }} style={{width:30,height:30,borderRadius:8,border:'1px solid var(--bd)',background:'transparent',color:'var(--tx)',fontSize:16,fontWeight:800,cursor:'pointer'}}>−</button>}
               <span style={{minWidth:54,textAlign:'center',fontSize:13,fontWeight:800,color:'var(--tx)'}}>{val}{suffix}</span>
-              <button onClick={()=>{ const nv=Math.min(max,(Number(val)||min)+5); data.onCfg&&data.onCfg({[keyName]:nv}); }} style={{width:30,height:30,borderRadius:8,border:'1px solid var(--bd)',background:'transparent',color:'var(--tx)',fontSize:16,fontWeight:800,cursor:'pointer'}}>+</button>
+              {!ro && <button onClick={()=>{ const nv=Math.min(max,(Number(val)||min)+5); data.onCfg&&data.onCfg({[keyName]:nv}); }} style={{width:30,height:30,borderRadius:8,border:'1px solid var(--bd)',background:'transparent',color:'var(--tx)',fontSize:16,fontWeight:800,cursor:'pointer'}}>+</button>}
             </div>
           </div>
         );
@@ -1422,7 +1422,7 @@ function Operaciones({toast,data={},solo}){
               <div style={{fontWeight:800,color:'var(--tx)',fontSize:13.5}}>🔥 Tarifa dinámica (surge) {sg?'· ON':'· OFF'}</div>
               <div style={{fontSize:11,color:'var(--tx3)',marginTop:4,lineHeight:1.4}}>Si un pedido lleva rato sin que ningún mensajero lo acepte, la tarifa sube sola. Déjalo OFF hasta tener red de mensajeros.</div>
             </div>
-            <button className="btn" onClick={()=>{ data.onCfg&&data.onCfg({surgeActive:!sg}); toast(sg?'Surge desactivado':'Surge activado'); }} style={{fontWeight:800,padding:'10px 18px',flexShrink:0,border:`1px solid ${sg?'var(--rd)':'var(--gn)'}`,color:sg?'var(--rd)':'var(--gn)',background:'transparent',borderRadius:10,cursor:'pointer'}}>{sg?'Desactivar':'Activar'}</button>
+            {!ro && <button className="btn" onClick={()=>{ data.onCfg&&data.onCfg({surgeActive:!sg}); toast(sg?'Surge desactivado':'Surge activado'); }} style={{fontWeight:800,padding:'10px 18px',flexShrink:0,border:`1px solid ${sg?'var(--rd)':'var(--gn)'}`,color:sg?'var(--rd)':'var(--gn)',background:'transparent',borderRadius:10,cursor:'pointer'}}>{sg?'Desactivar':'Activar'}</button>}
           </div>
           <div style={{marginTop:10}}>
             {numRow('Sube cada cuánto tiempo',every,'surgeIntervalMin',' min',5,120)}
@@ -1454,7 +1454,7 @@ function Operaciones({toast,data={},solo}){
                   <div style={{fontWeight:700,color:'var(--tx)',fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.nombre||c.userName}</div>
                   <div style={{fontSize:10,color:'var(--tx3)'}}>{c.vehiculo} · {c.zona||'—'} · {c.telefono||'—'}</div>
                 </div>
-                <button className="btn bts sm" onClick={()=>setCouView(c)}>Revisar</button>
+                <button className="btn bts sm" onClick={()=>setCouView(c)}>{ro?'Ver':'Revisar'}</button>
               </div>
             ))}
         </div>
@@ -1464,7 +1464,7 @@ function Operaciones({toast,data={},solo}){
             <div key={c.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 2px',borderBottom:'1px solid var(--bd)'}}>
               <div style={{width:34,height:34,borderRadius:9,overflow:'hidden',background:'var(--bg2)',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15}}>{c.selfie?<img src={c.selfie} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>:'🛵'}</div>
               <div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,color:'var(--tx)',fontSize:12.5}}>{c.nombre||c.userName}</div><div style={{fontSize:10,color:'var(--tx3)'}}>{c.vehiculo} · {c.zona||'—'}</div></div>
-              <button className="btn btd sm" onClick={()=>ask({title:'Quitar mensajero',msg:`Se le retira el acceso de mensajero a ${c.nombre||c.userName}. ¿Continuar?`,danger:true,yes:'Quitar',onYes:()=>couAct(c.id,'rejected'),msg2:'Mensajero retirado'})}>Quitar</button>
+              {!ro && <button className="btn btd sm" onClick={()=>ask({title:'Quitar mensajero',msg:`Se le retira el acceso de mensajero a ${c.nombre||c.userName}. ¿Continuar?`,danger:true,yes:'Quitar',onYes:()=>couAct(c.id,'rejected'),msg2:'Mensajero retirado'})}>Quitar</button>}
             </div>
           ))}
         </div>}
@@ -1499,10 +1499,12 @@ function Operaciones({toast,data={},solo}){
           ))}
         </div>
         <div style={{fontSize:10,color:'var(--tx3)',background:'var(--bg)',borderRadius:9,padding:'9px 11px',marginBottom:12,lineHeight:1.5}}>Compara la selfie con la foto del documento. La comparación facial automática llegará con el backend; por ahora la confirmas tú.</div>
-        <div className="mact">
+        {ro
+          ? <div style={{textAlign:'center',fontSize:11,color:'var(--tx3)'}}>👁 Solo lectura</div>
+          : <div className="mact">
           <button className="btn btd sm" onClick={()=>{couAct(couView.id,'rejected');toast('Solicitud rechazada');setCouView(null);}}>Rechazar</button>
           <button className="btn btp sm" onClick={()=>{couAct(couView.id,'approved');toast('✅ Mensajero aprobado');setCouView(null);}}>Aprobar mensajero</button>
-        </div>
+        </div>}
       </div>
     </div>}
 
@@ -1647,7 +1649,7 @@ function AdminOrders({ toast, onViewProfile }){
 }
 
 /* ── Moderación de publicaciones (a posteriori) — aprobar / retirar de verdad ── */
-function ModeracionPublicaciones({ toast, onViewProfile }){
+function ModeracionPublicaciones({ toast, onViewProfile, ro }){
   const PAGE = 20;
   const [q, setQ] = useState("");
   const [dq, setDq] = useState("");
@@ -1736,10 +1738,10 @@ function ModeracionPublicaciones({ toast, onViewProfile }){
                       {p.moderation_status === 'rejected' && p.moderation_reason && <span style={{ fontSize:10, color:'var(--tx3)' }}>· {p.moderation_reason}</span>}
                     </div>
                   </div>
-                  <div style={{ display:'flex', gap:4, flexShrink:0 }} onClick={e=>e.stopPropagation()}>
+                  {!ro && <div style={{ display:'flex', gap:4, flexShrink:0 }} onClick={e=>e.stopPropagation()}>
                     {p.moderation_status !== 'approved' && <button className="btn bts sm" disabled={busy===p.id} onClick={()=>doApprove(p)}>✅ Aprobar</button>}
                     {p.moderation_status !== 'rejected' && <button className="btn btd sm" disabled={busy===p.id} onClick={()=>{ setReason(''); setRejectFor(p); }}>🚫 Retirar</button>}
-                  </div>
+                  </div>}
                 </div>
               );
             })}
@@ -1785,8 +1787,8 @@ function ModeracionPublicaciones({ toast, onViewProfile }){
               ? <p style={{ fontSize:12.5, color:'var(--tx2,#aaa)', lineHeight:1.55, whiteSpace:'pre-wrap', margin:'0 0 12px' }}>{view.description}</p>
               : <p style={{ fontSize:11, color:'var(--tx3)', margin:'0 0 12px' }}>Sin descripción.</p>}
             <div style={{ display:'flex', gap:8 }}>
-              {view.moderation_status !== 'approved' && <button className="btn bts" style={{ flex:1 }} disabled={busy===view.id} onClick={async()=>{ await doApprove(view); setView(v=>v?{...v,moderation_status:'approved'}:v); }}>✅ Aprobar</button>}
-              {view.moderation_status !== 'rejected' && <button className="btn btd" style={{ flex:1 }} disabled={busy===view.id} onClick={()=>{ setReason(''); setRejectFor(view); setView(null); }}>🚫 Retirar</button>}
+              {!ro && view.moderation_status !== 'approved' && <button className="btn bts" style={{ flex:1 }} disabled={busy===view.id} onClick={async()=>{ await doApprove(view); setView(v=>v?{...v,moderation_status:'approved'}:v); }}>✅ Aprobar</button>}
+              {!ro && view.moderation_status !== 'rejected' && <button className="btn btd" style={{ flex:1 }} disabled={busy===view.id} onClick={()=>{ setReason(''); setRejectFor(view); setView(null); }}>🚫 Retirar</button>}
               <button className="btn" onClick={()=>setView(null)}>Cerrar</button>
             </div>
           </div>
@@ -1810,7 +1812,7 @@ function ModeracionPublicaciones({ toast, onViewProfile }){
 }
 
 /* ── Directorio REAL de usuarios (profiles) — verificar/suspender de verdad ──── */
-function RealUsersDirectory({ toast, meId }){
+function RealUsersDirectory({ toast, meId, ro }){
   const PAGE = 20;
   const [q, setQ] = useState("");
   const [dq, setDq] = useState("");           // query con debounce
@@ -1883,12 +1885,12 @@ function RealUsersDirectory({ toast, meId }){
                 <div style={{ fontSize:11, color:'var(--tx3)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{u.email || '—'}</div>
                 <div style={{ marginTop:4 }}>{chips(u)}</div>
               </div>
-              <div style={{ display:'flex', gap:4, flexShrink:0 }} onClick={e => e.stopPropagation()}>
+              {!ro && <div style={{ display:'flex', gap:4, flexShrink:0 }} onClick={e => e.stopPropagation()}>
                 <button className="btn bts sm" disabled={busy === u.id} onClick={() => doVerify(u, !u.is_verified)}>{u.is_verified ? 'Quitar ✓' : '✓ Verificar'}</button>
                 {u.is_suspended
                   ? <button className="btn btg sm" disabled={busy === u.id} onClick={() => doSuspend(u, false)}>Reactivar</button>
                   : <button className="btn btd sm" disabled={busy === u.id || u.id === meId} onClick={() => openSuspend(u)}>Suspender</button>}
-              </div>
+              </div>}
             </div>
           ))}
       {!loading && (page > 0 || hasMore) && (
@@ -1935,12 +1937,14 @@ function RealUsersDirectory({ toast, meId }){
               </div>
             ))}
           </div>
-          <div style={{ display:'flex', gap:8 }}>
+          {ro
+            ? <div style={{ textAlign:'center', fontSize:11, color:'var(--tx3)' }}>👁 Solo lectura</div>
+            : <div style={{ display:'flex', gap:8 }}>
             <button className="btn bts" style={{ flex:1 }} disabled={busy === sel.id} onClick={() => doVerify(sel, !sel.is_verified)}>{sel.is_verified ? 'Quitar verificación' : '✓ Verificar'}</button>
             {sel.is_suspended
               ? <button className="btn btg" style={{ flex:1 }} disabled={busy === sel.id} onClick={() => doSuspend(sel, false)}>Reactivar</button>
               : <button className="btn btd" style={{ flex:1 }} disabled={busy === sel.id || sel.id === meId} onClick={() => { const u = sel; setSel(null); openSuspend(u); }}>Suspender</button>}
-          </div>
+          </div>}
         </div>
       </div>}
     </div>
@@ -1948,7 +1952,7 @@ function RealUsersDirectory({ toast, meId }){
 }
 
 /* ── Cola REAL de verificaciones (KYC) ──────────────────────────────────────── */
-function VerificationQueue({ toast, onViewProfile }){
+function VerificationQueue({ toast, onViewProfile, ro }){
   const [filter, setFilter] = useState("pending"); // pending|approved|rejected
   const [rows, setRows] = useState([]);
   const [names, setNames] = useState({});
@@ -2042,8 +2046,8 @@ function VerificationQueue({ toast, onViewProfile }){
           {sel.status==='rejected'&&sel.reject_reason&&<div style={{fontSize:11,color:'var(--rd,#e05252)',marginTop:8}}>Motivo: {sel.reject_reason}</div>}
           <div style={{display:'flex',gap:8,marginTop:14}}>
             {onViewProfile && <button className="btn sm" onClick={()=>{ onViewProfile(sel.user_id); setSel(null); }}>Ver perfil</button>}
-            {sel.status!=='approved' && <button className="btn bts" style={{flex:1}} disabled={busy===sel.id} onClick={()=>approve(sel)}>✅ Aprobar</button>}
-            {sel.status!=='rejected' && <button className="btn btd" style={{flex:1}} disabled={busy===sel.id} onClick={()=>{ setReason(''); setRejectFor(sel); }}>🚫 Rechazar</button>}
+            {!ro && sel.status!=='approved' && <button className="btn bts" style={{flex:1}} disabled={busy===sel.id} onClick={()=>approve(sel)}>✅ Aprobar</button>}
+            {!ro && sel.status!=='rejected' && <button className="btn btd" style={{flex:1}} disabled={busy===sel.id} onClick={()=>{ setReason(''); setRejectFor(sel); }}>🚫 Rechazar</button>}
           </div>
         </div>
       </div>}
@@ -2068,7 +2072,7 @@ function VerificationQueue({ toast, onViewProfile }){
 }
 
 /* ── Cola REAL de solicitudes de plan ───────────────────────────────────────── */
-function PlanQueue({ toast, onViewProfile }){
+function PlanQueue({ toast, onViewProfile, ro }){
   const [filter, setFilter] = useState("pending");
   const [rows, setRows] = useState([]);
   const [names, setNames] = useState({});
@@ -2122,8 +2126,8 @@ function PlanQueue({ toast, onViewProfile }){
             </div>
             <div style={{display:'flex',gap:4,flexShrink:0}}>
               {onViewProfile && <button className="btn sm" onClick={()=>onViewProfile(r.user_id)}>Perfil</button>}
-              {r.status!=='approved' && <button className="btn bts sm" disabled={busy===r.id} onClick={()=>setConfirmFor({req:r,approve:true})}>✅ Aprobar</button>}
-              {r.status!=='rejected' && <button className="btn btd sm" disabled={busy===r.id} onClick={()=>setConfirmFor({req:r,approve:false})}>🚫 Rechazar</button>}
+              {!ro && r.status!=='approved' && <button className="btn bts sm" disabled={busy===r.id} onClick={()=>setConfirmFor({req:r,approve:true})}>✅ Aprobar</button>}
+              {!ro && r.status!=='rejected' && <button className="btn btd sm" disabled={busy===r.id} onClick={()=>setConfirmFor({req:r,approve:false})}>🚫 Rechazar</button>}
             </div>
           </div>
         ); })}
@@ -2161,7 +2165,7 @@ function Usuarios({toast,data={}}){
 }
 
 /* ── Economía ──────────────────────────────────────────────────────────────── */
-function Economia({toast, data={}}){
+function Economia({toast, data={}, ro}){
   const orders = data.orders || [];
   const cfg = data.cfg || {};
   const fmt = n=>'$'+Math.round(n||0).toLocaleString();
@@ -2361,8 +2365,8 @@ function Economia({toast, data={}}){
           : pend.map(r=><div key={r.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.12)'}}>
               <span className={`bdg ${r.kind==='vip'?'bp':'by'}`} style={{fontSize:9}}>{r.kind==='vip'?'VIP':'DESTACAR'}</span>
               <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:600,color:'var(--tx)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.auctionTitle||'Subasta'}</div><div style={{fontSize:10,color:'var(--tx3)'}}>{r.sellerName} · cobra {fmt(r.amount||0)}</div></div>
-              <button className="btn bts sm" onClick={()=>{ data.onPromoAction&&data.onPromoAction(r.id,'rejected'); toast('Solicitud rechazada'); }}>Rechazar</button>
-              <button className="btn btp sm" onClick={()=>{ data.onPromoAction&&data.onPromoAction(r.id,'approved'); toast('Aprobada · cobro registrado'); }}>Aprobar</button>
+              {!ro && <button className="btn bts sm" onClick={()=>{ data.onPromoAction&&data.onPromoAction(r.id,'rejected'); toast('Solicitud rechazada'); }}>Rechazar</button>}
+              {!ro && <button className="btn btp sm" onClick={()=>{ data.onPromoAction&&data.onPromoAction(r.id,'approved'); toast('Aprobada · cobro registrado'); }}>Aprobar</button>}
             </div>)}
       </div>
     ); })()}
@@ -2415,10 +2419,12 @@ function Economia({toast, data={}}){
 
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginTop:16,flexWrap:'wrap'}}>
         <span style={{fontSize:11,color:'var(--tx3)'}}>Estado del cobro: <b style={{color:t.commissionActive?'var(--gn)':'var(--rd)'}}>{t.commissionActive?'activo (cobrando)':'desactivado'}</b></span>
-        <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+        {ro
+          ? <span style={{fontSize:11,fontWeight:800,color:'var(--tx3)'}}>👁 Solo lectura</span>
+          : <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
           <button className="btn btd" onClick={()=>saveTarifas({commissionActive:!t.commissionActive})} style={{fontWeight:800,padding:'9px 18px',border:`1px solid ${t.commissionActive?'var(--rd)':'var(--gn)'}`,color:t.commissionActive?'var(--rd)':'var(--gn)'}}>{t.commissionActive?'○ Desactivar tarifas':'● Activar tarifas'}</button>
           <button className="btn btp" onClick={()=>saveTarifas()} style={{fontWeight:800,padding:'9px 22px'}}>Guardar tarifas</button>
-        </div>
+        </div>}
       </div>
     </div>
 
@@ -2435,9 +2441,9 @@ function Economia({toast, data={}}){
         <span style={{fontSize:12,fontWeight:700,color:'var(--tx)'}}>1 USD ≈ {usdEur.toFixed(2)} EUR</span>
         <span style={{fontSize:12,fontWeight:700,color:'var(--tx)'}}>1 EUR ≈ {(usdEur>0?1/usdEur:0).toFixed(2)} USD</span>
       </div>
-      <div style={{display:'flex',justifyContent:'flex-end',marginTop:16}}>
+      {!ro && <div style={{display:'flex',justifyContent:'flex-end',marginTop:16}}>
         <button className="btn btp" onClick={saveFx} style={{fontWeight:800,padding:'9px 22px'}}>Guardar cambio</button>
-      </div>
+      </div>}
     </div>
 
     {/* ── PLANES ── */}
@@ -2463,9 +2469,9 @@ function Economia({toast, data={}}){
         <div style={{fontSize:10,color:'var(--tx3)',marginBottom:4,fontWeight:600}}>QUÉ INCLUYE (una línea por beneficio)</div>
         <textarea value={(p.features||[]).join('\n')} onChange={e=>setPlan(i,'features',e.target.value.split('\n'))} rows={3} style={{width:'100%',background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'8px 10px',color:'var(--tx)',fontSize:12,outline:'none',resize:'vertical',fontFamily:'inherit',lineHeight:1.5}}/>
       </div>)}
-      <div style={{display:'flex',justifyContent:'flex-end',marginTop:4}}>
+      {!ro && <div style={{display:'flex',justifyContent:'flex-end',marginTop:4}}>
         <button className="btn btp" onClick={savePlans} style={{fontWeight:800,padding:'9px 22px'}}>Guardar planes</button>
-      </div>
+      </div>}
     </div>
 
     <div className="g2 mb16">
@@ -2494,10 +2500,10 @@ function Economia({toast, data={}}){
                 </div>
               </div>
               <span style={{fontSize:12.5,fontWeight:800,color:'var(--yw)',fontFamily:'var(--mo)',flexShrink:0}}>{fmt(d.total)}</span>
-              <div style={{display:'flex',gap:4,flexShrink:0}}>
+              {!ro && <div style={{display:'flex',gap:4,flexShrink:0}}>
                 <button className="btn btg sm" onClick={()=>data.onCollectDebt&&data.onCollectDebt(d.uid, name, collectMsg(d))}>💬 Cobrar</button>
                 <button className="btn bts sm" onClick={()=>setDebtConfirm({ uid:d.uid, name, total:d.total })}>✔ Pagado</button>
-              </div>
+              </div>}
             </div>;
           })}
       </div>
@@ -2525,7 +2531,7 @@ function Economia({toast, data={}}){
                   {' '}· {p.created_at ? new Date(p.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}) : ''}
                 </div>
               </div>
-              <button className="btn btd sm" disabled={busyP===p.id} onClick={()=>unpromote(p)} style={{flexShrink:0}}>Quitar destacado</button>
+              {!ro && <button className="btn btd sm" disabled={busyP===p.id} onClick={()=>unpromote(p)} style={{flexShrink:0}}>Quitar destacado</button>}
             </div>;
           })}
       {promoCharges.length > 0 && <>
@@ -2629,35 +2635,188 @@ function IntlRoute({country, toast, data={}}){
   </div>;
 }
 
-function TeamScreen({toast, data={}}){
-  // Equipo REAL: lista los administradores reales (profiles con role='admin').
-  // La delegación de permisos por sección llegará cuando haya equipo de verdad.
-  const [admins, setAdmins] = useState(null);
-  useEffect(() => { adminListAdmins().then(setAdmins).catch(() => setAdmins([])); }, []);
+// ── EQUIPO con PERMISOS A LA CARTA ─────────────────────────────────────────────
+// El dueño elige, sección por sección, qué puede hacer cada miembro:
+//   🚫 Sin acceso (none) · 👁️ Ver (view) · ✏️ Administrar (manage).
+const LEVELS=[
+  { v:'none',   icon:'🚫', label:'Sin acceso' },
+  { v:'view',   icon:'👁️', label:'Ver' },
+  { v:'manage', icon:'✏️', label:'Administrar' },
+];
+const LVL_TXT={ view:'ver', manage:'administrar' };
+const permSummary=(p)=>{
+  if(!p||typeof p!=='object') return 'Sin permisos';
+  const parts=PERM_CATALOG.filter(s=>p[s.key]&&p[s.key]!=='none').map(s=>`${s.label}: ${LVL_TXT[p[s.key]]||p[s.key]}`);
+  return parts.length?parts.join(' · '):'Sin permisos';
+};
+
+function PermGrid({ value, onChange }){
+  return <div style={{display:'flex',flexDirection:'column',gap:8}}>
+    {PERM_CATALOG.map(s=>{
+      const cur=value[s.key]||'none';
+      return <div key={s.key} style={{background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:12,padding:'10px 12px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+          <span style={{fontSize:15,width:20,textAlign:'center'}}>{s.icon}</span>
+          <span style={{fontSize:12.5,fontWeight:700,color:'var(--tx)'}}>{s.label}</span>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6}}>
+          {LEVELS.map(l=>{
+            const on=cur===l.v;
+            return <button key={l.v} onClick={()=>onChange(s.key,l.v)}
+              style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2,padding:'7px 4px',borderRadius:9,cursor:'pointer',
+                border:on?'1px solid var(--ac)':'1px solid var(--bd2)',
+                background:on?'var(--ag)':'transparent',
+                color:on?'var(--tx)':'var(--tx2)',fontWeight:on?700:600,fontSize:10.5,transition:'all .14s'}}>
+              <span style={{fontSize:15}}>{l.icon}</span>{l.label}
+            </button>;
+          })}
+        </div>
+      </div>;
+    })}
+  </div>;
+}
+
+function TeamScreen({ toast, meId }){
+  const [view, setView] = useState('list');       // list | search | perms
+  const [staff, setStaff] = useState(null);
+  const [target, setTarget] = useState(null);      // { user_id, profile } al editar/añadir
+  const [perm, setPerm] = useState({});            // borrador de permisos
+  const [busy, setBusy] = useState(false);
+  const [remFor, setRemFor] = useState(null);      // miembro a quitar (confirmación)
+  // Buscador de usuarios
+  const [q, setQ] = useState(""); const [dq, setDq] = useState("");
+  const [results, setResults] = useState([]); const [searching, setSearching] = useState(false);
+
+  const load = () => { setStaff(null); adminListStaff().then(setStaff).catch(() => setStaff([])); };
+  useEffect(() => { load(); }, []);
+  useEffect(() => { const t = setTimeout(() => setDq(q), 350); return () => clearTimeout(t); }, [q]);
+  useEffect(() => {
+    if (view !== 'search') return;
+    let alive = true; setSearching(true);
+    adminListUsers({ query: dq, from: 0, to: 19 })
+      .then(d => { if (alive) { setResults(d); setSearching(false); } })
+      .catch(() => { if (alive) { setResults([]); setSearching(false); } });
+    return () => { alive = false; };
+  }, [dq, view]);
+
+  const nmeOf = u => (u && (u.full_name || u.email)) || 'Usuario';
+  const staffIds = new Set((staff || []).map(m => m.user_id));
+
+  const openAdd = () => { setQ(""); setDq(""); setResults([]); setView('search'); };
+  const pickUser = (u) => { setTarget({ user_id: u.id, profile: u }); setPerm({}); setView('perms'); };
+  const openEdit = (m) => { setTarget({ user_id: m.user_id, profile: m.profile }); setPerm({ ...(m.permissions || {}) }); setView('perms'); };
+  const setLvl = (key, v) => setPerm(p => ({ ...p, [key]: v }));
+
+  const save = async () => {
+    setBusy(true);
+    const clean = {}; PERM_CATALOG.forEach(s => { if (perm[s.key] && perm[s.key] !== 'none') clean[s.key] = perm[s.key]; });
+    try {
+      await adminGrantStaff(target.user_id, clean);
+      toast(`✓ Permisos guardados · ${nmeOf(target.profile)}`);
+      setView('list'); setTarget(null); load();
+    } catch (e) { toast("⚠️ " + (e?.message || "No se pudo guardar")); }
+    setBusy(false);
+  };
+  const confirmRemove = async () => {
+    const m = remFor; setRemFor(null); setBusy(true);
+    try { await adminRevokeStaff(m.user_id); toast(`Quitado del equipo · ${nmeOf(m.profile)}`); load(); }
+    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+    setBusy(false);
+  };
+
+  // ── Pantalla de PERMISOS (añadir o editar) ──
+  if (view === 'perms' && target) {
+    const p = target.profile;
+    return <div className="mc">
+      <div className="card cp mb16">
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <Avatar url={avatarUrlOf(p?.avatar_url)} name={nmeOf(p)} size={46} />
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:14,fontWeight:800,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{nmeOf(p)}</div>
+            <div style={{fontSize:11.5,color:'var(--tx3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{p?.email||'—'}</div>
+          </div>
+        </div>
+      </div>
+      <div className="card cp mb16">
+        <div className="ch"><span className="ct">Permisos por sección</span></div>
+        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 12px'}}>Elige, sección por sección, qué puede hacer este miembro. Por defecto, todo en <b>Sin acceso</b>.</div>
+        <PermGrid value={perm} onChange={setLvl} />
+      </div>
+      <div style={{display:'flex',gap:8,marginBottom:20}}>
+        <button className="btn btg" style={{flex:1}} disabled={busy} onClick={() => { setView(staffIds.has(target.user_id) ? 'list' : 'search'); setTarget(null); }}>Cancelar</button>
+        <button className="btn btp" style={{flex:2}} disabled={busy} onClick={save}>{busy ? 'Guardando…' : 'Guardar permisos'}</button>
+      </div>
+    </div>;
+  }
+
+  // ── Buscador de usuarios para añadir ──
+  if (view === 'search') {
+    return <div className="mc">
+      <div className="card cp">
+        <div className="ch"><span className="ct">Añadir al equipo</span></div>
+        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Busca un usuario por nombre o email y asígnale permisos.</div>
+        <input value={q} onChange={e => setQ(e.target.value)} autoFocus placeholder="Buscar por nombre o email…"
+          style={{ width:'100%', boxSizing:'border-box', background:'var(--bg3)', border:'1px solid var(--bd2)', borderRadius:10, padding:'10px 12px', color:'var(--tx)', fontSize:13, outline:'none', marginBottom:10 }} />
+        {searching
+          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>Buscando…</div>
+          : results.length === 0
+            ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>{dq ? 'Nadie coincide con la búsqueda.' : 'Escribe para buscar usuarios.'}</div>
+            : results.map(u => {
+                const already = staffIds.has(u.id);
+                return <div key={u.id} className="reprow" onClick={() => !already && pickUser(u)}
+                  style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 8px', margin:'0 -8px', borderRadius:9, cursor: already?'default':'pointer', borderBottom:'1px solid rgba(128,128,128,.1)', opacity: already?.55:1 }}>
+                  <Avatar url={avatarUrlOf(u.avatar_url)} name={nmeOf(u)} size={38} />
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12.5,fontWeight:700,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{nmeOf(u)}</div>
+                    <div style={{fontSize:11,color:'var(--tx3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{u.email||'—'}</div>
+                  </div>
+                  {already ? <span className="bdg bx">En el equipo</span> : <button className="btn btp sm" onClick={e => { e.stopPropagation(); pickUser(u); }}>Asignar</button>}
+                </div>;
+              })}
+      </div>
+      <div style={{marginTop:14,marginBottom:20}}>
+        <button className="btn btg" style={{width:'100%'}} onClick={() => setView('list')}>‹ Volver al equipo</button>
+      </div>
+    </div>;
+  }
+
+  // ── Lista del equipo ──
   return <div className="mc">
     <div className="card cp mb16">
-      <div className="ch"><span className="ct">Administradores de la plataforma</span><span className="bdg bx">{admins ? admins.length : '…'}</span></div>
-      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 12px'}}>Cuentas con rol de administrador real en el backend.</div>
-      {admins === null
+      <div className="ch"><span className="ct">Equipo</span><span className="bdg bx">{staff ? staff.length : '…'}</span></div>
+      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 12px'}}>Miembros con acceso al panel y sus permisos por sección.</div>
+      {staff === null
         ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Cargando…</div>
-        : admins.length === 0
-          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>No se pudieron listar los administradores.</div>
-          : admins.map(a => (
-            <div key={a.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
-              <Avatar url={avatarUrlOf(a.avatar_url)} name={a.full_name||a.email||'Admin'} size={38} />
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:12.5,fontWeight:700,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{a.full_name||'Admin'}</div>
-                <div style={{fontSize:11,color:'var(--tx3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{a.email||'—'}</div>
-              </div>
-              <span className="bdg by">Admin</span>
-            </div>
-          ))}
+        : staff.length === 0
+          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Aún no has añadido a nadie al equipo.</div>
+          : staff.map(m => {
+              const p = m.profile; const isMe = m.user_id === meId;
+              return <div key={m.user_id} style={{display:'flex',alignItems:'center',gap:10,padding:'11px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+                <Avatar url={avatarUrlOf(p?.avatar_url)} name={nmeOf(p)} size={40} />
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12.5,fontWeight:700,color:'var(--tx)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{nmeOf(p)}{isMe && <span style={{color:'var(--tx3)',fontWeight:500}}> · tú</span>}</div>
+                  <div style={{fontSize:11,color:'var(--tx3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{p?.email||'—'}</div>
+                  <div style={{fontSize:10.5,color:'var(--tx2)',marginTop:3,lineHeight:1.4,whiteSpace:'normal'}}>{permSummary(m.permissions)}</div>
+                </div>
+                {!isMe && <div style={{display:'flex',flexDirection:'column',gap:4,flexShrink:0}}>
+                  <button className="btn btg sm" disabled={busy} onClick={() => openEdit(m)}>Editar</button>
+                  <button className="btn btd sm" disabled={busy} onClick={() => setRemFor(m)}>Quitar</button>
+                </div>}
+              </div>;
+            })}
     </div>
-    <div className="card cp" style={{textAlign:'center',padding:'26px 14px'}}>
-      <div style={{fontSize:26,marginBottom:8,opacity:.7}}>◔</div>
-      <div style={{fontSize:13,fontWeight:800,color:'var(--tx)'}}>🔜 Permisos por sección · Próximamente</div>
-      <p style={{fontSize:11.5,color:'var(--tx3)',marginTop:6,lineHeight:1.5}}>Podrás delegar secciones del panel a trabajadores (moderación, delivery, soporte) con llaves reales en el backend.</p>
-    </div>
+    <button className="btn btp" style={{width:'100%',justifyContent:'center',padding:'11px',marginBottom:20}} onClick={openAdd}>➕ Añadir al equipo</button>
+
+    {remFor && <div className="mo" onClick={() => setRemFor(null)}>
+      <div className="mb" onClick={e => e.stopPropagation()} style={{maxWidth:340}}>
+        <div className="mt">Quitar del equipo</div>
+        <div className="ms">{nmeOf(remFor.profile)} perderá el acceso al panel de administración. Podrás volver a añadirlo cuando quieras.</div>
+        <div style={{display:'flex',gap:8,marginTop:14}}>
+          <button className="btn btg" style={{flex:1}} onClick={() => setRemFor(null)}>Cancelar</button>
+          <button className="btn btd" style={{flex:1}} onClick={confirmRemove}>Quitar</button>
+        </div>
+      </div>
+    </div>}
   </div>;
 }
 
@@ -2755,43 +2914,24 @@ function Sistema({toast, data={}}){
 /* ── NAV + APP ──────────────────────────────────────────────────────────────── */
 // CIERRE DEL PANEL: solo secciones REALES arriba; lo que aún no existe va en
 // "Próximamente" con pantalla honesta (sin fingir tablas ni datos).
-const NAV=[
-  {sec:'Principal',items:[{id:'overview',icon:'◈',label:'Resumen General'}]},
-  {sec:'Plataforma',items:[
-    {id:'ops',icon:'📦',label:'Órdenes'},
-    {id:'modq',icon:'🛡',label:'Moderación'},
-    {id:'delivery',icon:'🛵',label:'Delivery local'},
-    {id:'users',icon:'◎',label:'Usuarios'},
-    {id:'editor',icon:'◐',label:'Editor Visual'},
-  ]},
-  {sec:'Control',items:[
-    {id:'eco',icon:'◇',label:'Economía'},
-    {id:'sys',icon:'◉',label:'Sistema'},
-  ]},
-  {sec:'Próximamente',items:[
-    {id:'support',icon:'💬',label:'Soporte 🔜'},
-    {id:'intl_es',icon:'✈',label:'España → Cuba 🔜'},
-    {id:'intl_us',icon:'✈',label:'EE.UU. → Cuba 🔜'},
-  ]},
+// Secciones del panel con su LLAVE de permiso. El admin (perms="ALL") ve todas; un
+// miembro del equipo ve SOLO las que tenga en "view" o "manage".
+const SECTIONS=[
+  { key:'dashboard',     page:'overview', group:'Principal',  icon:'◈', label:'Resumen General' },
+  { key:'orders',        page:'ops',      group:'Plataforma', icon:'📦', label:'Órdenes' },
+  { key:'moderation',    page:'modq',     group:'Plataforma', icon:'🛡', label:'Moderación' },
+  { key:'couriers',      page:'delivery', group:'Plataforma', icon:'🛵', label:'Delivery local' },
+  { key:'users',         page:'users',    group:'Plataforma', icon:'◎', label:'Usuarios' },
+  { key:'verifications', page:'verif',    group:'Plataforma', icon:'🪪', label:'Verificaciones' },
+  { key:'plans',         page:'plans',    group:'Plataforma', icon:'⭐', label:'Planes' },
+  { key:'editor',        page:'editor',   group:'Plataforma', icon:'◐', label:'Editor Visual' },
+  { key:'economy',       page:'eco',      group:'Control',    icon:'◇', label:'Economía' },
+  { key:'system',        page:'sys',      group:'Control',    icon:'◉', label:'Sistema' },
 ];
-const TITLES={overview:'Resumen General',ops:'Órdenes',modq:'Moderación',delivery:'Delivery local',support:'Soporte',users:'Usuarios',cats:'Pantallas de la plataforma',editor:'Editor Visual de Plataforma',eco:'Economía',sys:'Sistema',team:'Equipo y permisos',intl_es:'Envíos · España → Cuba',intl_us:'Envíos · EE.UU. → Cuba'};
-
-// Catálogo de secciones que el dueño puede delegar a un trabajador.
-// Cada una es una "llave": quien la tenga, entra y gestiona todo dentro de ella.
-const PERM_CATALOG=[
-  {id:'overview',label:'Resumen General',desc:'Panorama y métricas',icon:'◈'},
-  {id:'ops',     label:'Operaciones',    desc:'Órdenes, disputas y moderación',icon:'⚙'},
-  {id:'modq',    label:'Moderación',     desc:'Aprobar o retirar publicaciones',icon:'🛡'},
-  {id:'delivery',label:'Delivery local', desc:'Entregas locales en curso',icon:'🛵'},
-  {id:'support', label:'Soporte',        desc:'Centro de ayuda a usuarios',icon:'💬'},
-  {id:'users',   label:'Usuarios & Negocios',desc:'Usuarios, verificaciones, planes',icon:'◎'},
-  {id:'editor',  label:'Editor Visual',  desc:'Diseño de las pantallas',icon:'◐'},
-  {id:'eco',     label:'Economía',       desc:'Comisiones, tarifas, ingresos',icon:'◇'},
-  {id:'intl_es', label:'Envíos España→Cuba', desc:'Solicitudes, tarifa y avisos de tu ruta',icon:'✈'},
-  {id:'intl_us', label:'Envíos EE.UU.→Cuba', desc:'Solicitudes, tarifa y avisos de tu ruta',icon:'✈'},
-  {id:'sys',     label:'Sistema',        desc:'Estado y registro de actividad',icon:'◉'},
-];
-// (Próximo paso: "Envíos internacionales" se dividirá por ruta — España→Cuba, EE.UU.→Cuba — como llaves separadas.)
+const PAGE_TO_PERM=Object.fromEntries(SECTIONS.map(s=>[s.page,s.key]));
+const TITLES={overview:'Resumen General',ops:'Órdenes',modq:'Moderación',delivery:'Delivery local',users:'Usuarios',verif:'Verificaciones',plans:'Planes',editor:'Editor Visual de Plataforma',eco:'Economía',sys:'Sistema',team:'Equipo y permisos'};
+// Catalogo para la pantalla de permisos del equipo (las 10 llaves).
+const PERM_CATALOG=SECTIONS.map(s=>({key:s.key,label:s.label,icon:s.icon}));
 
 function useToast(){
   const[ts,setTs]=useState([]);
@@ -2801,29 +2941,33 @@ function useToast(){
 
 function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
   const[col,setCol]=useState(false);
-  const[page,setPage]=useState('overview');
-  const[subs,setSubs]=useState({});
+  const[page,setPage]=useState(null);
   const[narrow,setNarrow]=useState(false);
   const[mnav,setMnav]=useState(false);
   const rootRef=useRef(null);
   useEffect(()=>{
     const el=rootRef.current; if(!el||typeof ResizeObserver==='undefined') return;
-    const ro=new ResizeObserver(es=>{ const w=es[0].contentRect.width; setNarrow(w<760); });
-    ro.observe(el); return ()=>ro.disconnect();
+    const r=new ResizeObserver(es=>{ const w=es[0].contentRect.width; setNarrow(w<760); });
+    r.observe(el); return ()=>r.disconnect();
   },[]);
   const{ts,add}=useToast();
-  // ── Equipo y permisos ──
-  const team = data.teamMembers || [];
-  const [viewAs, setViewAs] = useState(null); // null = dueño (ve todo); o un miembro del equipo
-  const effPerms = viewAs ? (viewAs.perms || []) : null; // null = todas las secciones
-  // NAV visible según permisos; "Equipo y permisos" solo para el dueño
-  const visibleNav = NAV.map(g => ({ ...g, items: g.items.filter(i => effPerms === null || effPerms.includes(i.id)) })).filter(g => g.items.length)
-    .concat(effPerms === null ? [{ sec: 'Gestión', items: [{ id: 'team', icon: '◔', label: 'Equipo y permisos' }] }] : []);
-  // Si estoy "viendo como" alguien y la página actual no le pertenece, salto a la primera permitida
-  useEffect(() => { if (effPerms !== null && !effPerms.includes(page)) setPage(effPerms[0] || 'overview'); }, [viewAs]);
-  const cur=NAV.flatMap(g=>g.items).find(i=>i.id===page);
-  const gSub=(id,list)=>subs[id]||(list?.[0]??null);
-  const nav=(id,sub)=>{setPage(id);if(sub)setSubs(p=>({...p,[id]:sub}));setMnav(false);};
+  // ── Permisos a la carta: "ALL" (admin) o { seccion: none|view|manage } ──
+  const perms=data.perms;
+  const isAdmin=perms==='ALL';
+  const levelOf=(key)=> isAdmin?'manage':((perms&&typeof perms==='object'&&perms[key])||'none');
+  const allowed=(key)=>{ const l=levelOf(key); return l==='view'||l==='manage'; };
+  const visSecs=SECTIONS.filter(s=>allowed(s.key));
+  const groups=[]; visSecs.forEach(s=>{ let g=groups.find(x=>x.sec===s.group); if(!g){g={sec:s.group,items:[]};groups.push(g);} g.items.push(s); });
+  const visibleNav=groups.concat(isAdmin?[{sec:'Gestión',items:[{page:'team',icon:'◔',label:'Equipo y permisos'}]}]:[]);
+  // Primera página permitida al abrir (o si cambian los permisos y la actual ya no vale).
+  useEffect(()=>{
+    const okNow = page!=null && (page==='team'?isAdmin:(PAGE_TO_PERM[page]?allowed(PAGE_TO_PERM[page]):true));
+    if(!okNow){ setPage(isAdmin?'overview':((visSecs[0]&&visSecs[0].page)||null)); }
+  },[perms]);
+  const nav=(pg)=>{ setPage(pg); setMnav(false); };
+  const roFor=(pg)=>{ const k=PAGE_TO_PERM[pg]; return k?levelOf(k)==='view':false; }; // solo lectura
+  const curRO=roFor(page);
+  const pageAllowed = page==null ? true : (page==='team' ? isAdmin : (PAGE_TO_PERM[page] ? allowed(PAGE_TO_PERM[page]) : true));
   const dk = theme.isDark !== false;
   // Variables del panel mapeadas al tema real de la plataforma (claro/oscuro)
   const omniVars = dk
@@ -2844,8 +2988,8 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
         <nav className="sbnav">
           {visibleNav.map(g=><div key={g.sec}>
             <div className="sbg">{g.sec}</div>
-            {g.items.map(item=><div key={item.id}>
-              <div className={`sbi ${page===item.id?'on':''}`} onClick={()=>nav(item.id,item.subs?.[0])}>
+            {g.items.map(item=><div key={item.page}>
+              <div className={`sbi ${page===item.page?'on':''}`} onClick={()=>nav(item.page)}>
                 <span className="sbic">{item.icon}</span>
                 <span className="sbil">{item.label}</span>
               </div>
@@ -2856,30 +3000,31 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
       <div className="main">
         <header className="hdr">
           <button className="htog" onClick={()=>narrow?setMnav(m=>!m):setCol(c=>!c)}>{narrow?'☰':(col?'▶':'◀')}</button>
-          <div className="htit">{TITLES[page]}</div>
-          {/* (El buscador global decorativo se quitó: cada sección tiene su buscador REAL) */}
+          <div className="htit">{TITLES[page]||'Panel de administración'}</div>
           <div className="hacts">
-            {effPerms === null
-              ? (team.length > 0 && <select value="" onChange={e => { const m = team.find(x => x.id === e.target.value); if (m) setViewAs(m); }} style={{ background:'var(--bg2)', color:'var(--tx2)', border:'1px solid var(--bd)', borderRadius:8, fontSize:11, padding:'5px 8px', cursor:'pointer' }}>
-                  <option value="">Ver como…</option>
-                  {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </select>)
-              : <button onClick={() => setViewAs(null)} style={{ background:'var(--ag)', color:'var(--ac)', border:'1px solid var(--ac)', borderRadius:8, fontSize:11, fontWeight:700, padding:'5px 10px', cursor:'pointer' }}>👁 Viendo como {viewAs.name} · salir</button>}
+            {curRO && <span style={{fontSize:11,fontWeight:800,color:'var(--tx2)',background:'var(--bg2)',border:'1px solid var(--bd2)',borderRadius:8,padding:'4px 10px'}}>👁 Solo lectura</span>}
           </div>
         </header>
         <div className="cnt">
-          {page==='overview'&&<Overview toast={add} data={data} go={nav}/>}
-          {page==='ops'&&<AdminOrders toast={add} onViewProfile={data.onViewProfile}/>}
-          {page==='modq'&&<ModeracionPublicaciones toast={add} onViewProfile={data.onViewProfile}/>}
-          {page==='delivery'&&<Operaciones solo="Delivery" toast={add} data={data}/>}
-          {page==='support'&&<ComingSoon icon="💬" title="Soporte" note="El centro de ayuda tendrá su módulo cuando haya volumen de usuarios. Las quejas y problemas llegarán aquí."/>}
-          {page==='users'&&<Usuarios toast={add} data={data}/>}
-          {page==='editor'&&<EditorVisual toast={add} cfg={data.cfg} onCfg={data.onCfg}/>}
-          {page==='eco'&&<Economia toast={add} data={data}/>}
-          {page==='intl_es'&&<ComingSoon icon="✈" title="Envíos · España → Cuba" note="Será parte del módulo de envíos internacionales / dropshipping. Su tarifa por libra ya se edita en Economía."/>}
-          {page==='intl_us'&&<ComingSoon icon="✈" title="Envíos · EE.UU. → Cuba" note="Será parte del módulo de envíos internacionales / dropshipping. Su tarifa por libra ya se edita en Economía."/>}
-          {page==='sys'&&<Sistema toast={add} data={data}/>}
-          {page==='team'&&<TeamScreen toast={add} data={data}/>}
+          {!pageAllowed
+            ? <div style={{padding:'44px 20px',textAlign:'center'}}>
+                <div style={{fontSize:34,marginBottom:10,opacity:.3}}>🔒</div>
+                <div className="stit">Sin acceso</div>
+                <div className="ssub">No tienes acceso a esta sección.</div>
+              </div>
+            : <>
+              {page==='overview'&&<Overview toast={add} data={data} go={nav}/>}
+              {page==='ops'&&<AdminOrders toast={add} onViewProfile={data.onViewProfile}/>}
+              {page==='modq'&&<ModeracionPublicaciones toast={add} onViewProfile={data.onViewProfile} ro={curRO}/>}
+              {page==='delivery'&&<Operaciones solo="Delivery" toast={add} data={data} ro={curRO}/>}
+              {page==='users'&&<RealUsersDirectory toast={add} meId={data.meId} ro={curRO}/>}
+              {page==='verif'&&<VerificationQueue toast={add} onViewProfile={data.onViewProfile} ro={curRO}/>}
+              {page==='plans'&&<PlanQueue toast={add} onViewProfile={data.onViewProfile} ro={curRO}/>}
+              {page==='editor'&&<EditorVisual toast={add} cfg={data.cfg} onCfg={curRO ? (()=>add('👁 Solo lectura — no puedes publicar')) : data.onPublishBlocks}/>}
+              {page==='eco'&&<Economia toast={add} data={data} ro={curRO}/>}
+              {page==='sys'&&<Sistema toast={add} data={data}/>}
+              {page==='team'&&<TeamScreen toast={add} meId={data.meId} onViewProfile={data.onViewProfile}/>}
+            </>}
         </div>
       </div>
     </div>

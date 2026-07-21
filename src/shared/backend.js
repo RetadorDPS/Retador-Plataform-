@@ -293,6 +293,43 @@ export const setPlatformConfig = async (cfg) => {
   if (error) { console.error("setPlatformConfig:", error.message); throw error; }
   return data;
 };
+// set_platform_blocks(p_blocks) — guarda SOLO los bloques/masters del Editor Visual
+// (no toca tarifas). Lo puede usar quien tenga permiso 'editor' (manage). Rechaza a los demás.
+export const setPlatformBlocks = async (blocks) => {
+  const { data, error } = await supabase.rpc("set_platform_blocks", { p_blocks: blocks });
+  if (error) { console.error("setPlatformBlocks:", error.message); throw error; }
+  return data;
+};
+// ── Equipo / permisos a la carta ────────────────────────────────────────────
+// my_permissions() → "ALL" (admin) o un objeto { seccion: "none"|"view"|"manage" }.
+export const myPermissions = async () => {
+  const { data, error } = await supabase.rpc("my_permissions");
+  if (error) { console.error("myPermissions:", error.message); return {}; }
+  return data ?? {};
+};
+// Lista del equipo: filas de staff_permissions + su perfil (avatar, nombre, email).
+export const adminListStaff = async () => {
+  const { data, error } = await supabase.from("staff_permissions").select("user_id, permissions");
+  if (error) { console.error("adminListStaff:", error.message); return []; }
+  const rows = data || [];
+  if (!rows.length) return [];
+  const ids = rows.map(r => r.user_id);
+  const { data: profs } = await supabase.from("profiles").select("id, full_name, email, avatar_url").in("id", ids);
+  const byId = {}; (profs || []).forEach(p => { byId[p.id] = p; });
+  return rows.map(r => ({ user_id: r.user_id, permissions: r.permissions || {}, profile: byId[r.user_id] || null }));
+};
+// admin_grant_staff(p_user_id, p_permissions jsonb) — crea/actualiza permisos. Solo admin.
+export const adminGrantStaff = async (userId, permissions) => {
+  const { data, error } = await supabase.rpc("admin_grant_staff", { p_user_id: userId, p_permissions: permissions });
+  if (error) { console.error("adminGrantStaff:", error.message); throw error; }
+  return data;
+};
+// admin_revoke_staff(p_user_id) — quita del equipo. Solo admin.
+export const adminRevokeStaff = async (userId) => {
+  const { data, error } = await supabase.rpc("admin_revoke_staff", { p_user_id: userId });
+  if (error) { console.error("adminRevokeStaff:", error.message); throw error; }
+  return data;
+};
 
 // Estadísticas públicas de la plataforma (login/pantallas públicas): números REALES.
 // get_platform_stats() → { products, sellers, users, delivered }. Sin login.

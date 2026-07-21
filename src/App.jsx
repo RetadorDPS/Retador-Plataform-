@@ -791,7 +791,11 @@ function AppShell({ sessionUser }) {
 
   useEffect(() => {
     if (!user?.id) return;
-    let chan = null, retry = 0, retryTimer = null, cancelled = false;
+    let chan = null, retry = 0, retryTimer = null, cancelled = false, notifTmr = null;
+    // Campanita COMPARTIDA: cuando una cola se resuelve (verificación/plan/mensajero
+    // aprobado, deuda cobrada), recargamos la lista de notificaciones para que los
+    // avisos *_app ya atendidos por otro del staff dejen de figurar como pendientes.
+    const bumpNotifs = () => { clearTimeout(notifTmr); notifTmr = setTimeout(() => reloadBkNotifs(), 800); };
     const connect = () => {
       if (cancelled) return;
       // Nombre ÚNICO por intento: supabase.channel() reutiliza el canal si el
@@ -825,7 +829,13 @@ function AppShell({ sessionUser }) {
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "courier_applications" }, () => {
           if (user.role === "admin") reloadCourierApps();
+          bumpNotifs();
         })
+        // Colas de la plataforma: cuando cambian (alguien resuelve), refresca la
+        // campanita para TODO el staff → nadie persigue un aviso ya atendido.
+        .on("postgres_changes", { event: "*", schema: "public", table: "verifications" }, bumpNotifs)
+        .on("postgres_changes", { event: "*", schema: "public", table: "plan_requests" }, bumpNotifs)
+        .on("postgres_changes", { event: "*", schema: "public", table: "seller_commission_ledger" }, bumpNotifs)
         // 3) CONFIG GLOBAL EN VIVO: si el admin cambia una tasa fx, la comisión o apaga
         //    un servicio, TODOS los teléfonos lo aplican al instante, sin recargar.
         .on("postgres_changes", { event: "UPDATE", schema: "public", table: "platform_config" }, (payload) => {
@@ -848,8 +858,8 @@ function AppShell({ sessionUser }) {
         });
     };
     connect();
-    return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); try { if (chan) Promise.resolve(supabase.removeChannel(chan)).catch(() => {}); } catch (e) {} };
-  }, [user?.id, user?.role, reloadChatUnread, loadOrders, reloadCourierApps, refreshAllLive]);
+    return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); if (notifTmr) clearTimeout(notifTmr); try { if (chan) Promise.resolve(supabase.removeChannel(chan)).catch(() => {}); } catch (e) {} };
+  }, [user?.id, user?.role, reloadChatUnread, loadOrders, reloadCourierApps, refreshAllLive, reloadBkNotifs]);
 
   // Red de seguridad para redes intermitentes: al VOLVER a la app (foco/visible)
   // o al RECUPERAR internet, recarga todo lo vivo — nadie se queda atascado.

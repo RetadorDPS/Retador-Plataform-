@@ -2910,34 +2910,48 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
     r.observe(el); return ()=>r.disconnect();
   },[]);
   const{ts,add}=useToast();
-  // ── Badges de pendientes por sección (staff_pending_counts, ya filtrado por
-  // permisos en el backend). Se recarga con el realtime y al volver a la app. ──
+  // ── Badges de pendientes COMPARTIDOS y EN VIVO entre todo el equipo ──────────
+  // Los pendientes son de la PLATAFORMA, no de cada teléfono. El número SIEMPRE sale
+  // de la RPC staff_pending_counts (nada cacheado localmente): resuelva quien resuelva,
+  // todos los paneles abiertos actualizan sus badges en segundos gracias al realtime.
   const[pending,setPending]=useState({});
-  const loadPending=useCallback(()=>{ staffPendingCounts().then(c=>setPending(c||{})).catch(()=>setPending({})); },[]);
+  // "Última vez que vi Órdenes" POR USUARIO (clave con su id: no se mezcla entre cuentas
+  // del mismo teléfono). Es INFORMATIVO: cada quien marca lo suyo. Si nunca ha entrado,
+  // se ancla a su PRIMERA apertura del panel (no cuenta el historial entero). Se pasa a
+  // la RPC como p_orders_since → 'orders' cuenta solo los pedidos posteriores.
+  const ordersSeenKey = `retador_orders_since_${data.meId||'anon'}`;
+  const [ordersSince,setOrdersSince] = useState(()=>{
+    try{ let v=localStorage.getItem(ordersSeenKey); if(!v){ v=new Date().toISOString(); localStorage.setItem(ordersSeenKey,v); } return v; }
+    catch{ return new Date().toISOString(); }
+  });
+  const ordersSinceRef=useRef(ordersSince);
+  useEffect(()=>{ ordersSinceRef.current=ordersSince; },[ordersSince]);
+  const loadPending=useCallback(()=>{ staffPendingCounts(ordersSinceRef.current).then(c=>setPending(c||{})).catch(()=>setPending({})); },[]);
   useEffect(()=>{ loadPending(); },[loadPending]);
   useEffect(()=>{
-    let tmr=null; const bump=()=>{ clearTimeout(tmr); tmr=setTimeout(loadPending,1200); };
+    let tmr=null; const bump=()=>{ clearTimeout(tmr); tmr=setTimeout(loadPending,900); };
+    // Ante CUALQUIER cambio en estas tablas de la plataforma → recarga la RPC.
     const ch=supabase.channel(`staff-pend-${Date.now()}`)
       .on("postgres_changes",{event:"*",schema:"public",table:"products"},bump)
       .on("postgres_changes",{event:"*",schema:"public",table:"courier_applications"},bump)
       .on("postgres_changes",{event:"*",schema:"public",table:"verifications"},bump)
       .on("postgres_changes",{event:"*",schema:"public",table:"plan_requests"},bump)
+      .on("postgres_changes",{event:"*",schema:"public",table:"seller_commission_ledger"},bump)
       .on("postgres_changes",{event:"*",schema:"public",table:"orders"},bump)
       .subscribe();
     const onVis=()=>{ if(document.visibilityState==='visible') loadPending(); };
     document.addEventListener('visibilitychange',onVis); window.addEventListener('focus',loadPending);
     return ()=>{ clearTimeout(tmr); document.removeEventListener('visibilitychange',onVis); window.removeEventListener('focus',loadPending); try{Promise.resolve(supabase.removeChannel(ch)).catch(()=>{});}catch(e){} };
   },[loadPending]);
-  // ── Avisos INTELIGENTES: dos tipos, trato distinto ──────────────────────────
-  // ACCIÓN REQUERIDA (moderación, verificaciones, planes, mensajeros, economía):
-  //   el badge = pendientes REALES; NO baja por mirar, solo al RESOLVER.
-  // INFORMATIVO (órdenes): se marca visto AL ENTRAR (last-seen por sección/usuario)
-  //   y solo cuenta lo posterior.
-  const INFO_SECS = { orders:1 };
-  const seenKey = `retador_secseen_${data.meId||'anon'}`;
-  const [seen,setSeen] = useState(()=>{ try{ return JSON.parse(localStorage.getItem(seenKey)||'{}'); }catch{ return {}; } });
-  const badgeFor = (key)=>{ const c=Number(pending[key])||0; if(INFO_SECS[key]) return Math.max(0,c-(Number(seen[key])||0)); return c; };
-  const markSectionSeen = (key)=>{ if(!INFO_SECS[key]) return; setSeen(prev=>{ const next={...prev,[key]:Number(pending[key])||0}; try{localStorage.setItem(seenKey,JSON.stringify(next));}catch{} return next; }); };
+  // Badge = número de la RPC (acción = pendientes reales; órdenes = desde tu last-seen).
+  const badgeFor = (key)=> Number(pending[key])||0;
+  // Al ENTRAR a Órdenes: mueve el last-seen a ahora y recarga → su badge desaparece para
+  // ESTE usuario (informativo), sin tocar el de nadie más.
+  const markOrdersSeen = ()=>{
+    const now=new Date().toISOString();
+    try{ localStorage.setItem(ordersSeenKey,now); }catch{}
+    ordersSinceRef.current=now; setOrdersSince(now); loadPending();
+  };
   // ── Permisos a la carta: "ALL" (admin) o { seccion: none|view|manage } ──
   const perms=data.perms;
   const isAdmin=perms==='ALL';
@@ -2953,8 +2967,7 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
   },[perms]);
   const nav=(pg)=>{
     setPage(pg); setMnav(false);
-    const key = PAGE_TO_PERM[pg];
-    if(key) markSectionSeen(key);               // informativos (órdenes): visto al entrar
+    if(pg==='ops') markOrdersSeen();            // informativo: se limpia al entrar (por usuario)
     data.onOpenQueue && data.onOpenQueue(pg);   // marca leídas las notifs de esa cola
   };
   const roFor=(pg)=>{ const k=PAGE_TO_PERM[pg]; return k?levelOf(k)==='view':false; }; // solo lectura

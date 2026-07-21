@@ -653,8 +653,8 @@ export const adminDashboardStats = async () => {
 // staff_pending_counts() → { moderation, couriers, verifications, plans, orders, economy }
 // Ya viene FILTRADO por permisos: cada quien recibe solo los contadores de las
 // secciones que puede ver. Si no hay acceso o falla, devuelve null (sin badges).
-export const staffPendingCounts = async () => {
-  const { data, error } = await supabase.rpc("staff_pending_counts");
+export const staffPendingCounts = async (ordersSince = null) => {
+  const { data, error } = await supabase.rpc("staff_pending_counts", { p_orders_since: ordersSince });
   if (error) { console.error("staffPendingCounts:", error.message); return null; }
   return (Array.isArray(data) ? data[0] : data) || null;
 };

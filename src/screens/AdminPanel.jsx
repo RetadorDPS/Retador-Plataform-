@@ -425,14 +425,22 @@ const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;4
 .omni .ve-blk:hover .ve-handle{display:flex}
 .omni .ve-hdot{width:3px;height:3px;background:rgba(255,255,255,.5);border-radius:50%}
 
+/* Fila superior del bloque: asa (izq) + botones (der). No recorta: envuelve. */
+.omni .ve-toprow{
+  position:absolute;top:0;left:0;right:0;z-index:26;
+  display:flex;align-items:flex-start;gap:6px;padding:6px;flex-wrap:wrap;
+  pointer-events:none;
+}
+.omni .ve-toprow>*{pointer-events:auto}
+.omni .ve-actions{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto;justify-content:flex-end}
 /* Asa de arrastre (táctil + PC): siempre visible en cada banner/carrusel */
 .omni .ve-grip{
-  position:absolute;top:8px;left:8px;z-index:30;
   display:flex;align-items:center;gap:5px;
-  padding:5px 10px;border-radius:8px;
+  padding:6px 11px;border-radius:8px;
   background:var(--ac);color:#fff;
   cursor:grab;user-select:none;-webkit-user-select:none;
   box-shadow:0 2px 8px rgba(0,0,0,.35);
+  touch-action:none;
 }
 .omni .ve-grip:active{cursor:grabbing}
 .omni .ve-blk.dragging{opacity:.45}
@@ -440,28 +448,34 @@ const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;4
 .omni .ve-dropline{height:4px;margin:3px 6px;border-radius:3px;background:var(--gn);box-shadow:0 0 10px var(--gn)}
 
 
+/* Barra de acción: a TODO el ancho y con envoltura (flex-wrap) → nunca recorta
+   "Editar" ni ningún botón, ni siquiera en teléfonos angostos. */
 .omni .ve-blk-bar{
   position:absolute;
-  top:0;right:0;
-  z-index:25;
+  top:0;left:0;right:0;
+  z-index:26;
   display:none;
-  align-items:center;
-  background:var(--ac);
-  border-radius:0 0 0 8px;
-  overflow:hidden;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+  gap:4px;
+  padding:6px;
 }
 .omni .ve-blk:hover .ve-blk-bar,.omni .ve-blk.sel .ve-blk-bar{display:flex}
 .omni .ve-blk-btn{
-  padding:5px 9px;
-  font-size:9px;font-weight:700;
+  padding:6px 11px;
+  font-size:11px;font-weight:800;
   cursor:pointer;color:#fff;
   font-family:var(--fn);
-  border:none;background:transparent;
-  transition:background .12s;
+  border:none;border-radius:8px;
+  background:rgba(13,15,24,.92);
+  box-shadow:0 1px 5px rgba(0,0,0,.45);
   white-space:nowrap;
+  transition:filter .12s;
 }
-.omni .ve-blk-btn:hover{background:rgba(255,255,255,.2)}
-.omni .ve-blk-btn.del:hover{background:rgba(240,90,90,.5)}
+.omni .ve-blk-btn:hover{filter:brightness(1.25)}
+.omni .ve-blk-btn.del{background:rgba(190,50,50,.95)}
+/* Bloque seleccionado: borde de acento (la clase real es .sel) */
+.omni .ve-blk.sel{border-color:var(--ac) !important;box-shadow:inset 0 0 0 1px rgba(79,114,255,.25) !important}
 
 
 .omni .ve-add-btn{
@@ -1082,22 +1096,27 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
                         {line}
                         <div data-eid={e.id} className={["ve-blk", sel === m.id ? "sel" : "", !m.active ? "hidden-blk" : "", dragEid === e.id ? "dragging" : ""].filter(Boolean).join(" ")}
                           onClick={() => { if (dragMoved.current) { dragMoved.current = false; return; } setSel(sel === m.id ? null : m.id); }}>
-                          {/* ASA para arrastrar — agárrala y suelta donde quieras (táctil y PC) */}
-                          <div className="ve-grip" style={{ touchAction: "none" }} title="Arrastra para mover"
-                            onPointerDown={ev => dragStart(ev, e.id)} onPointerMove={dragMove} onPointerUp={dragEnd} onPointerCancel={dragEnd}>
-                            <span style={{ fontSize: 15, lineHeight: 1 }}>⠿</span><span style={{ fontSize: 9, fontWeight: 700 }}>Mover</span>
+                          {/* Fila superior: ASA de arrastre (izq, siempre visible) + botones (der, al
+                              seleccionar). No se recortan (envuelven en pantallas angostas). */}
+                          <div className="ve-toprow">
+                            <div className="ve-grip" style={{ touchAction: "none" }} title="Arrastra para mover"
+                              onPointerDown={ev => dragStart(ev, e.id)} onPointerMove={dragMove} onPointerUp={dragEnd} onPointerCancel={dragEnd}>
+                              <span style={{ fontSize: 15, lineHeight: 1 }}>⠿</span><span style={{ fontSize: 10, fontWeight: 800 }}>Mover</span>
+                            </div>
+                            {sel === m.id && (
+                              <div className="ve-actions" onClick={ev => ev.stopPropagation()}>
+                                <button className="ve-blk-btn" style={{ background: "var(--ac)" }} onClick={() => { setSel(m.id); setShowRight(true); }}>✏️ Editar</button>
+                                <button className="ve-blk-btn" onClick={() => patchMaster(m.id, { active: !m.active })}>{m.active ? "Ocultar" : "Mostrar"}</button>
+                                <button className="ve-blk-btn" onClick={() => dupBlock(m.id)}>Duplicar</button>
+                                <button className="ve-blk-btn" onClick={() => saveToLibrary(m.id)}>Guardar</button>
+                                <button className="ve-blk-btn del" onClick={ev => { ev.stopPropagation(); removeRef(e.id, m.id); }}>✕</button>
+                              </div>
+                            )}
                           </div>
                           <div className="ve-blk-lbl">
                             {m.kind === "carousel" ? "🎠 Carrusel" : "🖼️ Banner"}{Number(m.everyN) > 0 ? ` · 📢 anuncio cada ${m.everyN}` : ""}{!m.active ? " · oculto" : ""}{pubs.length > 1 ? ` · en ${pubs.length} pantallas` : ""}
                           </div>
-                          <div className="ve-blk-bar" onClick={ev => ev.stopPropagation()}>
-                            <button className="ve-blk-btn" style={{ color: "var(--ac2)", fontWeight: 800 }} onClick={() => { setSel(m.id); setShowRight(true); }}>Editar</button>
-                            <button className="ve-blk-btn" onClick={() => { patchMaster(m.id, { active: !m.active }); }}>{m.active ? "Ocultar" : "Mostrar"}</button>
-                            <button className="ve-blk-btn" onClick={() => dupBlock(m.id)}>Duplicar</button>
-                            <button className="ve-blk-btn" onClick={() => saveToLibrary(m.id)}>Guardar</button>
-                            <button className="ve-blk-btn del" onClick={ev => { ev.stopPropagation(); removeRef(e.id, m.id); }}>✕</button>
-                          </div>
-                          <div style={{ padding: "8px 8px 10px" }}><PreviewBlock m={m} /></div>
+                          <div style={{ padding: "34px 8px 10px" }}><PreviewBlock m={m} /></div>
                         </div>
                       </Fragment>
                     );

@@ -1353,8 +1353,8 @@ function Overview({toast, data={}, go}){
 
           <Head>⏳ Pendientes de ti</Head>
           <div className="g4 mb16">
-            <Card icon="🪪" label="Verificaciones" value={num(pendV)} sub={pendV ? 'toca para revisar' : 'todo al día'} gold={pendV > 0} badge={pendV} onClick={() => go && go('users', 'Usuarios')} />
-            <Card icon="⭐" label="Planes" value={num(pendP)} sub={pendP ? 'toca para revisar' : 'todo al día'} gold={pendP > 0} badge={pendP} onClick={() => go && go('users', 'Usuarios')} />
+            <Card icon="🪪" label="Verificaciones" value={num(pendV)} sub={pendV ? 'toca para revisar' : 'todo al día'} gold={pendV > 0} badge={pendV} onClick={() => go && go('verif')} />
+            <Card icon="⭐" label="Planes" value={num(pendP)} sub={pendP ? 'toca para revisar' : 'todo al día'} gold={pendP > 0} badge={pendP} onClick={() => go && go('plans')} />
             <Card icon="🛵" label="Mensajeros" value={num(pendC)} sub={pendC ? 'toca para revisar' : 'todo al día'} gold={pendC > 0} badge={pendC} onClick={() => go && go('delivery')} />
           </div>
 
@@ -1375,12 +1375,12 @@ function Overview({toast, data={}, go}){
 // Hoy solo se usa para DELIVERY LOCAL (solo='Delivery'): interruptor real del
 // servicio, surge, valoraciones y el registro de mensajeros. Las antiguas
 // sub-pestañas (Órdenes/Disputas/Moderación demo) se eliminaron en el cierre.
-function Operaciones({toast,data={},solo,ro}){
+function Operaciones({toast,data={},solo,ro,onResolved}){
   const sub2 = solo;
   const[confirm,setConfirm]=useState(null);    // diálogo de confirmación {title,msg,danger,yes,onYes}
   const couriers = data.couriers || [];
   const [couView, setCouView] = useState(null);
-  const couAct = (id, status) => { data.onCourierAction && data.onCourierAction(id, status); };
+  const couAct = (id, status) => { data.onCourierAction && data.onCourierAction(id, status); onResolved && onResolved(); };
   const fmt = n=>'$'+Math.round(n||0).toLocaleString();
   const ago = ts=>{ if(!ts) return '—'; const s=Math.floor((Date.now()-ts)/1000); if(s<60) return `${s}s`; const m=Math.floor(s/60); if(m<60) return `${m}m`; const h=Math.floor(m/60); if(h<24) return `${h}h`; return `${Math.floor(h/24)}d`; };
   const ask = (cfg)=>setConfirm(cfg);
@@ -1649,7 +1649,7 @@ function AdminOrders({ toast, onViewProfile }){
 }
 
 /* ── Moderación de publicaciones (a posteriori) — aprobar / retirar de verdad ── */
-function ModeracionPublicaciones({ toast, onViewProfile, ro }){
+function ModeracionPublicaciones({ toast, onViewProfile, ro, onResolved }){
   const PAGE = 20;
   const [q, setQ] = useState("");
   const [dq, setDq] = useState("");
@@ -1682,17 +1682,18 @@ function ModeracionPublicaciones({ toast, onViewProfile, ro }){
   }, [dq, filter, page]);
 
   const patch = (id, p) => setRows(rs => rs.map(r => r.id === id ? { ...r, ...p } : r));
+  const emsg = (e) => e?.message || e?.details || e?.hint || "No se pudo (sin mensaje del backend)";
   const doApprove = async (p) => {
     setBusy(p.id);
-    try { await adminModerateProduct(p.id, true); patch(p.id, { moderation_status: "approved" }); toast(`✅ «${p.title}» aprobada`); }
-    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+    try { await adminModerateProduct(p.id, true); patch(p.id, { moderation_status: "approved" }); toast(`✅ «${p.title}» aprobada`); onResolved && onResolved(); }
+    catch (e) { toast("⚠️ " + emsg(e)); }
     setBusy(null);
   };
   const doReject = async () => {
     const p = rejectFor; const why = reason.trim(); setRejectFor(null);
     setBusy(p.id);
-    try { await adminModerateProduct(p.id, false, why || null); patch(p.id, { moderation_status: "rejected", moderation_reason: why }); toast(`🚫 «${p.title}» retirada`); }
-    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+    try { await adminModerateProduct(p.id, false, why || null); patch(p.id, { moderation_status: "rejected", moderation_reason: why }); toast(`🚫 «${p.title}» retirada`); onResolved && onResolved(); }
+    catch (e) { toast("⚠️ " + emsg(e)); }
     setBusy(null);
   };
 
@@ -1956,15 +1957,37 @@ function RealUsersDirectory({ toast, meId, ro }){
   );
 }
 
+/* ── Foto KYC con enlace firmado + reintento (nunca un recuadro negro mudo) ──── */
+function KycPhoto({ path, label, onZoom }){
+  const [state, setState] = useState('loading'); // loading | ok | error
+  const [url, setUrl] = useState(null);
+  const fetchUrl = useCallback(() => {
+    if (!path) { setState('error'); return; }
+    setState('loading');
+    kycSignedUrl(path).then(u => { if (u) { setUrl(u); setState('ok'); } else { setState('error'); } }).catch(() => setState('error'));
+  }, [path]);
+  useEffect(() => { fetchUrl(); }, [fetchUrl]);
+  return (
+    <div style={{borderRadius:10,overflow:'hidden',border:'1px solid var(--bd2,#222)',background:'#111',height:110,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:5,cursor:state==='ok'?'pointer':'default',padding:6,textAlign:'center'}}
+      onClick={()=>{ if(state==='ok'&&url) onZoom(url); }}>
+      {state==='loading' && <span style={{fontSize:11,color:'var(--tx3)'}}>{label}…</span>}
+      {state==='error' && <>
+        <span style={{fontSize:10.5,color:'var(--tx3)',lineHeight:1.35}}>No se pudo cargar la imagen</span>
+        <button className="btn btg sm" onClick={(e)=>{ e.stopPropagation(); fetchUrl(); }}>↻ Reintentar</button>
+      </>}
+      {state==='ok' && <img src={url} alt={label} onError={()=>setState('error')} style={{width:'100%',height:'100%',objectFit:'cover'}}/>}
+    </div>
+  );
+}
+
 /* ── Cola REAL de verificaciones (KYC) ──────────────────────────────────────── */
-function VerificationQueue({ toast, onViewProfile, ro }){
+function VerificationQueue({ toast, onViewProfile, ro, onResolved }){
   const [filter, setFilter] = useState("pending"); // pending|approved|rejected
   const [rows, setRows] = useState([]);
   const [names, setNames] = useState({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(null);
   const [sel, setSel] = useState(null);            // ficha con fotos
-  const [urls, setUrls] = useState({});            // signed urls del sel
   const [zoom, setZoom] = useState(null);          // foto ampliada
   const [rejectFor, setRejectFor] = useState(null);
   const [reason, setReason] = useState("");
@@ -1988,23 +2011,21 @@ function VerificationQueue({ toast, onViewProfile, ro }){
     return () => { try { Promise.resolve(supabase.removeChannel(ch)).catch(()=>{}); } catch(e){} };
   }, [load]);
 
-  const openSheet = async (v) => {
-    setSel(v); setUrls({});
-    const [f, b, s] = await Promise.all([kycSignedUrl(v.doc_front), kycSignedUrl(v.doc_back), kycSignedUrl(v.selfie)]);
-    setUrls({ front: f, back: b, selfie: s });
-  };
+  const openSheet = (v) => { setSel(v); };  // cada foto (KycPhoto) carga su propio signed url con reintento
   const patch = (id, p) => { setRows(rs => rs.map(r => r.id === id ? { ...r, ...p } : r)); setSel(s => s && s.id === id ? { ...s, ...p } : s); };
+  // Muestra el mensaje EXACTO del backend (message/details/hint), nunca un genérico a secas.
+  const errMsg = (e) => e?.message || e?.details || e?.hint || e?.error_description || "No se pudo (sin mensaje del backend)";
   const approve = async (v) => {
     setBusy(v.id);
-    try { await adminReviewVerification(v.id, true); patch(v.id, { status: "approved" }); toast(`✓ ${v.full_name || 'Usuario'} verificado`); if (filter === "pending") setRows(rs => rs.filter(r => r.id !== v.id)); setSel(null); }
-    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+    try { await adminReviewVerification(v.id, true); patch(v.id, { status: "approved" }); toast(`✓ ${v.full_name || 'Usuario'} verificado`); if (filter === "pending") setRows(rs => rs.filter(r => r.id !== v.id)); setSel(null); onResolved && onResolved(); }
+    catch (e) { toast("⚠️ " + errMsg(e)); }
     setBusy(null);
   };
   const doReject = async () => {
     const v = rejectFor; const why = reason.trim(); setRejectFor(null);
     setBusy(v.id);
-    try { await adminReviewVerification(v.id, false, why || null); patch(v.id, { status: "rejected", reject_reason: why }); toast(`🚫 Verificación de ${v.full_name || 'usuario'} rechazada`); if (filter === "pending") setRows(rs => rs.filter(r => r.id !== v.id)); setSel(null); }
-    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+    try { await adminReviewVerification(v.id, false, why || null); patch(v.id, { status: "rejected", reject_reason: why }); toast(`🚫 Verificación de ${v.full_name || 'usuario'} rechazada`); if (filter === "pending") setRows(rs => rs.filter(r => r.id !== v.id)); setSel(null); onResolved && onResolved(); }
+    catch (e) { toast("⚠️ " + errMsg(e)); }
     setBusy(null);
   };
   const chip = (s) => s === "approved" ? <span className="bdg bg">✓ Aprobada</span> : s === "rejected" ? <span className="bdg br">🚫 Rechazada</span> : <span className="bdg by">🕐 Pendiente</span>;
@@ -2037,10 +2058,8 @@ function VerificationQueue({ toast, onViewProfile, ro }){
           <div className="mt">🪪 Verificación de {sel.full_name||'usuario'}</div>
           <div className="ms">Documento y selfie. Toca una foto para ampliarla.</div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:10}}>
-            {[["Frente",urls.front],["Reverso",urls.back],["Selfie",urls.selfie]].map(([lbl,u])=>(
-              <div key={lbl} onClick={()=>u&&setZoom(u)} style={{borderRadius:10,overflow:'hidden',border:'1px solid var(--bd2,#222)',background:'#111',height:110,display:'flex',alignItems:'center',justifyContent:'center',cursor:u?'pointer':'default'}}>
-                {u ? <img src={u} alt={lbl} style={{width:'100%',height:'100%',objectFit:'cover'}}/> : <span style={{fontSize:11,color:'var(--tx3)'}}>{lbl}…</span>}
-              </div>
+            {[["Frente",sel.doc_front],["Reverso",sel.doc_back],["Selfie",sel.selfie]].map(([lbl,p])=>(
+              <KycPhoto key={lbl} label={lbl} path={p} onZoom={setZoom} />
             ))}
           </div>
           {[['Nombre',sel.full_name||'—'],['Documento',sel.doc_type||'—'],['Número',sel.doc_number||'—'],['Estado',sel.status||'—']].map(([k,v])=>(
@@ -2077,7 +2096,7 @@ function VerificationQueue({ toast, onViewProfile, ro }){
 }
 
 /* ── Cola REAL de solicitudes de plan ───────────────────────────────────────── */
-function PlanQueue({ toast, onViewProfile, ro }){
+function PlanQueue({ toast, onViewProfile, ro, onResolved }){
   const [filter, setFilter] = useState("pending");
   const [rows, setRows] = useState([]);
   const [names, setNames] = useState({});
@@ -2106,7 +2125,8 @@ function PlanQueue({ toast, onViewProfile, ro }){
       await adminReviewPlan(req.id, approve);
       setRows(rs => filter === "pending" ? rs.filter(r => r.id !== req.id) : rs.map(r => r.id === req.id ? { ...r, status: approve ? "approved" : "rejected" } : r));
       toast(approve ? `✅ Plan ${req.plan} aprobado` : "Solicitud de plan rechazada");
-    } catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
+      onResolved && onResolved();
+    } catch (e) { toast("⚠️ " + (e?.message || e?.details || e?.hint || "No se pudo (sin mensaje del backend)")); }
     setBusy(null);
   };
   const chip = (s) => s === "approved" ? <span className="bdg bg">✅ Aprobada</span> : s === "rejected" ? <span className="bdg br">🚫 Rechazada</span> : <span className="bdg by">🕐 Pendiente</span>;
@@ -2908,6 +2928,16 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
     document.addEventListener('visibilitychange',onVis); window.addEventListener('focus',loadPending);
     return ()=>{ clearTimeout(tmr); document.removeEventListener('visibilitychange',onVis); window.removeEventListener('focus',loadPending); try{Promise.resolve(supabase.removeChannel(ch)).catch(()=>{});}catch(e){} };
   },[loadPending]);
+  // ── Avisos INTELIGENTES: dos tipos, trato distinto ──────────────────────────
+  // ACCIÓN REQUERIDA (moderación, verificaciones, planes, mensajeros, economía):
+  //   el badge = pendientes REALES; NO baja por mirar, solo al RESOLVER.
+  // INFORMATIVO (órdenes): se marca visto AL ENTRAR (last-seen por sección/usuario)
+  //   y solo cuenta lo posterior.
+  const INFO_SECS = { orders:1 };
+  const seenKey = `retador_secseen_${data.meId||'anon'}`;
+  const [seen,setSeen] = useState(()=>{ try{ return JSON.parse(localStorage.getItem(seenKey)||'{}'); }catch{ return {}; } });
+  const badgeFor = (key)=>{ const c=Number(pending[key])||0; if(INFO_SECS[key]) return Math.max(0,c-(Number(seen[key])||0)); return c; };
+  const markSectionSeen = (key)=>{ if(!INFO_SECS[key]) return; setSeen(prev=>{ const next={...prev,[key]:Number(pending[key])||0}; try{localStorage.setItem(seenKey,JSON.stringify(next));}catch{} return next; }); };
   // ── Permisos a la carta: "ALL" (admin) o { seccion: none|view|manage } ──
   const perms=data.perms;
   const isAdmin=perms==='ALL';
@@ -2921,7 +2951,12 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
     const okNow = page!=null && (page==='team'?isAdmin:(PAGE_TO_PERM[page]?allowed(PAGE_TO_PERM[page]):true));
     if(!okNow){ setPage(isAdmin?'overview':((visSecs[0]&&visSecs[0].page)||null)); }
   },[perms]);
-  const nav=(pg)=>{ setPage(pg); setMnav(false); };
+  const nav=(pg)=>{
+    setPage(pg); setMnav(false);
+    const key = PAGE_TO_PERM[pg];
+    if(key) markSectionSeen(key);               // informativos (órdenes): visto al entrar
+    data.onOpenQueue && data.onOpenQueue(pg);   // marca leídas las notifs de esa cola
+  };
   const roFor=(pg)=>{ const k=PAGE_TO_PERM[pg]; return k?levelOf(k)==='view':false; }; // solo lectura
   const curRO=roFor(page);
   const pageAllowed = page==null ? true : (page==='team' ? isAdmin : (PAGE_TO_PERM[page] ? allowed(PAGE_TO_PERM[page]) : true));
@@ -2949,7 +2984,7 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
               <div className={`sbi ${page===item.page?'on':''}`} onClick={()=>nav(item.page)}>
                 <span className="sbic">{item.icon}</span>
                 <span className="sbil">{item.label}</span>
-                {item.key && Number(pending[item.key])>0 && <span style={{marginLeft:'auto',minWidth:18,height:18,borderRadius:999,background:G,color:'#000',fontSize:10.5,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 5px',flexShrink:0}}>{pending[item.key]>99?'99+':pending[item.key]}</span>}
+                {item.key && badgeFor(item.key)>0 && <span style={{marginLeft:'auto',minWidth:18,height:18,borderRadius:999,background:G,color:'#000',fontSize:10.5,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 5px',flexShrink:0}}>{badgeFor(item.key)>99?'99+':badgeFor(item.key)}</span>}
               </div>
             </div>)}
           </div>)}
@@ -2973,11 +3008,11 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
             : <>
               {page==='overview'&&<Overview toast={add} data={data} go={nav}/>}
               {page==='ops'&&<AdminOrders toast={add} onViewProfile={data.onViewProfile}/>}
-              {page==='modq'&&<ModeracionPublicaciones toast={add} onViewProfile={data.onViewProfile} ro={curRO}/>}
-              {page==='delivery'&&<Operaciones solo="Delivery" toast={add} data={data} ro={curRO}/>}
+              {page==='modq'&&<ModeracionPublicaciones toast={add} onViewProfile={data.onViewProfile} ro={curRO} onResolved={loadPending}/>}
+              {page==='delivery'&&<Operaciones solo="Delivery" toast={add} data={data} ro={curRO} onResolved={loadPending}/>}
               {page==='users'&&<RealUsersDirectory toast={add} meId={data.meId} ro={curRO}/>}
-              {page==='verif'&&<VerificationQueue toast={add} onViewProfile={data.onViewProfile} ro={curRO}/>}
-              {page==='plans'&&<PlanQueue toast={add} onViewProfile={data.onViewProfile} ro={curRO}/>}
+              {page==='verif'&&<VerificationQueue toast={add} onViewProfile={data.onViewProfile} ro={curRO} onResolved={loadPending}/>}
+              {page==='plans'&&<PlanQueue toast={add} onViewProfile={data.onViewProfile} ro={curRO} onResolved={loadPending}/>}
               {page==='editor'&&(curRO
                 ? <fieldset disabled style={{border:'none',padding:0,margin:0,minWidth:0}}>
                     <div style={{margin:'0 0 12px',padding:'10px 14px',borderRadius:10,background:'var(--bg2)',border:'1px solid var(--bd2)',fontSize:12,fontWeight:700,color:'var(--tx2)'}}>👁 Solo lectura — sin permiso para modificar ni publicar.</div>

@@ -26,7 +26,7 @@ import {
   readRatings, aggRating, systemRating, serviceRating, serviceReviews, ratingForName, systemReviews,
   getUserOrders, updateOrderStatus, getUnreadCount, getProductById,
   getPendingCourierApplications, reviewCourierApplication,
-  getNotifications, markNotificationsRead, refreshSessionProfile, isSuspendedUser,
+  getNotifications, markNotificationsRead, markNotificationsReadByKind, refreshSessionProfile, isSuspendedUser,
   ORDER_FLOW, SHIP_LABELS, MODALIDAD_LABELS,
   CONTACT_PATTERNS, maskContacts, CUBA_PROVINCES,
   getUserTrustStats, trackEvent, blockUser, isBlocked, getSB, convKey,
@@ -1266,6 +1266,15 @@ function AppShell({ sessionUser }) {
       )}
       {showAdmin  && <OmniPanel onClose={() => setShowAdmin(false)} theme={appTk} zoom={densZoom} data={{
         meId: user?.id,
+        // Al abrir una cola, marca LEÍDAS sus notificaciones de campanita (para que no
+        // se acumulen). El badge de pendientes sigue su propia lógica (staff_pending_counts).
+        onOpenQueue: (page) => {
+          const kindByPage = { verif: "verification_app", plans: "plan_app", delivery: "courier_app" };
+          const kind = kindByPage[page];
+          if (!kind || !user?.id) return;
+          setBkNotifs(prev => prev.map(n => n.kind === kind ? { ...n, read: true } : n));
+          markNotificationsReadByKind(user.id, kind).catch(() => {});
+        },
         // CAPA ENCIMA del panel: la ficha se abre por encima (zIndex 5200 + backstack);
         // atrás la cierra y el panel sigue EXACTAMENTE donde estaba. No cerrar el panel.
         onViewProfile: (id) => openPublicProfile(id),

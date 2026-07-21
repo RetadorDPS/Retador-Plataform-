@@ -478,6 +478,15 @@ export const markNotificationsRead = async (userId, id = null) => {
     await q;
   } catch (e) {}
 };
+// Marca leídas las notificaciones de uno o varios TIPOS (kind). Se usa al abrir la
+// cola correspondiente: verification_app / plan_app / courier_app → read=true, para
+// que la campanita no acumule avisos de una cola que ya estás mirando.
+export const markNotificationsReadByKind = async (userId, kinds) => {
+  if (!userId || !kinds) return;
+  const list = Array.isArray(kinds) ? kinds : [kinds];
+  if (!list.length) return;
+  try { await supabase.from("notifications").update({ read: true }).eq("read", false).in("kind", list); } catch (e) {}
+};
 // Refresca el rol/nombre/foto del usuario en sesión (p.ej. al ser aprobado como
 // mensajero, para que el modo se desbloquee SIN cerrar la app).
 export const refreshSessionProfile = async (userId) => {

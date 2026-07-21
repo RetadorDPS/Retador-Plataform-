@@ -381,7 +381,7 @@ const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;4
   border-color:rgba(79,114,255,.5);
   box-shadow:inset 0 0 0 1px rgba(79,114,255,.15);
 }
-.omni .ve-blk.selected{
+.omni .ve-blk.selected,.omni .ve-blk.sel{
   border-color:var(--ac) !important;
   box-shadow:inset 0 0 0 1px rgba(79,114,255,.2) !important;
 }
@@ -834,7 +834,7 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showLeft, setShowLeft] = useState(true);
-  const [showRight, setShowRight] = useState(true);
+  const [showRight, setShowRight] = useState(false); // el panel de edición abre SOLO con "Editar"
   const [showCats, setShowCats] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [useLib, setUseLib] = useState(null);      // {mid} → modal "Usar en"
@@ -1023,7 +1023,7 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
                     const pubs = screensOf(m.id);
                     return (
                       <div key={e.id} draggable className={["ve-blk", sel === m.id ? "sel" : "", !m.active ? "hidden-blk" : "", dOv === i && dIdx !== i ? "dragover" : ""].filter(Boolean).join(" ")}
-                        onClick={() => { setSel(m.id); setShowRight(true); }}
+                        onClick={() => setSel(m.id)}
                         onDragStart={() => setDIdx(i)} onDragOver={ev => { ev.preventDefault(); setDOv(i); }} onDrop={ev => { ev.preventDefault(); onDrop(i); }} onDragEnd={() => { setDIdx(null); setDOv(null); }}>
                         <div className="ve-handle">{[0, 1, 2, 3, 4, 5].map(k => <div key={k} className="ve-hdot" />)}</div>
                         <div className="ve-blk-lbl">
@@ -1052,7 +1052,7 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
                   </div>
                   {libItems.length === 0 && <div className="ve-empty"><div style={{ fontSize: 32, marginBottom: 10, opacity: .2 }}>📚</div><div style={{ fontSize: 12, color: "var(--tx)" }}>Biblioteca vacía</div><div className="ve-empty-hint">Desde cualquier bloque, toca “Guardar en Contenido”.</div></div>}
                   {libItems.map(m => (
-                    <div key={m.id} className={`ve-blk ${sel === m.id ? "sel" : ""}`} onClick={() => { setSel(m.id); setShowRight(true); }}>
+                    <div key={m.id} className={`ve-blk ${sel === m.id ? "sel" : ""}`} onClick={() => setSel(m.id)}>
                       <div className="ve-blk-lbl">{m.kind === "carousel" ? "🎠 Carrusel" : "🖼️ Banner"} · en biblioteca</div>
                       <div className="ve-blk-bar" onClick={ev => ev.stopPropagation()}>
                         <button className="ve-blk-btn" onClick={() => { setSel(m.id); setShowRight(true); }}>Editar</button>
@@ -1083,7 +1083,7 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
                 <div className="ve-ph">
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                     <div className="ve-pt">{selM.kind === "carousel" ? "🎠 Carrusel" : "🖼️ Banner"}</div>
-                    <button style={{ background: "none", border: "none", color: "var(--tx3)", cursor: "pointer", fontSize: 18, lineHeight: 1 }} onClick={() => setSel(null)}>×</button>
+                    <button style={{ background: "none", border: "none", color: "var(--tx3)", cursor: "pointer", fontSize: 18, lineHeight: 1 }} onClick={() => setShowRight(false)}>×</button>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <Tog on={selM.active} ch={() => patchMaster(selM.id, { active: !selM.active })} />

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -1838,6 +1838,10 @@ function RealUsersDirectory({ toast, meId, ro }){
 
   const nmeOf = u => u.full_name || u.email || "Usuario";
   const patch = (id, p) => { setRows(rs => rs.map(r => r.id === id ? { ...r, ...p } : r)); setSel(s => s && s.id === id ? { ...s, ...p } : s); };
+  // Miembros del equipo (staff_permissions) para el chip 🛡️ Equipo. Best-effort:
+  // si no hay permiso para leer la tabla, el set queda vacío (solo se ve 👑 por rol).
+  const [staffIds, setStaffIds] = useState(() => new Set());
+  useEffect(() => { adminListStaff().then(list => setStaffIds(new Set((list || []).map(m => m.user_id)))).catch(() => {}); }, []);
 
   const doVerify = async (u, verified) => {
     setBusy(u.id);
@@ -1858,7 +1862,8 @@ function RealUsersDirectory({ toast, meId, ro }){
 
   const chips = (u) => (
     <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
-      {u.role === 'admin'   && <span className="bdg by">Admin</span>}
+      {u.role === 'admin'   && <span className="bdg by">👑 Administrador</span>}
+      {u.role !== 'admin' && staffIds.has(u.id) && <span className="bdg bp">🛡️ Equipo</span>}
       {u.role === 'courier' && <span className="bdg bb">Mensajero</span>}
       {u.plan && u.plan !== 'gratis' && <span className="bdg bx">{u.plan}</span>}
       {u.is_verified && <span className="bdg" style={{ background:'rgba(255,192,30,.14)', color:G }}>✓ Verificado</span>}
@@ -2166,37 +2171,26 @@ function Usuarios({toast,data={}}){
 
 /* ── Economía ──────────────────────────────────────────────────────────────── */
 function Economia({toast, data={}, ro}){
-  const orders = data.orders || [];
   const cfg = data.cfg || {};
-  const fmt = n=>'$'+Math.round(n||0).toLocaleString();
-  const pctOf = o => (cfg.commissionActive===false ? 0 : (o.commissionPct ?? cfg.commissionPct ?? 10)/100);
-  const revenue = orders.reduce((a,o)=>a+(o.amount||0)*pctOf(o),0);
-  const gmv = orders.reduce((a,o)=>a+(o.amount||0),0);
-  // comisión acumulada por vendedor (la "deuda" que cada vendedor debe pagar)
-  const bySeller = {};
-  orders.forEach(o=>{ const k=o.sellerName||o.sellerId||'—'; bySeller[k]=(bySeller[k]||0)+(o.amount||0)*pctOf(o); });
-  const sellers = Object.entries(bySeller).sort((a,b)=>b[1]-a[1]);
-  const payments = data.payments || [];
-  const paidBy = {};
-  payments.forEach(p=>{ paidBy[p.sellerName]=(paidBy[p.sellerName]||0)+(p.amount||0); });
-  // ── ganancias del dueño por fuente (respetan el interruptor global) ──
-  const gOn = cfg.commissionActive !== false;
-  const dPct=gOn?(cfg.commDeliveryPct??15)/100:0, iPct=gOn?(cfg.commIntlPct??10)/100:0, sPct=gOn?(cfg.commServicePct??12)/100:0;
-  const localOrders = orders.filter(o=>o.shipMode==='local');
-  const intlOrders = orders.filter(o=>o.shipMode==='intl');
-  const earnProducts = revenue - orders.filter(o=>o.cat==='servicios').reduce((a,o)=>a+(o.amount||0)*pctOf(o),0);
-  const earnIntl = intlOrders.reduce((a,o)=>a+(parseFloat(o.shipPrice)||0)*iPct,0);
-  const earnDelivery = localOrders.reduce((a,o)=>a+(parseFloat(o.shipPrice)||(cfg.localBase??150))*dPct,0); // % de la tarifa de cada entrega
-  const earnServices = orders.filter(o=>o.cat==='servicios').reduce((a,o)=>a+(o.amount||0)*pctOf(o),0);
-  // ingreso por promociones (destacar) y VIP: la plataforma se queda un % de cada solicitud aprobada
-  const vPct=gOn?(cfg.commVipPct??10)/100:0;
-  const promoReqs = data.promoRequests || [];
-  const earnVip = promoReqs.filter(r=>r.state==='approved').reduce((a,r)=>a+(Number(r.amount)||0)*vPct,0);
-  const userPlans = data.userPlans || {};
-  const planPrice = (name)=>{ const p=(cfg.plans||[]).find(x=>x.name===name); return p?(p.promo?p.promoPrice:p.price):0; };
-  const earnPlans = Object.values(userPlans).reduce((a,plan)=>a+ (Number(planPrice(plan))||0),0);
-  const earnTotal = earnProducts+earnIntl+earnDelivery+earnServices+earnVip+earnPlans;
-  // ── tarifas editables ──
+  const fmt = n => (n==null || n==='' || Number.isNaN(Number(n))) ? '—' : '$'+Math.round(Number(n)).toLocaleString('es-ES');
+  // ── FUENTE ÚNICA: TODOS los importes vienen SOLO del backend (admin_dashboard_stats).
+  // No se calcula NADA desde arrays locales (data.orders venía de localStorage del
+  // propio usuario → por eso a cada persona le salían cifras distintas). Si la RPC
+  // falla o no hay permiso → se muestra "—" o "Sin acceso", NUNCA un estimado. ──────
+  const [stats, setStats] = useState(undefined); // undefined=cargando · null=sin acceso
+  const loadStats = useCallback(() => { adminDashboardStats().then(s => setStats(s)).catch(() => setStats(null)); }, []);
+  useEffect(() => { loadStats(); }, [loadStats]);
+  useEffect(() => {
+    let tmr=null; const bump=()=>{ clearTimeout(tmr); tmr=setTimeout(loadStats,1500); };
+    const ch = supabase.channel(`eco-stats-${Date.now()}`)
+      .on("postgres_changes",{event:"*",schema:"public",table:"orders"},bump)
+      .subscribe();
+    return ()=>{ clearTimeout(tmr); try{Promise.resolve(supabase.removeChannel(ch)).catch(()=>{});}catch(e){} };
+  }, [loadStats]);
+  const S = stats || {};
+  const statLoading = stats === undefined;
+  const statVal = (v) => statLoading ? '…' : (stats === null ? '—' : fmt(v));
+  // ── tarifas editables (config de la plataforma, consistente para todos) ──
   const [t,setT] = useState({
     commissionPct: cfg.commissionPct ?? 10,
     commissionActive: cfg.commissionActive !== false,
@@ -2217,6 +2211,7 @@ function Economia({toast, data={}, ro}){
   });
   const set=(k,v)=>setT(s=>({...s,[k]:v}));
   const saveTarifas=(override={})=>{
+    if (ro) { toast('Solo lectura — sin permiso para modificar'); return; }
     const active = override.commissionActive !== undefined ? override.commissionActive : t.commissionActive;
     if (override.commissionActive !== undefined) set('commissionActive', active);
     data.onCfg && data.onCfg({
@@ -2235,16 +2230,18 @@ function Economia({toast, data={}, ro}){
     toast(override.commissionActive===true ? 'Tarifas activadas y aplicadas en la plataforma' : override.commissionActive===false ? 'Tarifas desactivadas' : 'Tarifas guardadas y aplicadas en la plataforma');
   };
   const saveFx=()=>{
+    if (ro) { toast('Solo lectura — sin permiso para modificar'); return; }
     data.onCfg && data.onCfg({ fx: { usdToCup:Number(t.usdCup)||0, eurToCup:Number(t.eurCup)||0 } });
     toast('Tasa de cambio guardada');
   };
   const usdEur = (Number(t.eurCup)>0) ? (Number(t.usdCup)/Number(t.eurCup)) : 0;
   const [pl, setPl] = useState(()=> (cfg.plans||[]).map(p=>({...p})));
   const setPlan=(i,k,v)=>setPl(arr=>arr.map((p,j)=>j===i?{...p,[k]:v}:p));
-  const savePlans=()=>{ data.onCfg && data.onCfg({ plans: pl.map(p=>({...p, price:Number(p.price)||0, promoPrice:Number(p.promoPrice)||0})) }); toast('Planes guardados'); };
-  const numInput=(k,suf,pre)=>(<div style={{display:'flex',alignItems:'center',gap:6,background:'var(--bg2)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px'}}>
+  const savePlans=()=>{ if (ro) { toast('Solo lectura — sin permiso para modificar'); return; } data.onCfg && data.onCfg({ plans: pl.map(p=>({...p, price:Number(p.price)||0, promoPrice:Number(p.promoPrice)||0})) }); toast('Planes guardados'); };
+  // En solo lectura (nivel "view") TODOS los campos van deshabilitados: no se puede escribir.
+  const numInput=(k,suf,pre)=>(<div style={{display:'flex',alignItems:'center',gap:6,background:'var(--bg2)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px',opacity:ro?.6:1}}>
     {pre&&<span style={{fontSize:12,color:'var(--tx3)',flexShrink:0}}>{pre}</span>}
-    <input type="number" inputMode="decimal" value={t[k]} onChange={e=>set(k,e.target.value)} style={{width:'100%',minWidth:0,background:'none',border:'none',color:'var(--tx)',fontSize:14,fontWeight:700,outline:'none',fontFamily:'var(--mo)'}}/>
+    <input type="number" inputMode="decimal" value={t[k]} disabled={ro} readOnly={ro} onChange={e=>set(k,e.target.value)} style={{width:'100%',minWidth:0,background:'none',border:'none',color:'var(--tx)',fontSize:14,fontWeight:700,outline:'none',fontFamily:'var(--mo)',cursor:ro?'not-allowed':'text'}}/>
     {suf&&<span style={{fontSize:11,color:'var(--tx3)',whiteSpace:'nowrap',flexShrink:0}}>{suf}</span>}
   </div>);
   const field=(label,node,hint)=>(<div><div style={{fontSize:11,fontWeight:600,color:'var(--tx2)',marginBottom:5}}>{label}</div>{node}{hint&&<div style={{fontSize:10,color:'var(--tx3)',marginTop:4}}>{hint}</div>}</div>);
@@ -2255,7 +2252,6 @@ function Economia({toast, data={}, ro}){
   const [pNames, setPNames] = useState({});
   const [busyP, setBusyP] = useState(null);
   const [debtConfirm, setDebtConfirm] = useState(null);  // { uid, name, total }
-  const [showMoves, setShowMoves] = useState(20);        // Movimientos: "Ver más"
   const reloadPromo = useCallback(() => { adminListPromoted().then(setPromoted).catch(() => setPromoted([])); }, []);
   useEffect(() => { reloadPromo(); }, [reloadPromo]);
   useEffect(() => { listLedger().then(setLedgerRows).catch(() => setLedgerRows(null)); }, []);
@@ -2264,40 +2260,26 @@ function Economia({toast, data={}, ro}){
     const ids = [
       ...(promoted || []).map(p => p.seller_id),
       ...((Array.isArray(ledger) ? ledger : []).map(e => e.seller_id)),
-      ...orders.map(o => o.sellerId || o.seller_id),
     ].filter(Boolean);
     if (!ids.length) return;
     getProfilesByIds(ids).then(m => setPNames(prev => ({ ...prev, ...m }))).catch(() => {});
-  }, [promoted, ledger, orders.length]);
+  }, [promoted, ledger]);
   const nameOf = uid => pNames[uid]?.full_name || null;
-  // DEUDAS por vendedor: del LEDGER real (comisiones + promociones sin saldar);
-  // si el ledger no es legible, cae al cálculo desde pedidos (solo comisiones).
+  // DEUDAS por vendedor: SOLO del LEDGER real del backend (seller_commission_ledger).
+  // Si el ledger no es legible (sin permiso) → lista vacía, nunca un estimado local.
   const debts = useMemo(() => {
-    if (Array.isArray(ledger)) {
-      // seller_commission_ledger: seller_id · amount_owed · paid · kind
-      const m = {};
-      ledger.forEach(e => {
-        const uid = e.seller_id; if (!uid) return;
-        if (e.paid === true) return;
-        const amt = Number(e.amount_owed) || 0; if (amt <= 0) return;
-        const kind = String(e.kind || '').toLowerCase();
-        if (!m[uid]) m[uid] = { uid, comm: 0, promo: 0 };
-        if (kind === 'promotion') m[uid].promo += amt; else m[uid].comm += amt;
-      });
-      return Object.values(m).map(d => ({ ...d, total: d.comm + d.promo })).filter(d => d.total > 0).sort((a, b) => b.total - a.total);
-    }
-    if (ledger === null) {
-      const m = {};
-      orders.forEach(o => {
-        const uid = o.sellerId || o.seller_id; if (!uid) return;
-        const c = (o.amount || 0) * pctOf(o); if (c <= 0) return;
-        if (!m[uid]) m[uid] = { uid, comm: 0, promo: 0 };
-        m[uid].comm += c;
-      });
-      return Object.values(m).map(d => ({ ...d, total: d.comm })).filter(d => d.total > 0).sort((a, b) => b.total - a.total);
-    }
-    return [];   // cargando
-  }, [ledger, orders]);
+    if (!Array.isArray(ledger)) return [];   // cargando o sin acceso → nada calculado
+    const m = {};
+    ledger.forEach(e => {
+      const uid = e.seller_id; if (!uid) return;
+      if (e.paid === true) return;
+      const amt = Number(e.amount_owed) || 0; if (amt <= 0) return;
+      const kind = String(e.kind || '').toLowerCase();
+      if (!m[uid]) m[uid] = { uid, comm: 0, promo: 0 };
+      if (kind === 'promotion') m[uid].promo += amt; else m[uid].comm += amt;
+    });
+    return Object.values(m).map(d => ({ ...d, total: d.comm + d.promo })).filter(d => d.total > 0).sort((a, b) => b.total - a.total);
+  }, [ledger]);
   const promoCharges = (Array.isArray(ledger) ? ledger : []).filter(e => String(e.kind || '').toLowerCase() === 'promotion').slice(0, 20);
   const unpromote = async (p) => {
     setBusyP(p.id);
@@ -2322,41 +2304,21 @@ function Economia({toast, data={}, ro}){
   };
   return <>
     <div className="stit">Economía</div>
-    <div className="ssub">Tarifas, comisiones e ingresos · conectado a la plataforma</div>
+    <div className="ssub">Tarifas, comisiones e ingresos · números del backend (fuente única)</div>
+    {stats === null && <div className="card cp mb16" style={{border:'1px solid var(--yw)',background:'var(--ywb)'}}>
+      <div style={{fontSize:12,fontWeight:700,color:'var(--yw)'}}>Sin acceso a las métricas</div>
+      <div style={{fontSize:11,color:'var(--tx3)',marginTop:3}}>El backend no te dio los números de esta sección. Se muestran como “—”.</div>
+    </div>}
     <div className="g4 mb16">
-      {[{l:'Ingresos por comisión',v:fmt(revenue),c:'var(--gn)',d:'acumulado'},
-        {l:'Ventas totales (GMV)',v:fmt(gmv),c:'var(--ac2)',d:`${orders.length} órdenes`},
-        {l:'Comisión por cobrar',v:fmt(revenue),c:'var(--yw)',d:'deuda de vendedores'},
+      {[{l:'Ingresos por comisión',v:statVal(S.commission_total),c:'var(--gn)',d:'acumulado'},
+        {l:'Ventas totales (GMV)',v:statVal(S.gmv_completed),c:'var(--ac2)',d:'pedidos completados'},
+        {l:'Comisión por cobrar',v:statVal(S.commission_pending),c:'var(--yw)',d:'tu dinero pendiente'},
         {l:'Comisión activa',v:(cfg.commissionActive!==false)?`${cfg.commissionPct??10}%`:'OFF',c:(cfg.commissionActive!==false)?'var(--gn)':'var(--rd)',d:(cfg.commissionActive!==false)?'cobrando':'desactivada'}
       ].map(m=><div className="mc" key={m.l}><div className="ml">{m.l}</div><div className="mv" style={{fontSize:20,color:m.c}}>{m.v}</div><div style={{fontSize:11,color:'var(--tx3)',marginTop:4}}>{m.d}</div></div>)}
     </div>
 
-    {/* ── MIS INGRESOS POR FUENTE ── */}
-    <div className="card cp mb16">
-      <div className="ch"><span className="ct">💰 Mis ingresos por fuente</span><span className="bdg bg">{fmt(earnTotal)} total</span></div>
-      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 12px'}}>Todo lo que ganas con la plataforma, por origen. (Delivery y servicios se acumulan con la actividad.)</div>
-      {[
-        {l:'Productos',v:earnProducts,pct:cfg.commissionPct??10,c:'#22d3a0'},
-        {l:'Envíos internacionales',v:earnIntl,pct:cfg.commIntlPct??10,c:'#4f72ff'},
-        {l:'Delivery local',v:earnDelivery,pct:cfg.commDeliveryPct??15,c:'#f5a623'},
-        {l:'Servicios',v:earnServices,pct:cfg.commServicePct??12,c:'#a855f7'},
-        {l:'Subastas VIP y Destacadas',v:earnVip,pct:cfg.commVipPct??10,c:'#06b6d4'},
-        {l:'Planes (suscripciones)',v:earnPlans,pct:null,c:'#ec4899'},
-      ].map(s=>{ const w=earnTotal>0?Math.round(s.v/earnTotal*100):0; return (
-        <div key={s.l} style={{marginBottom:12}}>
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5}}>
-            <span style={{width:8,height:8,borderRadius:'50%',background:s.c,flexShrink:0}}/>
-            <span style={{flex:1,fontSize:12,fontWeight:600,color:'var(--tx)'}}>{s.l}</span>
-            {s.pct!=null&&<span className="bdg bx" style={{fontSize:9}}>{s.pct}%</span>}
-            <span style={{fontSize:12.5,fontWeight:800,color:'var(--tx)',fontFamily:'var(--mo)'}}>{fmt(s.v)}</span>
-          </div>
-          <div style={{height:6,borderRadius:4,background:'var(--bg2)',overflow:'hidden'}}><div style={{height:'100%',width:`${w}%`,background:s.c,borderRadius:4}}/></div>
-        </div>
-      );})}
-    </div>
-
     {/* ── SOLICITUDES DE PROMOCIÓN ── */}
-    {(() => { const pend=promoReqs.filter(r=>r.state==='pending'); return (
+    {(() => { const promoReqs = data.promoRequests || []; const pend=promoReqs.filter(r=>r.state==='pending'); return (
       <div className="card cp mb16">
         <div className="ch"><span className="ct">⭐ Solicitudes de promoción</span><span className={`bdg ${pend.length?'by':'bx'}`}>{pend.length} pendientes</span></div>
         <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 12px'}}>Solicitudes de SUBASTAS (destacar/VIP): apruebas al recibir el pago. Los PRODUCTOS ya no piden permiso: se destacan directo con ⭐ y el cargo va a la deuda del vendedor.</div>
@@ -2385,7 +2347,7 @@ function Economia({toast, data={}, ro}){
       <div className="g2" style={{marginBottom:18}}>
         <div>
           <div style={{fontSize:11,fontWeight:600,color:'var(--tx2)',marginBottom:5}}>Interruptor</div>
-          <button onClick={()=>{ set('promoActive', !t.promoActive); }} style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,background:'var(--bg2)',border:`1px solid ${t.promoActive?'var(--gn)':'var(--bd2)'}`,borderRadius:8,padding:'8px 10px',cursor:'pointer',color:t.promoActive?'var(--gn)':'var(--tx3)',fontSize:13,fontWeight:800}}>
+          <button disabled={ro} onClick={()=>{ if(ro)return; set('promoActive', !t.promoActive); }} style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,background:'var(--bg2)',border:`1px solid ${t.promoActive?'var(--gn)':'var(--bd2)'}`,borderRadius:8,padding:'8px 10px',cursor:ro?'not-allowed':'pointer',opacity:ro?.6:1,color:t.promoActive?'var(--gn)':'var(--tx3)',fontSize:13,fontWeight:800}}>
             {t.promoActive ? '⭐ ENCENDIDA' : 'APAGADA'}
             <span style={{width:38,height:20,borderRadius:12,background:t.promoActive?'var(--gn)':'var(--bd2)',position:'relative',flexShrink:0}}><span style={{position:'absolute',top:2,left:t.promoActive?20:2,width:16,height:16,borderRadius:'50%',background:'#fff',transition:'left .15s'}}/></span>
           </button>
@@ -2452,22 +2414,22 @@ function Economia({toast, data={}, ro}){
       <div style={{fontSize:11,color:'var(--tx3)',marginBottom:14}}>Define cada plan: precio, promoción y qué incluye. Es lo que verá el usuario al pedir mejorar su plan.</div>
       {pl.map((p,i)=><div key={p.id||i} style={{border:'1px solid var(--bd2)',borderRadius:11,padding:'13px',marginBottom:11,background:'var(--bg2)'}}>
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
-          <input value={p.name} onChange={e=>setPlan(i,'name',e.target.value)} style={{flex:1,minWidth:0,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px',color:'var(--tx)',fontSize:13,fontWeight:800,outline:'none'}}/>
-          <div style={{display:'flex',alignItems:'center',gap:5,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px'}}>
+          <input value={p.name} disabled={ro} readOnly={ro} onChange={e=>setPlan(i,'name',e.target.value)} style={{flex:1,minWidth:0,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px',color:'var(--tx)',fontSize:13,fontWeight:800,outline:'none',opacity:ro?.6:1}}/>
+          <div style={{display:'flex',alignItems:'center',gap:5,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px',opacity:ro?.6:1}}>
             <span style={{fontSize:12,color:'var(--tx3)'}}>$</span>
-            <input type="number" value={p.price} onChange={e=>setPlan(i,'price',e.target.value)} style={{width:54,background:'none',border:'none',color:'var(--tx)',fontSize:13,fontWeight:700,outline:'none',fontFamily:'var(--mo)'}}/>
+            <input type="number" value={p.price} disabled={ro} readOnly={ro} onChange={e=>setPlan(i,'price',e.target.value)} style={{width:54,background:'none',border:'none',color:'var(--tx)',fontSize:13,fontWeight:700,outline:'none',fontFamily:'var(--mo)'}}/>
             <span style={{fontSize:10,color:'var(--tx3)'}}>/mes</span>
           </div>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,flexWrap:'wrap'}}>
-          <button onClick={()=>setPlan(i,'promo',!p.promo)} style={{height:32,padding:'0 12px',borderRadius:7,border:`1px solid ${p.promo?'var(--yw)':'var(--bd2)'}`,background:p.promo?'rgba(245,166,35,.12)':'var(--bg)',color:p.promo?'var(--yw)':'var(--tx3)',fontSize:11,fontWeight:700,cursor:'pointer'}}>{p.promo?'● En promoción':'○ Sin promo'}</button>
-          {p.promo&&<div style={{display:'flex',alignItems:'center',gap:5,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:7,padding:'6px 10px'}}>
+          <button disabled={ro} onClick={()=>{ if(ro)return; setPlan(i,'promo',!p.promo); }} style={{height:32,padding:'0 12px',borderRadius:7,border:`1px solid ${p.promo?'var(--yw)':'var(--bd2)'}`,background:p.promo?'rgba(245,166,35,.12)':'var(--bg)',color:p.promo?'var(--yw)':'var(--tx3)',fontSize:11,fontWeight:700,cursor:ro?'not-allowed':'pointer',opacity:ro?.6:1}}>{p.promo?'● En promoción':'○ Sin promo'}</button>
+          {p.promo&&<div style={{display:'flex',alignItems:'center',gap:5,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:7,padding:'6px 10px',opacity:ro?.6:1}}>
             <span style={{fontSize:11,color:'var(--tx3)'}}>Precio promo $</span>
-            <input type="number" value={p.promoPrice} onChange={e=>setPlan(i,'promoPrice',e.target.value)} style={{width:48,background:'none',border:'none',color:'var(--tx)',fontSize:12,fontWeight:700,outline:'none',fontFamily:'var(--mo)'}}/>
+            <input type="number" value={p.promoPrice} disabled={ro} readOnly={ro} onChange={e=>setPlan(i,'promoPrice',e.target.value)} style={{width:48,background:'none',border:'none',color:'var(--tx)',fontSize:12,fontWeight:700,outline:'none',fontFamily:'var(--mo)'}}/>
           </div>}
         </div>
         <div style={{fontSize:10,color:'var(--tx3)',marginBottom:4,fontWeight:600}}>QUÉ INCLUYE (una línea por beneficio)</div>
-        <textarea value={(p.features||[]).join('\n')} onChange={e=>setPlan(i,'features',e.target.value.split('\n'))} rows={3} style={{width:'100%',background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'8px 10px',color:'var(--tx)',fontSize:12,outline:'none',resize:'vertical',fontFamily:'inherit',lineHeight:1.5}}/>
+        <textarea value={(p.features||[]).join('\n')} disabled={ro} readOnly={ro} onChange={e=>setPlan(i,'features',e.target.value.split('\n'))} rows={3} style={{width:'100%',background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'8px 10px',color:'var(--tx)',fontSize:12,outline:'none',resize:'vertical',fontFamily:'inherit',lineHeight:1.5,opacity:ro?.6:1}}/>
       </div>)}
       {!ro && <div style={{display:'flex',justifyContent:'flex-end',marginTop:4}}>
         <button className="btn btp" onClick={savePlans} style={{fontWeight:800,padding:'9px 22px'}}>Guardar planes</button>
@@ -2478,10 +2440,10 @@ function Economia({toast, data={}, ro}){
       <div className="card cp" style={{display:'flex',flexDirection:'column',justifyContent:'center'}}>
         <div className="ch"><span className="ct">Comisiones (real)</span></div>
         <div style={{display:'flex',gap:18,flexWrap:'wrap',marginTop:8}}>
-          <div><div style={{fontSize:10,color:'var(--tx3)'}}>Acumuladas</div><div style={{fontSize:24,fontWeight:800,color:'var(--gn)',fontFamily:'var(--mo)'}}>{fmt(revenue)}</div></div>
-          <div><div style={{fontSize:10,color:'var(--tx3)'}}>Por cobrar</div><div style={{fontSize:24,fontWeight:800,color:'var(--yw)',fontFamily:'var(--mo)'}}>{fmt(sellers.reduce((a,[name,amt])=>a+Math.max(0,amt-(paidBy[name]||0)),0)*((cfg.commissionPct??10)/100))}</div></div>
+          <div><div style={{fontSize:10,color:'var(--tx3)'}}>Acumuladas</div><div style={{fontSize:24,fontWeight:800,color:'var(--gn)',fontFamily:'var(--mo)'}}>{statVal(S.commission_total)}</div></div>
+          <div><div style={{fontSize:10,color:'var(--tx3)'}}>Por cobrar</div><div style={{fontSize:24,fontWeight:800,color:'var(--yw)',fontFamily:'var(--mo)'}}>{statVal(S.commission_pending)}</div></div>
         </div>
-        <div style={{fontSize:10,color:'var(--tx3)',marginTop:8}}>Calculado de tus pedidos reales, no de un gráfico de ejemplo.</div>
+        <div style={{fontSize:10,color:'var(--tx3)',marginTop:8}}>Cifras del backend (fuente única), iguales para todo el equipo.</div>
       </div>
       <div className="card cp">
         <div className="ch"><span className="ct">Deudas por vendedor</span><span className={`bdg ${debts.length?'by':'bx'}`}>{debts.length}</span></div>
@@ -2559,27 +2521,6 @@ function Economia({toast, data={}, ro}){
       </div>
     </div>}
 
-    <div className="card">
-      <div className="cp"><div className="ch"><span className="ct">Movimientos recientes</span><span className="bdg bx">{orders.length}</span></div></div>
-      {orders.length===0
-        ? <div className="cp" style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'24px 6px'}}>Aún no hay movimientos. Cada venta generará su comisión aquí.</div>
-        : <>
-        <div className="tw"><table>
-          <thead><tr><th>Orden</th><th>Producto</th><th>Venta</th><th>Comisión</th></tr></thead>
-          <tbody>{orders.slice(0,showMoves).map(o=><tr key={o.id}>
-            <td><span className="mono" style={{fontSize:10,color:'var(--tx3)'}}>{String(o.id).slice(-6)}</span></td>
-            <td style={{color:'var(--tx)'}}>{o.title||'Producto'}</td>
-            <td style={{fontWeight:700,fontFamily:'var(--mo)',fontSize:12,color:'var(--tx)'}}>{fmt(o.amount)}</td>
-            <td style={{fontWeight:700,fontFamily:'var(--mo)',fontSize:12,color:'var(--gn)'}}>{fmt((o.amount||0)*pctOf(o))}</td>
-          </tr>)}</tbody>
-        </table></div>
-        {orders.length > showMoves && (
-          <div className="cp" style={{paddingTop:8}}>
-            <button className="btn btg" style={{width:'100%'}} onClick={()=>setShowMoves(n=>n+20)}>Ver más ({orders.length - showMoves} restantes)</button>
-          </div>
-        )}
-        </>}
-    </div>
   </>;
 }
 
@@ -2821,30 +2762,26 @@ function TeamScreen({ toast, meId }){
 }
 
 function Sistema({toast, data={}}){
-  const orders = data.orders || [];
-  const reports = data.reports || [];
-  const planReqs = data.planRequests || [];
-  const fmt = n=>'$'+Math.round(n||0).toLocaleString();
   const hhmm = ts=>{ const d=new Date(ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
   const dmy = ts=>new Date(ts).toLocaleDateString('es-ES',{day:'2-digit',month:'short'});
-  // Registro REAL de acciones del backend (si la tabla de log es legible).
-  const [logs, setLogs] = useState(undefined);
+  const num = v => (v==null||v===''||Number.isNaN(Number(v))) ? '—' : Number(v).toLocaleString('es-ES');
+  // ── FUENTE ÚNICA: contadores del backend (admin_dashboard_stats) y actividad del
+  // audit_log (adminListLogs). Cero conteo desde arrays locales — antes se mezclaban
+  // los pedidos/reportes en localStorage del propio usuario y salían cifras dispares.
+  const [stats, setStats] = useState(undefined);
+  useEffect(() => { adminDashboardStats().then(setStats).catch(() => setStats(null)); }, []);
+  const [logs, setLogs] = useState(undefined); // undefined=cargando · null=sin acceso
   useEffect(() => { adminListLogs(50).then(setLogs).catch(() => setLogs(null)); }, []);
-  // Actividad local real (pedidos, reportes, solicitudes).
-  const events = [
-    ...orders.map(o=>({at:o.createdAt, msg:`Orden creada · ${o.title||'Producto'} (${fmt(o.amount)})`, svc:'órdenes'})),
-    ...reports.map(r=>({at:r.at, msg:`Reporte recibido sobre ${r.targetName||'usuario'} · ${r.reason}`, svc:'moderación'})),
-    ...planReqs.map(p=>({at:p.at, msg:`Solicitud de plan ${p.plan} · ${p.userName||'usuario'}`, svc:'planes'})),
-  ].filter(e=>e.at);
-  // ── 📜 ACTIVIDAD CONSOLIDADA: backend + local, UNA sola lista ────────────────
-  const activity = useMemo(() => [
-    ...((Array.isArray(logs)?logs:[]).map(l=>({
-      at: l.created_at ? new Date(l.created_at).getTime() : 0,
-      msg: l.action || l.event || l.message || l.description || 'Acción',
-      svc: 'sistema',
-    }))),
-    ...events,
-  ].filter(e=>e.at).sort((a,b)=>b.at-a.at), [logs, orders.length, reports.length, planReqs.length]);
+  const activity = useMemo(() => (Array.isArray(logs)?logs:[]).map(l=>({
+    at: l.created_at ? new Date(l.created_at).getTime() : 0,
+    msg: l.action || l.event || l.message || l.description || 'Acción',
+    svc: 'sistema',
+  })).filter(e=>e.at).sort((a,b)=>b.at-a.at), [logs]);
+  const S = stats || {};
+  const statLoading = stats === undefined;
+  const ordersCount = statLoading ? '…' : (stats===null ? '—' : num((Number(S.orders_active)||0)+(Number(S.orders_completed)||0)));
+  const usersCount  = statLoading ? '…' : (stats===null ? '—' : num(S.users_total));
+  const eventsCount = logs===undefined ? '…' : (logs===null ? '—' : num(activity.length));
   const [actOpen, setActOpen] = useState(false);
   const [actShow, setActShow] = useState(20);
   // "N nuevas" desde la última vez que el admin abrió la actividad (last-seen local).
@@ -2867,11 +2804,11 @@ function Sistema({toast, data={}}){
   return <>
     <div className="stit">Sistema</div>
     <div className="ssub">Actividad real de la plataforma e integraciones</div>
-    {/* Resumen compacto: conteos por tipo */}
+    {/* Resumen compacto: conteos REALES del backend (fuente única) */}
     <div className="g3 mb16">{[
-      {l:'Órdenes',v:String(orders.length),c:'var(--gn)'},
-      {l:'Reportes',v:String(reports.length),c:reports.length?'var(--yw)':'var(--gn)'},
-      {l:'Eventos totales',v:String(activity.length),c:'var(--ac2)'}
+      {l:'Órdenes',v:ordersCount,c:'var(--gn)'},
+      {l:'Usuarios',v:usersCount,c:'var(--ac2)'},
+      {l:'Eventos (registro)',v:eventsCount,c:'var(--yw)'}
     ].map(m=><div className="mc" key={m.l}><div className="ml">{m.l}</div><div className="mv" style={{color:m.c}}>{m.v}</div></div>)}</div>
 
     {/* 📜 ACTIVIDAD (consolidada): plegada por defecto, con contador de nuevas */}
@@ -2880,12 +2817,14 @@ function Sistema({toast, data={}}){
         <span style={{fontSize:15}}>📜</span>
         <span className="ct" style={{flex:1}}>Actividad</span>
         {newCount > 0 && !actOpen && <span style={{display:'flex',alignItems:'center',gap:5,color:'var(--ac)',fontSize:11,fontWeight:800}}><span style={{width:8,height:8,borderRadius:'50%',background:'var(--ac)',boxShadow:'0 0 6px var(--ac)'}}/>{newCount} nuevas</span>}
-        <span className="bdg bx">{activity.length}</span>
+        <span className="bdg bx">{eventsCount}</span>
         <span style={{fontSize:12,color:'var(--tx3)'}}>{actOpen?'Plegar ▲':'Desplegar ▼'}</span>
       </div>
       {actOpen && (
-        activity.length===0
-          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'20px 6px'}}>Sin actividad todavía. Cada orden, reporte, solicitud o acción quedará registrada aquí.</div>
+        logs===null
+          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'20px 6px'}}>Sin acceso al registro de actividad.</div>
+          : activity.length===0
+          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'20px 6px'}}>Sin actividad en el registro todavía. Cada acción del backend quedará aquí.</div>
           : <div style={{marginTop:12}}>
             {activity.slice(0,actShow).map((l,i)=>(
               <div key={i} style={{display:'flex',alignItems:'center',gap:9,padding:'7px 0',borderBottom:'1px solid rgba(128,128,128,.08)'}}>
@@ -2951,6 +2890,24 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
     r.observe(el); return ()=>r.disconnect();
   },[]);
   const{ts,add}=useToast();
+  // ── Badges de pendientes por sección (staff_pending_counts, ya filtrado por
+  // permisos en el backend). Se recarga con el realtime y al volver a la app. ──
+  const[pending,setPending]=useState({});
+  const loadPending=useCallback(()=>{ staffPendingCounts().then(c=>setPending(c||{})).catch(()=>setPending({})); },[]);
+  useEffect(()=>{ loadPending(); },[loadPending]);
+  useEffect(()=>{
+    let tmr=null; const bump=()=>{ clearTimeout(tmr); tmr=setTimeout(loadPending,1200); };
+    const ch=supabase.channel(`staff-pend-${Date.now()}`)
+      .on("postgres_changes",{event:"*",schema:"public",table:"products"},bump)
+      .on("postgres_changes",{event:"*",schema:"public",table:"courier_applications"},bump)
+      .on("postgres_changes",{event:"*",schema:"public",table:"verifications"},bump)
+      .on("postgres_changes",{event:"*",schema:"public",table:"plan_requests"},bump)
+      .on("postgres_changes",{event:"*",schema:"public",table:"orders"},bump)
+      .subscribe();
+    const onVis=()=>{ if(document.visibilityState==='visible') loadPending(); };
+    document.addEventListener('visibilitychange',onVis); window.addEventListener('focus',loadPending);
+    return ()=>{ clearTimeout(tmr); document.removeEventListener('visibilitychange',onVis); window.removeEventListener('focus',loadPending); try{Promise.resolve(supabase.removeChannel(ch)).catch(()=>{});}catch(e){} };
+  },[loadPending]);
   // ── Permisos a la carta: "ALL" (admin) o { seccion: none|view|manage } ──
   const perms=data.perms;
   const isAdmin=perms==='ALL';
@@ -2992,6 +2949,7 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
               <div className={`sbi ${page===item.page?'on':''}`} onClick={()=>nav(item.page)}>
                 <span className="sbic">{item.icon}</span>
                 <span className="sbil">{item.label}</span>
+                {item.key && Number(pending[item.key])>0 && <span style={{marginLeft:'auto',minWidth:18,height:18,borderRadius:999,background:G,color:'#000',fontSize:10.5,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 5px',flexShrink:0}}>{pending[item.key]>99?'99+':pending[item.key]}</span>}
               </div>
             </div>)}
           </div>)}
@@ -3020,7 +2978,13 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
               {page==='users'&&<RealUsersDirectory toast={add} meId={data.meId} ro={curRO}/>}
               {page==='verif'&&<VerificationQueue toast={add} onViewProfile={data.onViewProfile} ro={curRO}/>}
               {page==='plans'&&<PlanQueue toast={add} onViewProfile={data.onViewProfile} ro={curRO}/>}
-              {page==='editor'&&<EditorVisual toast={add} cfg={data.cfg} onCfg={curRO ? (()=>add('👁 Solo lectura — no puedes publicar')) : data.onPublishBlocks}/>}
+              {page==='editor'&&(curRO
+                ? <fieldset disabled style={{border:'none',padding:0,margin:0,minWidth:0}}>
+                    <div style={{margin:'0 0 12px',padding:'10px 14px',borderRadius:10,background:'var(--bg2)',border:'1px solid var(--bd2)',fontSize:12,fontWeight:700,color:'var(--tx2)'}}>👁 Solo lectura — sin permiso para modificar ni publicar.</div>
+                    {/* fieldset[disabled] deshabilita de forma nativa TODOS los inputs, selects y botones del editor. */}
+                    <EditorVisual toast={add} cfg={data.cfg} onCfg={()=>add('👁 Solo lectura — no puedes publicar')}/>
+                  </fieldset>
+                : <EditorVisual toast={add} cfg={data.cfg} onCfg={data.onPublishBlocks}/>)}
               {page==='eco'&&<Economia toast={add} data={data} ro={curRO}/>}
               {page==='sys'&&<Sistema toast={add} data={data}/>}
               {page==='team'&&<TeamScreen toast={add} meId={data.meId} onViewProfile={data.onViewProfile}/>}

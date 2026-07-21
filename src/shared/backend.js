@@ -641,6 +641,14 @@ export const adminDashboardStats = async () => {
   if (error) { console.error("adminDashboardStats:", error.message); return null; }
   return (Array.isArray(data) ? data[0] : data) || null;
 };
+// staff_pending_counts() → { moderation, couriers, verifications, plans, orders, economy }
+// Ya viene FILTRADO por permisos: cada quien recibe solo los contadores de las
+// secciones que puede ver. Si no hay acceso o falla, devuelve null (sin badges).
+export const staffPendingCounts = async () => {
+  const { data, error } = await supabase.rpc("staff_pending_counts");
+  if (error) { console.error("staffPendingCounts:", error.message); return null; }
+  return (Array.isArray(data) ? data[0] : data) || null;
+};
 
 // ── FASE 4 — VERIFICACIÓN (KYC) y SOLICITUDES DE PLAN, de punta a punta ───────
 // Sube una foto KYC al bucket PRIVADO 'kyc', en la carpeta del usuario (su uid).

@@ -73,8 +73,14 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
           <div style={{ flex: 1 }}>
             <p style={{ fontSize: 15 * ts, fontWeight: 800, color: T1 }}>{name}</p>
             <p style={{ fontSize: 10 * ts, color: T2, marginTop: 2 }}>{user?.email || "Ver perfil completo"}</p>
-            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ fontSize: 9 * ts, fontWeight: 700, color: "#9A7C2A", background: "#9A7C2A18", border: "1px solid #9A7C2A30", borderRadius: 4, padding: "2px 7px" }}>FREE</span>
+              {/* Condición del staff: el usuario debe saber que es admin o equipo. */}
+              {user?.role === "admin"
+                ? <span style={{ fontSize: 9 * ts, fontWeight: 800, color: G, background: `${G}1c`, border: `1px solid ${G}40`, borderRadius: 4, padding: "2px 7px" }}>👑 Administrador</span>
+                : isOwner
+                  ? <span style={{ fontSize: 9 * ts, fontWeight: 800, color: "#A78BFA", background: "#A78BFA1c", border: "1px solid #A78BFA40", borderRadius: 4, padding: "2px 7px" }}>🛡️ Equipo RETADOR</span>
+                  : null}
               <span style={{ fontSize: 9 * ts, color: T3 }}>{rating > 0 ? `⭐ ${rating}` : "⭐ Nuevo"} · {sales} {sales === 1 ? "venta" : "ventas"}</span>
             </div>
           </div>

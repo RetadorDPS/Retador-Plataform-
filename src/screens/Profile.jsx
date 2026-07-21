@@ -69,7 +69,7 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
 
         {/* Avatar/nombre — toca para ver perfil completo */}
         <div onClick={onViewProfile} className="cd" style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, background: CARD, border: `1px solid ${B}`, borderRadius: 16, padding: "14px 14px", cursor: "pointer" }}>
-          <Avatar url={avatarSrc} name={name} size={56} style={{ boxShadow: `0 0 18px ${G}35` }} />
+          <Avatar url={avatarSrc} name={name} size={56} verified={!!user?.verified} style={{ boxShadow: `0 0 18px ${G}35` }} />
           <div style={{ flex: 1 }}>
             <p style={{ fontSize: 15 * ts, fontWeight: 800, color: T1 }}>{name}</p>
             <p style={{ fontSize: 10 * ts, color: T2, marginTop: 2 }}>{user?.email || "Ver perfil completo"}</p>
@@ -345,8 +345,8 @@ function FP_Row({ children, border=false, onClick, style={} }) {
 // ── AVATAR ────────────────────────────────────────────────────────
 // Reutiliza el Avatar único de la app: foto si hay; si no, inicial en círculo de
 // color. Nunca emoji.
-function FP_Avatar({ avatar, name, size=72 }) {
-  return <Avatar avatar={avatar} name={name} size={size} />;
+function FP_Avatar({ avatar, name, size=72, verified=false }) {
+  return <Avatar avatar={avatar} name={name} size={size} verified={verified} />;
 }
 
 // ── AVATAR PICKER (SOLO FOTO) ─────────────────────────────────────
@@ -1258,7 +1258,7 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
       ]);
       await submitVerification(user.id, { full_name: fullName.trim(), doc_type: docType, doc_number: docNum.trim(), doc_front: pf, doc_back: pb, selfie: ps });
       onSubmit?.();
-      flash_("✅ Verificación enviada — la revisaremos pronto");
+      flash_("✅ Solicitud de verificación de perfil enviada — la revisaremos pronto");
       onClose();
     } catch (e) {
       flash_("⚠️ " + (e?.message || "No se pudo enviar la verificación"));
@@ -1280,19 +1280,19 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.6)", zIndex:2000, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
       <div onClick={e=>e.stopPropagation()} style={{ background:C.surface, width:"100%", maxWidth:440, borderRadius:"18px 18px 0 0", padding:"20px 18px 26px", border:`1px solid ${C.border}`, maxHeight:"88vh", overflowY:"auto" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
-          <div style={{ fontSize:16, fontWeight:800, color:C.textPrimary }}>Verificar mi cuenta</div>
+          <div style={{ fontSize:16, fontWeight:800, color:C.textPrimary }}>Verificar mi perfil</div>
           <button onClick={onClose} style={{ background:"none", border:"none", color:C.textSecondary, fontSize:22, cursor:"pointer" }}>×</button>
         </div>
 
         {loading ? <div style={{ textAlign:"center", color:C.textSecondary, fontSize:13, padding:"30px 0" }}>Cargando…</div> : <>
-          {(isVerified || status === "approved") && banner(`${C.positive}14`, C.positive, "✓ Tu cuenta ya está verificada")}
+          {(isVerified || status === "approved") && banner(`${C.positive}14`, C.positive, "✓ Tu perfil ya está verificado")}
           {!isVerified && status === "pending" && banner(`${C.warning}14`, C.warning, "🕐 Pendiente de revisión. Te avisamos cuando la revisemos.")}
           {!isVerified && status === "rejected" && (
             <div style={{ marginBottom:14 }}>{banner(`${C.danger}14`, C.danger, `🚫 Rechazada${myVerif?.reject_reason ? `: ${myVerif.reject_reason}` : ""} — puedes intentarlo de nuevo`)}</div>
           )}
 
           {showForm && <>
-            <div style={{ fontSize:12, color:C.textSecondary, margin:"12px 0 16px", lineHeight:1.5 }}>Sube tu documento (frente y reverso) y una selfie sosteniéndolo. Tus datos son confidenciales y solo los ve el equipo de RETADOR.</div>
+            <div style={{ fontSize:12, color:C.textSecondary, margin:"12px 0 16px", lineHeight:1.5 }}>Sube tu documento (frente y reverso) y una selfie sosteniéndolo. Tus documentos son privados: solo el equipo de RETADOR los ve para confirmar tu perfil.</div>
             <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Tipo de documento</div>
             <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap" }}>
               {TYPES.map(t => <button key={t} onClick={()=>setDocType(t)} style={{ padding:"8px 12px", borderRadius:8, cursor:"pointer", fontSize:11.5, fontWeight:600, background: docType===t ? `${C.accent}1a` : C.surfaceTop, border:`1.5px solid ${docType===t ? C.accent : C.border}`, color: docType===t ? C.accent : C.textPrimary }}>{t}</button>)}
@@ -1314,7 +1314,7 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
             </div>
             <div style={{ display:"flex", gap:9 }}>
               <button onClick={onClose} style={{ flex:1, height:44, borderRadius:10, background:C.surfaceTop, border:`1px solid ${C.border}`, color:C.textPrimary, fontSize:13, fontWeight:700, cursor:"pointer" }}>Cancelar</button>
-              <button disabled={!valid || submitting} onClick={doSubmit} style={{ flex:1, height:44, borderRadius:10, background: (valid && !submitting) ? C.positive : C.surfaceTop, border:"none", color: (valid && !submitting) ? "#fff" : C.textSecondary, fontSize:13, fontWeight:800, cursor: (valid && !submitting) ? "pointer" : "default", opacity: (valid && !submitting) ? 1 : .6 }}>{submitting ? "Enviando…" : "Enviar verificación"}</button>
+              <button disabled={!valid || submitting} onClick={doSubmit} style={{ flex:1, height:44, borderRadius:10, background: (valid && !submitting) ? C.positive : C.surfaceTop, border:"none", color: (valid && !submitting) ? "#fff" : C.textSecondary, fontSize:13, fontWeight:800, cursor: (valid && !submitting) ? "pointer" : "default", opacity: (valid && !submitting) ? 1 : .6 }}>{submitting ? "Enviando…" : "Enviar solicitud"}</button>
             </div>
           </>}
         </>}
@@ -1575,7 +1575,7 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
           <div style={{ display:"flex", justifyContent:"space-between",
             alignItems:"flex-start", marginBottom:16 }}>
             <div style={{ position:"relative" }}>
-              <FP_Avatar avatar={profile.avatar} name={profile.name} size={72}/>
+              <FP_Avatar avatar={profile.avatar} name={profile.name} size={72} verified={!!isVerified}/>
               {/* FREE chip */}
               <div style={{ position:"absolute", bottom:-2, left:"50%",
                 transform:"translateX(-50%)",
@@ -1682,7 +1682,7 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
                   border:`1px solid ${isDark ? "rgba(25,195,125,.35)" : "#9DE9CC"}`, color:FP_C.positive,
                   borderRadius:8, height:38, cursor:"pointer", fontSize:12.5, fontWeight:700,
                   display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-                  <FP_Icon d={FP_Icons.shield} size={14} color={FP_C.positive}/> Verificar mi cuenta
+                  <FP_Icon d={FP_Icons.shield} size={14} color={FP_C.positive}/> Verificar mi perfil
                 </button>
               )}
               <button onClick={() => setShowPlans(true)} style={{

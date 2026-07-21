@@ -130,24 +130,35 @@ export const avatarUrlOf = (a) => {
 const _AV_COLORS = ["#6366F1", "#0EA5E9", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#14B8A6"];
 // AVATAR REUTILIZABLE — único en toda la app. Si hay foto muestra <img>; si no,
 // la inicial del nombre en un círculo de color (o un ícono de persona). NUNCA emoji.
-export const Avatar = ({ url, avatar, name, size = 40, style }) => {
+export const Avatar = ({ url, avatar, name, size = 40, style, verified = false }) => {
   const src = avatarUrlOf(url != null ? url : avatar);
   const nm = (name || "").trim();
   const letter = nm ? nm[0].toUpperCase() : null;
   const color = _AV_COLORS[(nm.charCodeAt(0) || 0) % _AV_COLORS.length];
-  const base = { width: size, height: size, borderRadius: "50%", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", ...style };
-  if (src) return <div style={base}><img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.style.display = "none"; }} /></div>;
-  return <div style={{ ...base, background: color, color: "#fff", fontWeight: 800, fontSize: Math.round(size * 0.42) }}>
-    {letter || <Ic n="user" c="#fff" s={Math.round(size * 0.55)} />}
+  // Sin verificar: se conserva EXACTAMENTE el render de antes (un solo div con `style`).
+  const base = { width: size, height: size, borderRadius: "50%", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", ...(verified ? {} : style) };
+  const face = src
+    ? <div style={base}><img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.style.display = "none"; }} /></div>
+    : <div style={{ ...base, background: color, color: "#fff", fontWeight: 800, fontSize: Math.round(size * 0.42) }}>
+        {letter || <Ic n="user" c="#fff" s={Math.round(size * 0.55)} />}
+      </div>;
+  if (!verified) return face;
+  // Verificado: insignia dorada ✓ (perfil verificado) anclada abajo-derecha.
+  const tick = Math.max(12, Math.round(size * 0.34));
+  return <div style={{ position: "relative", width: size, height: size, flexShrink: 0, ...style }}>
+    {face}
+    <div title="Perfil verificado" style={{ position: "absolute", right: -1, bottom: -1, width: tick, height: tick, borderRadius: "50%", background: G, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 0 2px rgba(0,0,0,.55)" }}>
+      <svg width={Math.round(tick * 0.6)} height={Math.round(tick * 0.6)} viewBox="0 0 24 24" fill="none" stroke="#1a1a1a" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+    </div>
   </div>;
 };
-// Igual que Avatar, pero resuelve la foto y el nombre REALES de una persona por su
-// id (tabla profiles, con caché). Úsalo donde solo tienes el id/el nombre viejo:
-// vendedor del producto, partes de un pedido, resultados. Solo foto pública.
-export const AvatarUser = ({ userId, name, size = 40, style }) => {
+// Igual que Avatar, pero resuelve la foto, el nombre y el ✓ REALES de una persona por
+// su id (tabla profiles, con caché). Úsalo donde solo tienes el id: vendedor del
+// producto, partes de un pedido, chat, resultados. `verified` explícito tiene prioridad.
+export const AvatarUser = ({ userId, name, size = 40, style, verified }) => {
   const [p, setP] = useState(null);
   useEffect(() => { let a = true; if (userId) getUserById(userId).then(x => { if (a) setP(x); }).catch(() => {}); return () => { a = false; }; }, [userId]);
-  return <Avatar url={p?.avatar || null} name={p?.name || name} size={size} style={style} />;
+  return <Avatar url={p?.avatar || null} name={p?.name || name} size={size} style={style} verified={verified != null ? verified : !!p?.verified} />;
 };
 
 export const Logo = ({ size = 21, sub = null }) => {

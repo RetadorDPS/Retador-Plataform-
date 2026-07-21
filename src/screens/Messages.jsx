@@ -129,7 +129,7 @@ export function MessagesScreen({ user, onBack, onChat, chatOpen = false }) {
                   const unread = c.unread || 0;
                   return (
                     <div key={c.id} className="cd" onClick={() => onChat(c)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 10px", borderRadius: 14, cursor: "pointer" }}>
-                      <Avatar url={c.otherAvatar} name={c.name} size={50} />
+                      <AvatarUser userId={c.otherId} name={c.name} size={50} verified={c.otherVerified} />
                       <div style={{ flex: 1, minWidth: 0, borderBottom: `1px solid ${B}`, paddingBottom: 11 }}>
                         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 3 }}>
                           <p style={{ fontSize: 14, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</p>

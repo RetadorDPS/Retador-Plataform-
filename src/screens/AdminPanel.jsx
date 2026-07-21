@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -1813,53 +1813,84 @@ function ModeracionPublicaciones({ toast, onViewProfile, ro, onResolved }){
 }
 
 /* ── Directorio REAL de usuarios (profiles) — verificar/suspender de verdad ──── */
-function RealUsersDirectory({ toast, meId, ro }){
+// ── USUARIOS (con pestañas) — UNA sola fuente, la ficha es el ÚNICO sitio de acción ──
+// Pestañas: 👥 Todos · 🪪 Verificaciones pendientes · ⭐ Solicitudes de plan. Las filas
+// abren la FICHA del usuario; ahí viven TODAS las acciones (verificar/plan/suspender).
+function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, initialTab = 'all' }){
   const PAGE = 20;
-  const [q, setQ] = useState("");
-  const [dq, setDq] = useState("");           // query con debounce
-  const [page, setPage] = useState(0);
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [hasMore, setHasMore] = useState(false);
-  const [busy, setBusy] = useState(null);      // id en proceso
-  const [sel, setSel] = useState(null);        // ficha rápida
-  const [selCount, setSelCount] = useState(null);
-  const [suspendFor, setSuspendFor] = useState(null); // { u } → modal de motivo
-  const [reason, setReason] = useState("");
+  const lvl = (k) => access[k] || 'none';
+  const canUsers = lvl('users') !== 'none', canVerif = lvl('verif') !== 'none', canPlans = lvl('plans') !== 'none';
+  const mngUsers = lvl('users') === 'manage', mngVerif = lvl('verif') === 'manage', mngPlans = lvl('plans') === 'manage';
+  const TABS = [
+    canUsers && { k:'all',   label:'👥 Todos' },
+    canVerif && { k:'verif', label:'🪪 Verificaciones' },
+    canPlans && { k:'plans', label:'⭐ Planes' },
+  ].filter(Boolean);
+  const [tab, setTab] = useState((TABS.find(t=>t.k===initialTab)||TABS[0]||{k:'all'}).k);
+  useEffect(()=>{ if(TABS.some(t=>t.k===initialTab)) setTab(initialTab); }, [initialTab]);
 
-  useEffect(() => { const t = setTimeout(() => setDq(q), 350); return () => clearTimeout(t); }, [q]);
-  useEffect(() => {
-    let alive = true; setLoading(true);
-    const from = page * PAGE;
-    adminListUsers({ query: dq, from, to: from + PAGE - 1 })
-      .then(d => { if (!alive) return; setRows(d); setHasMore(d.length === PAGE); setLoading(false); })
-      .catch(() => { if (alive) { setRows([]); setLoading(false); } });
-    return () => { alive = false; };
-  }, [dq, page]);
+  // Directorio (Todos)
+  const [q,setQ]=useState(""); const [dq,setDq]=useState(""); const [page,setPage]=useState(0);
+  const [rows,setRows]=useState([]); const [loading,setLoading]=useState(true); const [hasMore,setHasMore]=useState(false);
+  useEffect(()=>{ const t=setTimeout(()=>setDq(q),350); return ()=>clearTimeout(t); },[q]);
+  useEffect(()=>{
+    if(tab!=='all') return;
+    let alive=true; setLoading(true); const from=page*PAGE;
+    adminListUsers({query:dq,from,to:from+PAGE-1}).then(d=>{ if(!alive)return; setRows(d); setHasMore(d.length===PAGE); setLoading(false); }).catch(()=>{ if(alive){setRows([]);setLoading(false);} });
+    return ()=>{ alive=false; };
+  },[dq,page,tab]);
 
-  const nmeOf = u => u.full_name || u.email || "Usuario";
-  const patch = (id, p) => { setRows(rs => rs.map(r => r.id === id ? { ...r, ...p } : r)); setSel(s => s && s.id === id ? { ...s, ...p } : s); };
-  // Miembros del equipo (staff_permissions) para el chip 🛡️ Equipo. Best-effort:
-  // si no hay permiso para leer la tabla, el set queda vacío (solo se ve 👑 por rol).
-  const [staffIds, setStaffIds] = useState(() => new Set());
-  useEffect(() => { adminListStaff().then(list => setStaffIds(new Set((list || []).map(m => m.user_id)))).catch(() => {}); }, []);
+  // Colas pendientes (verificaciones y planes) + nombres/perfiles
+  const [verifs,setVerifs]=useState(null);
+  const [plans,setPlans]=useState(null);
+  const [names,setNames]=useState({});
+  const loadVerifs=useCallback(()=>{ if(!canVerif){ setVerifs([]); return; } adminListVerifications({status:'pending',from:0,to:49}).then(async d=>{ setVerifs(d); const m=await getProfilesByIds(d.map(v=>v.user_id)).catch(()=>({})); setNames(p=>({...p,...m})); }).catch(()=>setVerifs([])); },[canVerif]);
+  const loadPlans=useCallback(()=>{ if(!canPlans){ setPlans([]); return; } adminListPlanRequests({status:'pending',from:0,to:49}).then(async d=>{ setPlans(d); const m=await getProfilesByIds(d.map(r=>r.user_id)).catch(()=>({})); setNames(p=>({...p,...m})); }).catch(()=>setPlans([])); },[canPlans]);
+  useEffect(()=>{ loadVerifs(); },[loadVerifs]);
+  useEffect(()=>{ loadPlans(); },[loadPlans]);
+  // Realtime: las colas se refrescan cuando alguien (del staff) resuelve algo.
+  useEffect(()=>{
+    const ch=supabase.channel(`usershub-${Date.now()}`)
+      .on("postgres_changes",{event:"*",schema:"public",table:"verifications"},()=>loadVerifs())
+      .on("postgres_changes",{event:"*",schema:"public",table:"plan_requests"},()=>loadPlans())
+      .subscribe();
+    return ()=>{ try{Promise.resolve(supabase.removeChannel(ch)).catch(()=>{});}catch(e){} };
+  },[loadVerifs,loadPlans]);
 
-  const doVerify = async (u, verified) => {
-    setBusy(u.id);
-    try { await adminSetVerified(u.id, verified); patch(u.id, { is_verified: verified }); toast(verified ? `✓ ${nmeOf(u)} verificado` : `Verificación retirada a ${nmeOf(u)}`); }
-    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
-    setBusy(null);
+  // Chip 🛡️ Equipo
+  const [staffIds,setStaffIds]=useState(()=>new Set());
+  useEffect(()=>{ adminListStaff().then(list=>setStaffIds(new Set((list||[]).map(m=>m.user_id)))).catch(()=>{}); },[]);
+
+  // ── Ficha (ÚNICO sitio de acción) ──
+  const [sel,setSel]=useState(null);
+  const [selVerif,setSelVerif]=useState(undefined); // undefined=cargando · null=ninguna · obj
+  const [selPlan,setSelPlan]=useState(null);
+  const [selCount,setSelCount]=useState(null);
+  const [busy,setBusy]=useState(null);
+  const [zoom,setZoom]=useState(null);
+  const [rejectFor,setRejectFor]=useState(null);
+  const [reason,setReason]=useState("");
+  const [suspendFor,setSuspendFor]=useState(null);
+  const [susReason,setSusReason]=useState("");
+
+  const nmeOf = u => (u && (u.full_name || u.email)) || "Usuario";
+  const emsg = e => e?.message || e?.details || e?.hint || "No se pudo (sin mensaje del backend)";
+  const openSheet = async (u, plan=null) => {
+    setSel(u); setSelVerif(undefined); setSelPlan(plan); setSelCount(null); setZoom(null);
+    adminGetProfileById(u.id).then(p=>{ if(p) setSel(s=> s&&s.id===u.id ? {...s,...p} : s); }).catch(()=>{});
+    getMyVerification(u.id).then(v=>setSelVerif(v||null)).catch(()=>setSelVerif(null));
+    if(!plan && canPlans){ const pr=(plans||[]).find(r=>r.user_id===u.id); if(pr) setSelPlan(pr); }
+    const c=await getSellerProductCount(u.id).catch(()=>0); setSelCount(c);
   };
-  const doSuspend = async (u, suspended, why) => {
-    setBusy(u.id);
-    try { await adminSetSuspended(u.id, suspended, why || null); patch(u.id, { is_suspended: suspended }); toast(suspended ? `⛔ ${nmeOf(u)} suspendido` : `✅ ${nmeOf(u)} reactivado`); }
-    catch (e) { toast("⚠️ " + (e?.message || "No se pudo")); }
-    setBusy(null);
-  };
-  const openSuspend = (u) => { setReason(""); setSuspendFor(u); };
-  const confirmSuspend = async () => { const u = suspendFor; setSuspendFor(null); await doSuspend(u, true, reason.trim()); };
+  const closeSheet = () => { setSel(null); setSelVerif(undefined); setSelPlan(null); };
+  const afterChange = () => { loadVerifs(); loadPlans(); onResolved && onResolved(); };
 
-  const openSheet = async (u) => { setSel(u); setSelCount(null); const c = await getSellerProductCount(u.id).catch(() => 0); setSelCount(c); };
+  const approveVerif = async (v) => { setBusy('v'); try{ await adminReviewVerification(v.id,true); toast('✓ Perfil verificado'); setSel(s=>s?{...s,is_verified:true}:s); setSelVerif({...v,status:'approved'}); afterChange(); }catch(e){ toast('⚠️ '+emsg(e)); } setBusy(null); };
+  const rejectVerif = async () => { const v=rejectFor; const why=reason.trim(); setRejectFor(null); setBusy('v'); try{ await adminReviewVerification(v.id,false,why||null); toast('🚫 Solicitud de verificación de perfil rechazada'); setSelVerif({...v,status:'rejected',reject_reason:why}); afterChange(); }catch(e){ toast('⚠️ '+emsg(e)); } setBusy(null); };
+  const removeVerif = async () => { setBusy('v'); try{ await adminSetVerified(sel.id,false); toast('Verificación de perfil retirada'); setSel(s=>s?{...s,is_verified:false}:s); afterChange(); }catch(e){ toast('⚠️ '+emsg(e)); } setBusy(null); };
+  const decidePlan = async (approve) => { const r=selPlan; setBusy('p'); try{ await adminReviewPlan(r.id,approve); toast(approve?`✅ Plan ${r.plan} aprobado`:'Solicitud de plan rechazada'); setSelPlan(null); afterChange(); }catch(e){ toast('⚠️ '+emsg(e)); } setBusy(null); };
+  const doSuspend = async (u,suspended,why) => { setBusy('s'); try{ await adminSetSuspended(u.id,suspended,why||null); toast(suspended?`⛔ ${nmeOf(u)} suspendido`:`✅ ${nmeOf(u)} reactivado`); setSel(s=>s?{...s,is_suspended:suspended}:s); }catch(e){ toast('⚠️ '+emsg(e)); } setBusy(null); };
+  const confirmSuspend = async () => { const u=suspendFor; setSuspendFor(null); await doSuspend(u,true,susReason.trim()); };
 
   const chips = (u) => (
     <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
@@ -1867,52 +1898,96 @@ function RealUsersDirectory({ toast, meId, ro }){
       {u.role !== 'admin' && staffIds.has(u.id) && <span className="bdg bp">🛡️ Equipo</span>}
       {u.role === 'courier' && <span className="bdg bb">Mensajero</span>}
       {u.plan && u.plan !== 'gratis' && <span className="bdg bx">{u.plan}</span>}
-      {u.is_verified && <span className="bdg" style={{ background:'rgba(255,192,30,.14)', color:G }}>✓ Verificado</span>}
+      {u.is_verified && <span className="bdg" style={{ background:'rgba(255,192,30,.14)', color:G }}>✓ Perfil verificado</span>}
       {u.is_suspended && <span className="bdg br">⛔ Suspendido</span>}
     </div>
   );
 
+  const fieldRow = (label, node) => (<div style={{display:'flex',justifyContent:'space-between',gap:12,padding:'6px 0',borderBottom:'1px solid var(--bd)'}}><span style={{fontSize:12,color:'var(--tx3)'}}>{label}</span><span style={{fontSize:12,fontWeight:600,textAlign:'right'}}>{node}</span></div>);
+
   return (
     <div className="card cp">
-      <div className="ch"><span className="ct">Directorio de usuarios</span><span className="bdg bx">{rows.length}{hasMore ? '+' : ''}</span></div>
-      <div style={{ fontSize:11, color:'var(--tx3)', margin:'2px 0 10px' }}>Perfiles reales de la plataforma. Busca, verifica o suspende. Toca una fila para su ficha.</div>
-      <input value={q} onChange={e => { setQ(e.target.value); setPage(0); }} placeholder="Buscar por nombre o email…"
-        style={{ width:'100%', boxSizing:'border-box', background:'var(--bg3,#12151f)', border:'1px solid var(--bd2,#222)', borderRadius:10, padding:'10px 12px', color:'var(--tx)', fontSize:13, outline:'none', marginBottom:10 }} />
-      {loading
-        ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'24px 6px' }}>Cargando usuarios…</div>
-        : rows.length === 0
-          ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'24px 6px' }}>{dq ? 'Nadie coincide con la búsqueda.' : 'Aún no hay usuarios.'}</div>
-          : rows.map(u => (
-            <div key={u.id} onClick={() => openSheet(u)} className="reprow"
-              style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 8px', margin:'0 -8px', borderRadius:9, cursor:'pointer', borderBottom:'1px solid rgba(128,128,128,.1)', background: u.is_suspended ? 'rgba(224,82,82,.05)' : undefined }}>
-              <Avatar url={avatarUrlOf(u.avatar_url)} name={nmeOf(u)} size={38} />
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tx)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{nmeOf(u)}{u.id === meId && <span style={{ color:'var(--tx3)', fontWeight:500 }}> · tú</span>}</div>
-                <div style={{ fontSize:11, color:'var(--tx3)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{u.email || '—'}</div>
-                <div style={{ marginTop:4 }}>{chips(u)}</div>
+      <div className="ch"><span className="ct">Usuarios</span></div>
+      <div className="tabs" style={{ maxWidth:360, marginBottom:10 }}>
+        {TABS.map(t=>{
+          const cnt = t.k==='verif' ? (verifs?verifs.length:null) : t.k==='plans' ? (plans?plans.length:null) : null;
+          return <div key={t.k} className={`tab ${tab===t.k?'on':''}`} onClick={()=>setTab(t.k)} style={{display:'flex',alignItems:'center',gap:5,justifyContent:'center'}}>
+            {t.label}{cnt>0 && <span style={{minWidth:16,height:16,borderRadius:999,background:G,color:'#000',fontSize:9.5,fontWeight:800,display:'inline-flex',alignItems:'center',justifyContent:'center',padding:'0 4px'}}>{cnt}</span>}
+          </div>;
+        })}
+      </div>
+
+      {/* ── Pestaña TODOS ── */}
+      {tab==='all' && <>
+        <div style={{ fontSize:11, color:'var(--tx3)', margin:'0 0 10px' }}>Perfiles reales de la plataforma. Toca una fila para su ficha (ahí verificas, apruebas planes o suspendes).</div>
+        <input value={q} onChange={e => { setQ(e.target.value); setPage(0); }} placeholder="Buscar por nombre o email…"
+          style={{ width:'100%', boxSizing:'border-box', background:'var(--bg3,#12151f)', border:'1px solid var(--bd2,#222)', borderRadius:10, padding:'10px 12px', color:'var(--tx)', fontSize:13, outline:'none', marginBottom:10 }} />
+        {loading
+          ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'24px 6px' }}>Cargando usuarios…</div>
+          : rows.length === 0
+            ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'24px 6px' }}>{dq ? 'Nadie coincide con la búsqueda.' : 'Aún no hay usuarios.'}</div>
+            : rows.map(u => (
+              <div key={u.id} onClick={() => openSheet(u)} className="reprow"
+                style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 8px', margin:'0 -8px', borderRadius:9, cursor:'pointer', borderBottom:'1px solid rgba(128,128,128,.1)', background: u.is_suspended ? 'rgba(224,82,82,.05)' : undefined }}>
+                <Avatar url={avatarUrlOf(u.avatar_url)} name={nmeOf(u)} size={38} verified={!!u.is_verified} />
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tx)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{nmeOf(u)}{u.id === meId && <span style={{ color:'var(--tx3)', fontWeight:500 }}> · tú</span>}</div>
+                  <div style={{ fontSize:11, color:'var(--tx3)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{u.email || '—'}</div>
+                  <div style={{ marginTop:4 }}>{chips(u)}</div>
+                </div>
+                <span style={{ fontSize:16, color:'var(--tx3)', flexShrink:0 }}>›</span>
               </div>
-              {!ro && <div style={{ display:'flex', gap:4, flexShrink:0 }} onClick={e => e.stopPropagation()}>
-                <button className="btn bts sm" disabled={busy === u.id} onClick={() => doVerify(u, !u.is_verified)}>{u.is_verified ? 'Quitar ✓' : '✓ Verificar'}</button>
-                {u.is_suspended
-                  ? <button className="btn btg sm" disabled={busy === u.id} onClick={() => doSuspend(u, false)}>Reactivar</button>
-                  : <button className="btn btd sm" disabled={busy === u.id || u.id === meId} onClick={() => openSuspend(u)}>Suspender</button>}
-              </div>}
+            ))}
+        {!loading && (page > 0 || hasMore) && (
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:10 }}>
+            <button className="btn sm" disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))} style={{ opacity: page === 0 ? .4 : 1 }}>‹ Anterior</button>
+            <span style={{ fontSize:11, color:'var(--tx3)' }}>Página {page + 1}</span>
+            <button className="btn sm" disabled={!hasMore} onClick={() => setPage(p => p + 1)} style={{ opacity: hasMore ? 1 : .4 }}>Siguiente ›</button>
+          </div>
+        )}
+      </>}
+
+      {/* ── Pestaña VERIFICACIONES pendientes ── */}
+      {tab==='verif' && <>
+        <div style={{ fontSize:11, color:'var(--tx3)', margin:'0 0 10px' }}>Solicitudes de verificación de perfil. Toca una para revisar documentos y decidir en su ficha.</div>
+        {verifs===null ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>Cargando…</div>
+          : verifs.length===0 ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>Sin solicitudes pendientes.</div>
+          : verifs.map(v=>{ const pr=names[v.user_id]; return (
+            <div key={v.id} onClick={()=>openSheet({ id:v.user_id, full_name:v.full_name||pr?.full_name, avatar_url:pr?.avatar_url })} className="reprow" style={{display:'flex',alignItems:'center',gap:10,padding:'10px 8px',margin:'0 -8px',borderRadius:9,cursor:'pointer',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+              <Avatar url={avatarUrlOf(pr?.avatar_url)} name={v.full_name||pr?.full_name||'Usuario'} size={38} />
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12.5,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{v.full_name||pr?.full_name||'Usuario'}</div>
+                <div style={{fontSize:11,color:'var(--tx3)'}}>{v.doc_type||'—'} · {v.doc_number||'—'} · {v.created_at?new Date(v.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}):''}</div>
+                <div style={{marginTop:4}}><span className="bdg by">🕐 Pendiente</span></div>
+              </div>
+              <span style={{fontSize:16,color:'var(--tx3)',flexShrink:0}}>›</span>
             </div>
-          ))}
-      {!loading && (page > 0 || hasMore) && (
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:10 }}>
-          <button className="btn sm" disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))} style={{ opacity: page === 0 ? .4 : 1 }}>‹ Anterior</button>
-          <span style={{ fontSize:11, color:'var(--tx3)' }}>Página {page + 1}</span>
-          <button className="btn sm" disabled={!hasMore} onClick={() => setPage(p => p + 1)} style={{ opacity: hasMore ? 1 : .4 }}>Siguiente ›</button>
-        </div>
-      )}
+          ); })}
+      </>}
+
+      {/* ── Pestaña PLANES pendientes ── */}
+      {tab==='plans' && <>
+        <div style={{ fontSize:11, color:'var(--tx3)', margin:'0 0 10px' }}>Solicitudes de plan. Toca una para aprobar o rechazar en la ficha del usuario.</div>
+        {plans===null ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>Cargando…</div>
+          : plans.length===0 ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>Sin solicitudes pendientes.</div>
+          : plans.map(r=>{ const pr=names[r.user_id]; return (
+            <div key={r.id} onClick={()=>openSheet({ id:r.user_id, full_name:pr?.full_name, avatar_url:pr?.avatar_url }, r)} className="reprow" style={{display:'flex',alignItems:'center',gap:10,padding:'10px 8px',margin:'0 -8px',borderRadius:9,cursor:'pointer',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+              <Avatar url={avatarUrlOf(pr?.avatar_url)} name={pr?.full_name||'Usuario'} size={36} />
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12.5,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{pr?.full_name||'Usuario'}</div>
+                <div style={{fontSize:11,color:'var(--tx3)'}}>quiere <b style={{color:'var(--ac)',textTransform:'capitalize'}}>{r.plan}</b> · {r.created_at?new Date(r.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}):''}</div>
+              </div>
+              <span style={{fontSize:16,color:'var(--tx3)',flexShrink:0}}>›</span>
+            </div>
+          ); })}
+      </>}
 
       {/* Modal de motivo al suspender */}
       {suspendFor && <div className="mo" onClick={() => setSuspendFor(null)}>
         <div className="mb" onClick={e => e.stopPropagation()} style={{ maxWidth:360 }}>
           <div className="mt">Suspender a {nmeOf(suspendFor)}</div>
           <div className="ms">No podrá publicar, comprar ni chatear hasta reactivarlo. Recibirá una notificación.</div>
-          <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Motivo (opcional)…"
+          <textarea value={susReason} onChange={e => setSusReason(e.target.value)} rows={3} placeholder="Motivo (opcional)…"
             style={{ width:'100%', boxSizing:'border-box', background:'var(--bg3,#12151f)', border:'1px solid var(--bd2,#222)', borderRadius:10, padding:'10px 12px', color:'var(--tx)', fontSize:13, outline:'none', resize:'none', margin:'6px 0 12px' }} />
           <div style={{ display:'flex', gap:8 }}>
             <button className="btn" style={{ flex:1 }} onClick={() => setSuspendFor(null)}>Cancelar</button>
@@ -1921,15 +1996,34 @@ function RealUsersDirectory({ toast, meId, ro }){
         </div>
       </div>}
 
-      {/* Ficha rápida del usuario */}
-      {sel && <div className="mo" onClick={() => setSel(null)}>
-        <div className="mb" onClick={e => e.stopPropagation()} style={{ maxWidth:380 }}>
+      {/* Motivo al rechazar verificación */}
+      {rejectFor && <div className="mo" onClick={()=>setRejectFor(null)}>
+        <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:360}}>
+          <div className="mt">Rechazar solicitud de verificación de perfil</div>
+          <div className="ms">El usuario verá el motivo y podrá reenviar su solicitud.</div>
+          <textarea value={reason} onChange={e=>setReason(e.target.value)} rows={3} placeholder="Motivo (opcional)…" style={{width:'100%',boxSizing:'border-box',background:'var(--bg3,#12151f)',border:'1px solid var(--bd2,#222)',borderRadius:10,padding:'10px 12px',color:'var(--tx)',fontSize:13,outline:'none',resize:'none',margin:'6px 0 12px'}}/>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn" style={{flex:1}} onClick={()=>setRejectFor(null)}>Cancelar</button>
+            <button className="btn btd" style={{flex:1}} onClick={rejectVerif}>Rechazar</button>
+          </div>
+        </div>
+      </div>}
+
+      {/* Visor grande de foto KYC */}
+      {zoom && <div className="mo" onClick={()=>setZoom(null)} style={{zIndex:6000}}>
+        <img src={zoom} alt="" onClick={e=>e.stopPropagation()} style={{maxWidth:'92vw',maxHeight:'88vh',borderRadius:12,objectFit:'contain'}}/>
+      </div>}
+
+      {/* ── FICHA del usuario: ÚNICO sitio de acción ── */}
+      {sel && <div className="mo" onClick={closeSheet}>
+        <div className="mb" onClick={e => e.stopPropagation()} style={{ maxWidth:400, maxHeight:'88vh', overflowY:'auto' }}>
           <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:12 }}>
-            <Avatar url={avatarUrlOf(sel.avatar_url)} name={nmeOf(sel)} size={52} />
-            <div style={{ minWidth:0 }}>
+            <Avatar url={avatarUrlOf(sel.avatar_url)} name={nmeOf(sel)} size={52} verified={!!sel.is_verified} />
+            <div style={{ minWidth:0, flex:1 }}>
               <div style={{ fontSize:15, fontWeight:800, color:'var(--tx)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{nmeOf(sel)}</div>
               <div style={{ fontSize:12, color:'var(--tx3)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{sel.email || '—'}</div>
             </div>
+            {onViewProfile && <button className="btn sm" onClick={()=>{ onViewProfile(sel.id); closeSheet(); }}>Ver perfil</button>}
           </div>
           <div style={{ marginBottom:12 }}>{chips(sel)}</div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:14 }}>
@@ -1943,14 +2037,58 @@ function RealUsersDirectory({ toast, meId, ro }){
               </div>
             ))}
           </div>
-          {ro
-            ? <div style={{ textAlign:'center', fontSize:11, color:'var(--tx3)' }}>👁 Solo lectura</div>
-            : <div style={{ display:'flex', gap:8 }}>
-            <button className="btn bts" style={{ flex:1 }} disabled={busy === sel.id} onClick={() => doVerify(sel, !sel.is_verified)}>{sel.is_verified ? 'Quitar verificación' : '✓ Verificar'}</button>
-            {sel.is_suspended
-              ? <button className="btn btg" style={{ flex:1 }} disabled={busy === sel.id} onClick={() => doSuspend(sel, false)}>Reactivar</button>
-              : <button className="btn btd" style={{ flex:1 }} disabled={busy === sel.id || sel.id === meId} onClick={() => { const u = sel; setSel(null); openSuspend(u); }}>Suspender</button>}
+
+          {/* Bloque VERIFICACIÓN — 3 casos. El ✓ SOLO se da a quien envió su solicitud. */}
+          {canVerif && <div style={{ background:'var(--bg2)', border:'1px solid var(--bd)', borderRadius:12, padding:'12px', marginBottom:12 }}>
+            <div style={{ fontSize:12, fontWeight:800, color:'var(--tx)', marginBottom:8 }}>🪪 Verificación de perfil</div>
+            {sel.is_verified
+              ? <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                  <span style={{ fontSize:12.5, fontWeight:700, color:G }}>✓ Perfil verificado</span>
+                  {mngVerif && <button className="btn btd sm" style={{ marginLeft:'auto' }} disabled={busy==='v'} onClick={removeVerif}>Quitar verificación</button>}
+                </div>
+              : selVerif===undefined
+                ? <div style={{ fontSize:12, color:'var(--tx3)' }}>Cargando solicitud…</div>
+                : (selVerif && selVerif.status==='pending')
+                  ? <>
+                      {fieldRow('Nombre', selVerif.full_name || '—')}
+                      {fieldRow('Documento', selVerif.doc_type || '—')}
+                      {fieldRow('Número', selVerif.doc_number || '—')}
+                      {fieldRow('Enviada', selVerif.created_at ? new Date(selVerif.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short',year:'numeric'}) : '—')}
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, margin:'10px 0' }}>
+                        {[['Frente',selVerif.doc_front],['Reverso',selVerif.doc_back],['Selfie',selVerif.selfie]].map(([lbl,p])=>(
+                          <KycPhoto key={lbl} label={lbl} path={p} onZoom={setZoom} />
+                        ))}
+                      </div>
+                      {mngVerif
+                        ? <div style={{ display:'flex', gap:8 }}>
+                            <button className="btn bts" style={{ flex:1 }} disabled={busy==='v'} onClick={()=>approveVerif(selVerif)}>✅ Aprobar</button>
+                            <button className="btn btd" style={{ flex:1 }} disabled={busy==='v'} onClick={()=>{ setReason(''); setRejectFor(selVerif); }}>🚫 Rechazar</button>
+                          </div>
+                        : <div style={{ textAlign:'center', fontSize:11, color:'var(--tx3)' }}>👁 Solo lectura</div>}
+                    </>
+                  : <div style={{ fontSize:12, color:'var(--tx3)' }}>Sin solicitud de verificación de perfil. El ✓ se otorga solo cuando la persona envía sus documentos.</div>}
           </div>}
+
+          {/* Bloque PLAN pendiente */}
+          {canPlans && selPlan && <div style={{ background:'var(--bg2)', border:'1px solid var(--bd)', borderRadius:12, padding:'12px', marginBottom:12 }}>
+            <div style={{ fontSize:12, fontWeight:800, color:'var(--tx)', marginBottom:8 }}>⭐ Solicitud de plan</div>
+            <div style={{ fontSize:12, color:'var(--tx2)', marginBottom:10 }}>Pide el plan <b style={{ color:'var(--ac)', textTransform:'capitalize' }}>{selPlan.plan}</b>. Confirma el pago y aprueba: el plan cambia de verdad.</div>
+            {mngPlans
+              ? <div style={{ display:'flex', gap:8 }}>
+                  <button className="btn bts" style={{ flex:1 }} disabled={busy==='p'} onClick={()=>decidePlan(true)}>✅ Aprobar</button>
+                  <button className="btn btd" style={{ flex:1 }} disabled={busy==='p'} onClick={()=>decidePlan(false)}>🚫 Rechazar</button>
+                </div>
+              : <div style={{ textAlign:'center', fontSize:11, color:'var(--tx3)' }}>👁 Solo lectura</div>}
+          </div>}
+
+          {/* Acción de cuenta: suspender / reactivar */}
+          {canUsers && (mngUsers
+            ? <div style={{ display:'flex', gap:8 }}>
+                {sel.is_suspended
+                  ? <button className="btn btg" style={{ flex:1 }} disabled={busy==='s'} onClick={()=>doSuspend(sel,false)}>Reactivar</button>
+                  : <button className="btn btd" style={{ flex:1 }} disabled={busy==='s' || sel.id===meId} onClick={()=>{ setSusReason(''); setSuspendFor(sel); }}>Suspender</button>}
+              </div>
+            : <div style={{ textAlign:'center', fontSize:11, color:'var(--tx3)' }}>👁 Solo lectura</div>)}
         </div>
       </div>}
     </div>
@@ -1978,215 +2116,6 @@ function KycPhoto({ path, label, onZoom }){
       {state==='ok' && <img src={url} alt={label} onError={()=>setState('error')} style={{width:'100%',height:'100%',objectFit:'cover'}}/>}
     </div>
   );
-}
-
-/* ── Cola REAL de verificaciones (KYC) ──────────────────────────────────────── */
-function VerificationQueue({ toast, onViewProfile, ro, onResolved }){
-  const [filter, setFilter] = useState("pending"); // pending|approved|rejected
-  const [rows, setRows] = useState([]);
-  const [names, setNames] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(null);
-  const [sel, setSel] = useState(null);            // ficha con fotos
-  const [zoom, setZoom] = useState(null);          // foto ampliada
-  const [rejectFor, setRejectFor] = useState(null);
-  const [reason, setReason] = useState("");
-
-  const load = useCallback(() => {
-    setLoading(true);
-    adminListVerifications({ status: filter, from: 0, to: 49 })
-      .then(async d => {
-        setRows(d); setLoading(false);
-        const map = await getProfilesByIds(d.map(v => v.user_id)).catch(() => ({}));
-        setNames(map);
-      })
-      .catch(() => { setRows([]); setLoading(false); });
-  }, [filter]);
-  useEffect(() => { load(); }, [load]);
-  // Realtime: la cola se actualiza sola cuando llega/cambia una verificación.
-  useEffect(() => {
-    const ch = supabase.channel(`admin-verifs-${Date.now()}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "verifications" }, () => load())
-      .subscribe();
-    return () => { try { Promise.resolve(supabase.removeChannel(ch)).catch(()=>{}); } catch(e){} };
-  }, [load]);
-
-  const openSheet = (v) => { setSel(v); };  // cada foto (KycPhoto) carga su propio signed url con reintento
-  const patch = (id, p) => { setRows(rs => rs.map(r => r.id === id ? { ...r, ...p } : r)); setSel(s => s && s.id === id ? { ...s, ...p } : s); };
-  // Muestra el mensaje EXACTO del backend (message/details/hint), nunca un genérico a secas.
-  const errMsg = (e) => e?.message || e?.details || e?.hint || e?.error_description || "No se pudo (sin mensaje del backend)";
-  const approve = async (v) => {
-    setBusy(v.id);
-    try { await adminReviewVerification(v.id, true); patch(v.id, { status: "approved" }); toast(`✓ ${v.full_name || 'Usuario'} verificado`); if (filter === "pending") setRows(rs => rs.filter(r => r.id !== v.id)); setSel(null); onResolved && onResolved(); }
-    catch (e) { toast("⚠️ " + errMsg(e)); }
-    setBusy(null);
-  };
-  const doReject = async () => {
-    const v = rejectFor; const why = reason.trim(); setRejectFor(null);
-    setBusy(v.id);
-    try { await adminReviewVerification(v.id, false, why || null); patch(v.id, { status: "rejected", reject_reason: why }); toast(`🚫 Verificación de ${v.full_name || 'usuario'} rechazada`); if (filter === "pending") setRows(rs => rs.filter(r => r.id !== v.id)); setSel(null); onResolved && onResolved(); }
-    catch (e) { toast("⚠️ " + errMsg(e)); }
-    setBusy(null);
-  };
-  const chip = (s) => s === "approved" ? <span className="bdg bg">✓ Aprobada</span> : s === "rejected" ? <span className="bdg br">🚫 Rechazada</span> : <span className="bdg by">🕐 Pendiente</span>;
-  const pending = rows.filter(r => r.status === "pending").length;
-
-  return (
-    <div className="card cp mb16">
-      <div className="ch"><span className="ct">Verificación de identidad</span><span className={`bdg ${filter==='pending'&&pending?'by':'bx'}`}>{filter==='pending'? `${pending} pendientes` : `${rows.length}`}</span></div>
-      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Revisa el documento y la selfie. Al aprobar, el usuario queda verificado (insignia real) y recibe aviso.</div>
-      <div className="tabs" style={{maxWidth:320,marginBottom:10}}>
-        {[["pending","Pendientes"],["approved","Aprobadas"],["rejected","Rechazadas"]].map(([k,l])=><div key={k} className={`tab ${filter===k?'on':''}`} onClick={()=>setFilter(k)}>{l}</div>)}
-      </div>
-      {loading ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Cargando…</div>
-        : rows.length===0 ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Sin solicitudes.</div>
-        : rows.map(v => { const pr = names[v.user_id]; return (
-          <div key={v.id} onClick={()=>openSheet(v)} className="reprow" style={{display:'flex',alignItems:'center',gap:10,padding:'10px 8px',margin:'0 -8px',borderRadius:9,cursor:'pointer',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
-            <Avatar url={avatarUrlOf(pr?.avatar_url)} name={v.full_name||pr?.full_name||'Usuario'} size={38} />
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:12.5,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{v.full_name||pr?.full_name||'Usuario'}</div>
-              <div style={{fontSize:11,color:'var(--tx3)'}}>{v.doc_type||'—'} · {v.doc_number||'—'} · {v.created_at?new Date(v.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}):''}</div>
-              <div style={{marginTop:4}}>{chip(v.status)}</div>
-            </div>
-            <span style={{fontSize:16,color:'var(--tx3)',flexShrink:0}}>›</span>
-          </div>
-        ); })}
-
-      {/* Ficha de la verificación con las 3 fotos (signed urls) */}
-      {sel && <div className="mo" onClick={()=>setSel(null)}>
-        <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:400}}>
-          <div className="mt">🪪 Verificación de {sel.full_name||'usuario'}</div>
-          <div className="ms">Documento y selfie. Toca una foto para ampliarla.</div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:10}}>
-            {[["Frente",sel.doc_front],["Reverso",sel.doc_back],["Selfie",sel.selfie]].map(([lbl,p])=>(
-              <KycPhoto key={lbl} label={lbl} path={p} onZoom={setZoom} />
-            ))}
-          </div>
-          {[['Nombre',sel.full_name||'—'],['Documento',sel.doc_type||'—'],['Número',sel.doc_number||'—'],['Estado',sel.status||'—']].map(([k,v])=>(
-            <div key={k} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'6px 0',borderBottom:'1px solid var(--bd)'}}>
-              <span style={{fontSize:12,color:'var(--tx3)'}}>{k}</span><span style={{fontSize:12,fontWeight:600,textAlign:'right'}}>{v}</span>
-            </div>
-          ))}
-          {sel.status==='rejected'&&sel.reject_reason&&<div style={{fontSize:11,color:'var(--rd,#e05252)',marginTop:8}}>Motivo: {sel.reject_reason}</div>}
-          <div style={{display:'flex',gap:8,marginTop:14}}>
-            {onViewProfile && <button className="btn sm" onClick={()=>{ onViewProfile(sel.user_id); setSel(null); }}>Ver perfil</button>}
-            {!ro && sel.status!=='approved' && <button className="btn bts" style={{flex:1}} disabled={busy===sel.id} onClick={()=>approve(sel)}>✅ Aprobar</button>}
-            {!ro && sel.status!=='rejected' && <button className="btn btd" style={{flex:1}} disabled={busy===sel.id} onClick={()=>{ setReason(''); setRejectFor(sel); }}>🚫 Rechazar</button>}
-          </div>
-        </div>
-      </div>}
-
-      {zoom && <div className="mo" onClick={()=>setZoom(null)} style={{zIndex:6000}}>
-        <img src={zoom} alt="" onClick={e=>e.stopPropagation()} style={{maxWidth:'92vw',maxHeight:'88vh',borderRadius:12,objectFit:'contain'}}/>
-      </div>}
-
-      {rejectFor && <div className="mo" onClick={()=>setRejectFor(null)}>
-        <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:360}}>
-          <div className="mt">Rechazar verificación</div>
-          <div className="ms">El usuario verá el motivo y podrá reenviar.</div>
-          <textarea value={reason} onChange={e=>setReason(e.target.value)} rows={3} placeholder="Motivo (opcional)…" style={{width:'100%',boxSizing:'border-box',background:'var(--bg3,#12151f)',border:'1px solid var(--bd2,#222)',borderRadius:10,padding:'10px 12px',color:'var(--tx)',fontSize:13,outline:'none',resize:'none',margin:'6px 0 12px'}}/>
-          <div style={{display:'flex',gap:8}}>
-            <button className="btn" style={{flex:1}} onClick={()=>setRejectFor(null)}>Cancelar</button>
-            <button className="btn btd" style={{flex:1}} onClick={doReject}>Rechazar</button>
-          </div>
-        </div>
-      </div>}
-    </div>
-  );
-}
-
-/* ── Cola REAL de solicitudes de plan ───────────────────────────────────────── */
-function PlanQueue({ toast, onViewProfile, ro, onResolved }){
-  const [filter, setFilter] = useState("pending");
-  const [rows, setRows] = useState([]);
-  const [names, setNames] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(null);
-  const [confirmFor, setConfirmFor] = useState(null); // { req, approve }
-
-  const load = useCallback(() => {
-    setLoading(true);
-    adminListPlanRequests({ status: filter, from: 0, to: 49 })
-      .then(async d => { setRows(d); setLoading(false); const map = await getProfilesByIds(d.map(r => r.user_id)).catch(()=>({})); setNames(map); })
-      .catch(() => { setRows([]); setLoading(false); });
-  }, [filter]);
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => {
-    const ch = supabase.channel(`admin-plans-${Date.now()}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "plan_requests" }, () => load())
-      .subscribe();
-    return () => { try { Promise.resolve(supabase.removeChannel(ch)).catch(()=>{}); } catch(e){} };
-  }, [load]);
-
-  const decide = async () => {
-    const { req, approve } = confirmFor; setConfirmFor(null);
-    setBusy(req.id);
-    try {
-      await adminReviewPlan(req.id, approve);
-      setRows(rs => filter === "pending" ? rs.filter(r => r.id !== req.id) : rs.map(r => r.id === req.id ? { ...r, status: approve ? "approved" : "rejected" } : r));
-      toast(approve ? `✅ Plan ${req.plan} aprobado` : "Solicitud de plan rechazada");
-      onResolved && onResolved();
-    } catch (e) { toast("⚠️ " + (e?.message || e?.details || e?.hint || "No se pudo (sin mensaje del backend)")); }
-    setBusy(null);
-  };
-  const chip = (s) => s === "approved" ? <span className="bdg bg">✅ Aprobada</span> : s === "rejected" ? <span className="bdg br">🚫 Rechazada</span> : <span className="bdg by">🕐 Pendiente</span>;
-  const pending = rows.filter(r => r.status === "pending").length;
-
-  return (
-    <div className="card cp mb16">
-      <div className="ch"><span className="ct">Solicitudes de plan</span><span className={`bdg ${filter==='pending'&&pending?'by':'bx'}`}>{filter==='pending'?`${pending} pendientes`:`${rows.length}`}</span></div>
-      <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 10px'}}>Cuando un usuario pide Pro o Premium, aparece aquí. Confirmas el pago (manual) y apruebas: el plan cambia de verdad.</div>
-      <div className="tabs" style={{maxWidth:320,marginBottom:10}}>
-        {[["pending","Pendientes"],["approved","Aprobadas"],["rejected","Rechazadas"]].map(([k,l])=><div key={k} className={`tab ${filter===k?'on':''}`} onClick={()=>setFilter(k)}>{l}</div>)}
-      </div>
-      {loading ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Cargando…</div>
-        : rows.length===0 ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Sin solicitudes.</div>
-        : rows.map(r => { const pr = names[r.user_id]; return (
-          <div key={r.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
-            <Avatar url={avatarUrlOf(pr?.avatar_url)} name={pr?.full_name||'Usuario'} size={36} />
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:12.5,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{pr?.full_name||'Usuario'}</div>
-              <div style={{fontSize:11,color:'var(--tx3)'}}>quiere <b style={{color:'var(--ac)',textTransform:'capitalize'}}>{r.plan}</b> · {r.created_at?new Date(r.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}):''}</div>
-              <div style={{marginTop:4}}>{chip(r.status)}</div>
-            </div>
-            <div style={{display:'flex',gap:4,flexShrink:0}}>
-              {onViewProfile && <button className="btn sm" onClick={()=>onViewProfile(r.user_id)}>Perfil</button>}
-              {!ro && r.status!=='approved' && <button className="btn bts sm" disabled={busy===r.id} onClick={()=>setConfirmFor({req:r,approve:true})}>✅ Aprobar</button>}
-              {!ro && r.status!=='rejected' && <button className="btn btd sm" disabled={busy===r.id} onClick={()=>setConfirmFor({req:r,approve:false})}>🚫 Rechazar</button>}
-            </div>
-          </div>
-        ); })}
-
-      {confirmFor && <div className="mo" onClick={()=>setConfirmFor(null)}>
-        <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:340}}>
-          <div className="mt">{confirmFor.approve ? `Aprobar plan ${confirmFor.req.plan}` : 'Rechazar solicitud'}</div>
-          <div className="ms">{confirmFor.approve ? `Confirma que el usuario ya pagó. Se activará su plan ${confirmFor.req.plan} de verdad.` : 'Se rechaza la solicitud de plan.'}</div>
-          <div style={{display:'flex',gap:8,marginTop:12}}>
-            <button className="btn" style={{flex:1}} onClick={()=>setConfirmFor(null)}>Cancelar</button>
-            <button className={`btn ${confirmFor.approve?'bts':'btd'}`} style={{flex:1}} onClick={decide}>{confirmFor.approve?'Aprobar':'Rechazar'}</button>
-          </div>
-        </div>
-      </div>}
-    </div>
-  );
-}
-
-/* ── Usuarios ──────────────────────────────────────────────────────────────── */
-function Usuarios({toast,data={}}){
-  // Una sola pantalla, todo REAL: colas de verificación/planes + directorio de perfiles.
-  // (La sub-pestaña "Negocios" se eliminó: era una tabla derivada de datos parciales
-  // con botones sin conectar. El control real de cada vendedor vive en el directorio.)
-  return <>
-    <div className="stit">Usuarios</div>
-    <div className="ssub">Cuentas reales, verificaciones y planes · conectado a la plataforma</div>
-
-    {/* Cola REAL de verificaciones (KYC) y de planes */}
-    <VerificationQueue toast={toast} onViewProfile={data.onViewProfile} />
-    <PlanQueue toast={toast} onViewProfile={data.onViewProfile} />
-
-    {/* Directorio REAL de usuarios (profiles) con buscador, verificar/suspender y ficha */}
-    <RealUsersDirectory toast={toast} meId={data.meId} />
-  </>;
 }
 
 /* ── Economía ──────────────────────────────────────────────────────────────── */
@@ -3023,9 +2952,9 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
               {page==='ops'&&<AdminOrders toast={add} onViewProfile={data.onViewProfile}/>}
               {page==='modq'&&<ModeracionPublicaciones toast={add} onViewProfile={data.onViewProfile} ro={curRO} onResolved={loadPending}/>}
               {page==='delivery'&&<Operaciones solo="Delivery" toast={add} data={data} ro={curRO} onResolved={loadPending}/>}
-              {page==='users'&&<RealUsersDirectory toast={add} meId={data.meId} ro={curRO}/>}
-              {page==='verif'&&<VerificationQueue toast={add} onViewProfile={data.onViewProfile} ro={curRO} onResolved={loadPending}/>}
-              {page==='plans'&&<PlanQueue toast={add} onViewProfile={data.onViewProfile} ro={curRO} onResolved={loadPending}/>}
+              {(page==='users'||page==='verif'||page==='plans')&&<UsersHub toast={add} meId={data.meId} onViewProfile={data.onViewProfile} onResolved={loadPending}
+                initialTab={page==='verif'?'verif':page==='plans'?'plans':'all'}
+                access={{ users:levelOf('users'), verif:levelOf('verifications'), plans:levelOf('plans') }}/>}
               {page==='editor'&&(curRO
                 ? <fieldset disabled style={{border:'none',padding:0,margin:0,minWidth:0}}>
                     <div style={{margin:'0 0 12px',padding:'10px 14px',borderRadius:10,background:'var(--bg2)',border:'1px solid var(--bd2)',fontSize:12,fontWeight:700,color:'var(--tx2)'}}>👁 Solo lectura — sin permiso para modificar ni publicar.</div>

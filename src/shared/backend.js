@@ -27,9 +27,9 @@ export const getUserById = async (id) => {
   if (!id) return null;
   if (_profileCache.has(id)) return _profileCache.get(id);
   try {
-    const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url, bio").eq("id", id).single();
+    const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url, bio, is_verified").eq("id", id).single();
     if (error || !data) { _profileCache.set(id, null); return null; }
-    const p = { id: data.id, name: data.full_name || "Usuario", avatar: data.avatar_url || null, bio: data.bio || "" };
+    const p = { id: data.id, name: data.full_name || "Usuario", avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified };
     _profileCache.set(id, p);
     return p;
   } catch (e) { return null; }
@@ -509,6 +509,16 @@ export const adminListUsers = async ({ query = "", from = 0, to = 29 } = {}) => 
   const { data, error } = await q;
   if (error) { console.error("adminListUsers:", error.message); return []; }
   return data || [];
+};
+// Perfil COMPLETO de un usuario por id (para la ficha del panel): estado real de
+// verificación, suspensión, plan y rol. Lo puede leer admin/staff por RLS.
+export const adminGetProfileById = async (id) => {
+  if (!id) return null;
+  const { data, error } = await supabase.from("profiles")
+    .select("id, full_name, email, avatar_url, role, plan, is_verified, is_suspended, created_at")
+    .eq("id", id).maybeSingle();
+  if (error) { console.error("adminGetProfileById:", error.message); return null; }
+  return data || null;
 };
 // admin_set_verified / admin_set_suspended: SOLO admin; notifican al usuario y dejan
 // registro (lo hace el backend). Lanzan el error de la RPC (ej. suspenderte a ti mismo).

@@ -1572,7 +1572,7 @@ export function SellerProfile({ userId, currentUser, onBack, onChat, onProduct }
       </div>
       <div style={{ padding: "22px 18px 16px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 18 }}>
-          <Avatar url={profile?.avatar} name={name} size={70} style={{ boxShadow: `0 0 22px ${G}35` }} />
+          <Avatar url={profile?.avatar} name={name} size={70} verified={!!(profile?.is_verified || profile?.verified)} style={{ boxShadow: `0 0 22px ${G}35` }} />
           <div style={{ flex: 1 }}>
             <p style={{ fontSize: 17, fontWeight: 800 }}>{name}</p>
             {profile?.bio && <p style={{ fontSize: 11, color: "#484848", marginTop: 6, lineHeight: 1.5 }}>{profile.bio}</p>}

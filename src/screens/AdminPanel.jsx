@@ -2809,9 +2809,12 @@ const SECTIONS=[
   { key:'orders',        page:'ops',      group:'Plataforma', icon:'📦', label:'Órdenes' },
   { key:'moderation',    page:'modq',     group:'Plataforma', icon:'🛡', label:'Moderación' },
   { key:'couriers',      page:'delivery', group:'Plataforma', icon:'🛵', label:'Delivery local' },
-  { key:'users',         page:'users',    group:'Plataforma', icon:'◎', label:'Usuarios' },
-  { key:'verifications', page:'verif',    group:'Plataforma', icon:'🪪', label:'Verificaciones' },
-  { key:'plans',         page:'plans',    group:'Plataforma', icon:'⭐', label:'Planes' },
+  { key:'users',         page:'users',    group:'Plataforma', icon:'👥', label:'Usuarios' },
+  // Verificaciones y Planes ya no son entradas propias del menú: viven como pestañas
+  // dentro de Usuarios (UsersHub). Se conservan como páginas/permisos para que
+  // "Pendientes de ti" y los permisos por sección sigan funcionando (menuHidden).
+  { key:'verifications', page:'verif',    group:'Plataforma', icon:'🪪', label:'Verificaciones', menuHidden:true },
+  { key:'plans',         page:'plans',    group:'Plataforma', icon:'⭐', label:'Planes', menuHidden:true },
   { key:'editor',        page:'editor',   group:'Plataforma', icon:'◐', label:'Editor Visual' },
   { key:'economy',       page:'eco',      group:'Control',    icon:'◇', label:'Economía' },
   { key:'system',        page:'sys',      group:'Control',    icon:'◉', label:'Sistema' },
@@ -2886,12 +2889,18 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
   const isAdmin=perms==='ALL';
   const levelOf=(key)=> isAdmin?'manage':((perms&&typeof perms==='object'&&perms[key])||'none');
   const allowed=(key)=>{ const l=levelOf(key); return l==='view'||l==='manage'; };
-  const visSecs=SECTIONS.filter(s=>allowed(s.key));
+  // La entrada única "Usuarios" se ve si puede entrar a cualquiera de sus áreas
+  // (usuarios, verificaciones o planes). Verificaciones/Planes ya no van en el menú.
+  const usersEntryAllowed = allowed('users')||allowed('verifications')||allowed('plans');
+  const inMenu = (s)=> s.menuHidden ? false : (s.key==='users' ? usersEntryAllowed : allowed(s.key));
+  const visSecs=SECTIONS.filter(inMenu);
   const groups=[]; visSecs.forEach(s=>{ let g=groups.find(x=>x.sec===s.group); if(!g){g={sec:s.group,items:[]};groups.push(g);} g.items.push(s); });
   const visibleNav=groups.concat(isAdmin?[{sec:'Gestión',items:[{page:'team',icon:'◔',label:'Equipo y permisos'}]}]:[]);
+  // Badge del menú: en "Usuarios" se suman verificaciones + planes pendientes.
+  const menuBadge=(item)=> item.key==='users' ? ((Number(pending.verifications)||0)+(Number(pending.plans)||0)) : (item.key?badgeFor(item.key):0);
   // Primera página permitida al abrir (o si cambian los permisos y la actual ya no vale).
   useEffect(()=>{
-    const okNow = page!=null && (page==='team'?isAdmin:(PAGE_TO_PERM[page]?allowed(PAGE_TO_PERM[page]):true));
+    const okNow = page!=null && (page==='team'?isAdmin: page==='users'?usersEntryAllowed : (PAGE_TO_PERM[page]?allowed(PAGE_TO_PERM[page]):true));
     if(!okNow){ setPage(isAdmin?'overview':((visSecs[0]&&visSecs[0].page)||null)); }
   },[perms]);
   const nav=(pg)=>{
@@ -2901,7 +2910,7 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
   };
   const roFor=(pg)=>{ const k=PAGE_TO_PERM[pg]; return k?levelOf(k)==='view':false; }; // solo lectura
   const curRO=roFor(page);
-  const pageAllowed = page==null ? true : (page==='team' ? isAdmin : (PAGE_TO_PERM[page] ? allowed(PAGE_TO_PERM[page]) : true));
+  const pageAllowed = page==null ? true : page==='team' ? isAdmin : page==='users' ? usersEntryAllowed : (PAGE_TO_PERM[page] ? allowed(PAGE_TO_PERM[page]) : true);
   const dk = theme.isDark !== false;
   // Variables del panel mapeadas al tema real de la plataforma (claro/oscuro)
   const omniVars = dk
@@ -2923,10 +2932,10 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
           {visibleNav.map(g=><div key={g.sec}>
             <div className="sbg">{g.sec}</div>
             {g.items.map(item=><div key={item.page}>
-              <div className={`sbi ${page===item.page?'on':''}`} onClick={()=>nav(item.page)}>
+              <div className={`sbi ${(page===item.page || (item.page==='users' && (page==='verif'||page==='plans')))?'on':''}`} onClick={()=>nav(item.page)}>
                 <span className="sbic">{item.icon}</span>
                 <span className="sbil">{item.label}</span>
-                {item.key && badgeFor(item.key)>0 && <span style={{marginLeft:'auto',minWidth:18,height:18,borderRadius:999,background:G,color:'#000',fontSize:10.5,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 5px',flexShrink:0}}>{badgeFor(item.key)>99?'99+':badgeFor(item.key)}</span>}
+                {menuBadge(item)>0 && <span style={{marginLeft:'auto',minWidth:18,height:18,borderRadius:999,background:G,color:'#000',fontSize:10.5,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 5px',flexShrink:0}}>{menuBadge(item)>99?'99+':menuBadge(item)}</span>}
               </div>
             </div>)}
           </div>)}

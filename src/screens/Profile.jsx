@@ -1274,7 +1274,9 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
 
   const banner = (bg, color, txt) => <div style={{ background:bg, border:`1px solid ${color}44`, borderRadius:12, padding:"14px 14px", color, fontSize:13, fontWeight:700, textAlign:"center", lineHeight:1.5 }}>{txt}</div>;
   const status = myVerif?.status;
-  const showForm = !isVerified && status !== "pending" && status !== "approved";
+  // Puede enviar SIEMPRE que no esté verificado y no tenga una solicitud 'pending'.
+  // Da igual si antes fue rechazada o revocada (el backend permite re-solicitar).
+  const showForm = !isVerified && status !== "pending";
 
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.6)", zIndex:2000, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
@@ -1285,10 +1287,13 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
         </div>
 
         {loading ? <div style={{ textAlign:"center", color:C.textSecondary, fontSize:13, padding:"30px 0" }}>Cargando…</div> : <>
-          {(isVerified || status === "approved") && banner(`${C.positive}14`, C.positive, "✓ Tu perfil ya está verificado")}
-          {!isVerified && status === "pending" && banner(`${C.warning}14`, C.warning, "🕐 Pendiente de revisión. Te avisamos cuando la revisemos.")}
+          {isVerified && banner(`${C.positive}14`, C.positive, "✓ Tu perfil ya está verificado")}
+          {!isVerified && status === "pending" && banner(`${C.warning}14`, C.warning, "🕐 En revisión. Te avisamos cuando la revisemos.")}
           {!isVerified && status === "rejected" && (
-            <div style={{ marginBottom:14 }}>{banner(`${C.danger}14`, C.danger, `🚫 Rechazada${myVerif?.reject_reason ? `: ${myVerif.reject_reason}` : ""} — puedes intentarlo de nuevo`)}</div>
+            <div style={{ marginBottom:14 }}>{banner(`${C.danger}14`, C.danger, `🚫 Rechazada${myVerif?.reject_reason ? `: ${myVerif.reject_reason}` : ""} — puedes enviarla de nuevo`)}</div>
+          )}
+          {!isVerified && status === "revoked" && (
+            <div style={{ marginBottom:14 }}>{banner(`${C.warning}14`, C.warning, "Tu verificación fue retirada — puedes volver a solicitarla")}</div>
           )}
 
           {showForm && <>

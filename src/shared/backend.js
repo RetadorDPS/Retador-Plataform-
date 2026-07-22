@@ -487,6 +487,28 @@ export const markNotificationsReadByKind = async (userId, kinds) => {
   if (!list.length) return;
   try { await supabase.from("notifications").update({ read: true }).eq("read", false).in("kind", list); } catch (e) {}
 };
+// ── NOTIFICACIONES PUSH REALES (Web Push) — llegan con la app cerrada ────────
+// Guarda/renueva la suscripción del navegador (endpoint es la clave primaria: un
+// upsert por endpoint reasocia la fila a ESTE usuario, útil si el mismo navegador
+// lo usan varias cuentas). La Edge Function 'send-push' lee esta tabla al disparar.
+export const savePushSubscription = async (sub, userId) => {
+  if (!sub || !userId) return;
+  const json = typeof sub.toJSON === "function" ? sub.toJSON() : sub;
+  const keys = json.keys || {};
+  const row = {
+    endpoint: json.endpoint || sub.endpoint,
+    user_id: userId,
+    p256dh: keys.p256dh || null,
+    auth: keys.auth || null,
+    user_agent: (typeof navigator !== "undefined" && navigator.userAgent) || null,
+  };
+  const { error } = await supabase.from("push_subscriptions").upsert(row, { onConflict: "endpoint" });
+  if (error) { console.error("savePushSubscription:", error.message); throw error; }
+};
+export const deletePushSubscription = async (endpoint) => {
+  if (!endpoint) return;
+  try { await supabase.from("push_subscriptions").delete().eq("endpoint", endpoint); } catch (e) {}
+};
 // Refresca el rol/nombre/foto del usuario en sesión (p.ej. al ser aprobado como
 // mensajero, para que el modo se desbloquee SIN cerrar la app).
 export const refreshSessionProfile = async (userId) => {

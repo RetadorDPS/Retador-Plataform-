@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Gavel, Globe, HardDrive, HelpCircle, Info, Lock, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Phone, Plus, Shield, ShoppingBag, Smartphone, Star, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
 import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser } from "../shared/index.js";
+import { isPushSupported, hasActiveSubscription, enablePush, disablePush } from "../pwa/push.js";
 
 const CFG_DARK = {
   P:"#FFC01E", PL:"#FFC01E18",
@@ -500,8 +501,60 @@ function CFG_AppearanceScreen({ settings, upd, nav, appScale = 1, onScale, onThe
   );
 }
 
+/* ── PUSH REAL (Web Push) — interruptor de este dispositivo ─────── */
+function CFG_PushRow({ userId, flash }) {
+  const tk = CFG_useTk();
+  const [supported, setSupported] = useState(true);
+  const [on, setOn] = useState(false);
+  const busyRef = useRef(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const ok = isPushSupported();
+      if (!alive) return;
+      setSupported(ok);
+      if (!ok) return;
+      const active = typeof Notification !== "undefined" && Notification.permission === "granted" && await hasActiveSubscription();
+      if (alive) setOn(!!active);
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  if (!supported) return null; // el navegador no soporta push de verdad: no se muestra
+
+  const change = async (v) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    if (v) {
+      const r = await enablePush(userId);
+      setOn(!!r.ok);
+      if (r.ok) flash && flash("🔔 Avisos activados");
+      else flash && flash(r.reason === "denied" ? "Bloqueaste los avisos — actívalos desde los ajustes del navegador." : "No se pudo activar");
+    } else {
+      await disablePush();
+      setOn(false);
+      flash && flash("Avisos desactivados");
+    }
+    busyRef.current = false;
+  };
+
+  return (
+    <div style={{ background:tk.ROW }} className="flex items-center gap-2.5 px-3.5 py-2.5">
+      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-yellow-600">
+        <Bell size={15} className="text-white" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div style={{ color:tk.T1 }} className="text-[14px] font-medium leading-tight">Notificaciones push</div>
+        <div style={{ color:tk.T2 }} className="text-[11px] mt-0.5">Avisos aunque la app esté cerrada</div>
+      </div>
+      <CFG_Sw on={on} change={change} />
+    </div>
+  );
+}
+
 /* ── NOTIFICATIONS ─────────────────────────────────────────────── */
-function CFG_NotificationsScreen({ settings, upd, nav }) {
+function CFG_NotificationsScreen({ settings, upd, nav, user, flash }) {
   const tk = CFG_useTk();
   const n = settings.notifications;
   function set(g, k, v) { upd("notifications", { ...n, [g]:{ ...n[g], [k]:v } }); }
@@ -531,9 +584,16 @@ function CFG_NotificationsScreen({ settings, upd, nav }) {
       { k:"news",   l:"Novedades", Icon:Zap,      bg:"bg-rose-600"   },
     ]},
   ];
+  const pushOk = isPushSupported();
   return (
     <div style={{ background:tk.BG }} className="">
       <CFG_Hdr title="Notificaciones" onBack={() => nav("home")} />
+      {pushOk && <>
+        <CFG_Lbl>Este dispositivo</CFG_Lbl>
+        <CFG_Crd>
+          <CFG_PushRow userId={user?.id} flash={flash} />
+        </CFG_Crd>
+      </>}
       {groups.map(gr => (
         <div key={gr.id}>
           <CFG_Lbl>{gr.label}</CFG_Lbl>
@@ -1219,7 +1279,7 @@ export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTh
     return next;
   });
 
-  const p = { profile, setProfile: saveProfile, settings, upd, nav, appScale:imgScale, onScale:onImgScaleChange, onBack, onSignOut, onThemeChange, appTheme, appTextScale, onTextScaleChange, flash, isVerified, onRequestVerification, accountPassword, onSetPassword, blockedUsers, onToggleBlock, onOpenWallet, orders, productView, onProductViewChange };
+  const p = { profile, setProfile: saveProfile, settings, upd, nav, appScale:imgScale, onScale:onImgScaleChange, onBack, onSignOut, onThemeChange, appTheme, appTextScale, onTextScaleChange, flash, isVerified, onRequestVerification, accountPassword, onSetPassword, blockedUsers, onToggleBlock, onOpenWallet, orders, productView, onProductViewChange, user };
   const map = {
     home:          <CFG_HomeScreen          {...p} />,
     account:       <CFG_AccountScreen       {...p} />,

@@ -51,6 +51,8 @@ import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
 import InstallPrompt from "./pwa/InstallPrompt.jsx";
+import PushPrompt from "./pwa/PushPrompt.jsx";
+import { reclaimPushSubscription } from "./pwa/push.js";
 import { setThemeColor } from "./pwa/themeColor.js";
 
 
@@ -261,6 +263,11 @@ function AppShell({ sessionUser }) {
   useEffect(() => { loadPerms(); }, [loadPerms]);
   // ¿Puede abrir el panel? Admin (ALL) o al menos una sección distinta de "none".
   const hasPanel = adminPerms === "ALL" || (adminPerms && typeof adminPerms === "object" && Object.values(adminPerms).some(v => v && v !== "none"));
+  // Notificaciones PUSH: si el permiso del navegador ya está concedido, re-asocia (en
+  // silencio) la suscripción a ESTE usuario. La suscripción es del navegador, no de
+  // la cuenta: esto evita que, si dos personas usan el mismo teléfono, los avisos
+  // sigan yéndole a la cuenta anterior.
+  useEffect(() => { if (user?.id) reclaimPushSubscription(user.id); }, [user?.id]);
   // Configuración editable de la plataforma (controlada desde el panel admin, persiste)
   const [adminCfg, setAdminCfg] = useState(() => {
     const defaults = {
@@ -1106,6 +1113,9 @@ function AppShell({ sessionUser }) {
           {toast}
         </div>
       )}
+
+      {/* Tarjeta discreta "Activar avisos" — Web Push real, con la app cerrada */}
+      <PushPrompt userId={user?.id} flash={flash} />
 
       {editProd && <EditProductModal product={editProd} onClose={() => setEditProd(null)} onSave={(changes) => { updateProduct(editProd.id, changes); setEditProd(null); }} flash={flash} onPromote={() => { setEditProd(null); promoteFlow(editProd.id); }} />}
       {confirmCfg && (

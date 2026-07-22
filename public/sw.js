@@ -7,7 +7,7 @@
 //   · Otros orígenes (Supabase, imágenes externas): NO se tocan → van directo a la red.
 // No interfiere con el login de Google, el perfil, los productos ni las tasas.
 // ─────────────────────────────────────────────────────────────────────────────
-const CACHE = "retador-pwa-v73";
+const CACHE = "retador-pwa-v74";
 const START = self.registration.scope; // p.ej. https://retadordps.github.io/Retador-Plataform-/
 
 self.addEventListener("install", (event) => {
@@ -62,5 +62,40 @@ self.addEventListener("fetch", (event) => {
       })
       .catch(() => cached);
     return cached || network;
+  })());
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTIFICACIONES PUSH REALES (llegan aunque la app esté cerrada).
+// El backend (Edge Function 'send-push') dispara esto en cada notificación nueva.
+// ─────────────────────────────────────────────────────────────────────────────
+const ICON = self.registration.scope + "icons/icon-192.png"; // respeta la subcarpeta de GitHub Pages
+
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch (e) { payload = { title: "RETADOR", body: event.data ? event.data.text() : "" }; }
+  event.waitUntil((async () => {
+    // Si la app está ABIERTA y VISIBLE, ya se ve el toast interno (realtime):
+    // evita la notificación duplicada del sistema para el mismo aviso.
+    const allClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const visible = allClients.some((c) => c.visibilityState === "visible");
+    if (visible) return;
+    await self.registration.showNotification(payload.title || "RETADOR", {
+      body: payload.body || "",
+      icon: ICON,
+      badge: ICON,
+      data: payload,
+      tag: payload.kind || "retador",
+    });
+  })());
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil((async () => {
+    const url = self.registration.scope;
+    const allClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const c of allClients) { if ("focus" in c) return c.focus(); }
+    return self.clients.openWindow(url);
   })());
 });

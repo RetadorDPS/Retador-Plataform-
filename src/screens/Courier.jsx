@@ -163,7 +163,10 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
     const feePending = o.feeApproval === "pending" || (o.status === "confirmado" && o.proposedFee);
     const cash = isCash(o);
     const canPickup = o.status === "asignado";
-    const canDeliver = o.status === "recogido" || o.status === "en_ruta";
+    // El backend EXIGE que el pedido esté en "en_ruta" para aceptar "entregado"
+    // (courier_advance_stage lo rechaza si no). Antes este botón también se
+    // mostraba en "recogido" — mostrarlo antes de tiempo causaba el rechazo.
+    const canDeliver = o.status === "en_ruta";
     const mapUrl = a => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a || "")}`;
     return (
       <Card key={o.id} style={{ marginBottom: 14, padding: 14 }}>

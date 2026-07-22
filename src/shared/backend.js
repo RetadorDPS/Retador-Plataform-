@@ -253,6 +253,19 @@ export const getMyConversations = async (userId) => {
   }));
   return convs.sort((a, b) => new Date(b.lastTime || 0) - new Date(a.lastTime || 0));
 };
+// Resuelve UNA conversación por su id (el ref_id de una notificación kind='message')
+// para saber quién es la otra persona y poder abrir el chat directo. Mismo criterio
+// que getMyConversations: la fila trae un id (uuid) que no es el mío ni el de la fila.
+export const getConversationById = async (convId, userId) => {
+  if (!convId || !userId) return null;
+  const { data, error } = await supabase.from("conversations").select("*").eq("id", convId).maybeSingle();
+  if (error || !data) return null;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const otherId = Object.entries(data).find(([k, v]) => typeof v === "string" && v !== userId && v !== data.id && uuid.test(v))?.[1] || null;
+  if (!otherId) return null;
+  const prof = await getUserById(otherId).catch(() => null);
+  return { id: data.id, otherId, otherName: prof?.name || "Usuario", otherAvatar: prof?.avatar || null };
+};
 
 
 // Favorite functions — RPCs REALES del backend (nada local inventado).

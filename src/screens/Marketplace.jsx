@@ -221,9 +221,13 @@ export function CatModal({ onClose, onSelect, active }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // NOTIFICACIONES PANEL
 // ═════════════════════════════════════════════════════════════════════════════
-export function NotifPanel({ onClose, notifs = [], onRead, onOpenOrder }) {
+export function NotifPanel({ onClose, notifs = [], onRead, onOpenOrder, onOpenConversation }) {
   const { S, B, CARD, T1, T2, T3, isDark } = useAt();
-  const tap = n => { onRead && onRead(n.id); if (n.orderId && onOpenOrder) onOpenOrder(n.orderId); };
+  const tap = n => {
+    onRead && onRead(n.id);
+    if (n.orderId && onOpenOrder) onOpenOrder(n.orderId);
+    else if (n.conversationId && onOpenConversation) { onOpenConversation(n.conversationId); onClose && onClose(); }
+  };
   return (
     <div className="fi" style={{ position: "fixed", inset: 0, zIndex: 4400 }} onClick={onClose}>
       <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.76)", backdropFilter: "blur(14px)" }} />
@@ -236,13 +240,14 @@ export function NotifPanel({ onClose, notifs = [], onRead, onOpenOrder }) {
         <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 32px" }}>
           {notifs.length === 0 ? <div style={{ textAlign: "center", padding: "40px 0", color: T3 }}><div style={{ fontSize: 40, marginBottom: 10, opacity: .7 }}>🔔</div><p style={{ fontSize: 13 }}>Sin notificaciones por ahora</p></div>
           : notifs.map(n => (
-            <div key={n.id} onClick={() => tap(n)} className="cd" style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "13px 14px", marginBottom: 9, borderRadius: 15, background: n.read ? (isDark ? "#141414" : "#f7f8fa") : (isDark ? "#1a1709" : "#FFFBEC"), border: `1px solid ${n.read ? B : G + "55"}`, cursor: n.orderId ? "pointer" : "default" }}>
+            <div key={n.id} onClick={() => tap(n)} className="cd" style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "13px 14px", marginBottom: 9, borderRadius: 15, background: n.read ? (isDark ? "#141414" : "#f7f8fa") : (isDark ? "#1a1709" : "#FFFBEC"), border: `1px solid ${n.read ? B : G + "55"}`, cursor: (n.orderId || n.conversationId) ? "pointer" : "default" }}>
               <div style={{ width: 36, height: 36, borderRadius: "50%", background: n.read ? (isDark ? "#222" : "#eceef1") : G + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>🔔</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ fontSize: 13, color: T1, lineHeight: 1.45, fontWeight: n.read ? 500 : 700 }}>{n.text}</p>
                 <p style={{ fontSize: 10.5, color: T3, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
                   <span>{new Date(n.at).toLocaleDateString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
                   {n.orderId && <span style={{ color: G, fontWeight: 700 }}>· Ver pedido ›</span>}
+                  {n.conversationId && <span style={{ color: G, fontWeight: 700 }}>· Ver conversación ›</span>}
                 </p>
               </div>
               {!n.read && <div style={{ width: 9, height: 9, borderRadius: "50%", background: G, flexShrink: 0, marginTop: 5 }} />}

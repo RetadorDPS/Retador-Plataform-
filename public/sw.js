@@ -7,7 +7,7 @@
 //   · Otros orígenes (Supabase, imágenes externas): NO se tocan → van directo a la red.
 // No interfiere con el login de Google, el perfil, los productos ni las tasas.
 // ─────────────────────────────────────────────────────────────────────────────
-const CACHE = "retador-pwa-v74";
+const CACHE = "retador-pwa-v75";
 const START = self.registration.scope; // p.ej. https://retadordps.github.io/Retador-Plataform-/
 
 self.addEventListener("install", (event) => {
@@ -92,10 +92,20 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const data = event.notification.data || {};
   event.waitUntil((async () => {
-    const url = self.registration.scope;
+    const scope = self.registration.scope;
     const allClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    for (const c of allClients) { if ("focus" in c) return c.focus(); }
-    return self.clients.openWindow(url);
+    // Con una ventana ya abierta: la enfocamos y le avisamos (postMessage) a qué
+    // conversación/pedido navegar SIN recargar la SPA (App.jsx escucha este mensaje).
+    for (const c of allClients) {
+      if ("focus" in c) { c.postMessage({ type: "retador-notification-click", data }); return c.focus(); }
+    }
+    // Sin ninguna ventana abierta: abrimos una nueva. Si es un aviso de mensaje,
+    // añadimos la conversación en la URL para que la app navegue directo al abrir.
+    const target = (data.kind === "message" && data.ref_id)
+      ? `${scope}?openConv=${encodeURIComponent(data.ref_id)}`
+      : scope;
+    return self.clients.openWindow(target);
   })());
 });

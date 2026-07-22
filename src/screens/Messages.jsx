@@ -177,9 +177,13 @@ const ChatInput = memo(function ChatInput({ onSend, blocked, S, B, T1, initialDr
   );
 });
 
-export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = [], onOpenOrder, onOpenProduct }) {
+export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = [], onOpenOrder, onOpenProduct, onConvId }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const [convId,    setConvId]    = useState(chat.id || chat.key || null);
+  // Avisa al padre qué conversación está EN PANTALLA ahora mismo (para que, si llega
+  // una notificación de mensaje de esta MISMA conversación, no sume ruido extra: el
+  // usuario ya la está viendo).
+  useEffect(() => { onConvId && onConvId(convId || null); }, [convId, onConvId]);
   const [msgs,      setMsgs]      = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [otherName, setOtherName] = useState(chat.otherName || chat.name || null);

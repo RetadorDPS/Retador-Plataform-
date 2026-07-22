@@ -24,7 +24,7 @@ import {
   CURRENCIES, CURRENCY_CODES, DEFAULT_CURRENCY, money,
   createOrder, estimateDeliveryFee,
   readRatings, aggRating, systemRating, serviceRating, serviceReviews, ratingForName, systemReviews,
-  getUserOrders, updateOrderStatus, getUnreadCount, getProductById,
+  getUserOrders, updateOrderStatus, getUnreadCount, getProductById, getConversationById,
   getPendingCourierApplications, reviewCourierApplication,
   getNotifications, markNotificationsRead, markNotificationsReadByKind, refreshSessionProfile, isSuspendedUser,
   ORDER_FLOW, SHIP_LABELS, MODALIDAD_LABELS,
@@ -184,6 +184,13 @@ function AppShell({ sessionUser }) {
   const [pubOpen,    setPubOpen]    = useState(false);
   const [showNotif,  setShowNotif]  = useState(false);
   const [chatOpen,   setChatOpen]   = useState(false);
+  // Conversación EN PANTALLA ahora mismo (la resuelve ChatScreen vía onConvId). Sirve
+  // para no sumar ruido (toast/badge) a un mensaje de la MISMA conversación que ya se
+  // está viendo. Se usa por ref dentro del canal realtime para no reconectarlo.
+  const [openConvId, setOpenConvId] = useState(null);
+  useEffect(() => { if (!chatOpen) setOpenConvId(null); }, [chatOpen]);
+  const chatOpenRef = useRef(chatOpen); useEffect(() => { chatOpenRef.current = chatOpen; }, [chatOpen]);
+  const openConvIdRef = useRef(openConvId); useEffect(() => { openConvIdRef.current = openConvId; }, [openConvId]);
   // ── Aviso de MENSAJES NUEVOS en tiempo real (global) ────────────────────────
   // Cuenta los mensajes sin leer y se actualiza al instante con el realtime de
   // `messages` (cualquier INSERT/UPDATE de mis conversaciones refresca el número).
@@ -618,6 +625,41 @@ function AppShell({ sessionUser }) {
     else getProductById(productId).then(p => { if (p) go(p); else flash("Ese producto ya no está disponible"); }).catch(() => {});
   };
   const openMessages = () => { setSelChat(null); setChatOpen(false); setTab("perfil"); setPScr("messages"); };
+  // Abre el chat DIRECTO por conversation_id (notificación kind='message', o el aviso
+  // push tocado fuera de la app): resuelve quién es la otra persona y abre su chat.
+  const openConversationById = async (convId) => {
+    if (!convId || !user?.id) return;
+    try {
+      const c = await getConversationById(convId, user.id);
+      if (!c) { flash("Esa conversación ya no está disponible"); return; }
+      setSelChat({ id: c.id, otherId: c.otherId, otherName: c.otherName, otherAvatar: c.otherAvatar });
+      setChatOpen(true);
+    } catch (e) { flash("No se pudo abrir la conversación"); }
+  };
+  // Aviso PUSH de un mensaje tocado FUERA de la app: si abrió una ventana nueva, el
+  // service worker deja "?openConv=<id>" en la URL (ver sw.js); la leemos una vez y
+  // limpiamos la URL para que no se repita al recargar.
+  useEffect(() => {
+    if (!user?.id) return;
+    let convId = null;
+    try { convId = new URLSearchParams(window.location.search).get("openConv"); } catch (e) {}
+    if (!convId) return;
+    try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
+    openConversationById(convId);
+  }, [user?.id]);
+  // Aviso PUSH tocado con la app YA abierta: el service worker enfoca esta ventana y
+  // le manda un postMessage (sin recargar la SPA) con la conversación a abrir.
+  useEffect(() => {
+    if (!user?.id || !("serviceWorker" in navigator)) return;
+    const onMsg = (event) => {
+      const msg = event.data || {};
+      if (msg.type === "retador-notification-click" && msg.data?.kind === "message" && msg.data?.ref_id) {
+        openConversationById(msg.data.ref_id);
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", onMsg);
+    return () => navigator.serviceWorker.removeEventListener("message", onMsg);
+  }, [user?.id]);
 
   // Chat libre: cualquiera puede escribir desde cualquier lugar. Capturamos la información igual.
   const [orders, setOrders] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_orders') || '[]'); } catch { return []; } });
@@ -750,7 +792,7 @@ function AppShell({ sessionUser }) {
   }, [user?.id]);
   useEffect(() => { reloadBkNotifs(); }, [reloadBkNotifs]);
   const myNotifs = [
-    ...bkNotifs.map(n => ({ id: "bk" + n.id, text: n.text, orderId: n.kind === "order" ? n.ref_id : null, read: !!n.read, at: n.created_at ? new Date(n.created_at).getTime() : Date.now(), _bk: n.id })),
+    ...bkNotifs.map(n => ({ id: "bk" + n.id, text: n.text, orderId: n.kind === "order" ? n.ref_id : null, conversationId: n.kind === "message" ? n.ref_id : null, read: !!n.read, at: n.created_at ? new Date(n.created_at).getTime() : Date.now(), _bk: n.id })),
     ...myLocalNotifs,
   ].sort((a, b) => (b.at || 0) - (a.at || 0));
   const unreadNotif = myNotifs.filter(n => !n.read).length;
@@ -814,6 +856,15 @@ function AppShell({ sessionUser }) {
         // NOTIFICACIONES del backend EN VIVO: toast + campanita + reacciones por tipo.
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` }, (payload) => {
           const n = payload.new || {};
+          // Mensaje de la conversación que YA está en pantalla: no hace falta sumarle
+          // badge/toast extra (el usuario ya lo está viendo, el burbujeo del chat
+          // basta). Se guarda ya leída, sin toast.
+          const alreadyViewingThisChat = n.kind === "message" && chatOpenRef.current && n.ref_id && openConvIdRef.current === n.ref_id;
+          if (alreadyViewingThisChat) {
+            setBkNotifs(prev => prev.find(x => x.id === n.id) ? prev.map(x => x.id === n.id ? { ...x, read: true } : x) : [{ ...n, read: true }, ...prev]);
+            markNotificationsRead(user.id, n.id).catch(() => {});
+            return;
+          }
           setBkNotifs(prev => prev.find(x => x.id === n.id) ? prev : [n, ...prev]);
           if (n.text) flash("🔔 " + n.text);
           if (n.kind === "courier") {
@@ -1133,12 +1184,12 @@ function AppShell({ sessionUser }) {
       {/* Overlays */}
       {showCats   && <CatModal onClose={() => setShowCats(false)} onSelect={cat => { setActiveCat(cat); setShowCats(false); }} active={activeCat} />}
       {pubOpen    && <PubSheet onClose={() => setPubOpen(false)} onPublish={async d => { setPubOpen(false); await handlePublish(d); }} user={user} flash={flash} />}
-      {showNotif  && <NotifPanel onClose={() => { markNotifRead(null); setShowNotif(false); }} notifs={myNotifs} onRead={markNotifRead} onOpenOrder={(oid) => { setShowNotif(false); markNotifRead(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }} />}
+      {showNotif  && <NotifPanel onClose={() => { markNotifRead(null); setShowNotif(false); }} notifs={myNotifs} onRead={markNotifRead} onOpenOrder={(oid) => { setShowNotif(false); markNotifRead(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }} onOpenConversation={(cid) => { setShowNotif(false); markNotifRead(null); openConversationById(cid); }} />}
       {/* Chat: capa OPACA a pantalla completa (inset 0 cubre TODO el viewport,
           estándar) — nada del producto/pantalla de atrás puede asomar. */}
       {chatOpen && selChat && (
         <div style={{ position: "fixed", inset: 0, zIndex: 5100, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
-          <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => setChatOpen(false)} flash={flash} onViewProfile={openPublicProfile} orders={mergedOrders} onOpenOrder={openOrderFromChat} onOpenProduct={openProductFromChat} />
+          <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => setChatOpen(false)} onConvId={setOpenConvId} flash={flash} onViewProfile={openPublicProfile} orders={mergedOrders} onOpenOrder={openOrderFromChat} onOpenProduct={openProductFromChat} />
         </div>
       )}
       {showWallet && (() => {

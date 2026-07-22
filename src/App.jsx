@@ -325,6 +325,15 @@ function AppShell({ sessionUser }) {
   }, []);
   const [buyModal,   setBuyModal]   = useState(null);
   const [plusMenu,   setPlusMenu]   = useState(null); // { top, right } posición del dropdown
+  // BUG REAL encontrado: el fondo invisible que cierra este dropdown usa zIndex:9000
+  // (más alto que CUALQUIER otro overlay de la app: chat/admin/billetera llegan a
+  // 5100-5300, el modo mensajero a 4000). Si el "+" queda abierto y el usuario cambia
+  // de pestaña por un camino que no pasa por onTab (p.ej. openMessages hace
+  // setTab("perfil") directo), ese fondo transparente queda flotando SOBRE TODO,
+  // tragándose el primer toque en cualquier pantalla sin ningún indicio visual — así
+  // se veía un botón "pintado" (p.ej. "Entregué" del mensajero) que no reaccionaba al
+  // tocarlo. Cerrarlo en CADA cambio de pestaña, sin importar el camino, lo evita de raíz.
+  useEffect(() => { setPlusMenu(null); }, [tab]);
   const [subOpenCreate, setSubOpenCreate] = useState(false); // abre CreateAuction directo
   const [profileData, setProfileData] = useState({
     // Foto real del usuario (Google/Supabase) si la hay; si no, null → inicial.

@@ -7,7 +7,7 @@
 //   · Otros orígenes (Supabase, imágenes externas): NO se tocan → van directo a la red.
 // No interfiere con el login de Google, el perfil, los productos ni las tasas.
 // ─────────────────────────────────────────────────────────────────────────────
-const CACHE = "retador-pwa-v75";
+const CACHE = "retador-pwa-v76";
 const START = self.registration.scope; // p.ej. https://retadordps.github.io/Retador-Plataform-/
 
 self.addEventListener("install", (event) => {
@@ -70,6 +70,10 @@ self.addEventListener("fetch", (event) => {
 // El backend (Edge Function 'send-push') dispara esto en cada notificación nueva.
 // ─────────────────────────────────────────────────────────────────────────────
 const ICON = self.registration.scope + "icons/icon-192.png"; // respeta la subcarpeta de GitHub Pages
+// El ícono chico de la barra de estado (Android) lo arma el SO a partir del canal
+// alfa: icon-192.png es RGB opaco (sin transparencia real) → salía un cuadrado feo.
+// badge-mono.png es la MARCA aislada (blanco sólido) sobre fondo TRANSPARENTE real.
+const BADGE = self.registration.scope + "badge-mono.png";
 
 self.addEventListener("push", (event) => {
   let payload = {};
@@ -83,7 +87,7 @@ self.addEventListener("push", (event) => {
     await self.registration.showNotification(payload.title || "RETADOR", {
       body: payload.body || "",
       icon: ICON,
-      badge: ICON,
+      badge: BADGE,
       data: payload,
       tag: payload.kind || "retador",
     });

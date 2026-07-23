@@ -553,6 +553,26 @@ function CFG_PushRow({ userId, flash }) {
   );
 }
 
+/* ── GUÍA BREVE: avisos confiables en Xiaomi/Redmi/POCO ────────────
+   En MIUI/HyperOS el sistema mata las apps en segundo plano de forma agresiva:
+   sin estos dos ajustes, los avisos push llegan tarde o no llegan. Es lo que
+   más falla en teléfonos Xiaomi. */
+function CFG_NotifReliabilityTip() {
+  const tk = CFG_useTk();
+  return (
+    <div className="mx-4 mt-2">
+      <div style={{ background:tk.CARD, borderColor:tk.CARD_BD }} className="rounded-xl border px-3.5 py-3">
+        <div style={{ color:tk.T1 }} className="text-[12px] font-bold mb-1.5">📵 ¿Los avisos llegan tarde o no llegan? (Xiaomi/Redmi/POCO)</div>
+        <div style={{ color:tk.T2 }} className="text-[11.5px] leading-relaxed">
+          En Ajustes del teléfono → Aplicaciones → RETADOR:
+          <br />• <b>Batería</b>: pon <b>“Sin restricciones”</b>.
+          <br />• <b>Inicio automático</b>: <b>actívalo</b>.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── NOTIFICATIONS ─────────────────────────────────────────────── */
 function CFG_NotificationsScreen({ settings, upd, nav, user, flash }) {
   const tk = CFG_useTk();
@@ -593,6 +613,7 @@ function CFG_NotificationsScreen({ settings, upd, nav, user, flash }) {
         <CFG_Crd>
           <CFG_PushRow userId={user?.id} flash={flash} />
         </CFG_Crd>
+        <CFG_NotifReliabilityTip />
       </>}
       {groups.map(gr => (
         <div key={gr.id}>

@@ -617,6 +617,11 @@ function AppShell({ sessionUser }) {
     if (!orderId) return;
     setChatOpen(false); setSelOrderId(orderId); setTab("perfil"); setPScr("order-detail");
   };
+  // Abrir el DETALLE de un pedido desde un aviso PUSH tocado (kind === "order").
+  const openOrderById = (orderId) => {
+    if (!orderId) return;
+    setShowNotif(false); setChatOpen(false); setSelOrderId(orderId); setTab("perfil"); setPScr("order-detail");
+  };
   const openProductFromChat = (productId) => {
     if (!productId) return;
     const go = (p) => { setChatOpen(false); setSelProd(p); setTab("market"); setMScr("product"); };
@@ -641,21 +646,25 @@ function AppShell({ sessionUser }) {
   // limpiamos la URL para que no se repita al recargar.
   useEffect(() => {
     if (!user?.id) return;
-    let convId = null;
-    try { convId = new URLSearchParams(window.location.search).get("openConv"); } catch (e) {}
-    if (!convId) return;
+    let convId = null, orderId = null;
+    try {
+      const q = new URLSearchParams(window.location.search);
+      convId = q.get("openConv"); orderId = q.get("openOrder");
+    } catch (e) {}
+    if (!convId && !orderId) return;
     try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
-    openConversationById(convId);
+    if (convId) openConversationById(convId);
+    else if (orderId) openOrderById(orderId);
   }, [user?.id]);
   // Aviso PUSH tocado con la app YA abierta: el service worker enfoca esta ventana y
-  // le manda un postMessage (sin recargar la SPA) con la conversación a abrir.
+  // le manda un postMessage (sin recargar la SPA) con el destino a abrir.
   useEffect(() => {
     if (!user?.id || !("serviceWorker" in navigator)) return;
     const onMsg = (event) => {
       const msg = event.data || {};
-      if (msg.type === "retador-notification-click" && msg.data?.kind === "message" && msg.data?.ref_id) {
-        openConversationById(msg.data.ref_id);
-      }
+      if (msg.type !== "retador-notification-click" || !msg.data?.ref_id) return;
+      if (msg.data.kind === "message") openConversationById(msg.data.ref_id);
+      else if (msg.data.kind === "order") openOrderById(msg.data.ref_id);
     };
     navigator.serviceWorker.addEventListener("message", onMsg);
     return () => navigator.serviceWorker.removeEventListener("message", onMsg);

@@ -1,6 +1,45 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { getAvailableDeliveries, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase, usePlatformCfg } from "../shared/index.js";
 
+// ═══ DIAGNÓSTICO TEMPORAL — QUITAR DESPUÉS ═══════════════════════════════════
+// CAUSA REAL ENCONTRADA (Fase 2): un toque real (mousedown→mouseup→click del
+// navegador) SOLO dispara "click" si el MISMO elemento sigue bajo el dedo en
+// ambos momentos. Antes, este seguimiento de "último toque" vivía como estado
+// DENTRO de CourierDashboard: cada pointerdown re-renderizaba TODO el dashboard
+// (incluido el botón "Entregué") ENTRE el mousedown y el mouseup de un toque
+// real — moviendo el botón bajo el dedo a mitad de camino y matando el "click"
+// antes de que React pudiera verlo. Confirmado con Playwright: con el estado
+// viviendo en CourierDashboard, un clic real fallaba SIEMPRE; aislado aquí, en
+// un componente aparte que NO comparte árbol con el botón, funciona siempre.
+function DiagTouchLine() {
+  const [diagTouch, setDiagTouch] = useState(null);
+  useEffect(() => {
+    const onPointerDown = (e) => {
+      const x = e.clientX, y = e.clientY;
+      const el = document.elementFromPoint(x, y);
+      if (!el) return;
+      setDiagTouch({
+        x: Math.round(x), y: Math.round(y),
+        tag: el.tagName,
+        id: el.id || "(sin id)",
+        cls: (typeof el.className === "string" ? el.className : "").slice(0, 90) || "(sin clase)",
+        text: (el.textContent || "").trim().slice(0, 30),
+      });
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <b>Último toque (elementFromPoint):</b>{" "}
+      {diagTouch
+        ? `<${diagTouch.tag}> id="${diagTouch.id}" class="${diagTouch.cls}" texto="${diagTouch.text}" @ (${diagTouch.x},${diagTouch.y})`
+        : "(todavía no tocaste nada)"}
+    </div>
+  );
+}
+// ═══════════════════════════════════════════════════════════════════════════
+
 // Chip de PERFIL PÚBLICO: foto + nombre reales (tabla profiles). Al tocarlo abre
 // el perfil público de esa persona. No expone nada privado, solo reputación.
 function ProfileChip({ id, fallback = "Usuario", role, onOpen, dark }) {
@@ -30,7 +69,7 @@ function ProfileChip({ id, fallback = "Usuario", role, onOpen, dark }) {
 //   progreso Aceptada → Recogido → En reparto → Entregado y los 2 botones reales.
 // · Historial: mis entregas terminadas.
 // ═════════════════════════════════════════════════════════════════════════════
-function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, onCancel, onReport, onClose, dark, record, onViewProfile, onChat }) {
+function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, onCancel, onReport, onClose, dark, record, onViewProfile, onChat, diagLog = [] }) {
   const platformCfg = usePlatformCfg(); // config GLOBAL del backend (surge, tarifas…)
   const bg = dark ? "#0a0a0a" : "#f1f5f9", card = dark ? "#141417" : "#fff", t1 = dark ? "#f0f0f2" : "#0f172a", t2 = dark ? "#9aa0aa" : "#64748b", t3 = dark ? "#6b7280" : "#94a3b8", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)", AC = "#6366F1";
   const [tab, setTab] = useState("disp");
@@ -45,27 +84,16 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   const [reportSent, setReportSent] = useState({});
 
   // ═══ DIAGNÓSTICO TEMPORAL — QUITAR DESPUÉS DE CONFIRMAR EL BUG REAL ═══════════
-  // Captura, en captura (antes que cualquier otro handler pueda interceptarlo),
-  // QUÉ ELEMENTO recibe de verdad cada toque en esta pantalla. Si "Entregué" no
-  // reacciona por un overlay invisible, aquí aparecerá el tag/id/clase de ESE
-  // elemento en vez del botón. Panel visible arriba de las pestañas.
-  const [diagTouch, setDiagTouch] = useState(null);
-  useEffect(() => {
-    const onPointerDown = (e) => {
-      const x = e.clientX, y = e.clientY;
-      const el = document.elementFromPoint(x, y);
-      if (!el) return;
-      setDiagTouch({
-        x: Math.round(x), y: Math.round(y),
-        tag: el.tagName,
-        id: el.id || "(sin id)",
-        cls: (typeof el.className === "string" ? el.className : "").slice(0, 90) || "(sin clase)",
-        text: (el.textContent || "").trim().slice(0, 30),
-      });
-    };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, []);
+  // (El "último toque" se movió a un componente AISLADO — <DiagTouchLine/> más
+  // abajo — para que su re-render en cada pointerdown NUNCA toque el árbol de
+  // CourierDashboard. Ver la nota de la CAUSA REAL más abajo, donde se arma el panel.)
+  // Fase 2: prueba local de que React SÍ ejecutó el onClick del botón (se anota
+  // ANTES de llamar a onStage, dentro del propio onClick — ver "Entregué"/"Recogí").
+  const [diagClickLog, setDiagClickLog] = useState([]);
+  const logClick = (label, orderId) => {
+    try { window.__diagClickCount = (window.__diagClickCount || 0) + 1; window.__diagClickLast = { label, orderId, at: Date.now() }; } catch (e) {}
+    setDiagClickLog(prev => [...prev, `${new Date().toLocaleTimeString()} — onClick "${label}" disparado — pedido ${orderId}`].slice(-8));
+  };
   // ═══════════════════════════════════════════════════════════════════════════
 
   // POOL de entregas disponibles: viene del backend con TODO (título, foto,
@@ -276,9 +304,9 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
         {feePending
           ? <div style={{ width: "100%", padding: "13px", borderRadius: 13, background: AC + "12", border: `1px solid ${AC}30`, textAlign: "center", fontSize: 12.5, fontWeight: 700, color: AC }}>Esperando que el comprador apruebe tu tarifa de {money(o.proposedFee || feeOf(o))}…</div>
           : canPickup
-            ? <button onClick={() => onStage(o.id, "recogido")} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: AC, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>📦 Recogí el pedido</button>
+            ? <button onClick={() => { logClick("Recogí el pedido", o.id); onStage(o.id, "recogido"); }} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: AC, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>📦 Recogí el pedido</button>
             : canDeliver
-              ? <button onClick={() => onStage(o.id, "entregado")} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: "#22C55E", color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>✅ Entregué</button>
+              ? <button onClick={() => { logClick("Entregué", o.id); onStage(o.id, "entregado"); }} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: "#22C55E", color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>✅ Entregué</button>
               : <div style={{ textAlign: "center", color: t2, fontSize: 12.5, fontWeight: 700, padding: "10px" }}>Estado: {o.status}</div>}
 
         <div style={{ display: "flex", gap: 8, marginTop: 9 }}>
@@ -341,15 +369,20 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
         </div>
       </div>
 
-      {/* ═══ DIAGNÓSTICO TEMPORAL — QUITAR DESPUÉS ═══ */}
-      <div style={{ background: "#1a0f00", border: "2px solid #F59E0B", borderRadius: 12, padding: 10, marginBottom: 14, fontSize: 10.5, color: "#FDE68A", fontFamily: "monospace" }}>
+      {/* ═══ DIAGNÓSTICO TEMPORAL — QUITAR DESPUÉS ═══
+          CAUSA REAL ENCONTRADA (Fase 2): este panel actualizaba su estado en CADA
+          "pointerdown" (para mostrar elementFromPoint), lo que re-renderizaba y
+          podía CAMBIAR SU ALTURA justo entre el mousedown y el mouseup de un toque
+          real — desplazando el botón "Entregué" bajo el dedo A MITAD del toque. El
+          navegador exige el MISMO elemento en down y en up para sintetizar el
+          evento "click"; si el layout se movió entre medio, el click NUNCA se
+          dispara (confirmado con Playwright: un clic real fallaba 100% de las
+          veces con este panel de altura variable; con altura FIJA, funciona). Por
+          eso el panel ahora tiene altura fija con scroll interno — nunca empuja
+          nada de lo que está debajo. */}
+      <div style={{ background: "#1a0f00", border: "2px solid #F59E0B", borderRadius: 12, padding: 10, marginBottom: 14, fontSize: 10.5, color: "#FDE68A", fontFamily: "monospace", height: 220, overflowY: "auto", boxSizing: "border-box" }}>
         <div style={{ fontWeight: 800, marginBottom: 6, color: "#F59E0B" }}>🔧 DIAGNÓSTICO TEMPORAL (quitar después)</div>
-        <div style={{ marginBottom: 6 }}>
-          <b>Último toque (elementFromPoint):</b>{" "}
-          {diagTouch
-            ? `<${diagTouch.tag}> id="${diagTouch.id}" class="${diagTouch.cls}" texto="${diagTouch.text}" @ (${diagTouch.x},${diagTouch.y})`
-            : "(todavía no tocaste nada)"}
-        </div>
+        <DiagTouchLine />
         <div><b>Mis entregas activas ({actives.length}):</b></div>
         {actives.length === 0 && <div>— ninguna —</div>}
         {actives.map(o => {
@@ -364,6 +397,14 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
             </div>
           );
         })}
+        <div style={{ borderTop: "1px solid #78350F", marginTop: 8, paddingTop: 6 }}>
+          <b>Registro onClick (local, prueba que React ejecutó el handler):</b>
+          {diagClickLog.length === 0 ? <div>— nada todavía, toca "Entregué" o "Recogí" —</div> : diagClickLog.map((l, i) => <div key={i}>{l}</div>)}
+        </div>
+        <div style={{ borderTop: "1px solid #78350F", marginTop: 8, paddingTop: 6 }}>
+          <b>Registro RPC (courier_advance_stage, desde App.jsx):</b>
+          {diagLog.length === 0 ? <div>— nada todavía —</div> : diagLog.map((l, i) => <div key={i}>{l}</div>)}
+        </div>
       </div>
       {/* ═══ FIN DIAGNÓSTICO TEMPORAL ═══ */}
 
@@ -413,7 +454,7 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   </div>;
 }
 
-export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId, orders = [], localBase = 150, onAccept, onStage, onCancel, onReport, onViewProfile, onChat }) {
+export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId, orders = [], localBase = 150, onAccept, onStage, onCancel, onReport, onViewProfile, onChat, diagLog = [] }) {
   const bg = dark ? "#0a0a0a" : "#f1f5f9", card = dark ? "#141417" : "#fff", t1 = dark ? "#f0f0f2" : "#0f172a", t2 = dark ? "#9aa0aa" : "#64748b", t3 = dark ? "#6b7280" : "#94a3b8", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)", AC = "#6366F1";
   const [started, setStarted] = useState(false);
   const [app, setApp] = useState(undefined); // undefined = cargando
@@ -456,7 +497,7 @@ export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId
       </div>
     </div>
   );
-  if (approved) return <CourierDashboard meName={meName} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onChat={onChat} onClose={onClose} dark={dark} record={myRecord} />;
+  if (approved) return <CourierDashboard meName={meName} meId={meId} orders={orders} localBase={localBase} onAccept={onAccept} onStage={onStage} onCancel={onCancel} onReport={onReport} onViewProfile={onViewProfile} onChat={onChat} onClose={onClose} dark={dark} record={myRecord} diagLog={diagLog} />;
 
   // Cargando su solicitud
   if (app === undefined) return wrap(

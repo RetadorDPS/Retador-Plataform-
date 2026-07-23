@@ -73,15 +73,6 @@ export default function App() {
   useEffect(() => { getPlatformStats().then(s => setPlatformStats(s)).catch(() => {}); }, []);
 
   useEffect(() => {
-    // TEMP verificación e2e (Fase 2 del diagnóstico "Entregué") — inyecta una sesión
-    // de mensajero simulada para poder montar App.jsx COMPLETO (con sus overlays
-    // reales) en Playwright, sin depender de un login real. QUITAR DESPUÉS.
-    let e2e = null;
-    try { e2e = new URLSearchParams(window.location.search).get("e2e"); } catch (e) {}
-    if (e2e === "1") {
-      setSessionUser({ id: "e2e-courier-1", email: "e2e@test.local", name: "Mensajero E2E", avatar: null, plan: "gratis", role: "courier", verified: false, suspended: false, profile: null });
-      return;
-    }
     let alive = true;
     loadSessionUser().then(u => { if (alive) setSessionUser(u); });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -226,14 +217,6 @@ function AppShell({ sessionUser }) {
   const [showTools, setShowTools] = useState(false);
   const [toolApp, setToolApp] = useState(false);
   const [showCourier, setShowCourier] = useState(false);
-  // ═══ DIAGNÓSTICO TEMPORAL (Fase 2) — QUITAR DESPUÉS ═══════════════════════════
-  // Registro visible de "onStage se llamó" + "RPC llamado/resultado" para el
-  // panel de diagnóstico del modo mensajero (Courier.jsx). Vive aquí porque la
-  // llamada RPC real (courier_advance_stage) está en esta función, no en el
-  // componente de UI.
-  const [diagLog, setDiagLog] = useState([]);
-  const pushDiag = (msg) => setDiagLog(prev => [...prev, `${new Date().toLocaleTimeString()} — ${msg}`].slice(-14));
-  // ═══════════════════════════════════════════════════════════════════════════
   // RETIRADO: el registro local de mensajeros (retador_couriers en localStorage)
   // ya NO es vía de aprobación. La única vía real es courier_applications en el
   // backend + review_courier_application del admin (que pone role='courier').
@@ -264,30 +247,6 @@ function AppShell({ sessionUser }) {
     if (error) { console.error("buyer_respond_fee:", error.message); flash("⚠️ No se pudo responder: " + error.message); return; }
     await loadOrders();
     flash(ok ? "✅ Tarifa aprobada — el mensajero ya puede recoger" : "Tarifa rechazada · disponible de nuevo");
-  };
-  // El mensajero avanza su etapa. El backend SOLO acepta "recogido" y "entregado"
-  // ("recogido" auto-avanza a en_ruta; "entregado" cierra el pedido). RPC segura.
-  const courierStage = async (orderId, stage) => {
-    const p_stage = (stage === "recogido") ? "recogido" : "entregado";
-    // DIAGNÓSTICO TEMPORAL (Fase 2): registra el llamado y CUALQUIER resultado,
-    // incluida una excepción de red — nada de catch silencioso.
-    pushDiag(`RPC llamado: courier_advance_stage(p_order_id=${orderId}, p_stage="${p_stage}")`);
-    try {
-      const { error } = await supabase.rpc("courier_advance_stage", { p_order_id: orderId, p_stage });
-      if (error) {
-        pushDiag(`RPC resultado: ERROR — ${error.message || JSON.stringify(error)}`);
-        console.error("courier_advance_stage:", error.message);
-        flash("⚠️ No se pudo avanzar: " + error.message);
-        return;
-      }
-      pushDiag(`RPC resultado: ÉXITO`);
-    } catch (e) {
-      pushDiag(`RPC EXCEPCIÓN (red/otro): ${e?.message || String(e)}`);
-      flash("⚠️ Error de red al avanzar: " + (e?.message || String(e)));
-      return;
-    }
-    await loadOrders();
-    flash(p_stage === "recogido" ? "✅ Producto recogido — en ruta" : "✅ Entregado — pedido cerrado");
   };
   // Panel de administración: SOLO para cuentas con rol real de admin en el backend
   // (el dueño ya tiene role='admin' en profiles). Ya no está abierto para todos.
@@ -867,6 +826,28 @@ function AppShell({ sessionUser }) {
   useEffect(() => { loadOrders(); }, [loadOrders]);
   useEffect(() => { if (pScr === "orders" || pScr === "order-detail") loadOrders(); }, [pScr, loadOrders]);
 
+  // El mensajero avanza su etapa. El backend SOLO acepta "recogido" y "entregado"
+  // ("recogido" auto-avanza a en_ruta; "entregado" cierra el pedido). RPC segura.
+  // Identidad estable (useCallback) para que el botón "Entregué"/"Recogí" en
+  // Courier.jsx, aislado con React.memo, no se re-renderice por cambios ajenos
+  // (ej. el pool de entregas refrescándose en vivo) mientras el usuario lo toca.
+  const courierStage = useCallback(async (orderId, stage) => {
+    const p_stage = (stage === "recogido") ? "recogido" : "entregado";
+    try {
+      const { error } = await supabase.rpc("courier_advance_stage", { p_order_id: orderId, p_stage });
+      if (error) {
+        console.error("courier_advance_stage:", error.message);
+        flash("⚠️ No se pudo avanzar: " + error.message);
+        return;
+      }
+    } catch (e) {
+      flash("⚠️ Error de red al avanzar: " + (e?.message || String(e)));
+      return;
+    }
+    await loadOrders();
+    flash(p_stage === "recogido" ? "✅ Producto recogido — en ruta" : "✅ Entregado — pedido cerrado");
+  }, [loadOrders]);
+
   // ── CANAL REALTIME GLOBAL (UNO solo por usuario: rt-global-<uid>) ────────────
   // · messages → refresca el contador de mensajes sin leer (RPC oficial).
   // · orders   → recarga los pedidos EN VIVO: el vendedor ve llegar la venta al
@@ -1337,8 +1318,7 @@ function AppShell({ sessionUser }) {
         return <CourierFlow myRecord={myRecord} user={user} flash={flash} dark={effectiveTheme === "dark"} onClose={() => setShowCourier(false)}
           meName={meName} meId={user?.id} orders={orders} localBase={adminCfg.localBase || 150}
           onAccept={(id, fee) => { acceptDelivery(id, fee); }}
-          onStage={(id, st) => { courierStage(id, st); }}
-          diagLog={diagLog}
+          onStage={courierStage}
           onViewProfile={openPublicProfile}
           onChat={openChat}
           onCancel={(id) => { cancelDelivery(id); flash("Entrega liberada · disponible de nuevo"); }}

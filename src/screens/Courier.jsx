@@ -44,6 +44,30 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   const [reportOther, setReportOther] = useState(false);
   const [reportSent, setReportSent] = useState({});
 
+  // ═══ DIAGNÓSTICO TEMPORAL — QUITAR DESPUÉS DE CONFIRMAR EL BUG REAL ═══════════
+  // Captura, en captura (antes que cualquier otro handler pueda interceptarlo),
+  // QUÉ ELEMENTO recibe de verdad cada toque en esta pantalla. Si "Entregué" no
+  // reacciona por un overlay invisible, aquí aparecerá el tag/id/clase de ESE
+  // elemento en vez del botón. Panel visible arriba de las pestañas.
+  const [diagTouch, setDiagTouch] = useState(null);
+  useEffect(() => {
+    const onPointerDown = (e) => {
+      const x = e.clientX, y = e.clientY;
+      const el = document.elementFromPoint(x, y);
+      if (!el) return;
+      setDiagTouch({
+        x: Math.round(x), y: Math.round(y),
+        tag: el.tagName,
+        id: el.id || "(sin id)",
+        cls: (typeof el.className === "string" ? el.className : "").slice(0, 90) || "(sin clase)",
+        text: (el.textContent || "").trim().slice(0, 30),
+      });
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
+  // ═══════════════════════════════════════════════════════════════════════════
+
   // POOL de entregas disponibles: viene del backend con TODO (título, foto,
   // recogida, entrega, tarifa, pago). Se refresca en vivo con el realtime.
   const [pool, setPool] = useState([]);
@@ -316,6 +340,32 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
           <div><b style={{ fontSize: 16 }}>{pool.length}</b> <span style={{ opacity: .8 }}>disponibles</span></div>
         </div>
       </div>
+
+      {/* ═══ DIAGNÓSTICO TEMPORAL — QUITAR DESPUÉS ═══ */}
+      <div style={{ background: "#1a0f00", border: "2px solid #F59E0B", borderRadius: 12, padding: 10, marginBottom: 14, fontSize: 10.5, color: "#FDE68A", fontFamily: "monospace" }}>
+        <div style={{ fontWeight: 800, marginBottom: 6, color: "#F59E0B" }}>🔧 DIAGNÓSTICO TEMPORAL (quitar después)</div>
+        <div style={{ marginBottom: 6 }}>
+          <b>Último toque (elementFromPoint):</b>{" "}
+          {diagTouch
+            ? `<${diagTouch.tag}> id="${diagTouch.id}" class="${diagTouch.cls}" texto="${diagTouch.text}" @ (${diagTouch.x},${diagTouch.y})`
+            : "(todavía no tocaste nada)"}
+        </div>
+        <div><b>Mis entregas activas ({actives.length}):</b></div>
+        {actives.length === 0 && <div>— ninguna —</div>}
+        {actives.map(o => {
+          const feePending = o.feeApproval === "pending" || (o.status === "confirmado" && o.proposedFee);
+          const canPickup = o.status === "asignado";
+          const canDeliver = o.status === "en_ruta";
+          return (
+            <div key={o.id} style={{ borderTop: "1px solid #78350F", marginTop: 6, paddingTop: 6 }}>
+              <div>id: {String(o.id).slice(0, 8)}… | status="{o.status}" | courierStage="{o.courierStage ?? "(undefined)"}"</div>
+              <div>feePending={String(feePending)} canPickup={String(canPickup)} canDeliver={String(canDeliver)}</div>
+              <div>→ rama renderizada: {feePending ? "ESPERA TARIFA" : canPickup ? "RECOGÍ EL PEDIDO" : canDeliver ? "✅ ENTREGUÉ (activo)" : `texto "Estado: ${o.status}" (SIN BOTÓN)`}</div>
+            </div>
+          );
+        })}
+      </div>
+      {/* ═══ FIN DIAGNÓSTICO TEMPORAL ═══ */}
 
       <div style={{ display: "flex", background: dark ? "#141417" : "#fff", border: `1px solid ${bd}`, borderRadius: 12, padding: 3, marginBottom: 16 }}>
         {[["disp", "Disponibles"], ["activa", "Mi entrega"], ["hist", "Historial"]].map(([k, lb]) => (

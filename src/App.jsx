@@ -52,7 +52,7 @@ import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
 import InstallPrompt from "./pwa/InstallPrompt.jsx";
 import PushPrompt from "./pwa/PushPrompt.jsx";
-import { reclaimPushSubscription } from "./pwa/push.js";
+import { ensurePushSubscription } from "./pwa/push.js";
 import { setThemeColor } from "./pwa/themeColor.js";
 
 
@@ -261,11 +261,11 @@ function AppShell({ sessionUser }) {
   useEffect(() => { loadPerms(); }, [loadPerms]);
   // ¿Puede abrir el panel? Admin (ALL) o al menos una sección distinta de "none".
   const hasPanel = adminPerms === "ALL" || (adminPerms && typeof adminPerms === "object" && Object.values(adminPerms).some(v => v && v !== "none"));
-  // Notificaciones PUSH: si el permiso del navegador ya está concedido, re-asocia (en
-  // silencio) la suscripción a ESTE usuario. La suscripción es del navegador, no de
-  // la cuenta: esto evita que, si dos personas usan el mismo teléfono, los avisos
-  // sigan yéndole a la cuenta anterior.
-  useEffect(() => { if (user?.id) reclaimPushSubscription(user.id); }, [user?.id]);
+  // Notificaciones PUSH: en CADA carga, si el permiso ya está concedido, auto-renueva
+  // la suscripción EN SILENCIO — la reasocia a ESTE usuario (evita que, con varias
+  // cuentas en el mismo teléfono, los avisos vayan a la cuenta anterior) y, si no
+  // existe o expiró, la recrea sin volver a pedir permiso. El usuario nunca lo nota.
+  useEffect(() => { if (user?.id) ensurePushSubscription(user.id); }, [user?.id]);
   // Configuración editable de la plataforma (controlada desde el panel admin, persiste)
   const [adminCfg, setAdminCfg] = useState(() => {
     const defaults = {

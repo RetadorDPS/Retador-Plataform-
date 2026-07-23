@@ -69,15 +69,44 @@ export async function disablePush() {
   } catch (e) {}
 }
 
-// Re-asocia (en silencio) la suscripción existente a ESTE usuario. La suscripción es
-// del NAVEGADOR, no de la cuenta: si dos personas usan el mismo teléfono/navegador,
-// esto asegura que quien tiene sesión ACTIVA ahora es quien recibe los avisos aquí.
-export async function reclaimPushSubscription(userId) {
-  if (!userId || !isPushSupported()) return;
-  if (Notification.permission !== "granted") return;
+// AUTO-RENOVACIÓN INVISIBLE de la suscripción push. Se llama en CADA carga de la
+// app: el usuario nunca sabe que existe el concepto de "suscripción".
+//   · Si el permiso NO está concedido (o el navegador no soporta push): no hace
+//     NADA (silencioso). Nunca vuelve a pedir permiso — solo repara lo ya dado.
+//   · Si hay una suscripción válida: la reasocia a ESTE usuario (upsert por
+//     endpoint) — importante si el mismo navegador lo usan varias cuentas.
+//   · Si NO existe, EXPIRÓ, o el navegador la reporta inválida: crea una nueva EN
+//     SILENCIO (el permiso ya está concedido) y la guarda. Así se autorrepara sola
+//     con el tiempo, sin intervención del usuario.
+export async function ensurePushSubscription(userId) {
+  if (!userId || !isPushSupported()) return;                 // navegador sin push
+  if (Notification.permission !== "granted") return;          // permiso no concedido: silencioso
   try {
     const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.getSubscription();
+    let sub = await reg.pushManager.getSubscription();
+    const expired = sub && typeof sub.expirationTime === "number" && sub.expirationTime <= Date.now();
+
+    if (sub && !expired) {
+      // Válida: solo la reasociamos a este usuario.
+      await savePushSubscription(sub, userId);
+      return;
+    }
+
+    // No existe o expiró → la recreamos sin pedir permiso (ya está concedido).
+    if (sub && expired) { try { await sub.unsubscribe(); } catch (e) {} }
+    const opts = { userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) };
+    try {
+      sub = await reg.pushManager.subscribe(opts);
+    } catch (e) {
+      // Una sub vieja con OTRA applicationServerKey bloquea la nueva: la quitamos y reintentamos.
+      try { const old = await reg.pushManager.getSubscription(); if (old) await old.unsubscribe(); } catch (e2) {}
+      sub = await reg.pushManager.subscribe(opts);
+    }
     if (sub) await savePushSubscription(sub, userId);
-  } catch (e) {}
+  } catch (e) { /* silencioso: la auto-renovación jamás molesta al usuario */ }
 }
+
+// Alias retro-compatible: el comportamiento de "reclamar" ahora lo cubre
+// ensurePushSubscription (que además auto-renueva). Se mantiene por si algún
+// punto del código lo importaba con el nombre antiguo.
+export const reclaimPushSubscription = ensurePushSubscription;

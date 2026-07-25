@@ -53,6 +53,30 @@ import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
 import InstallPrompt from "./pwa/InstallPrompt.jsx";
 import PushPrompt from "./pwa/PushPrompt.jsx";
 import { ensurePushSubscription } from "./pwa/push.js";
+
+// Envuelve una sección de la plataforma: si está APAGADA (sectionsEnabled.X === false)
+// la deja VISIBLE pero en SOLO LECTURA — un aviso discreto arriba y todo lo interactivo
+// desactivado. fieldset[disabled] desactiva de forma nativa inputs/botones/selects; el
+// onClickCapture con preventDefault+stopPropagation bloquea también los taps sobre
+// tarjetas/enlaces (entrar a un detalle con acción) SIN impedir el scroll (un tap no es
+// un scroll). onClose (opcional) da una salida SIEMPRE activa, fuera del fieldset, para
+// overlays como la Billetera cuyo botón de cerrar quedaría atrapado si no.
+function SectionGate({ enabled, children, onClose, dark = true }) {
+  if (enabled !== false) return children;
+  const bd = dark ? "#3a2e00" : "#FDE68A";
+  const fg = dark ? "#FDE68A" : "#92400E";
+  return (
+    <div style={{ position: "relative", minHeight: "100%" }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 70, display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", background: dark ? "#1a1400" : "#FFFBEB", borderBottom: `1px solid ${bd}`, color: fg, fontSize: 12.5, fontWeight: 700 }}>
+        <span>🔜 Esta sección estará disponible pronto.</span>
+        {onClose && <button onClick={onClose} style={{ marginLeft: "auto", background: "transparent", border: `1px solid ${bd}`, color: fg, borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Cerrar ✕</button>}
+      </div>
+      <fieldset disabled style={{ border: "none", padding: 0, margin: 0, minWidth: 0 }} onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+        {children}
+      </fieldset>
+    </div>
+  );
+}
 import { setThemeColor } from "./pwa/themeColor.js";
 
 
@@ -71,6 +95,28 @@ export default function App() {
   // Estadísticas REALES de la plataforma para el login (get_platform_stats). null = no cargó.
   const [platformStats, setPlatformStats] = useState(null);
   useEffect(() => { getPlatformStats().then(s => setPlatformStats(s)).catch(() => {}); }, []);
+
+  // PANTALLA PRINCIPAL: SIEMPRE se muestra la bienvenida al abrir. Con sesión, el
+  // botón entra al marketplace (no vuelve a mostrarse hasta reabrir / re-loguear).
+  const [entered, setEntered] = useState(false);
+  useEffect(() => { if (!sessionUser) setEntered(false); }, [sessionUser]);
+  // Config editable de la bienvenida (subtítulo, texto del botón, color de acento),
+  // en config.home. Se carga aquí (fuera de AppShell) y se mantiene EN VIVO con el
+  // realtime de platform_config, para que un cambio del editor se vea al instante
+  // aunque el usuario esté todavía en la pantalla de bienvenida. Los conteos de
+  // stats son SIEMPRE reales (get_platform_stats), nunca editables.
+  const [homeCfg, setHomeCfg] = useState({});
+  useEffect(() => {
+    let alive = true;
+    getPlatformConfig().then(res => { if (alive && res?.config?.home) setHomeCfg(res.config.home); }).catch(() => {});
+    const ch = supabase.channel("rt-home-cfg")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "platform_config" }, (payload) => {
+        const cfg = payload?.new?.config;
+        if (cfg && typeof cfg === "object" && cfg.home) setHomeCfg(cfg.home);
+      })
+      .subscribe();
+    return () => { alive = false; try { supabase.removeChannel(ch); } catch (e) {} };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -95,8 +141,10 @@ export default function App() {
           <DensityProvider defaultMode="pequena">
             <CatalogProvider>
               {sessionUser
-                ? <AppShell sessionUser={sessionUser} />
-                : <RetadorInicio onGoogle={signInWithGoogle} stats={platformStats} />}
+                ? (entered
+                    ? <AppShell sessionUser={sessionUser} />
+                    : <RetadorInicio onEnter={() => setEntered(true)} subtitle={homeCfg.subtitle} enterLabel={homeCfg.enterLabel} accent={homeCfg.accent} stats={platformStats} />)
+                : <RetadorInicio onGoogle={signInWithGoogle} subtitle={homeCfg.subtitle} accent={homeCfg.accent} stats={platformStats} />}
             </CatalogProvider>
           </DensityProvider>
         )}
@@ -285,6 +333,11 @@ function AppShell({ sessionUser }) {
         { id: 'premium', name: 'Premium', price: 12, promo: false, promoPrice: 0, features: ['Todo lo del Pro', 'Aparecer en Tiendas Premium', 'Soporte prioritario', 'Destacar productos'] },
       ],
       team: [],
+      // Pantalla principal (bienvenida) — editable desde el Editor Visual.
+      home: { subtitle: "AHORA EN BETA PÚBLICA", enterLabel: "Entrar a RETADOR", accent: "#F5B301" },
+      // Secciones de la plataforma encendidas/apagadas (apagada = solo lectura).
+      // El backend siembra los valores reales; estos son el respaldo local.
+      sectionsEnabled: { marketplace: true, search: true, deliveryLocal: true, intlShipping: false, auctions: true, wallet: false },
       // Editor Visual: layout por pantalla (anclas + refs) y masters (contenido).
       blocks: DEFAULT_BLOCKS,
       masters: {},
@@ -1122,6 +1175,10 @@ function AppShell({ sessionUser }) {
   // Config global expuesta a toda la app + la fecha de última actualización (para la
   // tirita de tasas del perfil). __updatedAt no se guarda en el backend (es de UI).
   const cfgCtxValue = useMemo(() => ({ ...adminCfg, __updatedAt: cfgUpdatedAt }), [adminCfg, cfgUpdatedAt]);
+  // Secciones encendidas/apagadas (en vivo: adminCfg se actualiza por el realtime de
+  // platform_config). undefined = encendida; solo `false` apaga (→ solo lectura).
+  const sections = adminCfg.sectionsEnabled || {};
+  const isDarkTheme = effectiveTheme === "dark";
   return (
     <AppThCtx.Provider value={appTk}>
     <PlatformCfgContext.Provider value={cfgCtxValue}>
@@ -1237,8 +1294,10 @@ function AppShell({ sessionUser }) {
         const usdCup = Number(fx.usdToCup) || 400, eurCup = Number(fx.eurToCup) || 430;
         const walletRates = { base: "USD", updatedAt: Date.now(), rates: { USD: 1, EUR: +(usdCup / eurCup).toFixed(4), CUP: usdCup } };
         return <div style={{ position: "fixed", inset: 0, zIndex: 4000, overflow: "hidden", background: effectiveTheme === "dark" ? "#0a0a0a" : "#f1f5f9" }}>
-          <WalletApp user={meUser} contacts={contacts} orders={payable} rates={walletRates} dark={effectiveTheme === "dark"} onClose={() => setShowWallet(false)}
-            onOrderPaid={(orderId) => setOrders(prev => prev.map(o => o.id === orderId ? { ...o, paidViaWallet: true, status: o.status === "pendiente" || o.stepIdx === 0 ? (o.flow?.[1]?.key || o.status) : o.status } : o))} />
+          <SectionGate enabled={sections.wallet} dark={effectiveTheme === "dark"} onClose={() => setShowWallet(false)}>
+            <WalletApp user={meUser} contacts={contacts} orders={payable} rates={walletRates} dark={effectiveTheme === "dark"} onClose={() => setShowWallet(false)}
+              onOrderPaid={(orderId) => setOrders(prev => prev.map(o => o.id === orderId ? { ...o, paidViaWallet: true, status: o.status === "pendiente" || o.stepIdx === 0 ? (o.flow?.[1]?.key || o.status) : o.status } : o))} />
+          </SectionGate>
         </div>;
       })()}
       {showTools && (() => {
@@ -1418,7 +1477,7 @@ function AppShell({ sessionUser }) {
           con blur), así al esconderse no queda ninguna franja vacía debajo. */}
       <div onScrollCapture={handleNavScroll} style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <>
-          {tab === "market" && <>
+          {tab === "market" && <SectionGate enabled={sections.marketplace} dark={isDarkTheme}>
             {mScr === "home" && (
               <MarketHome
                 hidden={navHidden}
@@ -1476,31 +1535,35 @@ function AppShell({ sessionUser }) {
                 onProduct={p => { setSelProd(p); setProdBackTo("sellerProfile"); setMScr("product"); }}
               />
             )}
-          </>}
+          </SectionGate>}
 
           {tab === "search" && (
-            <AdvancedSearch
-              view={productView}
-              products={products}
-              onProduct={p => {
-                setSelProd(p);
-                setTab("market");
-                setMScr("product");
-              }}
-              favorites={favorites}
-              onFav={toggleFav}
-              onNav={navTo}
-            />
+            <SectionGate enabled={sections.search} dark={isDarkTheme}>
+              <AdvancedSearch
+                view={productView}
+                products={products}
+                onProduct={p => {
+                  setSelProd(p);
+                  setTab("market");
+                  setMScr("product");
+                }}
+                favorites={favorites}
+                onFav={toggleFav}
+                onNav={navTo}
+              />
+            </SectionGate>
           )}
 
           {tab === "envios" && <>
             {eScr === "menu"  && <EnviosMenu onLocal={() => setEScr("local")} onIntl={() => setEScr("intl")} user={user} requireAuth={requireAuth} />}
-            {eScr === "local" && <LocalDelivery onBack={() => setEScr("menu")} flash={flash} cfg={adminCfg} user={user} onNav={navTo} onChat={openMessages} />}
-            {eScr === "intl"  && <IntlShipping  onBack={() => setEScr("menu")} flash={flash} cfg={cfg} onNav={navTo} />}
+            {eScr === "local" && <SectionGate enabled={sections.deliveryLocal} dark={isDarkTheme} onClose={() => setEScr("menu")}><LocalDelivery onBack={() => setEScr("menu")} flash={flash} cfg={adminCfg} user={user} onNav={navTo} onChat={openMessages} /></SectionGate>}
+            {eScr === "intl"  && <SectionGate enabled={sections.intlShipping} dark={isDarkTheme} onClose={() => setEScr("menu")}><IntlShipping  onBack={() => setEScr("menu")} flash={flash} cfg={cfg} onNav={navTo} /></SectionGate>}
           </>}
 
           {tab === "subastas" && (
-            <SubastasScreen forceCreate={subOpenCreate} onForceCreateDone={() => setSubOpenCreate(false)} onNav={navTo} onPromote={addPromoRequest} sellerName={profileData?.name || user?.name || "Usuario"} />
+            <SectionGate enabled={sections.auctions} dark={isDarkTheme}>
+              <SubastasScreen forceCreate={subOpenCreate} onForceCreateDone={() => setSubOpenCreate(false)} onNav={navTo} onPromote={addPromoRequest} sellerName={profileData?.name || user?.name || "Usuario"} />
+            </SectionGate>
           )}
 
           {tab === "perfil" && <>

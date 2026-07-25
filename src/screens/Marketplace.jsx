@@ -988,7 +988,7 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
 
       {/* Filtros - Ahora con sticky */}
       <div style={{ position: "sticky", top: hidden ? 0 : 45, zIndex: 50, background: isDark ? BG : "#fff", borderBottom: "none", padding: "12px clamp(18px,3vw,48px)", display: "flex", gap: 7, overflowX: "auto", transition: "top .28s cubic-bezier(.4,0,.2,1)" }}>
-        {[["TODOS", "🏷️", "Todos"], ["OFERTAS", "🔥", "Ofertas"], ["NUEVO", "✨", "Nuevo"], ["RECOMENDADO", "⭐", "Destacado"], ["MAS_VENDIDO", "🏆", "Más vendido"]].map(([f, ic, lbl]) => (
+        {[["TODOS", "🏷️", "Todos"], ["OFERTAS", "🔥", "Ofertas"], ["NUEVO", "✨", "Nuevo"], ["RECOMENDADO", "⭐", "Destacado"], ["MAS_VENDIDO", "🏆", "Más vendido"], ["FAVORITOS", "❤️", "Favoritos"]].map(([f, ic, lbl]) => (
           <button key={f} onClick={() => setFilter(f)} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: filter === f ? G : isDark ? "#0e0e0e" : S, color: filter === f ? "#000" : T3, border: `1.5px solid ${filter === f ? G : B}`, borderRadius: 999, padding: "7px 13px", fontSize: 10 * ts, fontWeight: 700, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>{ic} {lbl}</button>
         ))}
         {/* Entrada a SERVICIOS (mundo aparte) */}

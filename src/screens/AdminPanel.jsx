@@ -2254,6 +2254,49 @@ function Economia({toast, data={}, ro}){
   return <>
     <div className="stit">Economía</div>
     <div className="ssub">Tarifas, comisiones e ingresos · números del backend (fuente única)</div>
+
+    {/* ── 🎛️ SECCIONES DE LA PLATAFORMA — encender/apagar (apagada = solo lectura) ──
+        Un solo lugar para todas. Guarda en config.sectionsEnabled (global, EN VIVO
+        para todos vía realtime). Nota: el "Servicio de delivery activo" de la página
+        Delivery local es DISTINTO (es operativo: día de descanso / prelanzamiento del
+        SERVICIO de pedidos), por eso se mantiene aparte y no se duplica aquí. */}
+    {(() => {
+      const secDefs = [
+        ['marketplace',   '🏪 Marketplace',              'Explorar y comprar productos'],
+        ['search',        '🔎 Búsqueda',                 'Buscador de productos'],
+        ['deliveryLocal', '🛵 Delivery local',           'Pantalla de mensajería local'],
+        ['intlShipping',  '✈️ Envíos internacionales',   'Cotizador de envíos al exterior'],
+        ['auctions',      '🔨 Subastas',                 'Pujar y crear subastas'],
+        ['wallet',        '👛 Billetera',                'Pagos y saldo'],
+      ];
+      const se = cfg.sectionsEnabled || {};
+      const on = (k) => se[k] !== false;
+      const toggle = (k) => {
+        if (ro) { toast('Solo lectura — sin permiso para modificar'); return; }
+        const wasOn = on(k);
+        data.onCfg && data.onCfg({ sectionsEnabled: { ...se, [k]: !wasOn } });
+        toast(wasOn ? 'Sección apagada — ahora es solo lectura para todos' : 'Sección encendida');
+      };
+      return (
+        <div className="card cp" style={{marginBottom:16}}>
+          <div style={{fontSize:15,fontWeight:800,color:'var(--tx)',marginBottom:3}}>🎛️ Secciones de la plataforma</div>
+          <div style={{fontSize:11,color:'var(--tx3)',marginBottom:8}}>Apaga una sección para dejarla en <b>solo lectura</b>: se sigue viendo, pero nadie puede tocar nada. El cambio es EN VIVO para todos.</div>
+          {secDefs.map(([k,label,desc],i)=>(
+            <div key={k} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'10px 0',borderTop:i>0?'1px solid var(--bd)':'none'}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:700,color:'var(--tx)'}}>{label}</div>
+                <div style={{fontSize:10.5,color:'var(--tx3)',marginTop:2}}>{desc}</div>
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:9,flexShrink:0}}>
+                <span style={{fontSize:11,fontWeight:800,color:on(k)?'var(--gn)':'var(--rd)'}}>{on(k)?'Encendida':'Apagada'}</span>
+                {!ro && <button onClick={()=>toggle(k)} style={{fontWeight:800,fontSize:12,padding:'8px 14px',borderRadius:10,cursor:'pointer',border:`1px solid ${on(k)?'var(--rd)':'var(--gn)'}`,color:on(k)?'var(--rd)':'var(--gn)',background:'transparent'}}>{on(k)?'Apagar':'Encender'}</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    })()}
+
     {stats === null && <div className="card cp mb16" style={{border:'1px solid var(--yw)',background:'var(--ywb)'}}>
       <div style={{fontSize:12,fontWeight:700,color:'var(--yw)'}}>Sin acceso a las métricas</div>
       <div style={{fontSize:11,color:'var(--tx3)',marginTop:3}}>El backend no te dio los números de esta sección. Se muestran como “—”.</div>
@@ -2799,6 +2842,52 @@ function Sistema({toast, data={}}){
   </>;
 }
 
+/* ── 🏠 EDITOR DE LA PANTALLA PRINCIPAL (bienvenida) ─────────────────────────────
+   Vive en la página del Editor Visual (permiso 'editor'). Guarda en config.home vía
+   onCfg (config global) → persiste y se ve EN VIVO para todos por el realtime de
+   platform_config. Los conteos (vendedores/productos) NO son editables: siempre reales. */
+function HomeScreenEditor({ cfg = {}, onCfg, ro, toast }) {
+  const h = cfg.home || {};
+  const [subtitle, setSubtitle] = useState(h.subtitle ?? 'AHORA EN BETA PÚBLICA');
+  const [enterLabel, setEnterLabel] = useState(h.enterLabel ?? 'Entrar a RETADOR');
+  const [accent, setAccent] = useState(h.accent ?? '#F5B301');
+  const save = () => {
+    if (ro) { toast('Solo lectura — sin permiso para modificar'); return; }
+    onCfg && onCfg({ home: {
+      subtitle: (subtitle.trim() || 'AHORA EN BETA PÚBLICA'),
+      enterLabel: (enterLabel.trim() || 'Entrar a RETADOR'),
+      accent: (accent || '#F5B301'),
+    } });
+    toast('Pantalla principal guardada y publicada');
+  };
+  const inp = { width:'100%', background:'var(--bg2)', border:'1px solid var(--bd2)', borderRadius:8, padding:'9px 11px', color:'var(--tx)', fontSize:13, outline:'none', boxSizing:'border-box' };
+  return (
+    <div className="card cp" style={{marginBottom:16}}>
+      <div style={{fontSize:15,fontWeight:800,color:'var(--tx)',marginBottom:3}}>🏠 Pantalla principal</div>
+      <div style={{fontSize:11,color:'var(--tx3)',marginBottom:12}}>La bienvenida que ve todo el mundo al abrir. Los conteos (vendedores/productos) son SIEMPRE reales y no se editan.</div>
+      <div style={{display:'flex',flexDirection:'column',gap:12}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:'var(--tx2)',marginBottom:5}}>Subtítulo (insignia)</div>
+          <input value={subtitle} disabled={ro} onChange={e=>setSubtitle(e.target.value)} style={inp} placeholder="AHORA EN BETA PÚBLICA"/>
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:'var(--tx2)',marginBottom:5}}>Texto del botón (entrar)</div>
+          <input value={enterLabel} disabled={ro} onChange={e=>setEnterLabel(e.target.value)} style={inp} placeholder="Entrar a RETADOR"/>
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:'var(--tx2)',marginBottom:5}}>Color de acento del botón</div>
+          <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+            <input type="color" value={accent} disabled={ro} onChange={e=>setAccent(e.target.value)} style={{width:46,height:38,border:'1px solid var(--bd2)',borderRadius:8,background:'var(--bg2)',cursor:ro?'not-allowed':'pointer',padding:2}}/>
+            <input value={accent} disabled={ro} onChange={e=>setAccent(e.target.value)} style={{...inp,fontFamily:'var(--mo)',maxWidth:150}} placeholder="#F5B301"/>
+            <span style={{marginLeft:'auto',background:accent,color:'#000',fontWeight:800,fontSize:12,padding:'8px 14px',borderRadius:10,whiteSpace:'nowrap'}}>{(enterLabel||'Entrar a RETADOR')} →</span>
+          </div>
+        </div>
+        {!ro && <button onClick={save} style={{alignSelf:'flex-start',fontWeight:800,fontSize:13,padding:'10px 20px',borderRadius:10,border:'none',background:'var(--gn)',color:'#04120b',cursor:'pointer'}}>Guardar y publicar</button>}
+      </div>
+    </div>
+  );
+}
+
 /* ── NAV + APP ──────────────────────────────────────────────────────────────── */
 // CIERRE DEL PANEL: solo secciones REALES arriba; lo que aún no existe va en
 // "Próximamente" con pantalla honesta (sin fingir tablas ni datos).
@@ -2968,9 +3057,10 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
                 ? <fieldset disabled style={{border:'none',padding:0,margin:0,minWidth:0}}>
                     <div style={{margin:'0 0 12px',padding:'10px 14px',borderRadius:10,background:'var(--bg2)',border:'1px solid var(--bd2)',fontSize:12,fontWeight:700,color:'var(--tx2)'}}>👁 Solo lectura — sin permiso para modificar ni publicar.</div>
                     {/* fieldset[disabled] deshabilita de forma nativa TODOS los inputs, selects y botones del editor. */}
+                    <HomeScreenEditor cfg={data.cfg} onCfg={()=>add('👁 Solo lectura — no puedes publicar')} ro={true} toast={add}/>
                     <EditorVisual toast={add} cfg={data.cfg} onCfg={()=>add('👁 Solo lectura — no puedes publicar')}/>
                   </fieldset>
-                : <EditorVisual toast={add} cfg={data.cfg} onCfg={data.onPublishBlocks}/>)}
+                : <><HomeScreenEditor cfg={data.cfg} onCfg={data.onCfg} ro={false} toast={add}/><EditorVisual toast={add} cfg={data.cfg} onCfg={data.onPublishBlocks}/></>)}
               {page==='eco'&&<Economia toast={add} data={data} ro={curRO}/>}
               {page==='sys'&&<Sistema toast={add} data={data}/>}
               {page==='team'&&<TeamScreen toast={add} meId={data.meId} onViewProfile={data.onViewProfile}/>}

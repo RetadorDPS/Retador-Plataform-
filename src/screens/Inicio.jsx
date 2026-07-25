@@ -38,7 +38,14 @@ function GoogleG({ size = 19 }) {
   );
 }
 
-export function RetadorInicio({ onGoogle, stats = null }) {
+// onGoogle  → sin sesión: botón "Entrar con Google" (login).
+// onEnter   → CON sesión: botón "Entrar a RETADOR" (entra al marketplace).
+// subtitle/enterLabel/accent → editables en vivo desde el Editor Visual
+// (config.home). Los conteos de stats son SIEMPRE reales, nunca editables.
+export function RetadorInicio({ onGoogle, onEnter = null, subtitle = "", enterLabel = "", accent = "", stats = null }) {
+  const gold = accent || INICIO_GOLD;
+  const badgeText = subtitle || INICIO_CFG.badge.text;
+  const enterText = enterLabel || "Entrar a RETADOR";
   return (
     <div style={{ minHeight: "100vh", width: "100%", background: "#080808", display: "flex", justifyContent: "center", WebkitFontSmoothing: "antialiased" }}>
       <style>{`
@@ -55,12 +62,12 @@ export function RetadorInicio({ onGoogle, stats = null }) {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ color: "#fff", fontSize: 14, letterSpacing: "0.18em", fontWeight: 800, fontStyle: "italic", fontFamily: INICIO_DISPLAY }}>RETADOR</span>
             <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "rgba(255,255,255,.45)", fontFamily: "ui-monospace, Menlo, monospace" }}>
-              <span style={{ height: 8, width: 8, borderRadius: 999, background: INICIO_GOLD }} />{INICIO_CFG.version}
+              <span style={{ height: 8, width: 8, borderRadius: 999, background: gold }} />{INICIO_CFG.version}
             </span>
           </div>
           <div style={{ marginTop: 34, display: "flex", justifyContent: "center" }}>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 999, padding: "5px 12px", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", color: INICIO_GOLD, border: "1px solid " + INICIO_GOLD + "44", background: "rgba(245,179,1,.05)" }}>
-              <Zap size={11} fill={INICIO_GOLD} strokeWidth={0} />{INICIO_CFG.badge.text}
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 999, padding: "5px 12px", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", color: gold, border: "1px solid " + gold + "44", background: gold + "0d" }}>
+              <Zap size={11} fill={gold} strokeWidth={0} />{badgeText}
             </div>
           </div>
           <div style={{ marginTop: 30, position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -83,10 +90,21 @@ export function RetadorInicio({ onGoogle, stats = null }) {
             <span style={{ color: "rgba(255,255,255,.38)", fontSize: 13.5 }}>{INICIO_CFG.search}</span>
           </div>
           <div style={{ marginTop: 22 }}>
-            <button onClick={onGoogle} style={{ width: "100%", borderRadius: 14, background: "#fff", color: "#000", border: "none", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: 15, padding: "13px 16px" }}>
-              <GoogleG size={19} /> Entrar con Google
-            </button>
-            <p style={{ marginTop: 10, textAlign: "center", fontSize: 11.5, color: "rgba(255,255,255,.3)" }}>Con tu cuenta de Google. Rápido y seguro.</p>
+            {onEnter ? (
+              <>
+                <button onClick={onEnter} style={{ width: "100%", borderRadius: 14, background: gold, color: "#000", border: "none", cursor: "pointer", fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: 15, padding: "14px 16px" }}>
+                  {enterText} →
+                </button>
+                <p style={{ marginTop: 10, textAlign: "center", fontSize: 11.5, color: "rgba(255,255,255,.3)" }}>Bienvenido de vuelta a RETADOR.</p>
+              </>
+            ) : (
+              <>
+                <button onClick={onGoogle} style={{ width: "100%", borderRadius: 14, background: "#fff", color: "#000", border: "none", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: 15, padding: "13px 16px" }}>
+                  <GoogleG size={19} /> Entrar con Google
+                </button>
+                <p style={{ marginTop: 10, textAlign: "center", fontSize: 11.5, color: "rgba(255,255,255,.3)" }}>Con tu cuenta de Google. Rápido y seguro.</p>
+              </>
+            )}
           </div>
           {/* Estadísticas REALES (get_platform_stats). Si no hay datos o todo es 0,
               no se muestra la fila: cero números inventados. */}

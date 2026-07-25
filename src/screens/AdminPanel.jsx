@@ -824,7 +824,7 @@ function normalizeCfg(cfg) {
   return { masters, layout };
 }
 
-function EditorVisual({ toast, cfg = {}, onCfg }) {
+function EditorVisual({ toast, cfg = {}, onCfg, onHomeCfg, roHome }) {
   const initRef = useRef(null);
   if (!initRef.current) initRef.current = normalizeCfg(cfg);
   const [masters, setMasters] = useState(initRef.current.masters);
@@ -876,7 +876,9 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
   };
 
   // ── Añadir / quitar / duplicar bloques en la pantalla actual ──
-  const isScreen = screen !== "library";
+  // "bienvenida" es una pantalla especial (no lleva banners): edita config.home.
+  const isWelcome = screen === "bienvenida";
+  const isScreen = screen !== "library" && !isWelcome;
   const entries = isScreen ? (layout[screen] || []) : [];
   const addBlock = kind => {
     const m = blankMaster(kind);
@@ -968,6 +970,10 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
           <div className="ve-left-inner">
             <div className="ve-left-scroll" style={{ paddingTop: 6 }}>
               <div className="ve-grp">Pantallas de la plataforma</div>
+              <div className={`ve-area ${isWelcome ? "on" : ""}`} onClick={() => { setScreen("bienvenida"); setSel(null); }}>
+                <span className="ve-ai">🏠</span>
+                <span className="ve-al">Pantalla de bienvenida</span>
+              </div>
               {SCREENS.map(sc => (
                 <div key={sc.id} className={`ve-area ${screen === sc.id ? "on" : ""}`} onClick={() => { setScreen(sc.id); setSel(null); }}>
                   <span className="ve-ai">{sc.icon}</span>
@@ -992,7 +998,7 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
             <button className="vp-btn" style={{ flexShrink: 0, padding: "5px 10px", fontSize: 13, fontWeight: 800 }} onClick={() => setShowLeft(v => !v)}>{showLeft ? "◀" : "☰"}</button>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, overflow: "hidden" }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {isScreen ? (SCREENS.find(s => s.id === screen) || {}).label : "📚 Contenido guardado"}
+                {isWelcome ? "🏠 Pantalla de bienvenida" : isScreen ? (SCREENS.find(s => s.id === screen) || {}).label : "📚 Contenido guardado"}
               </span>
               <span className="bdg bg" style={{ fontSize: 8, flexShrink: 0 }}>LIVE</span>
             </div>
@@ -1002,7 +1008,9 @@ function EditorVisual({ toast, cfg = {}, onCfg }) {
 
           <div className="ve-canvas-scroll">
             <div className="ve-frame" style={{ maxWidth: 430 }}>
-              {isScreen ? (
+              {isWelcome ? (
+                <HomeScreenEditor cfg={cfg} onCfg={onHomeCfg} ro={roHome} toast={toast} />
+              ) : isScreen ? (
                 <>
                   {entries.map((e, i) => {
                     if (isAnchor(e)) return (
@@ -2850,20 +2858,20 @@ function HomeScreenEditor({ cfg = {}, onCfg, ro, toast }) {
   const h = cfg.home || {};
   const [subtitle, setSubtitle] = useState(h.subtitle ?? 'AHORA EN BETA PÚBLICA');
   const [enterLabel, setEnterLabel] = useState(h.enterLabel ?? 'Entrar a RETADOR');
-  const [accent, setAccent] = useState(h.accent ?? '#F5B301');
+  const [accent, setAccent] = useState(h.accent ?? '#FFC01E');
   const save = () => {
     if (ro) { toast('Solo lectura — sin permiso para modificar'); return; }
     onCfg && onCfg({ home: {
       subtitle: (subtitle.trim() || 'AHORA EN BETA PÚBLICA'),
       enterLabel: (enterLabel.trim() || 'Entrar a RETADOR'),
-      accent: (accent || '#F5B301'),
+      accent: (accent || '#FFC01E'),
     } });
     toast('Pantalla principal guardada y publicada');
   };
   const inp = { width:'100%', background:'var(--bg2)', border:'1px solid var(--bd2)', borderRadius:8, padding:'9px 11px', color:'var(--tx)', fontSize:13, outline:'none', boxSizing:'border-box' };
   return (
     <div className="card cp" style={{marginBottom:16}}>
-      <div style={{fontSize:15,fontWeight:800,color:'var(--tx)',marginBottom:3}}>🏠 Pantalla principal</div>
+      <div style={{fontSize:15,fontWeight:800,color:'var(--tx)',marginBottom:3}}>🏠 Pantalla de bienvenida</div>
       <div style={{fontSize:11,color:'var(--tx3)',marginBottom:12}}>La bienvenida que ve todo el mundo al abrir. Los conteos (vendedores/productos) son SIEMPRE reales y no se editan.</div>
       <div style={{display:'flex',flexDirection:'column',gap:12}}>
         <div>
@@ -2878,7 +2886,7 @@ function HomeScreenEditor({ cfg = {}, onCfg, ro, toast }) {
           <div style={{fontSize:11,fontWeight:600,color:'var(--tx2)',marginBottom:5}}>Color de acento del botón</div>
           <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
             <input type="color" value={accent} disabled={ro} onChange={e=>setAccent(e.target.value)} style={{width:46,height:38,border:'1px solid var(--bd2)',borderRadius:8,background:'var(--bg2)',cursor:ro?'not-allowed':'pointer',padding:2}}/>
-            <input value={accent} disabled={ro} onChange={e=>setAccent(e.target.value)} style={{...inp,fontFamily:'var(--mo)',maxWidth:150}} placeholder="#F5B301"/>
+            <input value={accent} disabled={ro} onChange={e=>setAccent(e.target.value)} style={{...inp,fontFamily:'var(--mo)',maxWidth:150}} placeholder="#FFC01E"/>
             <span style={{marginLeft:'auto',background:accent,color:'#000',fontWeight:800,fontSize:12,padding:'8px 14px',borderRadius:10,whiteSpace:'nowrap'}}>{(enterLabel||'Entrar a RETADOR')} →</span>
           </div>
         </div>
@@ -3057,10 +3065,9 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
                 ? <fieldset disabled style={{border:'none',padding:0,margin:0,minWidth:0}}>
                     <div style={{margin:'0 0 12px',padding:'10px 14px',borderRadius:10,background:'var(--bg2)',border:'1px solid var(--bd2)',fontSize:12,fontWeight:700,color:'var(--tx2)'}}>👁 Solo lectura — sin permiso para modificar ni publicar.</div>
                     {/* fieldset[disabled] deshabilita de forma nativa TODOS los inputs, selects y botones del editor. */}
-                    <HomeScreenEditor cfg={data.cfg} onCfg={()=>add('👁 Solo lectura — no puedes publicar')} ro={true} toast={add}/>
-                    <EditorVisual toast={add} cfg={data.cfg} onCfg={()=>add('👁 Solo lectura — no puedes publicar')}/>
+                    <EditorVisual toast={add} cfg={data.cfg} onCfg={()=>add('👁 Solo lectura — no puedes publicar')} onHomeCfg={()=>add('👁 Solo lectura — no puedes publicar')} roHome={true}/>
                   </fieldset>
-                : <><HomeScreenEditor cfg={data.cfg} onCfg={data.onCfg} ro={false} toast={add}/><EditorVisual toast={add} cfg={data.cfg} onCfg={data.onPublishBlocks}/></>)}
+                : <EditorVisual toast={add} cfg={data.cfg} onCfg={data.onPublishBlocks} onHomeCfg={data.onCfg} roHome={false}/>)}
               {page==='eco'&&<Economia toast={add} data={data} ro={curRO}/>}
               {page==='sys'&&<Sistema toast={add} data={data}/>}
               {page==='team'&&<TeamScreen toast={add} meId={data.meId} onViewProfile={data.onViewProfile}/>}

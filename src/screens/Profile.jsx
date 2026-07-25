@@ -129,6 +129,50 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
   );
 }
 
+// PANEL LATERAL del Perfil: se abre con ☰ desde la vista principal del perfil y
+// contiene TODO lo que antes estaba apilado (Mensajes, Pedidos, Billetera,
+// Herramientas, Modo mensajero, Configuración, Panel admin). Respeta permisos:
+// el Panel de administración solo aparece si isOwner.
+export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, onOrders, onWallet, onTools, onCourier, onSettings, onAdmin, messagesBadge = 0, ordersBadge = 0, adminBadge = 0 }) {
+  const { BG, S, B, T1, T2, T3, isDark } = useAt();
+  const items = [
+    { ic: "msg",    label: "Mensajes",                sub: "Chats y conversaciones",              action: onMessages, color: G,         badge: messagesBadge },
+    { ic: "pkg",    label: "Mis pedidos",             sub: "Compras y ventas",                    action: onOrders,   color: "#60A5FA",  badge: ordersBadge },
+    { ic: "wallet", label: "Mi billetera",            sub: "Enviar, recibir, pagar y convertir",  action: onWallet,   color: "#22C55E" },
+    { ic: "tools",  label: "Herramientas",            sub: "Importador inteligente y más",        action: onTools,    color: "#6EE7B7" },
+    { ic: "moto",   label: "Modo Mensajero",          sub: "Gana dinero repartiendo pedidos",     action: onCourier,  color: "#6366F1" },
+    { ic: "cog",    label: "Configuración",           sub: "Cuenta, privacidad, nombre",          action: onSettings, color: "#94A3B8" },
+    ...(isOwner ? [{ ic: "shield", label: "Panel de administración", sub: "Control total de la plataforma", action: onAdmin, color: "#F5A623", badge: adminBadge }] : []),
+  ];
+  const go = (a) => { onClose && onClose(); if (a) a(); };
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 4600, pointerEvents: open ? "auto" : "none" }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.5)", opacity: open ? 1 : 0, transition: "opacity .25s" }} />
+      <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "82%", maxWidth: 330, background: BG, borderRight: `1px solid ${B}`, transform: open ? "translateX(0)" : "translateX(-100%)", transition: "transform .28s cubic-bezier(.4,0,.2,1)", display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top,0px)", overflowY: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 16px 10px" }}>
+          <span style={{ fontSize: 15, fontWeight: 800, color: T1 }}>Menú</span>
+          <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${B}`, color: T2, width: 30, height: 30, borderRadius: "50%", cursor: "pointer", fontSize: 15 }}>×</button>
+        </div>
+        <div style={{ padding: "0 12px 24px" }}>
+          {items.map((it, i) => (
+            <div key={i} onClick={() => go(it.action)} style={{ display: "flex", alignItems: "center", gap: 13, padding: "12px 12px", marginBottom: 7, background: isDark ? "#0d0d0d" : S, border: `1px solid ${B}`, borderRadius: 14, cursor: "pointer" }}>
+              <div style={{ width: 38, height: 38, borderRadius: 12, background: isDark ? it.color + "22" : it.color + "18", border: `1.5px solid ${it.color}55`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Ic n={it.ic} c={it.color} s={19} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: T1 }}>{it.label}</p>
+                <p style={{ fontSize: 9.5, color: T2, marginTop: 1 }}>{it.sub}</p>
+              </div>
+              {it.badge > 0 && <span style={{ minWidth: 18, height: 18, borderRadius: 999, background: "#EF4444", color: "#fff", fontSize: 10.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{it.badge > 99 ? "99+" : it.badge}</span>}
+              <span style={{ color: T3, fontSize: 18, fontWeight: 300 }}>›</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // MENSAJES — usa RPC get_my_conversations (1 sola query)
 // ═════════════════════════════════════════════════════════════════════════════
@@ -141,21 +185,22 @@ export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProf
 // ─────────────────────────────────────────────────────────────────
 const FP_MOCK_IS_OWNER = true;
 
-// ── DESIGN TOKENS — graphite dark, professional ───────────────────
+// ── DESIGN TOKENS — MISMA base neutra que el resto de la app (DARK_T/LIGHT_T) +
+// acento dorado de la identidad (nada de tono azulado propio). ─────────────────
 const FP_DARK = {
-  bg:          "#080A10",
-  surface:     "#0D0F18",
-  surfaceHigh: "#12151F",
-  surfaceTop:  "#171A26",
-  border:      "#1A1E2E",
-  borderMid:   "#222638",
-  borderHigh:  "#2C3148",
-  accent:      "#4E7CF6",
-  accentSoft:  "#1A2550",
-  accentText:  "#7DA4FF",
-  textPrimary:   "#E4E8F4",
-  textSecondary: "#5A6480",
-  textMuted:     "#2E3448",
+  bg:          "#080808",
+  surface:     "#0f0f0f",
+  surfaceHigh: "#141414",
+  surfaceTop:  "#1a1a1a",
+  border:      "#1a1a1a",
+  borderMid:   "#262626",
+  borderHigh:  "#333333",
+  accent:      "#FFC01E",
+  accentSoft:  "#2A2100",
+  accentText:  "#FFC01E",
+  textPrimary:   "#f0f0f0",
+  textSecondary: "#888888",
+  textMuted:     "#3a3a3a",
   positive: "#19C37D", positiveDim: "#0D2218",
   warning:  "#D4982A", warningDim:  "#261C08",
   danger:   "#E05252", dangerDim:   "#280E0E",
@@ -168,12 +213,12 @@ const FP_LIGHT = {
   border:      "#E4E6EB",
   borderMid:   "#D9DBDF",
   borderHigh:  "#BCC0C4",
-  accent:      "#4E7CF6",
-  accentSoft:  "#E7F0FE",
-  accentText:  "#1558D6",
+  accent:      "#B8860B",
+  accentSoft:  "#FFF6DF",
+  accentText:  "#8A6D00",
   textPrimary:   "#050505",
   textSecondary: "#65676B",
-  textMuted:     "#BCC0C4",
+  textMuted:     "#8A8D91",
   positive: "#19C37D", positiveDim: "#E6FAF3",
   warning:  "#D4982A", warningDim:  "#FFF8E6",
   danger:   "#E05252", dangerDim:   "#FFF0F0",
@@ -1413,7 +1458,7 @@ function FP_ReportModal({ targetName, onClose, onSubmit, C }) {
     </div>
   );
 }
-export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, onRequestPlan, currentPlan = "Básico", plans = [], myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct }) {
+export function FreeProfileScreen({ onBack, onMenu = null, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, onRequestPlan, currentPlan = "Básico", plans = [], myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct }) {
   // ⭐ Destacar: visible solo si el admin tiene la función encendida (config en vivo).
   const promoOn = usePlatformCfg().promoActive === true;
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
@@ -1543,13 +1588,20 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
         display:"flex", alignItems:"center", justifyContent:"space-between",
         position:"sticky", top:0, zIndex:100 }}>
 
-        <button onClick={onBack} style={{ background:"none", border:"none", cursor:"pointer", padding:0,
-          display:"flex", alignItems:"center", gap:8 }}>
-          <FP_Icon d={FP_Icons.back} size={18} color={FP_C.textSecondary}/>
-          <span style={{ fontSize:13, fontWeight:500, color:FP_C.textSecondary, fontFamily:FP_FB }}>
-            Atrás
-          </span>
-        </button>
+        {onMenu ? (
+          <button onClick={onMenu} aria-label="Menú" style={{ background:"none", border:`1px solid ${FP_C.border}`, borderRadius:6, height:32, padding:"0 12px", cursor:"pointer",
+            display:"flex", alignItems:"center", gap:8, color:FP_C.textPrimary, fontSize:13, fontWeight:700, fontFamily:FP_FB }}>
+            <span style={{ fontSize:17, lineHeight:1 }}>☰</span> Menú
+          </button>
+        ) : (
+          <button onClick={onBack} style={{ background:"none", border:"none", cursor:"pointer", padding:0,
+            display:"flex", alignItems:"center", gap:8 }}>
+            <FP_Icon d={FP_Icons.back} size={18} color={FP_C.textSecondary}/>
+            <span style={{ fontSize:13, fontWeight:500, color:FP_C.textSecondary, fontFamily:FP_FB }}>
+              Atrás
+            </span>
+          </button>
+        )}
 
         {isOwner ? (
           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
@@ -1572,6 +1624,9 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
           </div>
         ) : <div style={{ width:80 }}/>}
       </div>
+
+      {/* Tirita de tasas del día — visible en la vista principal del perfil (informativa) */}
+      {onMenu && <div style={{ padding:"12px 20px 0" }}><FxTirita /></div>}
 
       {/* ── PROFILE HEADER ── */}
       {!editProfile ? (
@@ -1652,7 +1707,7 @@ export function FreeProfileScreen({ onBack, user, initialProfile = {}, sellerId 
                   : <><FP_Icon d={FP_Icons.plus}  size={14} color="#fff"/> Seguir</>
                 }
               </button>
-              <button onClick={() => onChat?.(profile.username || profile.name, profile.name)} style={{
+              <button onClick={() => onChat?.(sellerId, profile.name)} style={{
                 flex:1, background:FP_C.surfaceTop, border:`1px solid ${FP_C.border}`,
                 borderRadius:8, height:38, cursor:"pointer",
                 color:FP_C.textPrimary, fontSize:13, fontWeight:700, fontFamily:FP_FH,

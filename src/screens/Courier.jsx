@@ -59,6 +59,9 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   const [reportText, setReportText] = useState("");
   const [reportOther, setReportOther] = useState(false);
   const [reportSent, setReportSent] = useState({});
+  // Al tocar Llamar/Mapa/Mensaje se elige primero SOBRE QUIÉN: recoger (vendedor) o
+  // entregar (comprador). { orderId, kind:'call'|'map'|'chat' } | null.
+  const [actionPick, setActionPick] = useState(null);
 
   // POOL de entregas disponibles: viene del backend con TODO (título, foto,
   // recogida, entrega, tarifa, pago). Se refresca en vivo con el realtime.
@@ -224,12 +227,52 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
           <span style={{ fontSize: 11, color: t2, fontWeight: 600 }}>{cash ? <>Cobras <b style={{ color: t1 }}>{money((o.amount || 0) + feeOf(o))}</b> (producto + tu tarifa)</> : <>Solo cobras <b style={{ color: "#22C55E" }}>{money(feeOf(o))}</b> en efectivo</>}</span>
         </div>
 
-        {/* Acciones: llamar / mapa / chat */}
+        {/* Acciones: llamar / mapa / chat — cada una pregunta primero SOBRE QUIÉN */}
         <div style={{ display: "flex", gap: 8, marginBottom: 11 }}>
-          <a href={`tel:${(dropPhoneOf(o) || pickupPhone || "").replace(/\\s/g, "")}`} onClick={e => { if (!dropPhoneOf(o) && !pickupPhone) e.preventDefault(); }} style={{ flex: 1, textAlign: "center", textDecoration: "none", background: "#22C55E18", border: "1px solid #22C55E45", color: "#16a34a", borderRadius: 11, padding: "10px 6px", fontSize: 12, fontWeight: 800 }}>📞 Llamar</a>
-          <a href={mapUrl(canPickup ? (pickupAddr || dropOf(o)) : dropOf(o))} target="_blank" rel="noopener noreferrer" style={{ flex: 1, textAlign: "center", textDecoration: "none", background: card, border: `1px solid ${bd}`, color: t1, borderRadius: 11, padding: "10px 6px", fontSize: 12, fontWeight: 800 }}>🗺️ Mapa</a>
-          {onChat && (o.buyerId || o.buyer_id) && <button onClick={() => onChat(o.buyerId || o.buyer_id, dropNameOf(o), { type: "order", id: o.id, title: o.title || "Pedido", image: o.image || prod?.image || null })} style={{ flex: 1, background: card, border: `1px solid ${bd}`, color: t1, borderRadius: 11, padding: "10px 6px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>💬 Mensaje</button>}
+          <button onClick={() => setActionPick({ orderId: o.id, kind: "call" })} style={{ flex: 1, textAlign: "center", background: "#22C55E18", border: "1px solid #22C55E45", color: "#16a34a", borderRadius: 11, padding: "10px 6px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>📞 Llamar</button>
+          <button onClick={() => setActionPick({ orderId: o.id, kind: "map" })} style={{ flex: 1, textAlign: "center", background: card, border: `1px solid ${bd}`, color: t1, borderRadius: 11, padding: "10px 6px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>🗺️ Mapa</button>
+          <button onClick={() => setActionPick({ orderId: o.id, kind: "chat" })} style={{ flex: 1, background: card, border: `1px solid ${bd}`, color: t1, borderRadius: 11, padding: "10px 6px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>💬 Mensaje</button>
         </div>
+
+        {/* Selector Recoger (vendedor) vs Entregar (comprador) para la acción elegida */}
+        {actionPick?.orderId === o.id && (() => {
+          const kind = actionPick.kind;
+          const kLabel = kind === "call" ? "Llamar" : kind === "map" ? "Ver en el mapa" : "Enviar mensaje";
+          const sellerId = o.sellerId || o.seller_id || null;
+          const buyerId = o.buyerId || o.buyer_id || null;
+          const parts = [
+            { role: "recoger", icon: "📍", head: "Recoger en", name: o.sellerName || "Vendedor", phone: pickupPhone, addr: pickupAddr, id: sellerId },
+            { role: "entregar", icon: "🏠", head: "Entregar a", name: dropNameOf(o), phone: dropPhoneOf(o), addr: dropOf(o), id: buyerId },
+          ];
+          const run = (part) => {
+            if (kind === "call") { if (part.phone) window.location.href = `tel:${String(part.phone).replace(/\s/g, "")}`; }
+            else if (kind === "map") { if (part.addr) window.open(mapUrl(part.addr), "_blank", "noopener,noreferrer"); }
+            else if (kind === "chat") { if (part.id && onChat) onChat(part.id, part.name, { type: "order", id: o.id, title: o.title || "Pedido", image: o.image || prod?.image || null }); }
+            setActionPick(null);
+          };
+          const avail = (part) => kind === "call" ? !!part.phone : kind === "map" ? !!part.addr : !!part.id;
+          return (
+            <div style={{ background: dark ? "#1a1a1e" : "#f8fafc", border: `1px solid ${bd}`, borderRadius: 12, padding: 12, marginBottom: 11 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: t2, marginBottom: 8 }}>{kLabel} — ¿a quién?</div>
+              {parts.map(part => {
+                const ok = avail(part);
+                const detail = kind === "call" ? (part.phone || "Sin teléfono") : kind === "map" ? (part.addr || "Sin dirección") : (part.id ? "Abrir chat" : "Sin usuario");
+                return (
+                  <button key={part.role} onClick={() => ok && run(part)} disabled={!ok}
+                    style={{ display: "flex", alignItems: "flex-start", gap: 10, width: "100%", textAlign: "left", background: "transparent", border: `1px solid ${bd}`, color: t1, borderRadius: 10, padding: "10px 12px", marginBottom: 7, cursor: ok ? "pointer" : "not-allowed", opacity: ok ? 1 : 0.5 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>{part.icon}</span>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: "block", fontSize: 9.5, color: t3, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>{part.head}</span>
+                      <span style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: t1 }}>{part.name}</span>
+                      <span style={{ display: "block", fontSize: 11, color: t2, marginTop: 1 }}>{detail}</span>
+                    </span>
+                  </button>
+                );
+              })}
+              <button onClick={() => setActionPick(null)} style={{ width: "100%", background: "transparent", border: "none", color: t3, fontSize: 12, fontWeight: 700, padding: "6px", cursor: "pointer" }}>Cancelar</button>
+            </div>
+          );
+        })()}
 
         {/* Reporte compacto */}
         {reportFor === o.id && !reportSent[o.id] && (

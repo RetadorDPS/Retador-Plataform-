@@ -46,7 +46,7 @@ import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProduct
 import OmniPanel from "./screens/AdminPanel.jsx";
 import { SubastasScreen } from "./screens/Auctions.jsx";
 import { SettingsScreen } from "./screens/Settings.jsx";
-import { ProfileMain, FreeProfileScreen } from "./screens/Profile.jsx";
+import { ProfileMain, FreeProfileScreen, ProfileMenuDrawer } from "./screens/Profile.jsx";
 import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
@@ -133,6 +133,14 @@ export default function App() {
   // toma el control y las sincroniza con el tema elegido (claro/oscuro).
   useEffect(() => { if (!sessionUser) setThemeColor("#080808"); }, [sessionUser]);
 
+  // La bienvenida SIGUE el mismo tema que el resto de la app (retador_theme, con
+  // "auto" resuelto por el sistema) — nunca un tema fijo.
+  let welcomeDark = true;
+  try {
+    const savedTheme = localStorage.getItem("retador_theme") || "auto";
+    const prefersDark = typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+    welcomeDark = savedTheme === "auto" ? !!prefersDark : savedTheme === "dark";
+  } catch (e) {}
   return (
     <>
       {sessionUser === undefined
@@ -143,8 +151,8 @@ export default function App() {
               {sessionUser
                 ? (entered
                     ? <AppShell sessionUser={sessionUser} />
-                    : <RetadorInicio onEnter={() => setEntered(true)} subtitle={homeCfg.subtitle} enterLabel={homeCfg.enterLabel} accent={homeCfg.accent} stats={platformStats} />)
-                : <RetadorInicio onGoogle={signInWithGoogle} subtitle={homeCfg.subtitle} accent={homeCfg.accent} stats={platformStats} />}
+                    : <RetadorInicio onEnter={() => setEntered(true)} subtitle={homeCfg.subtitle} enterLabel={homeCfg.enterLabel} accent={homeCfg.accent} stats={platformStats} dark={welcomeDark} />)
+                : <RetadorInicio onGoogle={signInWithGoogle} subtitle={homeCfg.subtitle} accent={homeCfg.accent} stats={platformStats} dark={welcomeDark} />}
             </CatalogProvider>
           </DensityProvider>
         )}
@@ -265,6 +273,7 @@ function AppShell({ sessionUser }) {
   const [showTools, setShowTools] = useState(false);
   const [toolApp, setToolApp] = useState(false);
   const [showCourier, setShowCourier] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false); // panel lateral del Perfil (☰)
   // RETIRADO: el registro local de mensajeros (retador_couriers en localStorage)
   // ya NO es vía de aprobación. La única vía real es courier_applications en el
   // backend + review_courier_application del admin (que pone role='courier').
@@ -334,7 +343,7 @@ function AppShell({ sessionUser }) {
       ],
       team: [],
       // Pantalla principal (bienvenida) — editable desde el Editor Visual.
-      home: { subtitle: "AHORA EN BETA PÚBLICA", enterLabel: "Entrar a RETADOR", accent: "#F5B301" },
+      home: { subtitle: "AHORA EN BETA PÚBLICA", enterLabel: "Entrar a RETADOR", accent: "#FFC01E" },
       // Secciones de la plataforma encendidas/apagadas (apagada = solo lectura).
       // El backend siembra los valores reales; estos son el respaldo local.
       sectionsEnabled: { marketplace: true, search: true, deliveryLocal: true, intlShipping: false, auctions: true, wallet: false },
@@ -342,10 +351,13 @@ function AppShell({ sessionUser }) {
       blocks: DEFAULT_BLOCKS,
       masters: {},
     };
-    try { const r = localStorage.getItem("retador_admincfg"); if (r) return { ...defaults, ...JSON.parse(r) }; } catch {}
+    // BANNER FANTASMA: blocks/masters (contenido visual del Editor) NUNCA salen del
+    // caché local — solo del backend fresco. Así el primer render no pinta banners
+    // viejos guardados localmente antes de que llegue la config real.
+    try { const r = localStorage.getItem("retador_admincfg"); if (r) { const p = JSON.parse(r); delete p.blocks; delete p.masters; return { ...defaults, ...p }; } } catch {}
     return defaults;
   });
-  useEffect(() => { try { localStorage.setItem("retador_admincfg", JSON.stringify(adminCfg)); } catch {} }, [adminCfg]);
+  useEffect(() => { try { const { blocks, masters, ...rest } = adminCfg; localStorage.setItem("retador_admincfg", JSON.stringify(rest)); } catch {} }, [adminCfg]);
   // Fecha de última actualización de la config (para la tirita de tasas del perfil).
   const [cfgUpdatedAt, setCfgUpdatedAt] = useState(null);
   // Espejo del adminCfg más reciente (para guardar el objeto COMPLETO sin depender del render).
@@ -1567,7 +1579,15 @@ function AppShell({ sessionUser }) {
           )}
 
           {tab === "perfil" && <>
-            {pScr === "main"         && <ProfileMain user={user} onMessages={openMessages} onSettings={() => setPScr("settings")} onOrders={() => setPScr("orders")} onViewProfile={() => setPScr("profile-full")} onAdmin={() => setShowAdmin(true)} onWallet={() => setShowWallet(true)} onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} isOwner={hasPanel} profileData={profileData} ordersBadge={ordersUnseen} messagesBadge={chatUnread} adminBadge={courierApps.length} />}
+            {pScr === "main" && (() => {
+              // Perfil DIRECTO: al tocar "Perfil" se ve el perfil propio (no un menú
+              // apilado). El menú vive en el panel lateral (☰ → ProfileMenuDrawer).
+              const me = profileData?.name || user?.name;
+              const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
+              const paid = payments.filter(p => p.sellerName === me).reduce((a, p) => a + (p.amount || 0), 0);
+              const myDebt = Math.max(0, accrued - paid);
+              return <FreeProfileScreen onMenu={() => setProfileMenuOpen(true)} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} onRequestPlan={() => {}} currentPlan={(user?.plan && user.plan !== "gratis") ? (user.plan === "pro" ? "Pro" : user.plan === "premium" ? "Premium" : userPlans[me] || "Básico") : (userPlans[me] || "Básico")} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)} />;
+            })()}
             {pScr === "profile-full" && (() => {
               const me = profileData?.name || user?.name;
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
@@ -1586,6 +1606,11 @@ function AppShell({ sessionUser }) {
               onOpenWallet={() => setShowWallet(true)} orders={orders.filter(o => (o.buyerId ? o.buyerId === user?.id : true))} />}
             {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { setSelOrderId(o.id); setPScr("order-detail"); }} />}
             {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => { const meSeller = (o.seller_id || o.sellerId) === user?.id; requestChat(meSeller ? (o.buyer_id || o.buyerId) : (o.seller_id || o.sellerId), meSeller ? (o.buyerName || "Comprador") : (o.sellerName || "Vendedor"), { type: "order", id: o.id, title: o.title || "Pedido", image: o.image || null }); }} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
+            {/* Panel lateral del Perfil (☰): todo el menú que antes estaba apilado */}
+            <ProfileMenuDrawer open={profileMenuOpen} onClose={() => setProfileMenuOpen(false)} user={user} isOwner={hasPanel}
+              onMessages={openMessages} onOrders={() => setPScr("orders")} onWallet={() => setShowWallet(true)}
+              onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} onSettings={() => setPScr("settings")}
+              onAdmin={() => setShowAdmin(true)} messagesBadge={chatUnread} ordersBadge={ordersUnseen} adminBadge={courierApps.length} />
           </>}
         </>
       </div>
@@ -1594,6 +1619,7 @@ function AppShell({ sessionUser }) {
       {!rsp.isDesktop && (
         <BottomNav tab={tab} unread={chatUnread + ordersUnseen} hidden={navHidden || hideNav} onTab={t => {
           setTab(t);
+          setProfileMenuOpen(false);
           if (t === "market") setMScr("home");
           if (t === "envios") setEScr("menu");
           if (t === "perfil") setPScr("main");

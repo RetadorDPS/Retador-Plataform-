@@ -1,4 +1,5 @@
 import { Zap, Search, Loader2 } from "lucide-react";
+import { useAppVersion } from "../shared/index.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PANTALLA DE INICIO (login) — diseño aprobado, conectado a Supabase Auth
@@ -7,7 +8,7 @@ import { Zap, Search, Loader2 } from "lucide-react";
 // ═══════════════════════════════════════════════════════════════════════════
 const INICIO_CFG = {
   version: "Marketplace v1.0",
-  badge: { text: "AHORA EN BETA PÚBLICA", color: "#F5B301" },
+  badge: { text: "AHORA EN BETA PÚBLICA", color: "#FFC01E" },
   tagline: ["Compra.", "Vende.", "Escala."],
   search: "Explora productos o empieza a vender...",
   // Etiquetas de las estadísticas. Los VALORES son SIEMPRE reales (get_platform_stats),
@@ -42,27 +43,39 @@ function GoogleG({ size = 19 }) {
 // onEnter   → CON sesión: botón "Entrar a RETADOR" (entra al marketplace).
 // subtitle/enterLabel/accent → editables en vivo desde el Editor Visual
 // (config.home). Los conteos de stats son SIEMPRE reales, nunca editables.
-export function RetadorInicio({ onGoogle, onEnter = null, subtitle = "", enterLabel = "", accent = "", stats = null }) {
+export function RetadorInicio({ onGoogle, onEnter = null, subtitle = "", enterLabel = "", accent = "", stats = null, dark = true }) {
   const gold = accent || INICIO_GOLD;
   const badgeText = subtitle || INICIO_CFG.badge.text;
   const enterText = enterLabel || "Entrar a RETADOR";
+  const version = useAppVersion();
+  // Paleta que SIGUE el tema de la app (claro/oscuro), como cualquier otra pantalla.
+  const p = dark ? {
+    bg: "#080808", brand: "#fff", t1: "#fff", t85: "rgba(255,255,255,.85)", t45: "rgba(255,255,255,.45)",
+    t40: "rgba(255,255,255,.4)", t38: "rgba(255,255,255,.38)", t34: "rgba(255,255,255,.34)", t30: "rgba(255,255,255,.3)",
+    grid: "rgba(255,255,255,.04)", cardBg: "rgba(255,255,255,.03)", cardBd: "rgba(255,255,255,.09)",
+    brandGrad: "linear-gradient(90deg,#ffffff 0%,#f6f6f7 36%,#ffe9ad 47%," + gold + " 60%,#E08600 100%)",
+  } : {
+    bg: "#FFFFFF", brand: "#050505", t1: "#050505", t85: "rgba(5,5,5,.85)", t45: "rgba(5,5,5,.5)",
+    t40: "rgba(5,5,5,.45)", t38: "rgba(5,5,5,.5)", t34: "rgba(5,5,5,.45)", t30: "rgba(5,5,5,.45)",
+    grid: "rgba(0,0,0,.05)", cardBg: "rgba(0,0,0,.03)", cardBd: "rgba(0,0,0,.10)",
+    brandGrad: "linear-gradient(90deg,#3a2a00 0%,#7a5c00 34%," + gold + " 58%,#B36B00 100%)",
+  };
   return (
-    <div style={{ minHeight: "100vh", width: "100%", background: "#080808", display: "flex", justifyContent: "center", WebkitFontSmoothing: "antialiased" }}>
+    <div style={{ minHeight: "100vh", width: "100%", background: p.bg, display: "flex", justifyContent: "center", WebkitFontSmoothing: "antialiased" }}>
       <style>{`
         @keyframes retShine { 0%{background-position:200% 0} 22%{background-position:-80% 0} 100%{background-position:-80% 0} }
         @keyframes retGlow { 0%,100%{opacity:.5;transform:scale(1)} 50%{opacity:.8;transform:scale(1.06)} }
-        .ret-base{ background:linear-gradient(90deg,#ffffff 0%,#f6f6f7 36%,#ffe9ad 47%,#F5B301 60%,#E08600 100%); -webkit-background-clip:text;background-clip:text;color:transparent; }
         .ret-shine{ background:linear-gradient(110deg,transparent 38%,rgba(255,255,255,.9) 50%,transparent 62%); background-size:250% 100%; -webkit-background-clip:text;background-clip:text;color:transparent; animation:retShine 5s ease-in-out infinite; }
         @media (prefers-reduced-motion: reduce){ .ret-shine{animation:none} .ret-glow{animation:none!important} }
       `}</style>
-      <div style={{ position: "relative", width: "100%", maxWidth: 430, background: "#080808", overflow: "hidden" }}>
-        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", backgroundImage: "linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px)", backgroundSize: "58px 58px" }} />
-        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(120% 80% at 50% 0%, transparent 55%, #080808 100%)" }} />
+      <div style={{ position: "relative", width: "100%", maxWidth: 430, background: p.bg, overflow: "hidden" }}>
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", backgroundImage: `linear-gradient(${p.grid} 1px, transparent 1px), linear-gradient(90deg, ${p.grid} 1px, transparent 1px)`, backgroundSize: "58px 58px" }} />
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: `radial-gradient(120% 80% at 50% 0%, transparent 55%, ${p.bg} 100%)` }} />
         <div style={{ position: "relative", zIndex: 10, padding: "26px 24px 34px", minHeight: "100vh", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ color: "#fff", fontSize: 14, letterSpacing: "0.18em", fontWeight: 800, fontStyle: "italic", fontFamily: INICIO_DISPLAY }}>RETADOR</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "rgba(255,255,255,.45)", fontFamily: "ui-monospace, Menlo, monospace" }}>
-              <span style={{ height: 8, width: 8, borderRadius: 999, background: gold }} />{INICIO_CFG.version}
+            <span style={{ color: p.brand, fontSize: 14, letterSpacing: "0.18em", fontWeight: 800, fontStyle: "italic", fontFamily: INICIO_DISPLAY }}>RETADOR</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: p.t45, fontFamily: "ui-monospace, Menlo, monospace" }}>
+              <span style={{ height: 8, width: 8, borderRadius: 999, background: gold }} />Marketplace v{version}
             </span>
           </div>
           <div style={{ marginTop: 34, display: "flex", justifyContent: "center" }}>
@@ -73,21 +86,21 @@ export function RetadorInicio({ onGoogle, onEnter = null, subtitle = "", enterLa
           <div style={{ marginTop: 30, position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
             <div className="ret-glow" style={{ position: "absolute", height: 150, width: 280, borderRadius: 999, filter: "blur(48px)", background: "radial-gradient(circle, rgba(245,179,1,.35) 0%, transparent 70%)", animation: "retGlow 4s ease-in-out infinite" }} />
             <div style={{ position: "relative", userSelect: "none", fontFamily: INICIO_DISPLAY }}>
-              <h1 className="ret-base" style={{ fontSize: 74, lineHeight: 1, fontWeight: 900, letterSpacing: "-0.02em", margin: 0 }}>RETADOR</h1>
+              <h1 style={{ fontSize: 74, lineHeight: 1, fontWeight: 900, letterSpacing: "-0.02em", margin: 0, background: p.brandGrad, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>RETADOR</h1>
               <h1 className="ret-shine" aria-hidden="true" style={{ position: "absolute", inset: 0, fontSize: 74, lineHeight: 1, fontWeight: 900, letterSpacing: "-0.02em", margin: 0 }}>RETADOR</h1>
             </div>
-            <div style={{ marginTop: 10, color: "rgba(255,255,255,.4)", fontSize: 15, fontWeight: 300, letterSpacing: "0.5em", paddingLeft: "0.5em" }}>MARKETPLACE</div>
+            <div style={{ marginTop: 10, color: p.t40, fontSize: 15, fontWeight: 300, letterSpacing: "0.5em", paddingLeft: "0.5em" }}>MARKETPLACE</div>
           </div>
-          <div style={{ marginTop: 34, display: "flex", alignItems: "center", justifyContent: "center", gap: 14, fontSize: 16, fontWeight: 500, color: "rgba(255,255,255,.85)" }}>
+          <div style={{ marginTop: 34, display: "flex", alignItems: "center", justifyContent: "center", gap: 14, fontSize: 16, fontWeight: 500, color: p.t85 }}>
             {INICIO_CFG.tagline.map((w, i) => (
               <span key={w} style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                {i > 0 && <span style={{ height: 5, width: 5, borderRadius: 999, background: INICIO_GOLD }} />}{w}
+                {i > 0 && <span style={{ height: 5, width: 5, borderRadius: 999, background: gold }} />}{w}
               </span>
             ))}
           </div>
-          <div style={{ marginTop: 28, display: "flex", alignItems: "center", gap: 10, borderRadius: 14, border: "1px solid rgba(255,255,255,.09)", background: "rgba(255,255,255,.03)", padding: "12px 15px" }}>
-            <Search size={17} style={{ color: "rgba(255,255,255,.38)", flexShrink: 0 }} />
-            <span style={{ color: "rgba(255,255,255,.38)", fontSize: 13.5 }}>{INICIO_CFG.search}</span>
+          <div style={{ marginTop: 28, display: "flex", alignItems: "center", gap: 10, borderRadius: 14, border: `1px solid ${p.cardBd}`, background: p.cardBg, padding: "12px 15px" }}>
+            <Search size={17} style={{ color: p.t38, flexShrink: 0 }} />
+            <span style={{ color: p.t38, fontSize: 13.5 }}>{INICIO_CFG.search}</span>
           </div>
           <div style={{ marginTop: 22 }}>
             {onEnter ? (
@@ -95,14 +108,14 @@ export function RetadorInicio({ onGoogle, onEnter = null, subtitle = "", enterLa
                 <button onClick={onEnter} style={{ width: "100%", borderRadius: 14, background: gold, color: "#000", border: "none", cursor: "pointer", fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: 15, padding: "14px 16px" }}>
                   {enterText} →
                 </button>
-                <p style={{ marginTop: 10, textAlign: "center", fontSize: 11.5, color: "rgba(255,255,255,.3)" }}>Bienvenido de vuelta a RETADOR.</p>
+                <p style={{ marginTop: 10, textAlign: "center", fontSize: 11.5, color: p.t30 }}>Bienvenido de vuelta a RETADOR.</p>
               </>
             ) : (
               <>
-                <button onClick={onGoogle} style={{ width: "100%", borderRadius: 14, background: "#fff", color: "#000", border: "none", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: 15, padding: "13px 16px" }}>
+                <button onClick={onGoogle} style={{ width: "100%", borderRadius: 14, background: dark ? "#fff" : "#111", color: dark ? "#000" : "#fff", border: "none", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: 15, padding: "13px 16px" }}>
                   <GoogleG size={19} /> Entrar con Google
                 </button>
-                <p style={{ marginTop: 10, textAlign: "center", fontSize: 11.5, color: "rgba(255,255,255,.3)" }}>Con tu cuenta de Google. Rápido y seguro.</p>
+                <p style={{ marginTop: 10, textAlign: "center", fontSize: 11.5, color: p.t30 }}>Con tu cuenta de Google. Rápido y seguro.</p>
               </>
             )}
           </div>
@@ -112,8 +125,8 @@ export function RetadorInicio({ onGoogle, onEnter = null, subtitle = "", enterLa
             <div style={{ marginTop: "auto", paddingTop: 34, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
               {INICIO_CFG.statLabels.map((s) => (
                 <div key={s.label} style={{ textAlign: "center" }}>
-                  <div style={{ color: "#fff", fontSize: 28, fontWeight: 900, lineHeight: 1, fontFamily: INICIO_DISPLAY }}>{fmtStat(stats[s.key])}</div>
-                  <div style={{ marginTop: 7, fontSize: 10.5, letterSpacing: "0.14em", color: "rgba(255,255,255,.34)", fontWeight: 500 }}>{s.label}</div>
+                  <div style={{ color: p.t1, fontSize: 28, fontWeight: 900, lineHeight: 1, fontFamily: INICIO_DISPLAY }}>{fmtStat(stats[s.key])}</div>
+                  <div style={{ marginTop: 7, fontSize: 10.5, letterSpacing: "0.14em", color: p.t34, fontWeight: 500 }}>{s.label}</div>
                 </div>
               ))}
             </div>

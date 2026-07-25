@@ -8,6 +8,34 @@ export const BG = "#080808";   // negro profundo
 export const S  = "#0f0f0f";   // superficies
 export const B  = "#1a1a1a";   // bordes
 
+// ─── VERSIÓN — UNA sola fuente de verdad para "Marketplace v…" y Ajustes → Versión.
+// El número real del despliegue vive en el nombre de caché del Service Worker
+// (public/sw.js → "retador-pwa-vNN"). Lo leemos en vivo con caches.keys(); si no
+// hay caché disponible (dev / primer arranque), cae a APP_VERSION_FALLBACK.
+// Al desplegar se sube el CACHE del SW y este número se refleja SOLO aquí, en ambos
+// sitios a la vez.
+export const APP_VERSION_FALLBACK = "84";
+export async function getDeployVersion() {
+  try {
+    if (typeof caches !== "undefined" && caches.keys) {
+      const keys = await caches.keys();
+      const nums = keys.map(k => { const m = /retador-pwa-v(\d+)/.exec(k); return m ? Number(m[1]) : null; }).filter(n => n != null);
+      if (nums.length) return String(Math.max(...nums));
+    }
+  } catch (e) {}
+  return null;
+}
+// Hook: devuelve "1.0.NN" con NN = número real del despliegue (mismo en toda la app).
+export function useAppVersion() {
+  const [v, setV] = useState("1.0." + APP_VERSION_FALLBACK);
+  useEffect(() => {
+    let alive = true;
+    getDeployVersion().then(n => { if (alive && n) setV("1.0." + n); });
+    return () => { alive = false; };
+  }, []);
+  return v;
+}
+
 // ─── Responsive hook ─────────────────────────────────────────────────────────
 export const RCtx = createContext({ isMobile: true, isTablet: false, isDesktop: false, cols: 2 });
 export const useR = () => useContext(RCtx);

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Gavel, Globe, HardDrive, HelpCircle, Info, Lock, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Phone, Plus, Shield, ShoppingBag, Smartphone, Star, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
-import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser } from "../shared/index.js";
+import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser, useAppVersion } from "../shared/index.js";
 import { isPushSupported, hasActiveSubscription, enablePush, disablePush } from "../pwa/push.js";
 
 const CFG_DARK = {
@@ -1231,6 +1231,7 @@ function CFG_HelpScreen({ nav, flash }) {
 /* ── ABOUT ────────────────────────────────────────────────────── */
 function CFG_AboutScreen({ nav }) {
   const tk = CFG_useTk();
+  const appVersion = useAppVersion();
   return (
     <div style={{ background:tk.BG }} className="">
       <CFG_Hdr title="Acerca de" onBack={() => nav("home")} />
@@ -1242,7 +1243,7 @@ function CFG_AboutScreen({ nav }) {
         <h2 style={{ color:tk.T1 }} className="text-[18px] font-black tracking-tight">RETADOR</h2>
         <div style={{ color:tk.T2 }} className="text-[11px] mt-0.5">Marketplace · Cuba</div>
         <div style={{ background:tk.PL, color:tk.P }} className="mt-2 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
-          v1.0.0 · Beta
+          v{appVersion} · Beta
         </div>
       </div>
       <CFG_Lbl>Legal</CFG_Lbl>
@@ -1253,7 +1254,7 @@ function CFG_AboutScreen({ nav }) {
       </CFG_Crd>
       <CFG_Lbl>Información</CFG_Lbl>
       <CFG_Crd>
-        {[["Versión","1.0.0"],["Estado","Beta"],["Plataforma","React / Web"],["© 2026","RETADOR"]].map(([k,v],i) => (
+        {[["Versión",appVersion],["Estado","Beta"],["Plataforma","React / Web"],["© 2026","RETADOR"]].map(([k,v],i) => (
           <div key={k}>
             {i > 0 && <CFG_Hr />}
             <div style={{ background:tk.ROW }} className="flex items-center justify-between px-3.5 py-2.5">

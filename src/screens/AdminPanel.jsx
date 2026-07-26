@@ -2858,21 +2858,21 @@ function HomeScreenEditor({ cfg = {}, onCfg, ro, toast }) {
   const h = cfg.home || {};
   const [subtitle, setSubtitle] = useState(h.subtitle ?? 'AHORA EN BETA PÚBLICA');
   const [enterLabel, setEnterLabel] = useState(h.enterLabel ?? 'Entrar a RETADOR');
-  const [accent, setAccent] = useState(h.accent ?? '#FFC01E');
+  // El COLOR de acento (dorado #FFC01E) es FIJO en código, no editable — por eso el
+  // guardado ya NO incluye 'accent'. Solo el subtítulo y el texto del botón se editan.
   const save = () => {
     if (ro) { toast('Solo lectura — sin permiso para modificar'); return; }
     onCfg && onCfg({ home: {
       subtitle: (subtitle.trim() || 'AHORA EN BETA PÚBLICA'),
       enterLabel: (enterLabel.trim() || 'Entrar a RETADOR'),
-      accent: (accent || '#FFC01E'),
     } });
-    toast('Pantalla principal guardada y publicada');
+    toast('Pantalla de bienvenida guardada y publicada');
   };
   const inp = { width:'100%', background:'var(--bg2)', border:'1px solid var(--bd2)', borderRadius:8, padding:'9px 11px', color:'var(--tx)', fontSize:13, outline:'none', boxSizing:'border-box' };
   return (
     <div className="card cp" style={{marginBottom:16}}>
       <div style={{fontSize:15,fontWeight:800,color:'var(--tx)',marginBottom:3}}>🏠 Pantalla de bienvenida</div>
-      <div style={{fontSize:11,color:'var(--tx3)',marginBottom:12}}>La bienvenida que ve todo el mundo al abrir. Los conteos (vendedores/productos) son SIEMPRE reales y no se editan.</div>
+      <div style={{fontSize:11,color:'var(--tx3)',marginBottom:12}}>La bienvenida que ve todo el mundo al abrir. Sigue el tema (claro/oscuro) de cada usuario; el dorado y los conteos (vendedores/productos) son fijos/reales y no se editan.</div>
       <div style={{display:'flex',flexDirection:'column',gap:12}}>
         <div>
           <div style={{fontSize:11,fontWeight:600,color:'var(--tx2)',marginBottom:5}}>Subtítulo (insignia)</div>
@@ -2881,13 +2881,8 @@ function HomeScreenEditor({ cfg = {}, onCfg, ro, toast }) {
         <div>
           <div style={{fontSize:11,fontWeight:600,color:'var(--tx2)',marginBottom:5}}>Texto del botón (entrar)</div>
           <input value={enterLabel} disabled={ro} onChange={e=>setEnterLabel(e.target.value)} style={inp} placeholder="Entrar a RETADOR"/>
-        </div>
-        <div>
-          <div style={{fontSize:11,fontWeight:600,color:'var(--tx2)',marginBottom:5}}>Color de acento del botón</div>
-          <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
-            <input type="color" value={accent} disabled={ro} onChange={e=>setAccent(e.target.value)} style={{width:46,height:38,border:'1px solid var(--bd2)',borderRadius:8,background:'var(--bg2)',cursor:ro?'not-allowed':'pointer',padding:2}}/>
-            <input value={accent} disabled={ro} onChange={e=>setAccent(e.target.value)} style={{...inp,fontFamily:'var(--mo)',maxWidth:150}} placeholder="#FFC01E"/>
-            <span style={{marginLeft:'auto',background:accent,color:'#000',fontWeight:800,fontSize:12,padding:'8px 14px',borderRadius:10,whiteSpace:'nowrap'}}>{(enterLabel||'Entrar a RETADOR')} →</span>
+          <div style={{display:'flex',marginTop:8}}>
+            <span style={{background:'#FFC01E',color:'#000',fontWeight:800,fontSize:12,padding:'8px 14px',borderRadius:10,whiteSpace:'nowrap'}}>{(enterLabel||'Entrar a RETADOR')} →</span>
           </div>
         </div>
         {!ro && <button onClick={save} style={{alignSelf:'flex-start',fontWeight:800,fontSize:13,padding:'10px 20px',borderRadius:10,border:'none',background:'var(--gn)',color:'#04120b',cursor:'pointer'}}>Guardar y publicar</button>}

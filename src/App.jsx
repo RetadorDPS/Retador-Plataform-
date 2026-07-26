@@ -151,8 +151,8 @@ export default function App() {
               {sessionUser
                 ? (entered
                     ? <AppShell sessionUser={sessionUser} />
-                    : <RetadorInicio onEnter={() => setEntered(true)} subtitle={homeCfg.subtitle} enterLabel={homeCfg.enterLabel} accent={homeCfg.accent} stats={platformStats} dark={welcomeDark} />)
-                : <RetadorInicio onGoogle={signInWithGoogle} subtitle={homeCfg.subtitle} accent={homeCfg.accent} stats={platformStats} dark={welcomeDark} />}
+                    : <RetadorInicio onEnter={() => setEntered(true)} subtitle={homeCfg.subtitle} enterLabel={homeCfg.enterLabel} stats={platformStats} dark={welcomeDark} />)
+                : <RetadorInicio onGoogle={signInWithGoogle} subtitle={homeCfg.subtitle} stats={platformStats} dark={welcomeDark} />}
             </CatalogProvider>
           </DensityProvider>
         )}
@@ -343,7 +343,7 @@ function AppShell({ sessionUser }) {
       ],
       team: [],
       // Pantalla principal (bienvenida) — editable desde el Editor Visual.
-      home: { subtitle: "AHORA EN BETA PÚBLICA", enterLabel: "Entrar a RETADOR", accent: "#FFC01E" },
+      home: { subtitle: "AHORA EN BETA PÚBLICA", enterLabel: "Entrar a RETADOR" },
       // Secciones de la plataforma encendidas/apagadas (apagada = solo lectura).
       // El backend siembra los valores reales; estos son el respaldo local.
       sectionsEnabled: { marketplace: true, search: true, deliveryLocal: true, intlShipping: false, auctions: true, wallet: false },
@@ -1586,7 +1586,7 @@ function AppShell({ sessionUser }) {
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
               const paid = payments.filter(p => p.sellerName === me).reduce((a, p) => a + (p.amount || 0), 0);
               const myDebt = Math.max(0, accrued - paid);
-              return <FreeProfileScreen onMenu={() => setProfileMenuOpen(true)} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} onRequestPlan={() => {}} currentPlan={(user?.plan && user.plan !== "gratis") ? (user.plan === "pro" ? "Pro" : user.plan === "premium" ? "Premium" : userPlans[me] || "Básico") : (userPlans[me] || "Básico")} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)} />;
+              return <FreeProfileScreen embedded onMenu={() => setProfileMenuOpen(true)} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} onRequestPlan={() => {}} currentPlan={(user?.plan && user.plan !== "gratis") ? (user.plan === "pro" ? "Pro" : user.plan === "premium" ? "Premium" : userPlans[me] || "Básico") : (userPlans[me] || "Básico")} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)} />;
             })()}
             {pScr === "profile-full" && (() => {
               const me = profileData?.name || user?.name;

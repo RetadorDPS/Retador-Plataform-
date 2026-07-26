@@ -41,10 +41,13 @@ function GoogleG({ size = 19 }) {
 
 // onGoogle  → sin sesión: botón "Entrar con Google" (login).
 // onEnter   → CON sesión: botón "Entrar a RETADOR" (entra al marketplace).
-// subtitle/enterLabel/accent → editables en vivo desde el Editor Visual
-// (config.home). Los conteos de stats son SIEMPRE reales, nunca editables.
-export function RetadorInicio({ onGoogle, onEnter = null, subtitle = "", enterLabel = "", accent = "", stats = null, dark = true }) {
-  const gold = accent || INICIO_GOLD;
+// subtitle/enterLabel → editables desde el Editor Visual (config.home). El COLOR
+// DE ACENTO (dorado) es FIJO en código (#FFC01E), no editable y no dependiente de
+// ningún valor guardado: así el título y el botón NUNCA cambian de estilo tras el
+// primer render (antes, un accent inválido llegado async rompía el degradado del
+// título y el fondo del botón — el "salto" visual). Los conteos son SIEMPRE reales.
+export function RetadorInicio({ onGoogle, onEnter = null, subtitle = "", enterLabel = "", stats = null, dark = true }) {
+  const gold = "#FFC01E"; // dorado de la identidad — fijo, no editable
   const badgeText = subtitle || INICIO_CFG.badge.text;
   const enterText = enterLabel || "Entrar a RETADOR";
   const version = useAppVersion();

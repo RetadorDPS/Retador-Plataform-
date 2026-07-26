@@ -1458,7 +1458,7 @@ function FP_ReportModal({ targetName, onClose, onSubmit, C }) {
     </div>
   );
 }
-export function FreeProfileScreen({ onBack, onMenu = null, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, onRequestPlan, currentPlan = "Básico", plans = [], myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct }) {
+export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, onRequestPlan, currentPlan = "Básico", plans = [], myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct }) {
   // ⭐ Destacar: visible solo si el admin tiene la función encendida (config en vivo).
   const promoOn = usePlatformCfg().promoActive === true;
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
@@ -1557,7 +1557,12 @@ export function FreeProfileScreen({ onBack, onMenu = null, user, initialProfile 
   }));
 
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:300, overflowY:"auto", background:FP_C.bg, fontFamily:FP_FB, color:FP_C.textPrimary }}>
+    // embedded (pestaña Perfil): contenedor EN FLUJO (no fixed), para que la barra
+    // inferior de la app quede visible y se comporte igual que en las demás pantallas.
+    // padding-bottom deja hueco para la barra. Sin embedded (overlay): fixed a pantalla.
+    <div style={embedded
+      ? { position:"relative", flex:1, minHeight:0, overflowY:"auto", WebkitOverflowScrolling:"touch", background:FP_C.bg, fontFamily:FP_FB, color:FP_C.textPrimary, paddingBottom:"calc(78px + env(safe-area-inset-bottom, 0px))" }
+      : { position:"fixed", inset:0, zIndex:300, overflowY:"auto", background:FP_C.bg, fontFamily:FP_FB, color:FP_C.textPrimary }}>
       {/* fonts loaded via @import in useCSS */}
 
       {/* OVERLAYS */}

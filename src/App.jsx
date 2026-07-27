@@ -1533,12 +1533,17 @@ function AppShell({ sessionUser }) {
         promoRequests, onPromoAction: (id, action) => setPromoRequests(prev => prev.map(r => r.id === id ? { ...r, state: action } : r)),
         teamMembers, onSaveTeam: setTeamMembers,
         // Solicitudes REALES de mensajero: aprobar/rechazar vía la función oficial
-        // review_courier_application (al aprobar pone role='courier' y notifica).
-        couriers: courierApps.map(a => ({ id: a.id, status: a.status || "pending", nombre: a.name, userName: a.name, telefono: a.phone, zona: a.zone, vehiculo: a.vehicle, createdAt: a.created_at })),
-        onCourierAction: async (id, status) => {
+        // review_courier_application (al aprobar pone role='courier' Y is_verified=true,
+        // y notifica). KYC completo: incluye nombre legal, documento y las 3 fotos.
+        couriers: courierApps.map(a => ({
+          id: a.id, userId: a.user_id, status: a.status || "pending",
+          nombre: a.name, userName: a.name, telefono: a.phone, zona: a.zone, vehiculo: a.vehicle, createdAt: a.created_at,
+          fullName: a.full_name, docType: a.doc_type, docNumber: a.doc_number, docFront: a.doc_front, docBack: a.doc_back, selfie: a.selfie, rejectReason: a.reject_reason,
+        })),
+        onCourierAction: async (id, status, reason) => {
           try {
-            await reviewCourierApplication(id, status === "approved");
-            flash(status === "approved" ? "✅ Mensajero aprobado" : "Solicitud rechazada");
+            await reviewCourierApplication(id, status === "approved", reason || null);
+            flash(status === "approved" ? "✅ Mensajero aprobado — su perfil también queda verificado" : "Solicitud rechazada");
           } catch (e) { flash("⚠️ No se pudo revisar: " + (e?.message || "error")); }
           reloadCourierApps();
         },

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { getAvailableDeliveries, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase, usePlatformCfg } from "../shared/index.js";
+import { getAvailableDeliveries, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase, usePlatformCfg, uploadKyc, KycSelfieSample } from "../shared/index.js";
 
 // Botón "Recogí"/"Entregué": AISLADO en su propio componente memoizado, recibiendo
 // solo lo que necesita (id, status, onStage) por props. Así, si el árbol de
@@ -418,10 +418,30 @@ export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId
   const bg = dark ? "#0a0a0a" : "#f1f5f9", card = dark ? "#141417" : "#fff", t1 = dark ? "#f0f0f2" : "#0f172a", t2 = dark ? "#9aa0aa" : "#64748b", t3 = dark ? "#6b7280" : "#94a3b8", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)", AC = "#6366F1";
   const [started, setStarted] = useState(false);
   const [app, setApp] = useState(undefined); // undefined = cargando
-  const [f, setF] = useState({ nombre: meName || "", telefono: "", zona: "", vehiculo: "A pie", acepta: false });
+  // Nombre SIEMPRE vacío al abrir (nunca el nombre de usuario/display) — la
+  // persona debe escribir a propósito su nombre legal, igual que en verificación.
+  const [f, setF] = useState({ nombre: "", docType: "Carnet de identidad", docNumber: "", telefono: "", zona: "", vehiculo: "A pie", acepta: false });
   const [err, setErr] = useState("");
   const [sending, setSending] = useState(false);
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  // KYC completo: mismas 3 fotos que verificar perfil (documento delante/detrás
+  // + selfie sosteniéndolo), con la misma hoja "Tomar foto / Elegir de galería".
+  const DOC_TYPES = ["Carnet de identidad", "Pasaporte", "Licencia de conducir"];
+  const [docFront, setDocFront] = useState(null);   // { file, url }
+  const [docBack,  setDocBack]  = useState(null);
+  const [selfie,   setSelfie]   = useState(null);
+  const [pickerFor, setPickerFor] = useState(null); // 'front' | 'back' | 'selfie' | null
+  const camRef = useRef(null), libRef = useRef(null);
+  const photoFor = (slot) => (slot === "front" ? docFront : slot === "back" ? docBack : selfie);
+  const setterFor = (slot) => (slot === "front" ? setDocFront : slot === "back" ? setDocBack : setSelfie);
+  const onPicked = (e) => {
+    const file = e.target.files?.[0]; const slot = pickerFor;
+    e.target.value = "";
+    setPickerFor(null);
+    if (!file || !slot) return;
+    setterFor(slot)({ file, url: URL.createObjectURL(file) });
+  };
+  const missingSlots = [!docFront && "delantera", !docBack && "trasera", !selfie && "selfie con tu cara"].filter(Boolean);
   const approved = myRecord?.status === "approved";
   // BIENVENIDA: la primera vez que un aprobado entra, breve explicación y
   // responsabilidades (se guarda visto por usuario en localStorage).
@@ -516,11 +536,20 @@ export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId
   const lbl = { fontSize: 11.5, fontWeight: 700, color: t2, marginBottom: 6, display: "block" };
   const inp = { width: "100%", background: dark ? "#1c1c20" : "#f5f5f7", color: t1, border: `1px solid ${bd}`, borderRadius: 11, padding: "11px 13px", fontSize: 14, outline: "none", fontFamily: "inherit", marginBottom: 14, boxSizing: "border-box" };
   const submit = async () => {
-    if (!f.nombre.trim() || !f.telefono.trim() || !f.zona.trim()) return setErr("Completa tu nombre, teléfono y zona.");
+    if (!f.nombre.trim() || !f.docNumber.trim() || !f.telefono.trim() || !f.zona.trim()) return setErr("Completa tu nombre, documento, teléfono y zona.");
+    if (!docFront || !docBack || !selfie) return setErr("Faltan fotos: " + missingSlots.join(", ") + ".");
     if (!f.acepta) return setErr("Debes aceptar la cláusula de responsabilidad.");
     setErr(""); setSending(true);
     try {
-      await submitCourierApplication({ userId: user?.id, name: f.nombre.trim(), phone: f.telefono.trim(), zone: f.zona.trim(), vehicle: f.vehiculo });
+      const [pf, pb, ps] = await Promise.all([
+        uploadKyc(docFront.file, user.id, "courier_front"),
+        uploadKyc(docBack.file, user.id, "courier_back"),
+        uploadKyc(selfie.file, user.id, "courier_selfie"),
+      ]);
+      await submitCourierApplication({
+        userId: user?.id, name: f.nombre.trim(), phone: f.telefono.trim(), zone: f.zona.trim(), vehicle: f.vehiculo,
+        full_name: f.nombre.trim(), doc_type: f.docType, doc_number: f.docNumber.trim(), doc_front: pf, doc_back: pb, selfie: ps,
+      });
       setApp({ status: "pending" });
       flash && flash("🛵 Solicitud enviada — en revisión");
     } catch (e) {
@@ -530,6 +559,16 @@ export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId
       } else setErr("No se pudo enviar: " + (e?.message || "intenta de nuevo"));
     } finally { setSending(false); }
   };
+  const upBox = (label, slot, hint) => {
+    const photo = photoFor(slot);
+    return (
+      <button onClick={() => setPickerFor(slot)} style={{ flex: 1, height: photo ? 128 : 112, borderRadius: 10, border: `1.5px dashed ${photo ? "#22C55E" : bd}`, background: dark ? "#1c1c20" : "#f5f5f7", cursor: "pointer", overflow: "hidden", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5, color: t2, fontSize: 10.5, fontWeight: 700, textAlign: "center", padding: "6px 6px" }}>
+        {photo
+          ? <img src={photo.url} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }}/>
+          : <><span style={{ fontSize: 22 }}>{hint}</span><span style={{ lineHeight: 1.3 }}>{label}</span></>}
+      </button>
+    );
+  };
 
   return wrap(
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 16px 44px" }}>
@@ -538,7 +577,16 @@ export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId
       <p style={{ fontSize: 12.5, color: t3, marginBottom: 18 }}>El equipo de RETADOR revisa cada solicitud. Te avisamos al aprobarla.</p>
 
       <label style={lbl}>Nombre completo *</label>
-      <input style={inp} value={f.nombre} onChange={e => set("nombre", e.target.value)} placeholder="Nombre y apellidos" />
+      <input style={inp} value={f.nombre} onChange={e => set("nombre", e.target.value)} placeholder="Nombre completo, como en tu documento" />
+      <div style={{ fontSize: 10.5, color: "#f59e0b", fontWeight: 700, margin: "-8px 0 14px", lineHeight: 1.4 }}>⚠️ Nombre COMPLETO, exactamente como aparece en tu documento de identidad. Puede ser diferente a tu nombre de usuario.</div>
+
+      <label style={lbl}>Tipo de documento *</label>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {DOC_TYPES.map(t => <button key={t} onClick={() => set("docType", t)} style={{ padding: "8px 12px", borderRadius: 8, cursor: "pointer", fontSize: 11.5, fontWeight: 600, background: f.docType === t ? AC + "1a" : (dark ? "#1c1c20" : "#f5f5f7"), border: `1.5px solid ${f.docType === t ? AC : bd}`, color: f.docType === t ? AC : t1 }}>{t}</button>)}
+      </div>
+      <label style={lbl}>Número de documento *</label>
+      <input style={inp} value={f.docNumber} onChange={e => set("docNumber", e.target.value)} placeholder="Ej. 95010112345" />
+
       <label style={lbl}>Teléfono *</label>
       <input style={inp} value={f.telefono} onChange={e => set("telefono", e.target.value)} placeholder="+53 …" />
       <label style={lbl}>Zona donde repartes *</label>
@@ -548,6 +596,26 @@ export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId
         <option>A pie</option><option>Bicicleta</option><option>Moto</option><option>Carro</option>
       </select>
 
+      <label style={lbl}>Fotos <span style={{ color: "#ef4444", fontWeight: 800 }}>· las 3 son obligatorias</span></label>
+      <input ref={camRef} type="file" accept="image/*" capture={pickerFor === "selfie" ? "user" : "environment"} onChange={onPicked} style={{ display: "none" }}/>
+      <input ref={libRef} type="file" accept="image/*" onChange={onPicked} style={{ display: "none" }}/>
+      <div style={{ display: "flex", gap: 9, marginBottom: 9 }}>
+        {upBox("Documento por DELANTE", "front", "📄")}
+        {upBox("Documento por DETRÁS", "back", "📄")}
+      </div>
+      <div style={{ display: "flex", gap: 9, alignItems: "stretch", marginBottom: 8 }}>
+        {upBox("Tú sosteniendo el documento junto a tu cara", "selfie", "🤳")}
+        {!selfie && (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, background: AC + "0a", border: `1px dashed ${AC}44`, borderRadius: 10, padding: "8px 6px" }}>
+            <KycSelfieSample accent={AC} surface={card}/>
+            <span style={{ fontSize: 9, color: t2, fontWeight: 600, textAlign: "center", lineHeight: 1.3 }}>Así, con el documento a un lado de tu cara</span>
+          </div>
+        )}
+      </div>
+      {missingSlots.length > 0 && <div style={{ fontSize: 11, color: "#f59e0b", fontWeight: 700, marginBottom: 14 }}>Falta: {missingSlots.join(", ")}</div>}
+      {missingSlots.length === 0 && <div style={{ marginBottom: 14 }}/>}
+      <div style={{ fontSize: 11.5, color: t3, marginBottom: 14, lineHeight: 1.5 }}>Tus documentos son privados: solo el equipo de RETADOR los ve para confirmar tu identidad.</div>
+
       <label style={{ display: "flex", gap: 11, alignItems: "flex-start", padding: "13px", border: `1px solid ${f.acepta ? AC : bd}`, borderRadius: 12, cursor: "pointer", background: f.acepta ? AC + "0f" : "transparent" }}>
         <input type="checkbox" checked={f.acepta} onChange={e => set("acepta", e.target.checked)} style={{ marginTop: 2, width: 18, height: 18, accentColor: AC, flexShrink: 0 }} />
         <span style={{ fontSize: 12, color: t1, lineHeight: 1.55 }}>Declaro que la información es verídica y acepto ser <b>totalmente responsable</b> de los bienes del comprador y del vendedor durante cada entrega, incluyendo el dinero cobrado en efectivo, hasta entregarlo a quien corresponde.</span>
@@ -556,6 +624,17 @@ export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId
       {err && <div style={{ fontSize: 12.5, color: "#fff", background: "#ef4444", borderRadius: 10, padding: "10px 13px", marginTop: 14, fontWeight: 600 }}>{err}</div>}
       <button onClick={submit} disabled={sending} style={{ width: "100%", height: 50, borderRadius: 14, border: "none", background: sending ? (dark ? "#26262b" : "#e2e8f0") : AC, color: sending ? t3 : "#fff", fontSize: 15, fontWeight: 800, cursor: sending ? "default" : "pointer", marginTop: 18 }}>{sending ? "Enviando…" : "Enviar solicitud"}</button>
       <p style={{ fontSize: 10.5, color: t3, textAlign: "center", marginTop: 10 }}>Tu solicitud quedará en revisión hasta que el equipo de RETADOR la apruebe.</p>
+
+      {pickerFor && (
+        <div onClick={() => setPickerFor(null)} style={{ position: "fixed", inset: 0, zIndex: 4100, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: card, width: "100%", maxWidth: 480, borderRadius: "16px 16px 0 0", padding: "10px 16px 24px", border: `1px solid ${bd}` }}>
+            <div style={{ textAlign: "center", fontSize: 11.5, fontWeight: 700, color: t2, padding: "8px 0 14px" }}>Añadir foto</div>
+            <button onClick={() => camRef.current?.click()} style={{ width: "100%", height: 48, borderRadius: 10, background: AC, border: "none", color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: "pointer", marginBottom: 9 }}>📷 Tomar foto</button>
+            <button onClick={() => libRef.current?.click()} style={{ width: "100%", height: 48, borderRadius: 10, background: dark ? "#1c1c20" : "#f5f5f7", border: `1px solid ${bd}`, color: t1, fontSize: 13.5, fontWeight: 800, cursor: "pointer", marginBottom: 9 }}>🖼️ Elegir de galería</button>
+            <button onClick={() => setPickerFor(null)} style={{ width: "100%", height: 44, borderRadius: 10, background: "none", border: "none", color: t2, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1388,7 +1388,10 @@ function Operaciones({toast,data={},solo,ro,onResolved}){
   const[confirm,setConfirm]=useState(null);    // diálogo de confirmación {title,msg,danger,yes,onYes}
   const couriers = data.couriers || [];
   const [couView, setCouView] = useState(null);
-  const couAct = (id, status) => { data.onCourierAction && data.onCourierAction(id, status); onResolved && onResolved(); };
+  const [couZoom, setCouZoom] = useState(null);
+  const [couRejectFor, setCouRejectFor] = useState(null);
+  const [couReason, setCouReason] = useState("");
+  const couAct = (id, status, reason) => { data.onCourierAction && data.onCourierAction(id, status, reason); onResolved && onResolved(); };
   const fmt = n=>'$'+Math.round(n||0).toLocaleString();
   const ago = ts=>{ if(!ts) return '—'; const s=Math.floor((Date.now()-ts)/1000); if(s<60) return `${s}s`; const m=Math.floor(s/60); if(m<60) return `${m}m`; const h=Math.floor(m/60); if(h<24) return `${h}h`; return `${Math.floor(h/24)}d`; };
   const ask = (cfg)=>setConfirm(cfg);
@@ -1455,11 +1458,9 @@ function Operaciones({toast,data={},solo,ro,onResolved}){
             ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px',background:'var(--bg)',borderRadius:10,border:'1px dashed var(--bd2)'}}>No hay solicitudes pendientes.</div>
             : pend.map(c=>(
               <div key={c.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px',background:'var(--bg)',borderRadius:10,border:'1px solid var(--bd)',marginBottom:8}}>
-                <div style={{width:42,height:42,borderRadius:10,overflow:'hidden',background:'var(--bg2)',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}>
-                  {c.selfie? <img src={c.selfie} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/> : '🛵'}
-                </div>
+                <div style={{width:42,height:42,borderRadius:10,overflow:'hidden',background:'var(--bg2)',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}>🛵</div>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontWeight:700,color:'var(--tx)',fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.nombre||c.userName}</div>
+                  <div style={{fontWeight:700,color:'var(--tx)',fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.fullName||c.nombre||c.userName}</div>
                   <div style={{fontSize:10,color:'var(--tx3)'}}>{c.vehiculo} · {c.zona||'—'} · {c.telefono||'—'}</div>
                 </div>
                 <button className="btn bts sm" onClick={()=>setCouView(c)}>{ro?'Ver':'Revisar'}</button>
@@ -1470,8 +1471,8 @@ function Operaciones({toast,data={},solo,ro,onResolved}){
           <div className="ch"><span className="ct">Mensajeros activos</span><span className="bdg bb">{appr.length}</span></div>
           {appr.map(c=>(
             <div key={c.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 2px',borderBottom:'1px solid var(--bd)'}}>
-              <div style={{width:34,height:34,borderRadius:9,overflow:'hidden',background:'var(--bg2)',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15}}>{c.selfie?<img src={c.selfie} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>:'🛵'}</div>
-              <div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,color:'var(--tx)',fontSize:12.5}}>{c.nombre||c.userName}</div><div style={{fontSize:10,color:'var(--tx3)'}}>{c.vehiculo} · {c.zona||'—'}</div></div>
+              <div style={{width:34,height:34,borderRadius:9,overflow:'hidden',background:'var(--bg2)',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15}}>🛵</div>
+              <div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,color:'var(--tx)',fontSize:12.5}}>{c.fullName||c.nombre||c.userName}</div><div style={{fontSize:10,color:'var(--tx3)'}}>{c.vehiculo} · {c.zona||'—'}</div></div>
               {!ro && <button className="btn btd sm" onClick={()=>ask({title:'Quitar mensajero',msg:`Se le retira el acceso de mensajero a ${c.nombre||c.userName}. ¿Continuar?`,danger:true,yes:'Quitar',onYes:()=>couAct(c.id,'rejected'),msg2:'Mensajero retirado'})}>Quitar</button>}
             </div>
           ))}
@@ -1490,29 +1491,40 @@ function Operaciones({toast,data={},solo,ro,onResolved}){
       <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:420,maxHeight:'88vh',overflowY:'auto'}}>
         <div className="mt">Revisar mensajero</div>
         <div style={{display:'flex',gap:11,alignItems:'center',margin:'4px 0 14px'}}>
-          <div style={{width:54,height:54,borderRadius:12,overflow:'hidden',background:'var(--bg2)',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22}}>{couView.selfie?<img src={couView.selfie} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>:'🛵'}</div>
-          <div><div style={{fontWeight:800,color:'var(--tx)',fontSize:15}}>{couView.nombre||couView.userName}</div><div style={{fontSize:11,color:'var(--tx3)'}}>{couView.telefono} · {couView.zona}</div></div>
+          <div style={{width:54,height:54,borderRadius:12,overflow:'hidden',background:'var(--bg2)',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22}}>🛵</div>
+          <div style={{flex:1,minWidth:0}}><div style={{fontWeight:800,color:'var(--tx)',fontSize:15}}>{couView.fullName||couView.nombre||couView.userName}</div><div style={{fontSize:11,color:'var(--tx3)'}}>{couView.telefono} · {couView.zona}</div></div>
+          {data.onViewProfile && couView.userId && <button className="btn sm" onClick={()=>{ data.onViewProfile(couView.userId); setCouView(null); }}>Ver perfil completo</button>}
         </div>
-        {(()=>{ const rows=[['Documento',`${couView.docTipo||'—'} · ${couView.docNumero||'—'}`],['Dirección',couView.direccion||'—'],['Zona',couView.zona||'—'],['Transporte',couView.vehiculo||'—'],...(couView.licNumero?[['Licencia',couView.licNumero]]:[]),...(couView.chapa?[['Chapa',couView.chapa]]:[]),['Experiencia',couView.experiencia||'—']];
+        {(()=>{ const rows=[['Documento',`${couView.docType||'—'} · ${couView.docNumber||'—'}`],['Zona',couView.zona||'—'],['Transporte',couView.vehiculo||'—'],['Enviada',couView.createdAt?new Date(couView.createdAt).toLocaleDateString('es-ES',{day:'2-digit',month:'short',year:'numeric'}):'—']];
           return <div style={{background:'var(--bg)',borderRadius:10,border:'1px solid var(--bd)',padding:'4px 12px',marginBottom:12}}>
             {rows.map(([k,v])=><div key={k} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'7px 0',borderBottom:'1px solid var(--bd)',fontSize:11.5}}><span style={{color:'var(--tx3)'}}>{k}</span><span style={{color:'var(--tx)',fontWeight:600,textAlign:'right'}}>{v}</span></div>)}
           </div>; })()}
-        <div style={{fontSize:11,fontWeight:700,color:'var(--tx3)',marginBottom:7}}>Verificación de identidad</div>
+        <div style={{fontSize:11,fontWeight:700,color:'var(--tx3)',marginBottom:7}}>Verificación de identidad — mismo nivel que verificar perfil</div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:7,marginBottom:14}}>
-          {[['Frente',couView.docFront],['Reverso',couView.docBack],['Selfie',couView.selfie],...(couView.licFoto?[['Licencia',couView.licFoto]]:[])].map(([lb,src])=>(
-            <div key={lb}>
-              <div style={{aspectRatio:'1/1',borderRadius:9,overflow:'hidden',background:'var(--bg2)',border:'1px solid var(--bd)',display:'flex',alignItems:'center',justifyContent:'center'}}>{src?<img src={src} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>:<span style={{fontSize:9,color:'var(--tx3)'}}>—</span>}</div>
-              <div style={{fontSize:9,color:'var(--tx3)',textAlign:'center',marginTop:3}}>{lb}</div>
-            </div>
+          {[['Frente',couView.docFront],['Reverso',couView.docBack],['Selfie',couView.selfie]].map(([lbl,p])=>(
+            <KycPhoto key={lbl} label={lbl} path={p} onZoom={setCouZoom} />
           ))}
         </div>
-        <div style={{fontSize:10,color:'var(--tx3)',background:'var(--bg)',borderRadius:9,padding:'9px 11px',marginBottom:12,lineHeight:1.5}}>Compara la selfie con la foto del documento. La comparación facial automática llegará con el backend; por ahora la confirmas tú.</div>
+        <div style={{fontSize:10,color:'var(--tx3)',background:'var(--bg)',borderRadius:9,padding:'9px 11px',marginBottom:12,lineHeight:1.5}}>Compara la selfie con la foto del documento antes de decidir.</div>
         {ro
           ? <div style={{textAlign:'center',fontSize:11,color:'var(--tx3)'}}>👁 Solo lectura</div>
           : <div className="mact">
-          <button className="btn btd sm" onClick={()=>{couAct(couView.id,'rejected');toast('Solicitud rechazada');setCouView(null);}}>Rechazar</button>
-          <button className="btn btp sm" onClick={()=>{couAct(couView.id,'approved');toast('✅ Mensajero aprobado');setCouView(null);}}>Aprobar mensajero</button>
+          <button className="btn btd sm" onClick={()=>{ setCouReason(''); setCouRejectFor(couView); setCouView(null); }}>Rechazar</button>
+          <button className="btn btp sm" onClick={()=>{couAct(couView.id,'approved');toast('✅ Mensajero aprobado — su perfil también queda verificado');setCouView(null);}}>Aprobar mensajero</button>
         </div>}
+      </div>
+    </div>}
+    {couZoom && <div className="mo" onClick={()=>setCouZoom(null)} style={{zIndex:6000}}>
+      <img src={couZoom} alt="" onClick={e=>e.stopPropagation()} style={{maxWidth:'92vw',maxHeight:'88vh',borderRadius:10,objectFit:'contain'}}/>
+    </div>}
+    {couRejectFor && <div className="mo" onClick={()=>setCouRejectFor(null)}>
+      <div className="mb" onClick={e=>e.stopPropagation()} style={{maxWidth:380}}>
+        <div className="mt">Rechazar solicitud de mensajero</div>
+        <textarea value={couReason} onChange={e=>setCouReason(e.target.value)} rows={3} placeholder="Motivo (opcional, se le muestra a la persona)…" style={{width:'100%',boxSizing:'border-box',background:'var(--bg3,#12151f)',border:'1px solid var(--bd2,#222)',borderRadius:10,padding:'10px 12px',color:'var(--tx)',fontSize:13,outline:'none',resize:'none',margin:'6px 0 12px'}}/>
+        <div className="mact">
+          <button className="btn btg sm" onClick={()=>setCouRejectFor(null)}>Cancelar</button>
+          <button className="btn btd sm" onClick={()=>{ const c=couRejectFor; const why=couReason.trim(); setCouRejectFor(null); couAct(c.id,'rejected',why||null); toast('Solicitud rechazada'); }}>Rechazar</button>
+        </div>
       </div>
     </div>}
 
@@ -2031,7 +2043,7 @@ function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, initial
               <div style={{ fontSize:15, fontWeight:800, color:'var(--tx)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{nmeOf(sel)}</div>
               <div style={{ fontSize:12, color:'var(--tx3)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{sel.email || '—'}</div>
             </div>
-            {onViewProfile && <button className="btn sm" onClick={()=>{ onViewProfile(sel.id); closeSheet(); }}>Ver perfil</button>}
+            {onViewProfile && <button className="btn sm" onClick={()=>{ onViewProfile(sel.id); closeSheet(); }}>Ver perfil completo</button>}
           </div>
           <div style={{ marginBottom:12 }}>{chips(sel)}</div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:14 }}>

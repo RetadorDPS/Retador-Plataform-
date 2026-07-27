@@ -161,6 +161,21 @@ export const AvatarUser = ({ userId, name, size = 40, style, verified }) => {
   return <Avatar url={p?.avatar || null} name={p?.name || name} size={size} style={style} verified={verified != null ? verified : !!p?.verified} />;
 };
 
+// Ilustración de MUESTRA para la selfie de KYC (verificación de perfil y KYC de
+// mensajero comparten exactamente la misma imagen): silueta simple sosteniendo
+// un documento junto a su cara — NUNCA una foto real de nadie. `accent`/`surface`
+// dejan que cada pantalla la pinte con sus propios colores.
+export const KycSelfieSample = ({ accent = "#FFC01E", surface = "#0f0f0f", size = 54 }) => (
+  <svg width={size} height={size} viewBox="0 0 72 72" fill="none" style={{ flexShrink: 0 }}>
+    <circle cx="36" cy="36" r="35" fill={`${accent}14`} stroke={`${accent}55`} strokeWidth="1"/>
+    <circle cx="29" cy="27" r="11" fill={`${accent}40`}/>
+    <path d="M13 58c1-12 8-19 16-19s15 7 16 19" fill={`${accent}40`}/>
+    <rect x="37" y="33" width="25" height="17" rx="2.5" fill={surface} stroke={accent} strokeWidth="2" transform="rotate(-9 37 33)"/>
+    <line x1="41" y1="39" x2="58" y2="36" stroke={accent} strokeWidth="1.3" opacity=".65"/>
+    <line x1="41" y1="43" x2="55" y2="41" stroke={accent} strokeWidth="1.3" opacity=".65"/>
+  </svg>
+);
+
 export const Logo = ({ size = 21, sub = null }) => {
   const { isDark } = useAt();
   const ink = isDark ? "#F0F0F2" : "#18182C";

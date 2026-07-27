@@ -847,34 +847,33 @@ export const getMyCourierApplication = async (userId) => {
   if (error) { console.error("getMyCourierApplication:", error.message); return null; }
   return data || null;
 };
-export const submitCourierApplication = async ({ userId, name, phone, zone, vehicle }) => {
-  const row = { user_id: userId, name, phone, zone, vehicle };
-  const { error } = await supabase.from("courier_applications").insert(row);
-  if (!error) return;
-  // Mismo patrón que verificación: si el rechazo previo dejó una fila única por
-  // usuario, en vez de fallar la reactivamos a 'pending' con los datos nuevos.
-  if (!/duplicate|unique/i.test(error.message || "")) throw error;
-  const prev = await getMyCourierApplication(userId);
-  if (prev && prev.status !== "pending" && prev.status !== "approved") {
-    let patch = { ...row, status: "pending", reject_reason: null, reviewed_by: null, reviewed_at: null };
-    for (let i = 0; i < 6; i++) {
-      const { error: upErr } = await supabase.from("courier_applications").update(patch).eq("id", prev.id);
-      if (!upErr) return;
-      const m = /column "?([a-zA-Z0-9_]+)"? .*does not exist/i.exec(upErr.message || "");
-      if (!m || !(m[1] in patch)) throw upErr;
-      const next = { ...patch }; delete next[m[1]]; patch = next;
+// KYC completo (mismo nivel que verificar perfil): nombre legal, documento y
+// las 3 fotos, además de los datos operativos (teléfono, zona, vehículo).
+export const submitCourierApplication = async ({ userId, name, phone, zone, vehicle, full_name, doc_type, doc_number, doc_front, doc_back, selfie }) => {
+  const row = { user_id: userId, name, phone, zone, vehicle, full_name, doc_type, doc_number, doc_front, doc_back, selfie };
+  try {
+    await writeProductRow((r) => supabase.from("courier_applications").insert(r), row);
+    return;
+  } catch (error) {
+    // Mismo patrón que verificación: si el rechazo previo dejó una fila única
+    // por usuario, en vez de fallar la reactivamos a 'pending' con los datos nuevos.
+    if (!/duplicate|unique/i.test(error.message || "")) throw error;
+    const prev = await getMyCourierApplication(userId);
+    if (prev && prev.status !== "pending" && prev.status !== "approved") {
+      const patch = { ...row, status: "pending", reject_reason: null, reviewed_by: null, reviewed_at: null };
+      await writeProductRow((r) => supabase.from("courier_applications").update(r).eq("id", prev.id), patch);
+      return;
     }
-    throw new Error("No se pudo reenviar la solicitud de mensajero");
+    throw error;
   }
-  throw error;
 };
 export const getPendingCourierApplications = async () => {
   const { data, error } = await supabase.from("courier_applications").select("*").eq("status", "pending").order("created_at", { ascending: true });
   if (error) { console.error("getPendingCourierApplications:", error.message); return []; }
   return data || [];
 };
-export const reviewCourierApplication = async (applicationId, approve) => {
-  const { error } = await supabase.rpc("review_courier_application", { p_application_id: applicationId, p_approve: !!approve });
+export const reviewCourierApplication = async (applicationId, approve, reason = null) => {
+  const { error } = await supabase.rpc("review_courier_application", { p_application_id: applicationId, p_approve: !!approve, p_reason: reason || null });
   if (error) throw error;
 };
 

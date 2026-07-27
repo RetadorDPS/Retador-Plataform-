@@ -228,6 +228,7 @@ function CFG_Bdg({ s }) {
 /* ── HOME ─────────────────────────────────────────────────────── */
 function CFG_HomeScreen({ profile, settings, nav, onBack }) {
   const tk = CFG_useTk();
+  const appVersion = useAppVersion();
   const storMB = Math.round(Object.values(settings.storage).reduce((a,b)=>a+b,0));
   const themeLabel = { auto:"Auto", light:"Claro", dark:"Oscuro" };
   const langLabel  = { es:"Español", en:"English", pt:"Português", fr:"Français" };
@@ -255,7 +256,7 @@ function CFG_HomeScreen({ profile, settings, nav, onBack }) {
     ]},
     { title:"Soporte", items:[
       { id:"help",          Icon:HelpCircle,    label:"Ayuda",               bg:"bg-cyan-700"  },
-      { id:"about",         Icon:Info,          label:"Acerca de",           value:"3.2.1",    bg:"bg-zinc-600" },
+      { id:"about",         Icon:Info,          label:"Acerca de",           value:`v${appVersion}`, bg:"bg-zinc-600" },
     ]},
   ];
   return (
@@ -289,7 +290,6 @@ function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=fal
   function startEdit(f, v) { setEditing(f); setVal(v); }
   function save() {
     if (editing==="name") { const ini=val.trim().split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase(); setProfile(p=>({...p,name:val.trim(),initials:ini})); }
-    else if (editing==="email") setProfile(p=>({...p,email:val.trim()}));
     else if (editing==="phone") setProfile(p=>({...p,phone:val.trim()}));
     setEditing(null);
   }
@@ -319,7 +319,11 @@ function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=fal
       </div>
       <CFG_Lbl>Información personal</CFG_Lbl>
       <CFG_Crd>
-        {fields.map(({ field, label, value, Icon }, i) => (
+        {fields.map(({ field, label, value, Icon }, i) => {
+          // El correo de la cuenta viene de Google/el backend y no se puede
+          // cambiar desde la app — se muestra fijo, sin lápiz de editar.
+          const locked = field === "email";
+          return (
           <div key={field}>
             {i > 0 && <CFG_Hr />}
             <div style={{ background:tk.ROW }} className="px-3.5 py-2.5">
@@ -334,8 +338,9 @@ function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=fal
                         style={{ borderColor:tk.P, color:tk.T1, background:"transparent" }}
                         className="text-[14px] font-medium border-b-2 outline-none w-full" />
                     : <div style={{ color:tk.T1 }} className="text-[14px] font-medium">{value}</div>}
+                  {locked && editing!==field && <div style={{ color:tk.T3 }} className="text-[10.5px] mt-0.5">El correo de tu cuenta no se puede cambiar</div>}
                 </div>
-                {editing===field ? (
+                {locked ? null : editing===field ? (
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <button onClick={() => setEditing(null)} style={{ color:tk.T2 }} className="text-[12px]">Cancelar</button>
                     <button onClick={save} style={{ color:tk.P }} className="text-[12px] font-bold">OK</button>
@@ -346,7 +351,8 @@ function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=fal
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </CFG_Crd>
       <CFG_Lbl>Estado</CFG_Lbl>
       <CFG_Crd>

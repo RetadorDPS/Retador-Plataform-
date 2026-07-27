@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample } from "../shared/index.js";
 
 // ─── TIRITA DE TASAS DEL DÍA ──────────────────────────────────────────────────
 // Franja discreta con las tasas del día que controla el admin (adminCfg.fx del
@@ -698,156 +698,6 @@ function FP_ProModal({ onClose }) {
   );
 }
 
-// ── SETTINGS SCREEN ───────────────────────────────────────────────
-// ── CHANGE EMAIL SCREEN ──────────────────────────────────────────
-function FP_ChangeEmailScreen({ onBack }) {
-  const FP_C = useFP_C();
-  const [step,        setStep]        = useState("form");   // "form" | "sent"
-  const [newEmail,    setNewEmail]    = useState("");
-  const [confirmPass, setConfirmPass] = useState("");
-  const [showPass,    setShowPass]    = useState(false);
-  const [error,       setError]       = useState("");
-  const [loading,     setLoading]     = useState(false);
-
-  // Basic email validation
-  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail);
-  const canSubmit = emailOk && confirmPass.length >= 1 && !loading;
-
-  function handleSubmit() {
-    if (!canSubmit) return;
-    setError("");
-    setLoading(true);
-    // INTEGRATION POINT: POST /api/user/change-email
-    // Body: { newEmail, currentPassword: confirmPass }
-    // On success: send verification link to both old & new email → setStep("sent")
-    // On error:   setError("Contraseña incorrecta") or "Correo ya en uso"
-    setTimeout(() => { setLoading(false); setStep("sent"); }, 1200);
-  }
-
-  return (
-    <div style={{ position:"fixed", inset:0, zIndex:600,
-      background:FP_C.bg, display:"flex", flexDirection:"column" }}>
-
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"0 20px", height:50, flexShrink:0, background:FP_C.bg,
-        borderBottom:`1px solid ${FP_C.border}`, position:"sticky", top:0 }}>
-        <button onClick={onBack} style={{ background:"none", border:"none",
-          cursor:"pointer", display:"flex", alignItems:"center", gap:8, padding:0 }}>
-          <FP_Icon d={FP_Icons.back} size={18} color={FP_C.textSecondary}/>
-          <span style={{ fontSize:13, fontWeight:600, fontFamily:FP_FB, color:FP_C.textSecondary }}>
-            Atrás
-          </span>
-        </button>
-        <span style={{ fontFamily:FP_FH, fontWeight:700, fontSize:14, color:FP_C.textPrimary }}>
-          Cambiar correo
-        </span>
-        <div style={{ width:60 }}/>
-      </div>
-
-      <div style={{ flex:1, padding:"32px 24px", display:"flex", flexDirection:"column" }}>
-        {step === "form" ? (
-          <>
-            <div style={{ marginBottom:32 }}>
-              <div style={{ fontSize:16, fontWeight:700, color:FP_C.textPrimary,
-                fontFamily:FP_FH, marginBottom:6 }}>
-                Actualiza tu correo electrónico
-              </div>
-              <div style={{ fontSize:13, color:FP_C.textSecondary, lineHeight:1.6 }}>
-                Ingresa el nuevo correo y confirma tu contraseña actual.
-                Recibirás un enlace de verificación en ambas direcciones.
-              </div>
-            </div>
-
-            <FP_Field label="Nuevo correo electrónico">
-              <input
-                type="email"
-                value={newEmail}
-                placeholder="nuevo@correo.com"
-                onChange={e => { setNewEmail(e.target.value); setError(""); }}
-                onFocus={e => e.target.style.borderColor = FP_C.accent}
-                onBlur={e => e.target.style.borderColor =
-                  newEmail && !emailOk ? FP_C.danger : FP_C.border}
-                style={{
-                  ...fpInputStyle(FP_C),
-                  borderColor: newEmail && !emailOk ? FP_C.danger : FP_C.border,
-                }}
-              />
-              {newEmail && !emailOk && (
-                <div style={{ fontSize:11, color:FP_C.danger, marginTop:5 }}>
-                  Ingresa un correo válido
-                </div>
-              )}
-            </FP_Field>
-
-            <FP_Field label="Confirma tu contraseña actual">
-              <div style={{ position:"relative" }}>
-                <input
-                  type={showPass ? "text" : "password"}
-                  value={confirmPass}
-                  placeholder="Tu contraseña actual"
-                  onChange={e => { setConfirmPass(e.target.value); setError(""); }}
-                  onFocus={e => e.target.style.borderColor = FP_C.accent}
-                  onBlur={e => e.target.style.borderColor = FP_C.border}
-                  style={{ ...fpInputStyle(FP_C), paddingRight:44 }}
-                />
-                <button onClick={() => setShowPass(!showPass)} style={{
-                  position:"absolute", right:12, top:"50%",
-                  transform:"translateY(-50%)",
-                  background:"none", border:"none", cursor:"pointer", padding:2,
-                }}>
-                  <FP_Icon d={showPass ? FP_Icons.eye : FP_Icons.lock}
-                    size={16} color={FP_C.textMuted}/>
-                </button>
-              </div>
-            </FP_Field>
-
-            {error && (
-              <div style={{ background:FP_C.dangerDim, border:`1px solid ${FP_C.danger}33`,
-                borderRadius:8, padding:"10px 12px", marginBottom:16,
-                fontSize:12, color:FP_C.danger, display:"flex", alignItems:"center", gap:8 }}>
-                <FP_Icon d={FP_Icons.x} size={14} color={FP_C.danger}/>
-                {error}
-              </div>
-            )}
-
-            <div style={{ marginTop:"auto", paddingTop:16 }}>
-              <FP_Btn onClick={handleSubmit} disabled={!canSubmit}
-                style={{ width:"100%", padding:"13px",
-                  opacity: loading ? 0.7 : canSubmit ? 1 : 0.4 }}>
-                {loading ? "Enviando…" : "Enviar enlace de verificación"}
-              </FP_Btn>
-            </div>
-          </>
-        ) : (
-          /* ── SENT STATE ── */
-          <div style={{ flex:1, display:"flex", flexDirection:"column",
-            alignItems:"center", justifyContent:"center", textAlign:"center", gap:16 }}>
-            <div style={{ width:64, height:64, borderRadius:"50%",
-              background:FP_C.positiveDim, border:`1px solid #0D2218`,
-              display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <FP_Icon d={FP_Icons.mail} size={28} color={FP_C.positive}/>
-            </div>
-            <div>
-              <div style={{ fontSize:17, fontWeight:700, color:FP_C.textPrimary,
-                fontFamily:FP_FH, marginBottom:8 }}>
-                Revisa tu correo
-              </div>
-              <div style={{ fontSize:13, color:FP_C.textSecondary, lineHeight:1.7, maxWidth:300 }}>
-                Enviamos un enlace de verificación a{" "}
-                <strong style={{ color:FP_C.textPrimary }}>{newEmail}</strong>.
-                El cambio se aplica al confirmar desde ese correo.
-              </div>
-            </div>
-            <FP_Btn variant="secondary" onClick={onBack} style={{ marginTop:8 }}>
-              Volver a configuración
-            </FP_Btn>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ── CHANGE PASSWORD SCREEN ────────────────────────────────────────
 function FP_ChangePasswordScreen({ hasPassword, onBack }) {
   const FP_C = useFP_C();
@@ -1089,7 +939,7 @@ function FP_SettingsScreen({ onClose }) {
   const FP_C = useFP_C();
   const [notif,      setNotif]      = useState({ ventas:true, mensajes:true, reseñas:true, promo:false });
   const [privacy,    setPrivacy]    = useState("public");
-  const [subScreen,  setSubScreen]  = useState(null); // null | "email" | "password"
+  const [subScreen,  setSubScreen]  = useState(null); // null | "password"
   const [toast,      setToast]      = useState(null);
   function toast_(msg) { setToast(msg); setTimeout(() => setToast(null), 2500); }
 
@@ -1100,7 +950,6 @@ function FP_SettingsScreen({ onClose }) {
   // onDelete()  → DELETE /api/user (con confirmación)
   const hasPassword = false; // INTEGRATION POINT: reemplazar con dato real del backend
 
-  if (subScreen === "email")    return <FP_ChangeEmailScreen    onBack={() => setSubScreen(null)}/>;
   if (subScreen === "password") return <FP_ChangePasswordScreen hasPassword={hasPassword} onBack={() => setSubScreen(null)}/>;
 
   return (
@@ -1196,13 +1045,6 @@ function FP_SettingsScreen({ onClose }) {
         <div style={{ marginBottom:6 }}><FP_SectionHead>Cuenta</FP_SectionHead></div>
         <div style={{ background:FP_C.surface, border:`1px solid ${FP_C.border}`,
           borderRadius:10, overflow:"hidden", marginBottom:16 }}>
-          <FP_Row border onClick={() => setSubScreen("email")}>
-            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-              <FP_Icon d={FP_Icons.mail} size={15} color={FP_C.textSecondary}/>
-              <span style={{ fontSize:13, color:FP_C.textPrimary }}>Cambiar correo</span>
-            </div>
-            <FP_Icon d={FP_Icons.chevronR} size={15} color={FP_C.textMuted}/>
-          </FP_Row>
           <FP_Row border onClick={() => setSubScreen("password")}>
             <div style={{ display:"flex", alignItems:"center", gap:12 }}>
               <FP_Icon d={FP_Icons.key} size={15} color={FP_C.textSecondary}/>
@@ -1273,7 +1115,9 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
   const [loading, setLoading] = useState(true);
   const [myVerif, setMyVerif] = useState(null);
   const [docType, setDocType] = useState("Carnet de identidad");
-  const [fullName, setFullName] = useState(name || "");
+  // Siempre vacío al abrir: nunca se pre-llena con el nombre de usuario/display,
+  // para que la persona escriba a propósito el nombre legal de su documento.
+  const [fullName, setFullName] = useState("");
   const [docNum, setDocNum] = useState("");
   const [front, setFront] = useState(null);   // { file, url }
   const [back, setBack]   = useState(null);
@@ -1326,18 +1170,9 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
     setSubmitting(false);
   };
 
-  // Ilustración de muestra (silueta simple, identidad RETADOR dorada) — NO es
-  // una foto real de nadie, solo para entender la postura de la selfie.
-  const SelfieSample = () => (
-    <svg width="54" height="54" viewBox="0 0 72 72" fill="none" style={{ flexShrink:0 }}>
-      <circle cx="36" cy="36" r="35" fill={`${C.accent}14`} stroke={`${C.accent}55`} strokeWidth="1"/>
-      <circle cx="29" cy="27" r="11" fill={`${C.accent}40`}/>
-      <path d="M13 58c1-12 8-19 16-19s15 7 16 19" fill={`${C.accent}40`}/>
-      <rect x="37" y="33" width="25" height="17" rx="2.5" fill={C.surface} stroke={C.accent} strokeWidth="2" transform="rotate(-9 37 33)"/>
-      <line x1="41" y1="39" x2="58" y2="36" stroke={C.accent} strokeWidth="1.3" opacity=".65"/>
-      <line x1="41" y1="43" x2="55" y2="41" stroke={C.accent} strokeWidth="1.3" opacity=".65"/>
-    </svg>
-  );
+  // Ilustración de muestra compartida (misma que usa el KYC de mensajero) — NO
+  // es una foto real de nadie, solo para entender la postura de la selfie.
+  const SelfieSample = () => <KycSelfieSample accent={C.accent} surface={C.surface}/>;
 
   const upBox = (label, slot, hint) => {
     const photo = photoFor(slot);
@@ -1381,9 +1216,9 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
               {TYPES.map(t => <button key={t} onClick={()=>setDocType(t)} style={{ padding:"8px 12px", borderRadius:8, cursor:"pointer", fontSize:11.5, fontWeight:600, background: docType===t ? `${C.accent}1a` : C.surfaceTop, border:`1.5px solid ${docType===t ? C.accent : C.border}`, color: docType===t ? C.accent : C.textPrimary }}>{t}</button>)}
             </div>
             <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Nombre completo</div>
-            <input value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Como aparece en tu documento" style={{ width:"100%", boxSizing:"border-box", background:C.surfaceTop, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 12px", color:C.textPrimary, fontSize:13, outline:"none" }}/>
+            <input value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Nombre completo, como en tu documento" style={{ width:"100%", boxSizing:"border-box", background:C.surfaceTop, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 12px", color:C.textPrimary, fontSize:13, outline:"none" }}/>
             <div style={{ fontSize:10.5, color:C.warning, fontWeight:700, margin:"6px 0 13px", lineHeight:1.4 }}>
-              ⚠️ Escríbelo EXACTAMENTE como aparece en tu documento.
+              ⚠️ Nombre COMPLETO, exactamente como aparece en tu documento de identidad. Puede ser diferente a tu nombre de usuario.
               {nameMismatch && " Es distinto al nombre de tu perfil — no bloquea el envío, pero verifica que esté bien escrito."}
             </div>
             <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Número de documento</div>
@@ -1706,15 +1541,18 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
             alignItems:"flex-start", marginBottom:16 }}>
             <div style={{ position:"relative" }}>
               <FP_Avatar avatar={profile.avatar} name={profile.name} size={72} verified={!!isVerified || !!profile.isVerified}/>
-              {/* FREE chip */}
-              <div style={{ position:"absolute", bottom:-2, left:"50%",
-                transform:"translateX(-50%)",
-                background:FP_C.bg, border:`1px solid ${FP_C.borderMid}`,
-                borderRadius:4, padding:"1px 6px",
-                fontSize:8, fontWeight:800, color:FP_C.textMuted,
-                fontFamily:FP_FH, letterSpacing:"0.8px", whiteSpace:"nowrap" }}>
-                FREE
-              </div>
+              {/* Chip de plan — SOLO lo ve el dueño de la cuenta, nunca un visitante
+                  (el plan no es información pública; además chocaba con el ✓). */}
+              {isOwner && (
+                <div style={{ position:"absolute", bottom:-2, left:"50%",
+                  transform:"translateX(-50%)",
+                  background:FP_C.bg, border:`1px solid ${FP_C.borderMid}`,
+                  borderRadius:4, padding:"1px 6px",
+                  fontSize:8, fontWeight:800, color:FP_C.textMuted,
+                  fontFamily:FP_FH, letterSpacing:"0.8px", whiteSpace:"nowrap" }}>
+                  {String(currentPlan || "Básico").toUpperCase()}
+                </div>
+              )}
             </div>
 
             {isOwner ? (

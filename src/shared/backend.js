@@ -227,6 +227,68 @@ export const loadMessages = async (convId) => {
   if (error) { console.error("loadMessages:", error.message); return []; }
   return data || [];
 };
+// Responder a un mensaje: mismo sendMessage, con meta {reply_to, reply_preview}.
+export const sendReply = async (senderId, otherId, text, replyTo, replyPreview) => {
+  return sendMessage(senderId, otherId, text, { reply_to: replyTo, reply_preview: replyPreview || "" });
+};
+// Editar el texto de MI PROPIO mensaje — UPDATE directo (el RLS ya solo deja
+// que el dueño lo haga). edited_at lo pone SOLO el backend (trigger); aquí
+// nunca se toca esa columna.
+export const editMessage = async (messageId, text) => {
+  const t = (text || "").trim();
+  if (!messageId || !t) throw new Error("Falta el texto");
+  const { data, error } = await supabase.from("messages").update({ text: t }).eq("id", messageId).select().single();
+  if (error) throw error;
+  return data;
+};
+
+// ── NOTAS DE VOZ (bucket privado 'voice-notes') ──────────────────────────────
+// Sube el audio grabado a su carpeta (su uid) y devuelve el PATH (no URL: el
+// bucket es privado, se reproduce con un enlace firmado temporal).
+export const uploadVoiceNote = async (blob, userId) => {
+  if (!userId) throw new Error("Sesión no válida");
+  const path = `${userId}/${crypto.randomUUID()}.webm`;
+  const { error } = await supabase.storage.from("voice-notes").upload(path, blob, {
+    cacheControl: "3600", upsert: false, contentType: blob.type || "audio/webm",
+  });
+  if (error) throw error;
+  return path;
+};
+export const voiceNoteSignedUrl = async (path, expiresIn = 3600) => {
+  if (!path) return null;
+  const { data, error } = await supabase.storage.from("voice-notes").createSignedUrl(path, expiresIn);
+  if (error) { console.error("voiceNoteSignedUrl:", error.message); return null; }
+  return data?.signedUrl || null;
+};
+
+// ── REACCIONES (message_reactions, una fila por persona por mensaje) ────────
+// Mismo emoji de nuevo → se quita. Emoji distinto → reemplaza la fila (nunca
+// dos reacciones de la misma persona en el mismo mensaje).
+export const toggleReaction = async (messageId, userId, emoji) => {
+  const { data: existing } = await supabase.from("message_reactions").select("id, emoji").eq("message_id", messageId).eq("user_id", userId).maybeSingle();
+  if (existing) {
+    if (existing.emoji === emoji) {
+      const { error } = await supabase.from("message_reactions").delete().eq("id", existing.id);
+      if (error) throw error;
+      return null;
+    }
+    const { data, error } = await supabase.from("message_reactions").update({ emoji }).eq("id", existing.id).select().single();
+    if (error) throw error;
+    return data;
+  }
+  const { data, error } = await supabase.from("message_reactions").insert({ message_id: messageId, user_id: userId, emoji }).select().single();
+  if (error) throw error;
+  return data;
+};
+// Trae TODAS las reacciones de un lote de mensajes (la conversación cargada) de
+// una vez — se agrupan por mensaje en el cliente.
+export const getReactionsForMessages = async (messageIds) => {
+  const ids = (messageIds || []).filter(Boolean);
+  if (!ids.length) return [];
+  const { data, error } = await supabase.from("message_reactions").select("*").in("message_id", ids);
+  if (error) { console.error("getReactionsForMessages:", error.message); return []; }
+  return data || [];
+};
 // Marca la conversación como leída (read_at) vía la función del backend.
 export const markRead = async (convId, userId) => {
   if (!convId) return;
@@ -952,9 +1014,40 @@ export const getUserTrustStats = async (userId) => ({ score: 85, reviews: 12 });
 // Event functions
 export const trackEvent = async (userId, event, data) => {};
 
-// Block functions
-export const blockUser = async (userId, blockedId) => {};
-export const isBlocked = async (userId, otherId) => false;
+// ── Bloqueo REAL entre usuarios (blocked_users + toggle_block RPC) ───────────
+// El bloqueo es MUTUO por diseño del backend: mientras esté activo, el INSERT
+// en `messages` lo rechaza el RLS (is_blocked_pair) para AMBOS lados, sin
+// aviso al bloqueado. El frontend solo alterna y, opcionalmente, consulta el
+// estado — pero la fuente de verdad real es siempre el rechazo del insert.
+export const toggleBlockUser = async (targetId) => {
+  const { data, error } = await supabase.rpc("toggle_block", { p_target_id: targetId });
+  if (error) throw error;
+  return data; // boolean con el nuevo estado, si el backend lo devuelve
+};
+// Consulta best-effort si YO y otro usuario estamos bloqueados (en cualquier
+// sentido) — para deshabilitar el input al abrir el chat sin esperar a que
+// falle un envío. Si la tabla no tiene estas columnas o el select falla por
+// cualquier motivo, degrada a "no bloqueado" (el RLS sigue protegiendo igual).
+export const isBlockedPair = async (userId, otherId) => {
+  if (!userId || !otherId) return false;
+  try {
+    const { data, error } = await supabase.from("blocked_users").select("id")
+      .or(`and(blocker_id.eq.${userId},blocked_id.eq.${otherId}),and(blocker_id.eq.${otherId},blocked_id.eq.${userId})`)
+      .limit(1);
+    if (error) return false;
+    return (data || []).length > 0;
+  } catch (e) { return false; }
+};
+// Un error de envío es "por bloqueo" si el RLS lo rechazó (row-level security /
+// permission denied) o si el propio backend lo dice explícitamente.
+export const isBlockSendError = (e) => {
+  const msg = (e?.message || "") + " " + (e?.details || "");
+  return e?.code === "42501" || /row-level security|permission denied|blocked/i.test(msg);
+};
+
+// Alias — mantiene el nombre que ya usaban otras pantallas.
+export const blockUser = toggleBlockUser;
+export const isBlocked = isBlockedPair;
 
 // Helper functions
 // Devuelve el cliente de Supabase (lo usa el chat para el realtime por canal).

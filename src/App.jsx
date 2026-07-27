@@ -764,12 +764,15 @@ function AppShell({ sessionUser }) {
   const openMessages = () => { setSelChat(null); setChatOpen(false); setTab("perfil"); setPScr("messages"); };
   // Abre el chat DIRECTO por conversation_id (notificación kind='message', o el aviso
   // push tocado fuera de la app): resuelve quién es la otra persona y abre su chat.
-  const openConversationById = async (convId) => {
+  const openConversationById = async (convId, focusLatest = false) => {
     if (!convId || !user?.id) return;
     try {
       const c = await getConversationById(convId, user.id);
       if (!c) { flash("Esa conversación ya no está disponible"); return; }
-      setSelChat({ id: c.id, otherId: c.otherId, otherName: c.otherName, otherAvatar: c.otherAvatar });
+      // focusLatest: se abrió desde un aviso de mensaje — no hay id de mensaje
+      // exacto en la notificación (solo el de la conversación), así que ChatScreen
+      // salta y resalta el ÚLTIMO mensaje, que en la práctica es el que avisó.
+      setSelChat({ id: c.id, otherId: c.otherId, otherName: c.otherName, otherAvatar: c.otherAvatar, focusLatest });
       setChatOpen(true);
     } catch (e) { flash("No se pudo abrir la conversación"); }
   };
@@ -785,7 +788,7 @@ function AppShell({ sessionUser }) {
     } catch (e) {}
     if (!convId && !orderId) return;
     try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
-    if (convId) openConversationById(convId);
+    if (convId) openConversationById(convId, true);
     else if (orderId) openOrderById(orderId);
   }, [user?.id]);
   // Aviso PUSH tocado con la app YA abierta: el service worker enfoca esta ventana y
@@ -795,7 +798,7 @@ function AppShell({ sessionUser }) {
     const onMsg = (event) => {
       const msg = event.data || {};
       if (msg.type !== "retador-notification-click" || !msg.data?.ref_id) return;
-      if (msg.data.kind === "message") openConversationById(msg.data.ref_id);
+      if (msg.data.kind === "message") openConversationById(msg.data.ref_id, true);
       else if (msg.data.kind === "order") openOrderById(msg.data.ref_id);
     };
     navigator.serviceWorker.addEventListener("message", onMsg);
@@ -936,8 +939,11 @@ function AppShell({ sessionUser }) {
   // courier_app): tocarlas lleva directo a su cola real en el panel, igual que
   // los mensajes llevan directo al chat.
   const QUEUE_PAGE_BY_KIND = { verification_app: "verif", plan_app: "plans", courier_app: "delivery" };
+  // Los avisos de MENSAJE nunca entran a la campanita: ya suman al contador del
+  // botón "Mensajes" (chatUnread, independiente) — contarlos aquí también los
+  // duplicaría.
   const myNotifs = [
-    ...bkNotifs.map(n => ({ id: "bk" + n.id, text: n.text, orderId: n.kind === "order" ? n.ref_id : null, conversationId: n.kind === "message" ? n.ref_id : null, queuePage: QUEUE_PAGE_BY_KIND[n.kind] || null, read: !!n.read, at: n.created_at ? new Date(n.created_at).getTime() : Date.now(), _bk: n.id })),
+    ...bkNotifs.filter(n => n.kind !== "message").map(n => ({ id: "bk" + n.id, text: n.text, orderId: n.kind === "order" ? n.ref_id : null, queuePage: QUEUE_PAGE_BY_KIND[n.kind] || null, read: !!n.read, at: n.created_at ? new Date(n.created_at).getTime() : Date.now(), _bk: n.id })),
     ...myLocalNotifs,
   ].sort((a, b) => (b.at || 0) - (a.at || 0));
   const unreadNotif = myNotifs.filter(n => !n.read).length;

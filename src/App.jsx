@@ -22,7 +22,7 @@ import {
   toggleFavorite, getMyFavorites, getPlatformStats, getPlatformConfig, setPlatformConfig, setPlatformBlocks, myPermissions, promoteProduct,
   getLedgerEntries, createEscrow, releaseEscrow, getSystemStatus,
   CURRENCIES, CURRENCY_CODES, DEFAULT_CURRENCY, money,
-  createOrder, estimateDeliveryFee,
+  createOrder, estimateDeliveryFee, getAvailableStock, writeProductRow,
   readRatings, aggRating, systemRating, serviceRating, serviceReviews, ratingForName, systemReviews,
   getUserOrders, updateOrderStatus, getUnreadCount, getProductById, getConversationById,
   getPendingCourierApplications, reviewCourierApplication,
@@ -74,6 +74,45 @@ function SectionGate({ enabled, children, onClose, dark = true }) {
       <fieldset disabled style={{ border: "none", padding: 0, margin: 0, minWidth: 0 }} onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}>
         {children}
       </fieldset>
+    </div>
+  );
+}
+
+// GRUPO 1, punto 5 — franja horaria de Subastas: si hay horario configurado y
+// aún no ha empezado (o ya cerró), reemplaza la pantalla normal por un aviso
+// claro con cuenta regresiva en vez de mostrarla vacía o inerte. Independiente
+// del interruptor on/off de SectionGate (ese es "encendida/apagada"; esto es
+// "dentro/fuera de horario").
+function AuctionScheduleGate({ schedule, dark = true, children }) {
+  const enabled = !!schedule?.enabled && schedule?.start && schedule?.end;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [enabled]);
+  if (!enabled) return children;
+  const toMin = (hhmm) => { const [h, m] = String(hhmm).split(":").map(Number); return (h || 0) * 60 + (m || 0); };
+  const d = new Date(now);
+  const curMin = d.getHours() * 60 + d.getMinutes();
+  const startMin = toMin(schedule.start), endMin = toMin(schedule.end);
+  const open = startMin === endMin ? true
+    : startMin < endMin ? (curMin >= startMin && curMin < endMin)
+    : (curMin >= startMin || curMin < endMin); // franja que cruza medianoche
+  if (open) return children;
+  const startToday = new Date(d); startToday.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+  const startAt = startToday.getTime() > now ? startToday.getTime() : startToday.getTime() + 86400000;
+  const totalSec = Math.max(0, Math.floor((startAt - now) / 1000));
+  const hh = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+  const mm = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+  const ss = String(totalSec % 60).padStart(2, "0");
+  const bg = dark ? "#0a0a0a" : "#f8fafc", fg = dark ? "#f0f0f0" : "#0f172a", sub = dark ? "#888" : "#64748b";
+  return (
+    <div style={{ flex: 1, minHeight: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, textAlign: "center", background: bg }}>
+      <div style={{ fontSize: 44, marginBottom: 14 }}>🕐</div>
+      <div style={{ fontSize: 17, fontWeight: 800, color: fg, marginBottom: 6 }}>Las subastas abren a las {schedule.start}</div>
+      <div style={{ fontSize: 13, color: sub, marginBottom: 20 }}>Vuelve más tarde para pujar y crear subastas.</div>
+      <div style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 26, fontWeight: 800, color: "#FFC01E", letterSpacing: 2 }}>{hh}:{mm}:{ss}</div>
     </div>
   );
 }
@@ -202,15 +241,23 @@ function AppShell({ sessionUser }) {
     if (changes.pickupAddress !== undefined) upd.pickup_address = changes.pickupAddress || null;
     if (changes.pickupPhone   !== undefined) upd.pickup_phone   = changes.pickupPhone || null;
     if (changes.location      !== undefined) upd.location       = changes.location || null;
+    if (changes.currency      !== undefined) upd.currency       = changes.currency || "USD";
+    // GRUPO 1 — cantidad disponible, descuentos por cantidad, métodos de pago.
+    if (changes.stock          !== undefined) upd.stock           = Number(changes.stock) || 0;
+    if (changes.bulkDiscounts  !== undefined) upd.bulk_discounts  = Array.isArray(changes.bulkDiscounts) ? changes.bulkDiscounts : [];
+    if (changes.paymentMethods !== undefined) upd.payment_methods = Array.isArray(changes.paymentMethods) ? changes.paymentMethods : [];
     // Al editar, una publicación RETIRADA vuelve a quedar visible (approved).
     upd.moderation_status = "approved";
-    const { data, error } = await supabase.from("products").update(upd).eq("id", id).select().single();
-    if (error) { flash("⚠️ " + (error.message || "No se pudo editar")); return; }
+    let data, missing;
+    try {
+      const res = await writeProductRow((r) => supabase.from("products").update(r).eq("id", id).select().single(), upd);
+      data = res.data; missing = res.missing;
+    } catch (error) { flash("⚠️ " + (error.message || "No se pudo editar")); return; }
     const mapped = mapProduct(data);
     setProducts(prev => { const exists = prev.some(p => p.id === id); return exists ? prev.map(p => p.id === id ? mapped : p) : (mapped.kind === "service" ? prev : [mapped, ...prev]); });
     setServices(prev => prev.map(p => p.id === id ? mapped : p));
     reloadOwn();
-    flash("✏️ Publicación actualizada");
+    flash(missing?.length ? `✏️ Actualizado, pero el backend aún no guarda: ${missing.join(", ")}` : "✏️ Publicación actualizada");
   };
   const [selChat,   setSelChat]   = useState(null);
   const [selSeller, setSelSeller] = useState(null);
@@ -347,6 +394,11 @@ function AppShell({ sessionUser }) {
       // Secciones de la plataforma encendidas/apagadas (apagada = solo lectura).
       // El backend siembra los valores reales; estos son el respaldo local.
       sectionsEnabled: { marketplace: true, search: true, deliveryLocal: true, intlShipping: false, auctions: true, wallet: false },
+      // Categorías propias de SERVICIOS (no las de productos), editables por el admin.
+      serviceCats: ["Diseño", "Reparaciones", "Transporte", "Clases", "Belleza", "Tecnología", "Construcción", "Limpieza", "Fotografía", "Otro"],
+      // Franja horaria de Subastas (opcional): si enabled=true y estamos fuera de
+      // [start,end), se muestra "abren a las HH:MM" en vez de la pantalla normal.
+      auctionSchedule: { enabled: false, start: "09:00", end: "21:00" },
       // Editor Visual: layout por pantalla (anclas + refs) y masters (contenido).
       blocks: DEFAULT_BLOCKS,
       masters: {},
@@ -621,6 +673,7 @@ function AppShell({ sessionUser }) {
     if (suspended) { flash("⛔ Tu cuenta está suspendida"); return; }
     if (!user?.id) { flash("⚠️ Debes iniciar sesión para publicar"); return; }
     const isService = d.kind === "service";
+    if (!isService && !(Number(d.stock) > 0)) { flash("⚠️ Indica la cantidad disponible (mínimo 1)"); return; }
     const row = {
       seller_id: user.id,
       kind: isService ? "service" : "product",   // FASE 3: separa origen (obligatorio)
@@ -633,15 +686,26 @@ function AppShell({ sessionUser }) {
       subcat: d.subcat || null,
       images: Array.isArray(d.images) ? d.images : [],
       badge: isService ? null : (d.badge || null),
-      // Un servicio no tiene formas de entrega/envío ni recogida.
+      // Un servicio no tiene formas de entrega/envío, stock, ni métodos de pago.
       ship_modes: isService ? null : (d.shipModes || { local: true, intl: false, persona: false }),
       ship_price: isService ? 0 : (Number(d.shippingPrice) || 0),
       location: d.location || null,   // zona (donde ofrece el servicio / ubicación del producto)
       pickup_address: isService ? null : (d.pickupAddress || null),
       pickup_phone: isService ? null : (d.pickupPhone || null),
+      // GRUPO 1 — cantidad disponible, descuentos por cantidad y métodos de pago
+      // aceptados (solo productos). stock/payment_methods son escritura resiliente:
+      // si el backend aún no tiene esas columnas, se reintenta sin ellas.
+      ...(isService ? {} : {
+        stock: Number(d.stock) || 0,
+        bulk_discounts: Array.isArray(d.bulkDiscounts) ? d.bulkDiscounts : [],
+        payment_methods: Array.isArray(d.paymentMethods) ? d.paymentMethods : [],
+      }),
     };
-    const { data, error } = await supabase.from("products").insert(row).select().single();
-    if (error) {
+    let data, missing;
+    try {
+      const res = await writeProductRow((r) => supabase.from("products").insert(r).select().single(), row);
+      data = res.data; missing = res.missing;
+    } catch (error) {
       // Índice único anti-duplicados: mismo vendedor + mismo título activo.
       if (error.code === "23505" || /duplicate|unique|ya existe/i.test(error.message || "")) {
         flash("⚠️ Ya tienes una publicación activa con este nombre. Edítala o usa otro título.");
@@ -649,7 +713,7 @@ function AppShell({ sessionUser }) {
       return;
     }
     if (isService) { setServices(prev => [mapProduct(data), ...prev]); flash("✅ Servicio publicado — visible en la sección Servicios"); }
-    else { setProducts(prev => [mapProduct(data), ...prev]); flash("✅ Producto publicado — visible para todos"); }
+    else { setProducts(prev => [mapProduct(data), ...prev]); flash(missing?.length ? `✅ Publicado, pero el backend aún no guarda: ${missing.join(", ")}` : "✅ Producto publicado — visible para todos"); }
     reloadOwn();
     // ⭐ Marcó "Destacar" al publicar (ya confirmó la tarifa en el formulario).
     if (d.promote && adminCfg.promoActive === true) promoteFlow(data.id, { skipConfirm: true });
@@ -1574,7 +1638,9 @@ function AppShell({ sessionUser }) {
 
           {tab === "subastas" && (
             <SectionGate enabled={sections.auctions} dark={isDarkTheme}>
-              <SubastasScreen forceCreate={subOpenCreate} onForceCreateDone={() => setSubOpenCreate(false)} onNav={navTo} onPromote={addPromoRequest} sellerName={profileData?.name || user?.name || "Usuario"} />
+              <AuctionScheduleGate schedule={adminCfg.auctionSchedule} dark={isDarkTheme}>
+                <SubastasScreen forceCreate={subOpenCreate} onForceCreateDone={() => setSubOpenCreate(false)} onNav={navTo} onPromote={addPromoRequest} sellerName={profileData?.name || user?.name || "Usuario"} />
+              </AuctionScheduleGate>
             </SectionGate>
           )}
 

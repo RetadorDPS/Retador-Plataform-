@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, Spin, createOrder, densityCols, estimateDeliveryFee, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -281,7 +281,20 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   const [step, setStep] = useState("resumen");
   const cur = product.currency || DEFAULT_CURRENCY;
   const price = parseFloat(product.price || 0);
-  const total = price * qty;
+  // Stock REAL disponible ahora mismo (descuenta lo comprometido en pedidos vivos):
+  // se consulta al abrir el diálogo para que el selector nunca permita pedir de más.
+  // null mientras carga = sin límite conocido todavía (no bloquea, solo no lo muestra).
+  const [availStock, setAvailStock] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    if (product?.id) getAvailableStock(product.id).then(n => { if (alive) setAvailStock(n); }).catch(() => {});
+    return () => { alive = false; };
+  }, [product?.id]);
+  useEffect(() => { if (availStock != null) setQty(q => Math.max(1, Math.min(q, availStock))); }, [availStock]);
+  // Descuento por cantidad (SOLO vista previa — el total real lo calcula el backend).
+  const discPct = bulkDiscountPctFor(qty, product.bulkDiscounts);
+  const unitPriceWithDisc = discPct > 0 ? price * (1 - discPct / 100) : price;
+  const total = unitPriceWithDisc * qty;
 
   const SHIP_META = {
     local:   { icon: "🛵", label: "Delivery local",      desc: "Un mensajero te lo lleva" },
@@ -317,7 +330,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
       const order = await createOrder({
         productId: product.id, title: product.title, image: product.img || product.image, cat: product.cat,
         sellerId: product.seller_id, sellerName: product.seller_name,
-        buyerId: user?.id, buyerName: user?.name, qty, unitPrice: price, amount: total, currency: cur,
+        buyerId: user?.id, buyerName: user?.name, qty, unitPrice: unitPriceWithDisc, amount: total, currency: cur,
         shipMode, modalidad,
         shipPrice, shipTo,
         delivery,
@@ -333,7 +346,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   const soft = isDark ? "#111" : "#F5F6F7";
   const inp = { width: "100%", background: isDark ? "#0a0a0a" : "#fff", border: `1px solid ${B}`, borderRadius: 10, padding: "11px 13px", fontSize: 12.5, color: T1, outline: "none", fontFamily: "inherit", boxSizing: "border-box" };
   const lbl = { fontSize: 10, fontWeight: 700, color: T2, marginBottom: 5, display: "block" };
-  const primaryAction = () => { if (availModes.length === 0) return; if (needData) setStep("datos"); else handle(); };
+  const primaryAction = () => { if (availModes.length === 0) return; if (availStock != null && availStock <= 0) { flash("⚠️ Este producto está agotado"); return; } if (needData) setStep("datos"); else handle(); };
 
   return (
     <div className="fi" style={{ position: "fixed", inset: 0, zIndex: 500 }} onClick={onClose}>
@@ -350,18 +363,37 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontSize: 13, fontWeight: 700, color: T1 }}>{product.title}</p>
-              <p style={{ fontSize: 16, fontWeight: 900, color: G, marginTop: 4 }}>{money(price, cur)}</p>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }}>
+                <p style={{ fontSize: 16, fontWeight: 900, color: G }}>{money(unitPriceWithDisc, cur)}</p>
+                {discPct > 0 && <span style={{ fontSize: 10.5, color: T3, textDecoration: "line-through" }}>{money(price, cur)}</span>}
+                {discPct > 0 && <span style={{ fontSize: 9.5, fontWeight: 800, color: "#22C55E", background: "#22C55E1a", borderRadius: 100, padding: "2px 7px" }}>-{discPct}%</span>}
+              </div>
             </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: soft, border: `1px solid ${B}`, borderRadius: 13, padding: "12px 14px", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: soft, border: `1px solid ${B}`, borderRadius: 13, padding: "12px 14px", marginBottom: 6 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: T1 }}>Cantidad</span>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <button className="p" onClick={() => setQty(q => Math.max(1, q - 1))} style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${B}`, background: "none", color: T1, fontSize: 18, fontWeight: 700, lineHeight: 1 }}>−</button>
               <span style={{ fontSize: 15, fontWeight: 800, color: T1, minWidth: 18, textAlign: "center" }}>{qty}</span>
-              <button className="p" onClick={() => setQty(q => q + 1)} style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${B}`, background: "none", color: T1, fontSize: 18, fontWeight: 700, lineHeight: 1 }}>+</button>
+              <button className="p" disabled={availStock != null && qty >= availStock}
+                onClick={() => setQty(q => availStock != null ? Math.min(availStock, q + 1) : q + 1)}
+                style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${B}`, background: "none", color: (availStock != null && qty >= availStock) ? T3 : T1, fontSize: 18, fontWeight: 700, lineHeight: 1, cursor: (availStock != null && qty >= availStock) ? "not-allowed" : "pointer" }}>+</button>
             </div>
           </div>
+          {availStock != null && (
+            <p style={{ fontSize: 10, color: availStock <= 5 ? G : T3, fontWeight: availStock <= 5 ? 700 : 500, marginBottom: 12 }}>
+              {availStock <= 0 ? "⚠️ Sin stock disponible ahora mismo" : availStock <= 5 ? `¡Últimas ${availStock} disponibles!` : `${availStock} disponibles`}
+            </p>
+          )}
+          {Array.isArray(product.bulkDiscounts) && product.bulkDiscounts.length > 0 && (
+            <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
+              <p style={{ fontSize: 9.5, fontWeight: 800, color: G, marginBottom: 4, textTransform: "uppercase", letterSpacing: .3 }}>Descuento por cantidad</p>
+              {[...product.bulkDiscounts].sort((a, b) => (a.min || 0) - (b.min || 0)).map((t, i) => (
+                <p key={i} style={{ fontSize: 11, color: T2, lineHeight: 1.6 }}>Llevando {t.min} o más: <b style={{ color: G }}>-{t.pct}%</b></p>
+              ))}
+            </div>
+          )}
 
           {(() => {
             const isIntl = shipMode === "intl", isLocal = shipMode === "local";
@@ -948,6 +980,7 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
           <div style={{ position: "relative" }}>
             <button
               ref={plusBtnRef}
+              aria-label="Crear nuevo"
               onClick={() => {
                 const r = plusBtnRef.current.getBoundingClientRect();
                 onPlusMenu({ top: r.bottom + 8, right: window.innerWidth - r.right });
@@ -1138,8 +1171,19 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
   const [shipPrice, setShipPrice] = useState(product.shippingPrice ?? product.ship_price ?? "");
   const [location, setLocation] = useState(product.location || "");
   const isService = product.kind === "service";   // el kind NO se puede cambiar al editar
+  // GRUPO 1 — cantidad disponible, descuentos por cantidad, moneda y métodos de
+  // pago (solo productos).
+  const [stock, setStock] = useState(product.stock ?? "");
+  const [currency, setCurrency] = useState(product.currency || "USD");
+  const [tiers, setTiers] = useState(() => (Array.isArray(product.bulkDiscounts) ? product.bulkDiscounts : []).map(t => ({ min: String(t.min ?? ""), pct: String(t.pct ?? "") })));
+  const addTier = () => setTiers(t => [...t, { min: "", pct: "" }]);
+  const setTier = (i, k, v) => setTiers(t => t.map((row, j) => j === i ? { ...row, [k]: v } : row));
+  const removeTier = (i) => setTiers(t => t.filter((_, j) => j !== i));
+  const [paymentMethods, setPaymentMethods] = useState(() => Array.isArray(product.paymentMethods) ? product.paymentMethods : []);
+  const togglePayment = (m) => setPaymentMethods(p => p.includes(m) ? p.filter(x => x !== m) : [...p, m]);
   const save = () => {
     if (!title.trim()) { flash && flash("Ponle un título"); return; }
+    if (!isService && !(Number(stock) > 0)) { flash && flash("⚠️ Indica la cantidad disponible (mínimo 1)"); return; }
     if (!isService && !shipModes.local && !shipModes.persona && !shipModes.intl) { flash && flash("⚠️ Marca al menos una forma de entrega"); return; }
     if (!isService && shipModes.intl && !Number(shipPrice)) { flash && flash("⚠️ Define el precio del envío internacional"); return; }
     const parts = catLabel.split("/").map(s => s.trim());
@@ -1149,7 +1193,12 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
       cat: found ? found.id : product.cat, subcat: parts[1] || undefined,
       image: imgs[0] || product.image, images: imgs,
       location,
-      ...(isService ? {} : { shipModes, shippingPrice: Number(shipPrice) || 0, pickupAddress, pickupPhone }),
+      ...(isService ? {} : {
+        shipModes, shippingPrice: Number(shipPrice) || 0, pickupAddress, pickupPhone,
+        currency, stock: Number(stock) || 0,
+        bulkDiscounts: tiers.filter(t => t.min && t.pct).map(t => ({ min: Number(t.min), pct: Number(t.pct) })),
+        paymentMethods,
+      }),
     });
     flash && flash(isService ? "✅ Servicio actualizado" : "✅ Producto actualizado");
   };
@@ -1187,6 +1236,24 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
         <input value={title} onChange={e => setTitle(e.target.value)} style={{ ...inp, marginBottom: 13 }} />
         <label style={lbl}>Precio</label>
         <input type="number" value={price} onChange={e => setPrice(e.target.value)} style={{ ...inp, marginBottom: 13 }} />
+        {!isService && (
+          <>
+            <label style={lbl}>Moneda</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 13 }}>
+              {CURRENCY_CODES.map(code => (
+                <button key={code} type="button" onClick={() => setCurrency(code)}
+                  style={{ flex: 1, padding: "10px 4px", borderRadius: 10, cursor: "pointer",
+                    background: currency === code ? `${G}14` : (isDark ? "#111" : "#F5F6F7"),
+                    border: `1.5px solid ${currency === code ? G : (isDark ? "#222" : B)}`,
+                    color: currency === code ? G : T2, fontSize: 12, fontWeight: 800 }}>
+                  {CURRENCIES[code].symbol} {code}
+                </button>
+              ))}
+            </div>
+            <label style={lbl}>Cantidad disponible *</label>
+            <input type="number" min="1" step="1" value={stock} onChange={e => setStock(e.target.value)} style={{ ...inp, marginBottom: 13 }} />
+          </>
+        )}
         <label style={lbl}>Categoría</label>
         <select value={catLabel} onChange={e => setCatLabel(e.target.value)} style={{ ...inp, marginBottom: 13 }}>
           <option value="">Selecciona…</option>
@@ -1194,6 +1261,44 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
         </select>
         <label style={lbl}>Descripción</label>
         <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4} style={{ ...inp, resize: "none", marginBottom: 18 }} />
+
+        {/* Descuento por cantidad (solo productos, opcional) */}
+        {!isService && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={lbl}>Descuento por cantidad <span style={{ color: T3, fontWeight: 500 }}>(opcional)</span></label>
+            {tiers.map((t, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                <input style={{ ...inp, flex: 1 }} type="number" min="2" placeholder="Desde (unidades)" value={t.min} onChange={e => setTier(i, "min", e.target.value)} />
+                <div style={{ flex: 1, position: "relative" }}>
+                  <input style={{ ...inp, paddingRight: 22 }} type="number" min="1" max="90" placeholder="% descuento" value={t.pct} onChange={e => setTier(i, "pct", e.target.value)} />
+                  <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: T3, fontSize: 11 }}>%</span>
+                </div>
+                <button onClick={() => removeTier(i)} style={{ background: "none", border: "none", color: "#ef4444", fontSize: 18, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>×</button>
+              </div>
+            ))}
+            <button onClick={addTier} style={{ width: "100%", background: "none", border: `1.5px dashed ${B}`, borderRadius: 10, padding: "9px", fontSize: 11, fontWeight: 700, color: G, cursor: "pointer" }}>+ Añadir tramo</button>
+          </div>
+        )}
+
+        {/* Métodos de pago (solo productos, multi-select opcional) */}
+        {!isService && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={lbl}>Métodos de pago que aceptas <span style={{ color: T3, fontWeight: 500 }}>(opcional)</span></label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
+              {["Efectivo USD", "Efectivo EUR", "Efectivo CUP", "Transferencia"].map(m => {
+                const on = paymentMethods.includes(m);
+                return (
+                  <button key={m} onClick={() => togglePayment(m)} style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", background: on ? `${G}12` : "transparent", border: `1.5px solid ${on ? G : B}`, borderRadius: 10, padding: "9px 10px", cursor: "pointer" }}>
+                    <div style={{ width: 16, height: 16, borderRadius: 5, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: on ? G : "transparent", border: `1.5px solid ${on ? G : B}` }}>
+                      {on && <svg width="9" height="7" viewBox="0 0 11 9" fill="none"><path d="M1 4.5l3 3 6-6.5" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    </div>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: on ? G : T1 }}>{m}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Zona (servicio): dónde ofrece el servicio */}
         {isService && (
@@ -1399,6 +1504,18 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
     if (user?.id) trackEvent(user.id, p.id, "view").catch(() => {});
   }, [p.seller_id]);
 
+  // Stock REAL disponible (descuenta lo comprometido en pedidos vivos). Solo
+  // aplica a productos (los servicios no tienen inventario). null = aún cargando.
+  const isService = p.kind === "service";
+  const [availStock, setAvailStock] = useState(null);
+  useEffect(() => {
+    if (isService || !p.id) return;
+    let alive = true;
+    getAvailableStock(p.id).then(n => { if (alive) setAvailStock(n); }).catch(() => {});
+    return () => { alive = false; };
+  }, [p.id, isService]);
+  const soldOut = !isService && availStock != null && availStock <= 0;
+
   return (
     <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", position: "relative" }}>
       {/* Botón volver — sticky, SIEMPRE visible (no depende de position:fixed) */}
@@ -1456,13 +1573,42 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
           </div>
         )}
         <h1 style={{ fontSize: 19 * ts, fontWeight: 800, lineHeight: 1.2, marginBottom: 10, color: T1 }}>{p.title}</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
           <span style={{ fontSize: 21 * ts, fontWeight: 900, color: G }}>{money(p.price, p.currency)}</span>
           {p.orig_price && <>
             <span style={{ fontSize: 13 * ts, color: T2, textDecoration: "line-through" }}>{(CURRENCIES[p.currency || "USD"] || CURRENCIES.USD).symbol}{parseFloat(p.orig_price).toLocaleString("es-ES")}</span>
             <span style={{ background: "#16A34A1a", borderRadius: 100, padding: "3px 9px", fontSize: 10 * ts, fontWeight: 700, color: "#22C55E" }}>-{disc}%</span>
           </>}
         </div>
+
+        {/* Stock real disponible (solo productos) */}
+        {!isService && availStock != null && (
+          <p style={{ fontSize: 11 * ts, fontWeight: soldOut ? 800 : availStock <= 5 ? 700 : 500, color: soldOut ? "#ef4444" : availStock <= 5 ? G : T2, marginBottom: 14 }}>
+            {soldOut ? "🚫 Agotado" : availStock <= 5 ? `¡Últimas ${availStock} disponibles!` : `Quedan ${availStock} disponibles`}
+          </p>
+        )}
+
+        {/* Descuentos por cantidad (solo productos, si el vendedor los definió) */}
+        {!isService && Array.isArray(p.bulkDiscounts) && p.bulkDiscounts.length > 0 && (
+          <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 12, padding: "10px 13px", marginBottom: 14 }}>
+            <p style={{ fontSize: 9, fontWeight: 800, color: G, marginBottom: 5, textTransform: "uppercase", letterSpacing: .3 }}>💰 Descuento por cantidad</p>
+            {[...p.bulkDiscounts].sort((a, b) => (a.min || 0) - (b.min || 0)).map((t, i) => (
+              <p key={i} style={{ fontSize: 11.5 * ts, color: T2, lineHeight: 1.6 }}>Llevando {t.min} o más: <b style={{ color: G }}>-{t.pct}%</b></p>
+            ))}
+          </div>
+        )}
+
+        {/* Métodos de pago que acepta el vendedor (solo productos, si los definió) */}
+        {!isService && Array.isArray(p.paymentMethods) && p.paymentMethods.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <p style={{ fontSize: 9, fontWeight: 700, color: T2, marginBottom: 7, letterSpacing: .3 }}>MÉTODOS DE PAGO ACEPTADOS</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {p.paymentMethods.map(m => (
+                <span key={m} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: S, border: `1px solid ${B}`, borderRadius: 50, padding: "6px 11px", fontSize: 10, fontWeight: 700, color: T1 }}>{m}</span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {p.description && (
           <>
@@ -1513,10 +1659,14 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
 
       {/* Acciones */}
       <div style={{ padding: "0 18px 32px", display: "flex", gap: 8 }}>
-        <button className="btn btn-gold" onClick={() => requireAuth(() => onBuy(p))}
-          style={{ flex: 1, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800 }}>
-          Comprar ahora
-        </button>
+        {soldOut ? (
+          <div style={{ flex: 1, textAlign: "center", padding: "15px", borderRadius: 50, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>🚫 Agotado</div>
+        ) : (
+          <button className="btn btn-gold" onClick={() => requireAuth(() => onBuy(p))}
+            style={{ flex: 1, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800 }}>
+            Comprar ahora
+          </button>
+        )}
         <button className={`btn ${isDark ? "btn-dark" : "btn-light"}`} onClick={() => requireAuth(() => {
           if (p.seller_id) {
             // Abre el chat CON CONTEXTO del producto (franja "estás consultando sobre esto").
@@ -1620,433 +1770,499 @@ export function SellerProfile({ userId, currentUser, onBack, onChat, onProduct }
 // ═════════════════════════════════════════════════════════════════════════════
 // PUBLISH SHEET
 // ═════════════════════════════════════════════════════════════════════════════
-export function PubSheet({ onClose, onPublish, user, flash }) {
-  const { cols } = useR();
-  const { cats, subcats } = useCatalog();
+// GRUPO 1 — Producto vs Servicio son DOS FLUJOS DE VERDAD, no un chip que
+// cambia campos dentro del mismo formulario: PubSheet solo decide cuál de los
+// dos montar. Cada uno tiene sus propios campos, validación y texto de ayuda.
+const PRODUCT_PAYMENT_METHODS = ["Efectivo USD", "Efectivo EUR", "Efectivo CUP", "Transferencia"];
+const DEFAULT_SERVICE_CATS = ["Diseño", "Reparaciones", "Transporte", "Clases", "Belleza", "Tecnología", "Construcción", "Limpieza", "Fotografía", "Otro"];
+
+// Envoltorio visual compartido (hoja inferior + header + botón cerrar) — igual
+// para el selector y los dos formularios, para que se sientan la misma familia.
+function PubSheetShell({ title, subtitle, onClose, children }) {
   const { S, B, CARD, T1, T2, T3, isDark } = useAt();
-  // ⭐ Destacar: controlado por el admin (config global en vivo). Apagado → oculto.
-  const platformCfg = usePlatformCfg();
-  const promoOn = platformCfg.promoActive === true;
-  const promoCost = Number(platformCfg.promoCost) || 0;
-  const [promoAsk, setPromoAsk] = useState(false);
-  const [form, setForm] = useState({
-    kind: "",   // FASE 3: 'product' | 'service' — OBLIGATORIO elegir antes de publicar
-    title: "",
-    price: "",
-    currency: "USD",
-    orig: "",
-    cat: "",
-    subcat: "",
-    desc: "",
-    images: [], // Array de URLs
-    badge: "",
-    shipModes: { local: true, intl: false, persona: false }, // combinables: el vendedor marca las que quiera
-    location: "",
-    pickupAddress: (() => { try { return JSON.parse(localStorage.getItem("retador_pickup") || "{}").address || ""; } catch (e) { return ""; } })(),
-    pickupPhone: (() => { try { return JSON.parse(localStorage.getItem("retador_pickup") || "{}").phone || ""; } catch (e) { return ""; } })(),
-    shippingPrice: "",
-    shippingType: "standard",
-    promote: false
-  });
-  const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const fileRef = useRef(null);
-  
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  
-  const inp = { 
-    width: "100%", 
-    background: isDark?"#0e0e0e":CARD, 
-    border: `1px solid ${B}`, 
-    borderRadius: 10, 
-    padding: "11px 13px", 
-    color: isDark?"#fff":T1, 
-    fontSize: 11, 
-    outline: "none",
-    fontFamily: "'Inter', sans-serif"
-  };
-  
-  const lbl = { 
-    fontSize: 10, 
-    fontWeight: 700, 
-    color: isDark?"#888":T2, 
-    letterSpacing: .3, 
-    display: "block", 
-    marginBottom: 7 
-  };
-
-  const sectionStyle = {
-    background: isDark?"#0a0a0a":CARD,
-    border: `1px solid ${B}`,
-    borderRadius: 14,
-    padding: "13px",
-    marginBottom: 12
-  };
-
-  const sectionTitle = {
-    fontSize: 11,
-    fontWeight: 800,
-    color: isDark?"#fff":T1,
-    marginBottom: 14,
-    display: "flex",
-    alignItems: "center",
-    gap: 8
-  };
-
-  const handleFile = async e => {
-    const files = Array.from(e.target.files);
-    if (form.images.length + files.length > 5) {
-      flash("⚠️ Máximo 5 imágenes");
-      return;
-    }
-    
-    setUploading(true);
-    try {
-      const urls = await Promise.all(
-        files.map(file => uploadImage(file, user?.id))
-      );
-      set("images", [...form.images, ...urls]);
-      flash("✅ Imagen(es) subida(s)");
-    } catch (e) {
-      flash("⚠️ " + (e.message || "Error subiendo"));
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const removeImage = (idx) => {
-    set("images", form.images.filter((_, i) => i !== idx));
-  };
-
-  const kindChosen = form.kind === "product" || form.kind === "service";
-  const isService = form.kind === "service";
-  const anyShip = form.shipModes.local || form.shipModes.intl || form.shipModes.persona;
-  const needsLoc = form.shipModes.local || form.shipModes.persona;
-  // Servicio: título + categoría (precio y zona opcionales). Producto: regla completa.
-  const canPublish = kindChosen && form.title && form.cat && (
-    isService
-      ? true
-      : (form.price && anyShip && (!needsLoc || form.location) && (!form.shipModes.intl || form.shippingPrice))
-  );
-
   return (
     <div className="fi" style={{ position: "fixed", inset: 0, zIndex: 400 }} onClick={onClose}>
       <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.88)", backdropFilter: "blur(18px)" }} />
-      <div className="bs" onClick={e => e.stopPropagation()} style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: isDark ? isDark?"#060606":S : S, borderRadius: "24px 24px 0 0", border: `1px solid ${B}`, borderBottom: "none", maxHeight: "96dvh", overflowY: "auto" }}>
-        
-        {/* Handle bar */}
+      <div className="bs" onClick={e => e.stopPropagation()} style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: isDark ? "#060606" : S, borderRadius: "24px 24px 0 0", border: `1px solid ${B}`, borderBottom: "none", maxHeight: "96dvh", overflowY: "auto" }}>
         <div style={{ width: 36, height: 4, background: B, borderRadius: 2, margin: "14px auto 0" }} />
-        
-        {/* Header */}
         <div style={{ position: "sticky", top: 0, background: isDark ? "rgba(6,6,6,.98)" : `rgba(220,221,232,.98)`, backdropFilter: "blur(18px)", padding: "14px 20px", borderBottom: `1px solid ${B}`, display: "flex", justifyContent: "space-between", alignItems: "center", zIndex: 10 }}>
           <div>
-            <h2 style={{ fontSize: 16, fontWeight: 900, letterSpacing: -.3, color: T1 }}>{isService ? "Publicar Servicio" : "Publicar Producto"}</h2>
-            <p style={{ fontSize: 10, color: T3, marginTop: 2 }}>Publicación libre e instantánea · Visible globalmente 🌍</p>
+            <h2 style={{ fontSize: 16, fontWeight: 900, letterSpacing: -.3, color: T1 }}>{title}</h2>
+            <p style={{ fontSize: 10, color: T3, marginTop: 2 }}>{subtitle}</p>
           </div>
           <button onClick={onClose} className="p" style={{ background: isDark?"#111":CARD, border: `1px solid ${B}`, borderRadius: "50%", width: 27, height: 27, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Ic n="close" c={T2} s={15} />
           </button>
         </div>
-
-        <div style={{ padding: "13px" }}>
-
-          {/* SELECTOR OBLIGATORIO: ¿Producto o Servicio? */}
-          <div style={sectionStyle}>
-            <div style={sectionTitle}><span>❓</span> ¿Qué vas a publicar?</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {[
-                { k: "product", ic: "📦", t: "Producto", d: "Algo físico que vendes y se entrega" },
-                { k: "service", ic: "🛠️", t: "Servicio", d: "Un trabajo o servicio que ofreces" },
-              ].map(o => {
-                const on = form.kind === o.k;
-                return (
-                  <button key={o.k} type="button" className="p" onClick={() => set("kind", o.k)}
-                    style={{ textAlign: "center", padding: "16px 10px", borderRadius: 14, cursor: "pointer",
-                      background: on ? `${G}14` : (isDark ? "#0e0e0e" : CARD),
-                      border: `2px solid ${on ? G : (isDark ? "#1a1a1a" : B)}` }}>
-                    <div style={{ fontSize: 26, marginBottom: 4 }}>{o.ic}</div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: on ? G : (isDark ? "#fff" : T1) }}>{o.t}</div>
-                    <div style={{ fontSize: 9, color: isDark ? "#777" : T2, marginTop: 3, lineHeight: 1.35 }}>{o.d}</div>
-                  </button>
-                );
-              })}
-            </div>
-            {!kindChosen && <p style={{ fontSize: 9.5, color: G, marginTop: 8, textAlign: "center" }}>Elige una opción para continuar.</p>}
-          </div>
-
-          {kindChosen && <>
-          {/* SECCIÓN 1: IMÁGENES */}
-          <div style={sectionStyle}>
-            <div style={sectionTitle}>
-              <span>📷</span> Imágenes del producto
-            </div>
-            <input type="file" accept="image/*" multiple ref={fileRef} onChange={handleFile} style={{ display: "none" }} />
-            
-            {form.images.length > 0 && (
-              <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 3)},1fr)`, gap: 8, marginBottom: 12 }}>
-                {form.images.map((img, i) => (
-                  <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: isDark?"#141414":CARD }}>
-                    <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    <button onClick={() => removeImage(i)} className="p" style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,.85)", border: "none", borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", color: isDark?"#fff":T1, fontSize: 12, fontWeight: 700 }}>×</button>
-                    {i === 0 && <div style={{ position: "absolute", bottom: 4, left: 4, background: G, color: "#000", fontSize: 9, fontWeight: 800, padding: "3px 7px", borderRadius: 4 }}>PRINCIPAL</div>}
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            {form.images.length < 5 && (
-              <button className="p" onClick={() => fileRef.current?.click()} disabled={uploading} style={{ width: "100%", background: isDark?"#0e0e0e":CARD, border: `1.5px dashed #222`, borderRadius: 10, padding: "13px", fontSize: 8, color: form.images.length === 0 ? G : isDark?"#555":T2, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                {uploading ? <><Spin size={15} /> Subiendo...</> : `${form.images.length === 0 ? "📸 Subir primera imagen (obligatorio)" : `+ Agregar más (${form.images.length}/5)`}`}
-              </button>
-            )}
-          </div>
-
-          {/* SECCIÓN 2: INFORMACIÓN BÁSICA */}
-          <div style={sectionStyle}>
-            <div style={sectionTitle}>
-              <span>📝</span> Información básica
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div>
-                <label style={lbl}>Título del producto *</label>
-                <input style={inp} placeholder="Ej: iPhone 14 Pro Max 256GB" value={form.title} onChange={e => set("title", e.target.value)} maxLength={80} />
-                <p style={{ fontSize: 9, color: T3, marginTop: 4, textAlign: "right" }}>{form.title.length}/80</p>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: isService ? "1fr" : `repeat(${cols},1fr)`, gap: 8 }}>
-                <div>
-                  <label style={lbl}>{isService ? <>Precio <span style={{ color: T3 }}>(desde · opcional)</span></> : "Precio *"}</label>
-                  <div style={{ position: "relative" }}>
-                    <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: isDark?"#666":T2, fontSize: 12, fontWeight: 700 }}>$</span>
-                    <input style={{ ...inp, paddingLeft: 26 }} type="number" min="0" step="0.01" placeholder={isService ? "Desde… (opcional)" : "0.00"} value={form.price} onChange={e => set("price", e.target.value)} />
-                  </div>
-                </div>
-                {!isService && <div>
-                  <label style={lbl}>Precio original <span style={{ color: T3 }}>(opcional)</span></label>
-                  <div style={{ position: "relative" }}>
-                    <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: isDark?"#444":T3, fontSize: 12, fontWeight: 700 }}>$</span>
-                    <input style={{ ...inp, paddingLeft: 26 }} type="number" min="0" step="0.01" placeholder="0.00" value={form.orig} onChange={e => set("orig", e.target.value)} />
-                  </div>
-                </div>}
-              </div>
-              <div style={{ marginTop: 12 }}>
-                <label style={lbl}>Moneda *</label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {CURRENCY_CODES.map(code => {
-                    const active = form.currency === code;
-                    return (
-                      <button key={code} type="button" onClick={() => set("currency", code)}
-                        style={{ flex: 1, padding: "11px 4px", borderRadius: 11, cursor: "pointer",
-                          background: active ? `${G}14` : (isDark ? "#111" : "#F5F6F7"),
-                          border: `1.5px solid ${active ? G : (isDark ? "#222" : "#E4E6EB")}`,
-                          color: active ? G : (isDark ? "#aaa" : T2), fontSize: 12, fontWeight: 800 }}>
-                        {CURRENCIES[code].symbol} {code}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* SECCIÓN 3: CATEGORÍA */}
-          <div style={sectionStyle}>
-            <div style={sectionTitle}>
-              <span>🏷️</span> {isService ? "Categoría del servicio" : "Categoría y subcategoría"}
-            </div>
-            <select style={{ ...inp, appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23666' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 13px center", paddingRight: 40, cursor: "pointer", color: form.cat ? T1 : T3 }} value={form.cat ? `${form.cat}|${form.subcat || ""}` : ""} onChange={e => { const [cid, sub] = e.target.value.split("|"); set("cat", cid || ""); set("subcat", sub || ""); }}>
-              <option value="">Selecciona categoría…</option>
-              {cats.map(c => {
-                const sc = subcats[c.id] || [];
-                return sc.length
-                  ? sc.map(s => <option key={c.id + "|" + s} value={`${c.id}|${s}`}>{c.name} / {s}</option>)
-                  : <option key={c.id} value={`${c.id}|`}>{c.name}</option>;
-              })}
-            </select>
-            {!form.cat && <p style={{ fontSize: 9.5, color: T3, marginTop: 5 }}>Obligatorio · ayuda a que aparezca en la búsqueda correcta.</p>}
-          </div>
-
-          {/* ZONA (servicio): dónde ofrece el servicio */}
-          {isService && <div style={sectionStyle}>
-            <div style={sectionTitle}><span>📍</span> Zona donde ofreces el servicio</div>
-            <input style={inp} placeholder="Ej: La Habana, Vedado (o «toda Cuba», «en línea»…)" value={form.location} onChange={e => set("location", e.target.value)} />
-          </div>}
-
-          {!isService && form.shipModes.local && <div style={sectionStyle}>
-            <div style={sectionTitle}>
-              <span>🏪</span> Dirección de recogida
-            </div>
-            <p style={{ fontSize: 9.5, color: T3, marginBottom: 8 }}>Desde dónde el mensajero recoge el producto. Se usa para calcular el domicilio y guiarlo. No se muestra públicamente.</p>
-            <input style={inp} value={form.pickupAddress} onChange={e => set("pickupAddress", e.target.value)} placeholder="Calle, número, entre calles, municipio" />
-            <input style={{ ...inp, marginTop: 8 }} value={form.pickupPhone} onChange={e => set("pickupPhone", e.target.value)} placeholder="Teléfono de contacto para la recogida" />
-          </div>}
-
-          {/* SECCIÓN 4: DESCRIPCIÓN */}
-          <div style={sectionStyle}>
-            <div style={sectionTitle}>
-              <span>📄</span> Descripción
-            </div>
-            <textarea style={{ ...inp, resize: "none", minHeight: 100, lineHeight: 1.7, fontFamily: "'Inter', sans-serif" }} placeholder="Describe tu producto con detalle: estado, características, incluye..." value={form.desc} onChange={e => set("desc", e.target.value)} maxLength={500} />
-            <p style={{ fontSize: 9, color: T3, marginTop: 6, textAlign: "right" }}>{form.desc.length}/500</p>
-          </div>
-
-          {/* SECCIÓN 5: ETIQUETA */}
-          {!isService && <div style={sectionStyle}>
-            <div style={sectionTitle}>
-              <span>⭐</span> Etiqueta destacada
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 4)},1fr)`, gap: 7 }}>
-              {["", "NUEVO", "OFERTA", "RECOMENDADO"].map(b => (
-                <button key={b} onClick={() => set("badge", b)} className="p" style={{ background: form.badge === b ? (BC[b]?.bg || isDark?"#1a1a1a":B) : isDark?"#0e0e0e":CARD, color: form.badge === b ? (BC[b]?.tx || isDark?"#fff":T1) : isDark?"#444":T3, border: `1.5px solid ${form.badge === b ? (BC[b]?.bg || "#333") : isDark?"#1a1a1a":B}`, borderRadius: 8, padding: "10px 4px", fontSize: 9, fontWeight: 700, textAlign: "center" }}>
-                  {b || "Sin etiqueta"}
-                </button>
-              ))}
-            </div>
-          </div>}
-
-          {/* SECCIÓN 6: ENTREGA (solo productos) */}
-          {!isService && <div style={sectionStyle}>
-            <div style={sectionTitle}>
-              <span>🚚</span> Opciones de entrega
-            </div>
-            <p style={{ fontSize: 9.5, color: isDark?"#777":T2, marginTop: -8, marginBottom: 12, lineHeight: 1.5 }}>
-              Marca todas las formas en que puedes entregar este producto. El comprador elegirá entre las que actives.
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {[
-                { key: "local",   icon: "🛵", title: "Delivery local",      desc: "Un mensajero lo entrega en tu zona o provincia." },
-                { key: "intl",    icon: "✈️", title: "Envío internacional", desc: "Cargo a toda Cuba, con seguimiento." },
-                { key: "persona", icon: "🤝", title: "Entrega en persona",  desc: "El comprador te lo recoge donde estás." },
-              ].map(opt => {
-                const on = form.shipModes[opt.key];
-                return (
-                  <button key={opt.key} className="p" onClick={() => set("shipModes", { ...form.shipModes, [opt.key]: !on })}
-                    style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", width: "100%",
-                      background: on ? `${G}12` : isDark?"#0e0e0e":CARD,
-                      border: `1.5px solid ${on ? G : isDark?"#1a1a1a":B}`, borderRadius: 12, padding: "11px 12px" }}>
-                    <span style={{ fontSize: 17, flexShrink: 0 }}>{opt.icon}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 11, fontWeight: 800, color: on ? G : isDark?"#fff":T1 }}>{opt.title}</div>
-                      <div style={{ fontSize: 9, color: isDark?"#777":T2, marginTop: 2, lineHeight: 1.4 }}>{opt.desc}</div>
-                    </div>
-                    <div style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                      background: on ? G : "transparent", border: `1.5px solid ${on ? G : isDark?"#333":B}` }}>
-                      {on && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4.5l3 3 6-6.5" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {(form.shipModes.local || form.shipModes.persona) && (
-              <div style={{ marginTop: 12 }}>
-                <label style={lbl}>📍 Tu ubicación / zona *</label>
-                <input style={inp} placeholder="Ej: La Habana, Vedado" value={form.location} onChange={e => set("location", e.target.value)} />
-              </div>
-            )}
-
-            {form.shipModes.intl && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-                <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols},1fr)`, gap: 8 }}>
-                  <div>
-                    <label style={lbl}>💵 Precio de envío *</label>
-                    <div style={{ position: "relative" }}>
-                      <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: isDark?"#666":T2, fontSize: 12, fontWeight: 700 }}>$</span>
-                      <input style={{ ...inp, paddingLeft: 26 }} type="number" min="0" step="0.01" placeholder="0.00" value={form.shippingPrice} onChange={e => set("shippingPrice", e.target.value)} />
-                    </div>
-                  </div>
-                  <div>
-                    <label style={lbl}>📦 Tipo de envío</label>
-                    <select style={{ ...inp, appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23666' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 13px center", paddingRight: 40, cursor: "pointer" }} value={form.shippingType} onChange={e => set("shippingType", e.target.value)}>
-                      <option value="standard">Standard (7-14 días)</option>
-                      <option value="express">Express (3-5 días)</option>
-                      <option value="priority">Priority (24-48h)</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>}
-
-          {/* SECCIÓN 8: DESTACAR (⭐) — solo si el admin tiene la función ENCENDIDA.
-              Apagada → oculta del todo (ni gris ni nada). La tarifa es la REAL de
-              la config en vivo; se confirma ANTES de marcar. */}
-          {!isService && promoOn && (
-          <div style={sectionStyle}>
-            <div style={sectionTitle}>
-              <span>⭐</span> Destacar
-            </div>
-            <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", padding: "12px 14px", background: form.promote ? `${G}08` : isDark?"#0e0e0e":CARD, borderRadius: 10, border: `1px solid ${form.promote ? `${G}30` : isDark?"#1a1a1a":B}` }}>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: form.promote ? G : isDark?"#fff":T1, marginBottom: 2 }}>⭐ Destacar este producto · {promoCost} CUP</div>
-                <div style={{ fontSize: 9, color: isDark?"#555":T2 }}>Aparece en el filtro Destacado. Se cobra a tu deuda al publicar.</div>
-              </div>
-              <div onClick={() => { if (form.promote) { set("promote", false); } else { setPromoAsk(true); } }} style={{ width: 44, height: 24, borderRadius: 12, background: form.promote ? G : isDark?"#222":B, position: "relative", transition: "background 0.2s", cursor: "pointer" }}>
-                <div style={{ position: "absolute", top: 2, left: form.promote ? 22 : 2, width: 20, height: 20, borderRadius: "50%", background: form.promote ? "#000" : isDark?"#444":T3, transition: "left 0.2s" }} />
-              </div>
-            </label>
-          </div>
-          )}
-
-          {/* Confirmación de la tarifa de destacar (antes de marcar) */}
-          {promoAsk && (
-            <div onClick={() => setPromoAsk(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.65)", zIndex: 6000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-              <div onClick={e => e.stopPropagation()} style={{ background: isDark ? "#141414" : "#fff", borderRadius: 16, padding: "20px 18px", maxWidth: 340, width: "100%" }}>
-                <div style={{ fontSize: 15, fontWeight: 800, color: T1, marginBottom: 8 }}>⭐ Destacar producto</div>
-                <p style={{ fontSize: 12.5, color: T2, lineHeight: 1.55, margin: "0 0 14px" }}>Destacar cuesta <b style={{ color: G }}>{promoCost} CUP</b>. Se suma a tu deuda con RETADOR y se cobra después. El impago puede llevar a sanciones. ¿Confirmas?</p>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button className="p" onClick={() => setPromoAsk(false)} style={{ flex: 1, height: 42, borderRadius: 10, border: `1px solid ${B}`, background: "transparent", color: T1, fontSize: 13, fontWeight: 700 }}>Cancelar</button>
-                  <button className="p" onClick={() => { set("promote", true); setPromoAsk(false); }} style={{ flex: 1, height: 42, borderRadius: 10, border: "none", background: G, color: "#000", fontSize: 13, fontWeight: 800 }}>Confirmar</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* SECCIÓN 9: ACCIÓN */}
-          <button 
-            onClick={async () => {
-              if (!canPublish) {
-                if (!kindChosen) flash("⚠️ Elige Producto o Servicio");
-                else if (!form.title) flash("⚠️ Escribe un título");
-                else if (!form.cat) flash("⚠️ Elige una categoría");
-                else if (isService) { /* servicio: resto opcional */ }
-                else if (!form.price) flash("⚠️ Define el precio");
-                else if (!anyShip) flash("⚠️ Marca al menos una forma de entrega");
-                else if (needsLoc && !form.location) flash("⚠️ Indica tu ubicación / zona");
-                else if (form.shipModes.intl && !form.shippingPrice) flash("⚠️ Define precio de envío internacional");
-                return;
-              }
-              setSaving(true); 
-              try { if (form.pickupAddress || form.pickupPhone) localStorage.setItem("retador_pickup", JSON.stringify({ address: form.pickupAddress, phone: form.pickupPhone })); } catch (e) {}
-              await onPublish({ ...form, img: form.images[0] }); // Pasamos primera imagen como principal
-              setSaving(false); 
-            }} 
-            className="p" 
-            disabled={saving}
-            style={{ 
-              width: "100%", 
-              background: canPublish ? `linear-gradient(135deg, ${G} 0%, #D4A800 100%)` : "#151515", 
-              color: canPublish ? "#000" : "#2e2e2e", 
-              border: "none", 
-              borderRadius: 50, 
-              padding: "13px", 
-              fontSize: 8, 
-              fontWeight: 900, 
-              letterSpacing: .5,
-              marginTop: 8,
-              marginBottom: 20,
-              boxShadow: canPublish ? `0 8px 24px ${G}40` : "none",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8
-            }}>
-            {saving ? <><Spin size={17} color="#000" /> Publicando...</> : (isService ? "🚀 PUBLICAR SERVICIO" : "🚀 PUBLICAR PRODUCTO")}
-          </button>
-          </>}
-        </div>
+        <div style={{ padding: "13px" }}>{children}</div>
       </div>
     </div>
   );
+}
+
+// PASO 1 — elegir el camino. Pura elección, sin campos: cada opción lleva a su
+// propio formulario (PublishProductForm / PublishServiceForm).
+function PubChooser({ onClose, onPick }) {
+  const { CARD, B, T1, T2, isDark } = useAt();
+  const opt = (ic, title, desc, onClick) => (
+    <button type="button" className="p" onClick={onClick}
+      style={{ textAlign: "left", display: "flex", alignItems: "center", gap: 14, padding: "18px 16px", borderRadius: 16, cursor: "pointer", background: isDark ? "#0e0e0e" : CARD, border: `2px solid ${isDark ? "#1a1a1a" : B}`, width: "100%" }}>
+      <div style={{ fontSize: 32, flexShrink: 0 }}>{ic}</div>
+      <div>
+        <div style={{ fontSize: 15, fontWeight: 800, color: isDark ? "#fff" : T1 }}>{title}</div>
+        <div style={{ fontSize: 11, color: isDark ? "#888" : T2, marginTop: 3, lineHeight: 1.4 }}>{desc}</div>
+      </div>
+    </button>
+  );
+  return (
+    <PubSheetShell title="¿Qué vas a publicar?" subtitle="Cada camino tiene sus propios campos" onClose={onClose}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingBottom: 8 }}>
+        {opt("📦", "Vender un producto", "Algo físico: fotos, precio, cantidad disponible, entrega y pago.", () => onPick("product"))}
+        {opt("🛠️", "Ofrecer un servicio", "Un trabajo que haces: zona, categoría de servicio y contacto.", () => onPick("service"))}
+      </div>
+    </PubSheetShell>
+  );
+}
+
+// FLUJO PRODUCTO — completo: stock obligatorio, descuentos por cantidad,
+// moneda, métodos de pago aceptados (multi-select, opcional) y entrega.
+function PublishProductForm({ onClose, onBack, onPublish, user, flash }) {
+  const { cols } = useR();
+  const { cats, subcats } = useCatalog();
+  const { CARD, B, T1, T2, T3, isDark } = useAt();
+  const platformCfg = usePlatformCfg();
+  const promoOn = platformCfg.promoActive === true;
+  const promoCost = Number(platformCfg.promoCost) || 0;
+  const [promoAsk, setPromoAsk] = useState(false);
+  const [form, setForm] = useState({
+    title: "", price: "", currency: "USD", orig: "", cat: "", subcat: "", desc: "",
+    images: [], badge: "", stock: "",
+    bulkDiscounts: [], // [{min,pct}]
+    paymentMethods: [], // selección múltiple, opcional
+    shipModes: { local: true, intl: false, persona: false }, // combinables: el vendedor marca las que quiera
+    location: "",
+    pickupAddress: (() => { try { return JSON.parse(localStorage.getItem("retador_pickup") || "{}").address || ""; } catch (e) { return ""; } })(),
+    pickupPhone: (() => { try { return JSON.parse(localStorage.getItem("retador_pickup") || "{}").phone || ""; } catch (e) { return ""; } })(),
+    shippingPrice: "", shippingType: "standard", promote: false,
+  });
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const inp = { width: "100%", background: isDark?"#0e0e0e":CARD, border: `1px solid ${B}`, borderRadius: 10, padding: "11px 13px", color: isDark?"#fff":T1, fontSize: 11, outline: "none", fontFamily: "'Inter', sans-serif" };
+  const lbl = { fontSize: 10, fontWeight: 700, color: isDark?"#888":T2, letterSpacing: .3, display: "block", marginBottom: 7 };
+  const sectionStyle = { background: isDark?"#0a0a0a":CARD, border: `1px solid ${B}`, borderRadius: 14, padding: "13px", marginBottom: 12 };
+  const sectionTitle = { fontSize: 11, fontWeight: 800, color: isDark?"#fff":T1, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 };
+
+  const handleFile = async e => {
+    const files = Array.from(e.target.files);
+    if (form.images.length + files.length > 5) { flash("⚠️ Máximo 5 imágenes"); return; }
+    setUploading(true);
+    try { const urls = await Promise.all(files.map(file => uploadImage(file, user?.id))); set("images", [...form.images, ...urls]); flash("✅ Imagen(es) subida(s)"); }
+    catch (e) { flash("⚠️ " + (e.message || "Error subiendo")); }
+    finally { setUploading(false); }
+  };
+  const removeImage = (idx) => set("images", form.images.filter((_, i) => i !== idx));
+
+  // Descuentos por cantidad — tramos [{min,pct}], opcional.
+  const addTier = () => set("bulkDiscounts", [...form.bulkDiscounts, { min: "", pct: "" }]);
+  const setTier = (i, k, v) => set("bulkDiscounts", form.bulkDiscounts.map((t, j) => j === i ? { ...t, [k]: v } : t));
+  const removeTier = (i) => set("bulkDiscounts", form.bulkDiscounts.filter((_, j) => j !== i));
+  const togglePayment = (m) => set("paymentMethods", form.paymentMethods.includes(m) ? form.paymentMethods.filter(x => x !== m) : [...form.paymentMethods, m]);
+
+  const anyShip = form.shipModes.local || form.shipModes.intl || form.shipModes.persona;
+  const needsLoc = form.shipModes.local || form.shipModes.persona;
+  const hasStock = Number(form.stock) > 0;
+  const canPublish = form.title && form.cat && form.price && hasStock && anyShip && (!needsLoc || form.location) && (!form.shipModes.intl || form.shippingPrice);
+
+  const submit = async () => {
+    if (!canPublish) {
+      if (!form.title) flash("⚠️ Escribe un título");
+      else if (!form.cat) flash("⚠️ Elige una categoría");
+      else if (!form.price) flash("⚠️ Define el precio");
+      else if (!hasStock) flash("⚠️ Indica la cantidad disponible (mínimo 1)");
+      else if (!anyShip) flash("⚠️ Marca al menos una forma de entrega");
+      else if (needsLoc && !form.location) flash("⚠️ Indica tu ubicación / zona");
+      else if (form.shipModes.intl && !form.shippingPrice) flash("⚠️ Define precio de envío internacional");
+      return;
+    }
+    setSaving(true);
+    try { if (form.pickupAddress || form.pickupPhone) localStorage.setItem("retador_pickup", JSON.stringify({ address: form.pickupAddress, phone: form.pickupPhone })); } catch (e) {}
+    const bulkDiscounts = form.bulkDiscounts.filter(t => t.min && t.pct).map(t => ({ min: Number(t.min), pct: Number(t.pct) }));
+    await onPublish({ ...form, kind: "product", bulkDiscounts, img: form.images[0] });
+    setSaving(false);
+  };
+
+  return (
+    <PubSheetShell title="Publicar Producto" subtitle="Algo físico que vendes y se entrega · Visible globalmente 🌍" onClose={onClose}>
+      <button type="button" onClick={onBack} className="p" style={{ background: "none", border: "none", color: T2, fontSize: 11, fontWeight: 700, cursor: "pointer", padding: 0, marginBottom: 10 }}>‹ Cambiar tipo de publicación</button>
+
+      {/* IMÁGENES */}
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>📷</span> Imágenes del producto</div>
+        <input type="file" accept="image/*" multiple ref={fileRef} onChange={handleFile} style={{ display: "none" }} />
+        {form.images.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 3)},1fr)`, gap: 8, marginBottom: 12 }}>
+            {form.images.map((img, i) => (
+              <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: isDark?"#141414":CARD }}>
+                <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <button onClick={() => removeImage(i)} className="p" style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,.85)", border: "none", borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", color: isDark?"#fff":T1, fontSize: 12, fontWeight: 700 }}>×</button>
+                {i === 0 && <div style={{ position: "absolute", bottom: 4, left: 4, background: G, color: "#000", fontSize: 9, fontWeight: 800, padding: "3px 7px", borderRadius: 4 }}>PRINCIPAL</div>}
+              </div>
+            ))}
+          </div>
+        )}
+        {form.images.length < 5 && (
+          <button className="p" onClick={() => fileRef.current?.click()} disabled={uploading} style={{ width: "100%", background: isDark?"#0e0e0e":CARD, border: `1.5px dashed #222`, borderRadius: 10, padding: "13px", fontSize: 8, color: form.images.length === 0 ? G : isDark?"#555":T2, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            {uploading ? <><Spin size={15} /> Subiendo...</> : `${form.images.length === 0 ? "📸 Subir primera imagen (obligatorio)" : `+ Agregar más (${form.images.length}/5)`}`}
+          </button>
+        )}
+      </div>
+
+      {/* INFORMACIÓN BÁSICA */}
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>📝</span> Información básica</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div>
+            <label style={lbl}>Título del producto *</label>
+            <input style={inp} placeholder="Ej: iPhone 14 Pro Max 256GB" value={form.title} onChange={e => set("title", e.target.value)} maxLength={80} />
+            <p style={{ fontSize: 9, color: T3, marginTop: 4, textAlign: "right" }}>{form.title.length}/80</p>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols},1fr)`, gap: 8 }}>
+            <div>
+              <label style={lbl}>Precio *</label>
+              <div style={{ position: "relative" }}>
+                <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: isDark?"#666":T2, fontSize: 12, fontWeight: 700 }}>$</span>
+                <input style={{ ...inp, paddingLeft: 26 }} type="number" min="0" step="0.01" placeholder="0.00" value={form.price} onChange={e => set("price", e.target.value)} />
+              </div>
+            </div>
+            <div>
+              <label style={lbl}>Precio original <span style={{ color: T3 }}>(opcional)</span></label>
+              <div style={{ position: "relative" }}>
+                <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: isDark?"#444":T3, fontSize: 12, fontWeight: 700 }}>$</span>
+                <input style={{ ...inp, paddingLeft: 26 }} type="number" min="0" step="0.01" placeholder="0.00" value={form.orig} onChange={e => set("orig", e.target.value)} />
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <label style={lbl}>Cantidad disponible *</label>
+            <input style={inp} type="number" min="1" step="1" placeholder="Ej: 10" value={form.stock} onChange={e => set("stock", e.target.value)} />
+            <p style={{ fontSize: 9, color: T3, marginTop: 4 }}>Obligatorio · el comprador nunca podrá pedir más de lo que quede disponible.</p>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <label style={lbl}>Moneda *</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {CURRENCY_CODES.map(code => {
+                const active = form.currency === code;
+                return (
+                  <button key={code} type="button" onClick={() => set("currency", code)}
+                    style={{ flex: 1, padding: "11px 4px", borderRadius: 11, cursor: "pointer",
+                      background: active ? `${G}14` : (isDark ? "#111" : "#F5F6F7"),
+                      border: `1.5px solid ${active ? G : (isDark ? "#222" : "#E4E6EB")}`,
+                      color: active ? G : (isDark ? "#aaa" : T2), fontSize: 12, fontWeight: 800 }}>
+                    {CURRENCIES[code].symbol} {code}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* DESCUENTOS POR CANTIDAD (opcional) */}
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>💰</span> Descuento por cantidad <span style={{ fontWeight: 500, color: T3, fontSize: 9 }}>(opcional)</span></div>
+        <p style={{ fontSize: 9.5, color: isDark?"#777":T2, marginTop: -8, marginBottom: 10, lineHeight: 1.5 }}>Ej: desde 3 unidades, 10% menos. El comprador lo ve claro en el detalle.</p>
+        {form.bulkDiscounts.map((t, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <div style={{ flex: 1 }}>
+              <input style={inp} type="number" min="2" placeholder="Desde (unidades)" value={t.min} onChange={e => setTier(i, "min", e.target.value)} />
+            </div>
+            <div style={{ flex: 1, position: "relative" }}>
+              <input style={{ ...inp, paddingRight: 22 }} type="number" min="1" max="90" placeholder="% descuento" value={t.pct} onChange={e => setTier(i, "pct", e.target.value)} />
+              <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: T3, fontSize: 11 }}>%</span>
+            </div>
+            <button onClick={() => removeTier(i)} className="p" style={{ background: "none", border: "none", color: "#ef4444", fontSize: 18, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>×</button>
+          </div>
+        ))}
+        <button onClick={addTier} className="p" style={{ width: "100%", background: "none", border: `1.5px dashed ${isDark ? "#222" : B}`, borderRadius: 10, padding: "10px", fontSize: 10.5, fontWeight: 700, color: G, cursor: "pointer" }}>+ Añadir tramo</button>
+      </div>
+
+      {/* CATEGORÍA (producto) */}
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>🏷️</span> Categoría y subcategoría</div>
+        <select style={{ ...inp, appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23666' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 13px center", paddingRight: 40, cursor: "pointer", color: form.cat ? T1 : T3 }} value={form.cat ? `${form.cat}|${form.subcat || ""}` : ""} onChange={e => { const [cid, sub] = e.target.value.split("|"); set("cat", cid || ""); set("subcat", sub || ""); }}>
+          <option value="">Selecciona categoría…</option>
+          {cats.map(c => {
+            const sc = subcats[c.id] || [];
+            return sc.length
+              ? sc.map(s => <option key={c.id + "|" + s} value={`${c.id}|${s}`}>{c.name} / {s}</option>)
+              : <option key={c.id} value={`${c.id}|`}>{c.name}</option>;
+          })}
+        </select>
+        {!form.cat && <p style={{ fontSize: 9.5, color: T3, marginTop: 5 }}>Obligatorio · ayuda a que aparezca en la búsqueda correcta.</p>}
+      </div>
+
+      {form.shipModes.local && <div style={sectionStyle}>
+        <div style={sectionTitle}><span>🏪</span> Dirección de recogida</div>
+        <p style={{ fontSize: 9.5, color: T3, marginBottom: 8 }}>Desde dónde el mensajero recoge el producto. Se usa para calcular el domicilio y guiarlo. No se muestra públicamente.</p>
+        <input style={inp} value={form.pickupAddress} onChange={e => set("pickupAddress", e.target.value)} placeholder="Calle, número, entre calles, municipio" />
+        <input style={{ ...inp, marginTop: 8 }} value={form.pickupPhone} onChange={e => set("pickupPhone", e.target.value)} placeholder="Teléfono de contacto para la recogida" />
+      </div>}
+
+      {/* DESCRIPCIÓN */}
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>📄</span> Descripción</div>
+        <textarea style={{ ...inp, resize: "none", minHeight: 100, lineHeight: 1.7, fontFamily: "'Inter', sans-serif" }} placeholder="Describe tu producto con detalle: estado, características, incluye..." value={form.desc} onChange={e => set("desc", e.target.value)} maxLength={500} />
+        <p style={{ fontSize: 9, color: T3, marginTop: 6, textAlign: "right" }}>{form.desc.length}/500</p>
+      </div>
+
+      {/* ETIQUETA */}
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>⭐</span> Etiqueta destacada</div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 4)},1fr)`, gap: 7 }}>
+          {["", "NUEVO", "OFERTA", "RECOMENDADO"].map(b => (
+            <button key={b} onClick={() => set("badge", b)} className="p" style={{ background: form.badge === b ? (BC[b]?.bg || isDark?"#1a1a1a":B) : isDark?"#0e0e0e":CARD, color: form.badge === b ? (BC[b]?.tx || isDark?"#fff":T1) : isDark?"#444":T3, border: `1.5px solid ${form.badge === b ? (BC[b]?.bg || "#333") : isDark?"#1a1a1a":B}`, borderRadius: 8, padding: "10px 4px", fontSize: 9, fontWeight: 700, textAlign: "center" }}>
+              {b || "Sin etiqueta"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ENTREGA */}
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>🚚</span> Opciones de entrega</div>
+        <p style={{ fontSize: 9.5, color: isDark?"#777":T2, marginTop: -8, marginBottom: 12, lineHeight: 1.5 }}>Marca todas las formas en que puedes entregar este producto. El comprador elegirá entre las que actives.</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[
+            { key: "local",   icon: "🛵", title: "Delivery local",      desc: "Un mensajero lo entrega en tu zona o provincia." },
+            { key: "intl",    icon: "✈️", title: "Envío internacional", desc: "Cargo a toda Cuba, con seguimiento." },
+            { key: "persona", icon: "🤝", title: "Entrega en persona",  desc: "El comprador te lo recoge donde estás." },
+          ].map(o => {
+            const on = form.shipModes[o.key];
+            return (
+              <button key={o.key} className="p" onClick={() => set("shipModes", { ...form.shipModes, [o.key]: !on })}
+                style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", width: "100%",
+                  background: on ? `${G}12` : isDark?"#0e0e0e":CARD,
+                  border: `1.5px solid ${on ? G : isDark?"#1a1a1a":B}`, borderRadius: 12, padding: "11px 12px" }}>
+                <span style={{ fontSize: 17, flexShrink: 0 }}>{o.icon}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: on ? G : isDark?"#fff":T1 }}>{o.title}</div>
+                  <div style={{ fontSize: 9, color: isDark?"#777":T2, marginTop: 2, lineHeight: 1.4 }}>{o.desc}</div>
+                </div>
+                <div style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                  background: on ? G : "transparent", border: `1.5px solid ${on ? G : isDark?"#333":B}` }}>
+                  {on && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4.5l3 3 6-6.5" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {(form.shipModes.local || form.shipModes.persona) && (
+          <div style={{ marginTop: 12 }}>
+            <label style={lbl}>📍 Tu ubicación / zona *</label>
+            <input style={inp} placeholder="Ej: La Habana, Vedado" value={form.location} onChange={e => set("location", e.target.value)} />
+          </div>
+        )}
+        {form.shipModes.intl && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols},1fr)`, gap: 8 }}>
+              <div>
+                <label style={lbl}>💵 Precio de envío *</label>
+                <div style={{ position: "relative" }}>
+                  <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: isDark?"#666":T2, fontSize: 12, fontWeight: 700 }}>$</span>
+                  <input style={{ ...inp, paddingLeft: 26 }} type="number" min="0" step="0.01" placeholder="0.00" value={form.shippingPrice} onChange={e => set("shippingPrice", e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <label style={lbl}>📦 Tipo de envío</label>
+                <select style={{ ...inp, appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23666' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 13px center", paddingRight: 40, cursor: "pointer" }} value={form.shippingType} onChange={e => set("shippingType", e.target.value)}>
+                  <option value="standard">Standard (7-14 días)</option>
+                  <option value="express">Express (3-5 días)</option>
+                  <option value="priority">Priority (24-48h)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* MÉTODOS DE PAGO — selección múltiple, opcional: el vendedor marca los que
+          tenga (uno, varios o todos), nunca uno solo forzado. */}
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>💳</span> Métodos de pago que aceptas <span style={{ fontWeight: 500, color: T3, fontSize: 9 }}>(opcional)</span></div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 2)},1fr)`, gap: 7 }}>
+          {PRODUCT_PAYMENT_METHODS.map(m => {
+            const on = form.paymentMethods.includes(m);
+            return (
+              <button key={m} className="p" onClick={() => togglePayment(m)}
+                style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", background: on ? `${G}12` : isDark?"#0e0e0e":CARD, border: `1.5px solid ${on ? G : isDark?"#1a1a1a":B}`, borderRadius: 10, padding: "9px 10px" }}>
+                <div style={{ width: 16, height: 16, borderRadius: 5, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: on ? G : "transparent", border: `1.5px solid ${on ? G : isDark?"#333":B}` }}>
+                  {on && <svg width="9" height="7" viewBox="0 0 11 9" fill="none"><path d="M1 4.5l3 3 6-6.5" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </div>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: on ? G : isDark?"#fff":T1 }}>{m}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* DESTACAR (⭐) — solo si el admin tiene la función ENCENDIDA. */}
+      {promoOn && (
+        <div style={sectionStyle}>
+          <div style={sectionTitle}><span>⭐</span> Destacar</div>
+          <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", padding: "12px 14px", background: form.promote ? `${G}08` : isDark?"#0e0e0e":CARD, borderRadius: 10, border: `1px solid ${form.promote ? `${G}30` : isDark?"#1a1a1a":B}` }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: form.promote ? G : isDark?"#fff":T1, marginBottom: 2 }}>⭐ Destacar este producto · {promoCost} CUP</div>
+              <div style={{ fontSize: 9, color: isDark?"#555":T2 }}>Aparece en el filtro Destacado. Se cobra a tu deuda al publicar.</div>
+            </div>
+            <div onClick={() => { if (form.promote) set("promote", false); else setPromoAsk(true); }} style={{ width: 44, height: 24, borderRadius: 12, background: form.promote ? G : isDark?"#222":B, position: "relative", transition: "background 0.2s", cursor: "pointer" }}>
+              <div style={{ position: "absolute", top: 2, left: form.promote ? 22 : 2, width: 20, height: 20, borderRadius: "50%", background: form.promote ? "#000" : isDark?"#444":T3, transition: "left 0.2s" }} />
+            </div>
+          </label>
+        </div>
+      )}
+
+      {promoAsk && (
+        <div onClick={() => setPromoAsk(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.65)", zIndex: 6000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: isDark ? "#141414" : "#fff", borderRadius: 16, padding: "20px 18px", maxWidth: 340, width: "100%" }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: T1, marginBottom: 8 }}>⭐ Destacar producto</div>
+            <p style={{ fontSize: 12.5, color: T2, lineHeight: 1.55, margin: "0 0 14px" }}>Destacar cuesta <b style={{ color: G }}>{promoCost} CUP</b>. Se suma a tu deuda con RETADOR y se cobra después. El impago puede llevar a sanciones. ¿Confirmas?</p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="p" onClick={() => setPromoAsk(false)} style={{ flex: 1, height: 42, borderRadius: 10, border: `1px solid ${B}`, background: "transparent", color: T1, fontSize: 13, fontWeight: 700 }}>Cancelar</button>
+              <button className="p" onClick={() => { set("promote", true); setPromoAsk(false); }} style={{ flex: 1, height: 42, borderRadius: 10, border: "none", background: G, color: "#000", fontSize: 13, fontWeight: 800 }}>Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <button onClick={submit} className="p" disabled={saving}
+        style={{ width: "100%", background: canPublish ? `linear-gradient(135deg, ${G} 0%, #D4A800 100%)` : "#151515", color: canPublish ? "#000" : "#2e2e2e", border: "none", borderRadius: 50, padding: "13px", fontSize: 8, fontWeight: 900, letterSpacing: .5, marginTop: 8, marginBottom: 20, boxShadow: canPublish ? `0 8px 24px ${G}40` : "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        {saving ? <><Spin size={17} color="#000" /> Publicando...</> : "🚀 PUBLICAR PRODUCTO"}
+      </button>
+    </PubSheetShell>
+  );
+}
+
+// FLUJO SERVICIO — sin stock, sin envío, sin métodos de pago. Categoría propia
+// (config.serviceCats, editable por el admin — no las categorías de productos).
+function PublishServiceForm({ onClose, onBack, onPublish, user, flash }) {
+  const { CARD, B, T1, T2, T3, isDark } = useAt();
+  const platformCfg = usePlatformCfg();
+  const serviceCats = (Array.isArray(platformCfg.serviceCats) && platformCfg.serviceCats.length) ? platformCfg.serviceCats : DEFAULT_SERVICE_CATS;
+  const [form, setForm] = useState({ title: "", price: "", desc: "", images: [], location: "", cat: "", availability: "" });
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const inp = { width: "100%", background: isDark?"#0e0e0e":CARD, border: `1px solid ${B}`, borderRadius: 10, padding: "11px 13px", color: isDark?"#fff":T1, fontSize: 11, outline: "none", fontFamily: "'Inter', sans-serif" };
+  const lbl = { fontSize: 10, fontWeight: 700, color: isDark?"#888":T2, letterSpacing: .3, display: "block", marginBottom: 7 };
+  const sectionStyle = { background: isDark?"#0a0a0a":CARD, border: `1px solid ${B}`, borderRadius: 14, padding: "13px", marginBottom: 12 };
+  const sectionTitle = { fontSize: 11, fontWeight: 800, color: isDark?"#fff":T1, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 };
+
+  const handleFile = async e => {
+    const files = Array.from(e.target.files);
+    if (form.images.length + files.length > 5) { flash("⚠️ Máximo 5 imágenes"); return; }
+    setUploading(true);
+    try { const urls = await Promise.all(files.map(file => uploadImage(file, user?.id))); set("images", [...form.images, ...urls]); flash("✅ Imagen(es) subida(s)"); }
+    catch (e) { flash("⚠️ " + (e.message || "Error subiendo")); }
+    finally { setUploading(false); }
+  };
+  const removeImage = (idx) => set("images", form.images.filter((_, i) => i !== idx));
+
+  const canPublish = form.title && form.cat;
+  const submit = async () => {
+    if (!canPublish) {
+      if (!form.title) flash("⚠️ Escribe un título");
+      else if (!form.cat) flash("⚠️ Elige una categoría de servicio");
+      return;
+    }
+    setSaving(true);
+    // Sin columna dedicada de contacto/disponibilidad: se agrega a la descripción,
+    // visible igual para quien vea el servicio.
+    const desc = form.availability.trim() ? `${form.desc.trim()}${form.desc.trim() ? "\n\n" : ""}📞 Contacto y disponibilidad: ${form.availability.trim()}` : form.desc;
+    await onPublish({ kind: "service", title: form.title, price: form.price, desc, images: form.images, location: form.location, cat: form.cat, img: form.images[0] });
+    setSaving(false);
+  };
+
+  return (
+    <PubSheetShell title="Publicar Servicio" subtitle="Un trabajo o servicio que ofreces · Visible globalmente 🌍" onClose={onClose}>
+      <button type="button" onClick={onBack} className="p" style={{ background: "none", border: "none", color: T2, fontSize: 11, fontWeight: 700, cursor: "pointer", padding: 0, marginBottom: 10 }}>‹ Cambiar tipo de publicación</button>
+
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>📷</span> Imágenes del servicio</div>
+        <input type="file" accept="image/*" multiple ref={fileRef} onChange={handleFile} style={{ display: "none" }} />
+        {form.images.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 12 }}>
+            {form.images.map((img, i) => (
+              <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: isDark?"#141414":CARD }}>
+                <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <button onClick={() => removeImage(i)} className="p" style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,.85)", border: "none", borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", color: isDark?"#fff":T1, fontSize: 12, fontWeight: 700 }}>×</button>
+                {i === 0 && <div style={{ position: "absolute", bottom: 4, left: 4, background: G, color: "#000", fontSize: 9, fontWeight: 800, padding: "3px 7px", borderRadius: 4 }}>PRINCIPAL</div>}
+              </div>
+            ))}
+          </div>
+        )}
+        {form.images.length < 5 && (
+          <button className="p" onClick={() => fileRef.current?.click()} disabled={uploading} style={{ width: "100%", background: isDark?"#0e0e0e":CARD, border: `1.5px dashed #222`, borderRadius: 10, padding: "13px", fontSize: 8, color: form.images.length === 0 ? G : isDark?"#555":T2, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            {uploading ? <><Spin size={15} /> Subiendo...</> : `${form.images.length === 0 ? "📸 Subir primera imagen (opcional)" : `+ Agregar más (${form.images.length}/5)`}`}
+          </button>
+        )}
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>📝</span> Información básica</div>
+        <label style={lbl}>Título del servicio *</label>
+        <input style={{ ...inp, marginBottom: 12 }} placeholder="Ej: Clases de guitarra a domicilio" value={form.title} onChange={e => set("title", e.target.value)} maxLength={80} />
+        <label style={lbl}>Precio <span style={{ color: T3 }}>(desde · opcional)</span></label>
+        <div style={{ position: "relative" }}>
+          <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: isDark?"#666":T2, fontSize: 12, fontWeight: 700 }}>$</span>
+          <input style={{ ...inp, paddingLeft: 26 }} type="number" min="0" step="0.01" placeholder="Desde… (opcional)" value={form.price} onChange={e => set("price", e.target.value)} />
+        </div>
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>🏷️</span> Categoría del servicio</div>
+        <select style={{ ...inp, appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23666' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 13px center", paddingRight: 40, cursor: "pointer", color: form.cat ? T1 : T3 }} value={form.cat} onChange={e => set("cat", e.target.value)}>
+          <option value="">Selecciona categoría…</option>
+          {serviceCats.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        {!form.cat && <p style={{ fontSize: 9.5, color: T3, marginTop: 5 }}>Obligatorio · categorías propias de servicios (las define el equipo de RETADOR).</p>}
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>📍</span> Zona donde ofreces el servicio</div>
+        <input style={inp} placeholder="Ej: La Habana, Vedado (o «toda Cuba», «en línea»…)" value={form.location} onChange={e => set("location", e.target.value)} />
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>📄</span> Descripción</div>
+        <textarea style={{ ...inp, resize: "none", minHeight: 90, lineHeight: 1.7, fontFamily: "'Inter', sans-serif" }} placeholder="Describe tu servicio: qué incluye, experiencia, materiales..." value={form.desc} onChange={e => set("desc", e.target.value)} maxLength={500} />
+        <p style={{ fontSize: 9, color: T3, marginTop: 6, textAlign: "right" }}>{form.desc.length}/500</p>
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>☎️</span> Contacto y disponibilidad <span style={{ fontWeight: 500, color: T3, fontSize: 9 }}>(opcional)</span></div>
+        <textarea style={{ ...inp, resize: "none", minHeight: 60, lineHeight: 1.6, fontFamily: "'Inter', sans-serif" }} placeholder="Ej: WhatsApp +53 5xxx xxxx, disponible L-V de 9am a 6pm" value={form.availability} onChange={e => set("availability", e.target.value)} maxLength={200} />
+      </div>
+
+      <button onClick={submit} className="p" disabled={saving}
+        style={{ width: "100%", background: canPublish ? `linear-gradient(135deg, ${G} 0%, #D4A800 100%)` : "#151515", color: canPublish ? "#000" : "#2e2e2e", border: "none", borderRadius: 50, padding: "13px", fontSize: 8, fontWeight: 900, letterSpacing: .5, marginTop: 8, marginBottom: 20, boxShadow: canPublish ? `0 8px 24px ${G}40` : "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        {saving ? <><Spin size={17} color="#000" /> Publicando...</> : "🚀 PUBLICAR SERVICIO"}
+      </button>
+    </PubSheetShell>
+  );
+}
+
+// Punto de entrada externo (sin cambios en la firma): decide cuál de los dos
+// flujos separados montar. App.jsx sigue montando <PubSheet .../> igual que antes.
+export function PubSheet({ onClose, onPublish, user, flash }) {
+  const [kind, setKind] = useState("");
+  if (kind === "product") return <PublishProductForm onClose={onClose} onBack={() => setKind("")} onPublish={onPublish} user={user} flash={flash} />;
+  if (kind === "service") return <PublishServiceForm onClose={onClose} onBack={() => setKind("")} onPublish={onPublish} user={user} flash={flash} />;
+  return <PubChooser onClose={onClose} onPick={setKind} />;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

@@ -2129,6 +2129,7 @@ function KycPhoto({ path, label, onZoom }){
 /* ── Economía ──────────────────────────────────────────────────────────────── */
 function Economia({toast, data={}, ro}){
   const cfg = data.cfg || {};
+  const [svcCatDraft, setSvcCatDraft] = useState(''); // borrador del input "Categorías de servicios"
   const fmt = n => (n==null || n==='' || Number.isNaN(Number(n))) ? '—' : '$'+Math.round(Number(n)).toLocaleString('es-ES');
   // ── FUENTE ÚNICA: TODOS los importes vienen SOLO del backend (admin_dashboard_stats).
   // No se calcula NADA desde arrays locales (data.orders venía de localStorage del
@@ -2301,6 +2302,78 @@ function Economia({toast, data={}, ro}){
               </div>
             </div>
           ))}
+
+          {/* GRUPO 1, punto 5 — Horario de Subastas: fuera de la franja, se muestra
+              "abren a las HH:MM" en vez de la pantalla normal (independiente del
+              interruptor de arriba, que es solo encendida/apagada). */}
+          {(() => {
+            const as = cfg.auctionSchedule || { enabled: false, start: '09:00', end: '21:00' };
+            const setAs = (patch) => { if (ro) { toast('Solo lectura — sin permiso para modificar'); return; } data.onCfg && data.onCfg({ auctionSchedule: { ...as, ...patch } }); };
+            const timeInp = {background:'var(--bg2)',border:'1px solid var(--bd2)',borderRadius:8,padding:'8px 10px',color:'var(--tx)',fontSize:13,outline:'none',width:'100%',boxSizing:'border-box'};
+            return (
+              <div style={{borderTop:'1px solid var(--bd)',marginTop:4,paddingTop:12}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:700,color:'var(--tx)'}}>🕐 Horario de Subastas</div>
+                    <div style={{fontSize:10.5,color:'var(--tx3)',marginTop:2}}>Fuera de este horario, se muestra "abren a las HH:MM" en vez de la pantalla normal.</div>
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:9,flexShrink:0}}>
+                    <span style={{fontSize:11,fontWeight:800,color:as.enabled?'var(--gn)':'var(--tx3)'}}>{as.enabled?'Activado':'Sin restricción'}</span>
+                    {!ro && <button onClick={()=>setAs({enabled:!as.enabled})} style={{fontWeight:800,fontSize:12,padding:'8px 14px',borderRadius:10,cursor:'pointer',border:`1px solid ${as.enabled?'var(--rd)':'var(--gn)'}`,color:as.enabled?'var(--rd)':'var(--gn)',background:'transparent'}}>{as.enabled?'Quitar horario':'Configurar horario'}</button>}
+                  </div>
+                </div>
+                {as.enabled && (
+                  <div style={{display:'flex',gap:10,marginTop:10}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:10,color:'var(--tx3)',marginBottom:4}}>Abre</div>
+                      <input type="time" value={as.start} disabled={ro} onChange={e=>setAs({start:e.target.value})} style={timeInp}/>
+                    </div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:10,color:'var(--tx3)',marginBottom:4}}>Cierra</div>
+                      <input type="time" value={as.end} disabled={ro} onChange={e=>setAs({end:e.target.value})} style={timeInp}/>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      );
+    })()}
+
+    {/* GRUPO 1 — Categorías propias de SERVICIOS (config.serviceCats), distintas de
+        las categorías de productos. Lista simple: añadir/quitar, guarda en vivo. */}
+    {(() => {
+      const list = Array.isArray(cfg.serviceCats) ? cfg.serviceCats : [];
+      const addCat = () => {
+        if (ro) { toast('Solo lectura — sin permiso para modificar'); return; }
+        const v = svcCatDraft.trim(); if (!v || list.includes(v)) return;
+        data.onCfg && data.onCfg({ serviceCats: [...list, v] });
+        setSvcCatDraft('');
+      };
+      const removeCat = (c) => {
+        if (ro) { toast('Solo lectura — sin permiso para modificar'); return; }
+        data.onCfg && data.onCfg({ serviceCats: list.filter(x => x !== c) });
+      };
+      return (
+        <div className="card cp" style={{marginBottom:16}}>
+          <div style={{fontSize:15,fontWeight:800,color:'var(--tx)',marginBottom:3}}>🛠️ Categorías de servicios</div>
+          <div style={{fontSize:11,color:'var(--tx3)',marginBottom:10}}>Las que ve el vendedor al publicar un SERVICIO (distintas de las categorías de productos).</div>
+          <div style={{display:'flex',flexWrap:'wrap',gap:7,marginBottom:12}}>
+            {list.map(c => (
+              <span key={c} style={{display:'inline-flex',alignItems:'center',gap:6,background:'var(--bg3)',border:'1px solid var(--bd)',borderRadius:50,padding:'6px 10px',fontSize:11.5,color:'var(--tx2)'}}>
+                {c}
+                {!ro && <span onClick={()=>removeCat(c)} style={{cursor:'pointer',color:'var(--rd)',fontWeight:800}}>×</span>}
+              </span>
+            ))}
+            {list.length===0 && <span style={{fontSize:11,color:'var(--tx3)'}}>Ninguna todavía.</span>}
+          </div>
+          {!ro && (
+            <div style={{display:'flex',gap:8}}>
+              <input value={svcCatDraft} onChange={e=>setSvcCatDraft(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')addCat();}} placeholder="Nueva categoría de servicio" style={{flex:1,background:'var(--bg2)',border:'1px solid var(--bd2)',borderRadius:8,padding:'9px 11px',color:'var(--tx)',fontSize:12.5,outline:'none',minWidth:0}}/>
+              <button className="btn btp sm" onClick={addCat}>Agregar</button>
+            </div>
+          )}
         </div>
       );
     })()}

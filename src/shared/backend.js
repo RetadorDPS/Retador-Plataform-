@@ -55,6 +55,11 @@ export const mapProduct = (p) => ({
   // Dirección/teléfono de recogida que escribió el vendedor al publicar.
   pickupAddress: p.pickup_address || "",
   pickupPhone: p.pickup_phone || "",
+  // Cantidad total listada (fuente del "available_stock" real del backend) y
+  // tramos de descuento por cantidad, en camelCase para el resto de la app.
+  stock: p.stock ?? p.qty_available ?? null,
+  bulkDiscounts: Array.isArray(p.bulk_discounts) ? p.bulk_discounts : [],
+  paymentMethods: Array.isArray(p.payment_methods) ? p.payment_methods : [],
 });
 // Un solo producto por id (para leer la dirección de recogida en el detalle del
 // mensajero cuando el producto no está cargado en memoria).
@@ -382,28 +387,67 @@ export function money(amount, cur = DEFAULT_CURRENCY) {
 }
 
 // Order functions
+// SEGURIDAD: el pedido YA NO se crea con un insert directo desde el cliente (el
+// cliente no puede fijar su propio precio ni saltarse el stock). TODO pedido pasa
+// por create_order(...) en el backend, que valida el stock real, toma el precio
+// del servidor y aplica el descuento por cantidad. Si no alcanza el stock, el
+// backend devuelve un error con el mensaje exacto (ej. "Solo quedan 2 unidades
+// disponibles") — se propaga tal cual para mostrarlo al comprador.
 export const createOrder = async (data) => {
-  const row = {
-    buyer_id:   data.buyerId,
-    seller_id:  data.sellerId,
-    product_id: data.productId || null,
-    title:      data.title || null,
-    image:      data.image || null,
-    cat:        data.cat || null,
-    qty:        data.qty || 1,
-    unit_price: Number(data.unitPrice) || 0,
-    amount:     Number(data.amount) || 0,
-    currency:   data.currency || "USD",
-    ship_mode:  data.shipMode,
-    modalidad:  data.modalidad || null,
-    ship_price: Number(data.shipPrice) || 0,
-    ship_to:    data.shipTo || null,
-    delivery:   data.delivery || null,
-    payment_method: "coordinado",
-  };
-  const { data: created, error } = await supabase.from("orders").insert(row).select().single();
+  const { data: orderId, error } = await supabase.rpc("create_order", {
+    p_product_id: data.productId,
+    p_qty: data.qty || 1,
+    p_ship_mode: data.shipMode,
+    p_modalidad: data.modalidad || null,
+    p_ship_price: Number(data.shipPrice) || 0,
+    p_ship_to: data.shipTo || null,
+    p_delivery: data.delivery || null,
+    p_payment_method: data.paymentMethod || "coordinado",
+  });
   if (error) throw error;
-  return { ...data, id: created.id, status: created.status || "creada", createdAt: Date.now() };
+  // La RPC devuelve el id del pedido (string) o una fila con .id — cubrimos ambos.
+  const id = (orderId && typeof orderId === "object") ? (orderId.id ?? orderId[0]?.id) : orderId;
+  return { ...data, id, status: "creada", createdAt: Date.now() };
+};
+// Stock REAL disponible de un producto (descuenta lo comprometido en pedidos
+// vivos). Se consulta al ver el detalle y al abrir el diálogo de compra, para que
+// el selector de cantidad nunca permita pedir más de lo que de verdad hay.
+export const getAvailableStock = async (productId) => {
+  if (!productId) return null;
+  const { data, error } = await supabase.rpc("available_stock", { product_id: productId });
+  if (error) { console.error("available_stock:", error.message); return null; }
+  return (data == null) ? null : Number(data);
+};
+// Descuento por cantidad — SOLO para la vista previa (el total real, en la orden
+// creada, lo calcula el backend con bulk_discount_pct). tiers: [{min,pct}, ...].
+// Devuelve el % del tramo más alto que la cantidad alcanza (0 si ninguno aplica).
+export const bulkDiscountPctFor = (qty, tiers) => {
+  if (!Array.isArray(tiers) || !tiers.length) return 0;
+  const q = Number(qty) || 0;
+  return tiers
+    .filter(t => q >= (Number(t.min) || 0))
+    .reduce((best, t) => Math.max(best, Number(t.pct) || 0), 0);
+};
+
+// ── Escritura resiliente de productos ────────────────────────────────────────
+// Algunas columnas nuevas (cantidad/stock, métodos de pago) dependen de que el
+// backend ya las haya sumado a la tabla. Si el backend reporta que una columna
+// todavía no existe, reintenta SIN ella (en vez de romper toda la publicación) y
+// avisa cuáles se quedaron sin guardar, para no fingir un éxito silencioso.
+export const writeProductRow = async (run, row) => {
+  let current = { ...row };
+  const missing = [];
+  for (let i = 0; i < 6; i++) {
+    const { data, error } = await run(current);
+    if (!error) return { data, missing };
+    const m = /column "?([a-zA-Z0-9_]+)"? .*does not exist/i.exec(error.message || "");
+    if (!m || !(m[1] in current)) throw error; // error real (no de columna faltante): propágalo
+    missing.push(m[1]);
+    const next = { ...current };
+    delete next[m[1]];
+    current = next;
+  }
+  throw new Error("No se pudo publicar: demasiadas columnas faltantes en el backend");
 };
 // Cálculo del domicilio local. km = null mientras no haya mapa/backend → usa tarifa base (estimado plano).
 // Cuando entre el backend, se pasa la distancia real y NO hay que tocar la interfaz.

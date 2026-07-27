@@ -34,6 +34,19 @@ export const getUserById = async (id) => {
     return p;
   } catch (e) { return null; }
 };
+// Estado de verificación REAL en lote — para tarjetas de producto (evita 1
+// consulta por vendedor). ids repetidos/nulos se ignoran; devuelve {id: bool}.
+export const getVerifiedMap = async (ids) => {
+  const uniq = [...new Set((ids || []).filter(Boolean))];
+  if (!uniq.length) return {};
+  try {
+    const { data, error } = await supabase.from("profiles").select("id, is_verified").in("id", uniq);
+    if (error || !data) return {};
+    const map = {};
+    data.forEach(r => { map[r.id] = !!r.is_verified; });
+    return map;
+  } catch (e) { return {}; }
+};
 export const getUserName = async (id) => {
   const p = await getUserById(id);
   return p?.name || "Vendedor";
@@ -59,7 +72,9 @@ export const mapProduct = (p) => ({
   // tramos de descuento por cantidad, en camelCase para el resto de la app.
   stock: p.stock ?? p.qty_available ?? null,
   bulkDiscounts: Array.isArray(p.bulk_discounts) ? p.bulk_discounts : [],
-  paymentMethods: Array.isArray(p.payment_methods) ? p.payment_methods : [],
+  // Monedas en las que el vendedor acepta cobrar (USD/EUR/CUP) — NO es método
+  // de pago (eso lo acuerdan comprador y vendedor entre ellos).
+  acceptedCurrencies: Array.isArray(p.accepted_currencies) ? p.accepted_currencies : [],
 });
 // Un solo producto por id (para leer la dirección de recogida en el detalle del
 // mensajero cuando el producto no está cargado en memoria).
@@ -430,7 +445,7 @@ export const bulkDiscountPctFor = (qty, tiers) => {
 };
 
 // ── Escritura resiliente de productos ────────────────────────────────────────
-// Algunas columnas nuevas (cantidad/stock, métodos de pago) dependen de que el
+// Algunas columnas nuevas (cantidad/stock, monedas aceptadas) dependen de que el
 // backend ya las haya sumado a la tabla. Si el backend reporta que una columna
 // todavía no existe, reintenta SIN ella (en vez de romper toda la publicación) y
 // avisa cuáles se quedaron sin guardar, para no fingir un éxito silencioso.
@@ -826,13 +841,32 @@ export const adminReviewPlan = async (requestId, approve) => {
 // con la función oficial review_courier_application (al aprobar pone role=courier).
 export const getMyCourierApplication = async (userId) => {
   if (!userId) return null;
-  const { data, error } = await supabase.from("courier_applications").select("*").eq("user_id", userId).maybeSingle();
+  // Ordenado por fecha (igual que getMyVerification): si alguna vez hay más de
+  // una fila por usuario, siempre gana la más reciente.
+  const { data, error } = await supabase.from("courier_applications").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (error) { console.error("getMyCourierApplication:", error.message); return null; }
   return data || null;
 };
 export const submitCourierApplication = async ({ userId, name, phone, zone, vehicle }) => {
-  const { error } = await supabase.from("courier_applications").insert({ user_id: userId, name, phone, zone, vehicle });
-  if (error) throw error;
+  const row = { user_id: userId, name, phone, zone, vehicle };
+  const { error } = await supabase.from("courier_applications").insert(row);
+  if (!error) return;
+  // Mismo patrón que verificación: si el rechazo previo dejó una fila única por
+  // usuario, en vez de fallar la reactivamos a 'pending' con los datos nuevos.
+  if (!/duplicate|unique/i.test(error.message || "")) throw error;
+  const prev = await getMyCourierApplication(userId);
+  if (prev && prev.status !== "pending" && prev.status !== "approved") {
+    let patch = { ...row, status: "pending", reject_reason: null, reviewed_by: null, reviewed_at: null };
+    for (let i = 0; i < 6; i++) {
+      const { error: upErr } = await supabase.from("courier_applications").update(patch).eq("id", prev.id);
+      if (!upErr) return;
+      const m = /column "?([a-zA-Z0-9_]+)"? .*does not exist/i.exec(upErr.message || "");
+      if (!m || !(m[1] in patch)) throw upErr;
+      const next = { ...patch }; delete next[m[1]]; patch = next;
+    }
+    throw new Error("No se pudo reenviar la solicitud de mensajero");
+  }
+  throw error;
 };
 export const getPendingCourierApplications = async () => {
   const { data, error } = await supabase.from("courier_applications").select("*").eq("status", "pending").order("created_at", { ascending: true });

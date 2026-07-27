@@ -463,20 +463,29 @@ export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId
   if (app === undefined) return wrap(
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "60px 16px", textAlign: "center", color: t2, fontSize: 13 }}>Cargando…</div>
   );
-  // Ya tiene solicitud: mostrar su ESTADO (la tabla es única por usuario).
-  if (app && app.status !== "approved") {
-    const rejected = app.status === "rejected";
+  // Ya tiene solicitud: mostrar su ESTADO. Solo bloquea si está 'pending'; si
+  // está 'rejected' puede intentarlo de nuevo (mismo patrón que verificación).
+  if (app && app.status === "pending") {
     return wrap(
       <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 16px 40px" }}>
         {backBtn}
         <div style={{ textAlign: "center", padding: "40px 16px" }}>
-          <div style={{ width: 72, height: 72, borderRadius: 20, background: (rejected ? "#ef4444" : AC) + "22", border: `1px solid ${(rejected ? "#ef4444" : AC)}55`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34, margin: "0 auto 18px" }}>{rejected ? "😕" : "🛵"}</div>
-          <h1 style={{ fontSize: 21, fontWeight: 800, color: t1, marginBottom: 8 }}>{rejected ? "Solicitud rechazada" : "Pendiente de revisión"}</h1>
-          <p style={{ fontSize: 13.5, color: t2, lineHeight: 1.55, maxWidth: 340, margin: "0 auto" }}>
-            {rejected
-              ? "Tu solicitud para ser mensajero no fue aprobada esta vez. Si crees que fue un error, contacta al equipo de RETADOR."
-              : "Recibimos tu solicitud para ser mensajero de RETADOR. La estamos revisando — te avisaremos cuando esté aprobada."}
-          </p>
+          <div style={{ width: 72, height: 72, borderRadius: 20, background: AC + "22", border: `1px solid ${AC}55`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34, margin: "0 auto 18px" }}>🛵</div>
+          <h1 style={{ fontSize: 21, fontWeight: 800, color: t1, marginBottom: 8 }}>🕐 En revisión</h1>
+          <p style={{ fontSize: 13.5, color: t2, lineHeight: 1.55, maxWidth: 340, margin: "0 auto" }}>Recibimos tu solicitud para ser mensajero de RETADOR. La estamos revisando — te avisaremos cuando esté aprobada.</p>
+        </div>
+      </div>
+    );
+  }
+  if (app && app.status === "rejected" && !started) {
+    return wrap(
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 16px 40px" }}>
+        {backBtn}
+        <div style={{ textAlign: "center", padding: "40px 16px" }}>
+          <div style={{ width: 72, height: 72, borderRadius: 20, background: "#ef4444" + "22", border: "1px solid #ef444455", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34, margin: "0 auto 18px" }}>😕</div>
+          <h1 style={{ fontSize: 21, fontWeight: 800, color: t1, marginBottom: 8 }}>🚫 No aprobada — puedes intentarlo de nuevo</h1>
+          <p style={{ fontSize: 13.5, color: t2, lineHeight: 1.55, maxWidth: 340, margin: "0 auto", marginBottom: 20 }}>Tu solicitud para ser mensajero no fue aprobada esta vez. Puedes revisar tus datos y enviarla de nuevo cuando quieras.</p>
+          <button onClick={() => setStarted(true)} style={{ background: AC, border: "none", color: "#fff", borderRadius: 12, padding: "12px 22px", fontSize: 13.5, fontWeight: 800, cursor: "pointer" }}>Intentarlo de nuevo →</button>
         </div>
       </div>
     );

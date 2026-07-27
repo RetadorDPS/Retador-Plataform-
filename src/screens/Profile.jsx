@@ -1279,7 +1279,10 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
   const [back, setBack]   = useState(null);
   const [selfie, setSelfie] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const frontRef = useRef(null), backRef = useRef(null), selfieRef = useRef(null);
+  // Nunca se abre la cámara directo: siempre se elige "Tomar foto" o "Elegir de
+  // galería" en una pequeña hoja de acción, por cada una de las 3 fotos.
+  const [pickerFor, setPickerFor] = useState(null); // 'front' | 'back' | 'selfie' | null
+  const camRef = useRef(null), libRef = useRef(null);
 
   useEffect(() => {
     let alive = true;
@@ -1288,9 +1291,21 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
     return () => { alive = false; };
   }, [user?.id]);
 
-  const pick = (setter) => (e) => { const f = e.target.files?.[0]; if (!f) return; setter({ file: f, url: URL.createObjectURL(f) }); };
+  const setterFor = (slot) => (slot === "front" ? setFront : slot === "back" ? setBack : setSelfie);
+  const photoFor  = (slot) => (slot === "front" ? front : slot === "back" ? back : selfie);
+  const onPicked = (e) => {
+    const f = e.target.files?.[0];
+    const slot = pickerFor;
+    e.target.value = ""; // permite re-elegir el mismo archivo más tarde
+    setPickerFor(null);
+    if (!f || !slot) return;
+    setterFor(slot)({ file: f, url: URL.createObjectURL(f) });
+  };
+
+  const missingSlots = [!front && "delantera", !back && "trasera", !selfie && "selfie con tu cara"].filter(Boolean);
   const valid = fullName.trim() && docNum.trim() && front && back && selfie;
   const flash_ = flash || (() => {});
+  const nameMismatch = !!(fullName.trim() && name && fullName.trim().toLowerCase() !== String(name).trim().toLowerCase());
 
   const doSubmit = async () => {
     if (!valid || submitting) return;
@@ -1311,11 +1326,29 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
     setSubmitting(false);
   };
 
-  const upBox = (label, photo, refEl, hint) => (
-    <button onClick={() => refEl.current?.click()} style={{ flex:1, height: photo ? 120 : 92, borderRadius:10, border:`1.5px dashed ${C.border}`, background:C.surfaceTop, cursor:"pointer", overflow:"hidden", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, color:C.textSecondary, fontSize:10.5, fontWeight:600, textAlign:"center", padding:"0 4px" }}>
-      {photo ? <img src={photo.url} alt={label} style={{ width:"100%", height:"100%", objectFit:"cover" }}/> : <><span style={{fontSize:20}}>{hint}</span>{label}</>}
-    </button>
+  // Ilustración de muestra (silueta simple, identidad RETADOR dorada) — NO es
+  // una foto real de nadie, solo para entender la postura de la selfie.
+  const SelfieSample = () => (
+    <svg width="54" height="54" viewBox="0 0 72 72" fill="none" style={{ flexShrink:0 }}>
+      <circle cx="36" cy="36" r="35" fill={`${C.accent}14`} stroke={`${C.accent}55`} strokeWidth="1"/>
+      <circle cx="29" cy="27" r="11" fill={`${C.accent}40`}/>
+      <path d="M13 58c1-12 8-19 16-19s15 7 16 19" fill={`${C.accent}40`}/>
+      <rect x="37" y="33" width="25" height="17" rx="2.5" fill={C.surface} stroke={C.accent} strokeWidth="2" transform="rotate(-9 37 33)"/>
+      <line x1="41" y1="39" x2="58" y2="36" stroke={C.accent} strokeWidth="1.3" opacity=".65"/>
+      <line x1="41" y1="43" x2="55" y2="41" stroke={C.accent} strokeWidth="1.3" opacity=".65"/>
+    </svg>
   );
+
+  const upBox = (label, slot, hint) => {
+    const photo = photoFor(slot);
+    return (
+      <button onClick={() => setPickerFor(slot)} style={{ flex:1, height: photo ? 128 : 112, borderRadius:10, border:`1.5px dashed ${photo ? C.positive : C.border}`, background:C.surfaceTop, cursor:"pointer", overflow:"hidden", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:5, color:C.textSecondary, fontSize:10.5, fontWeight:700, textAlign:"center", padding:"6px 6px" }}>
+        {photo
+          ? <img src={photo.url} alt={label} style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+          : <><span style={{fontSize:22}}>{hint}</span><span style={{ lineHeight:1.3 }}>{label}</span></>}
+      </button>
+    );
+  };
 
   const banner = (bg, color, txt) => <div style={{ background:bg, border:`1px solid ${color}44`, borderRadius:12, padding:"14px 14px", color, fontSize:13, fontWeight:700, textAlign:"center", lineHeight:1.5 }}>{txt}</div>;
   const status = myVerif?.status;
@@ -1348,20 +1381,38 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
               {TYPES.map(t => <button key={t} onClick={()=>setDocType(t)} style={{ padding:"8px 12px", borderRadius:8, cursor:"pointer", fontSize:11.5, fontWeight:600, background: docType===t ? `${C.accent}1a` : C.surfaceTop, border:`1.5px solid ${docType===t ? C.accent : C.border}`, color: docType===t ? C.accent : C.textPrimary }}>{t}</button>)}
             </div>
             <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Nombre completo</div>
-            <input value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Como aparece en tu documento" style={{ width:"100%", boxSizing:"border-box", background:C.surfaceTop, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 12px", color:C.textPrimary, fontSize:13, marginBottom:13, outline:"none" }}/>
+            <input value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Como aparece en tu documento" style={{ width:"100%", boxSizing:"border-box", background:C.surfaceTop, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 12px", color:C.textPrimary, fontSize:13, outline:"none" }}/>
+            <div style={{ fontSize:10.5, color:C.warning, fontWeight:700, margin:"6px 0 13px", lineHeight:1.4 }}>
+              ⚠️ Escríbelo EXACTAMENTE como aparece en tu documento.
+              {nameMismatch && " Es distinto al nombre de tu perfil — no bloquea el envío, pero verifica que esté bien escrito."}
+            </div>
             <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Número de documento</div>
             <input value={docNum} onChange={e=>setDocNum(e.target.value)} placeholder="Ej. 95010112345" style={{ width:"100%", boxSizing:"border-box", background:C.surfaceTop, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 12px", color:C.textPrimary, fontSize:13, marginBottom:13, outline:"none" }}/>
-            <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Fotos</div>
-            <input ref={frontRef} type="file" accept="image/*" onChange={pick(setFront)} style={{ display:"none" }}/>
-            <input ref={backRef} type="file" accept="image/*" onChange={pick(setBack)} style={{ display:"none" }}/>
-            <input ref={selfieRef} type="file" accept="image/*" capture="user" onChange={pick(setSelfie)} style={{ display:"none" }}/>
+
+            <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Fotos <span style={{ color:C.danger, fontWeight:800 }}>· las 3 son obligatorias</span></div>
+            {/* input de cámara: el atributo "capture" se ajusta al slot activo justo
+                antes de mostrarse la hoja de acción, así siempre abre la cámara
+                correcta (trasera para el documento, frontal para la selfie). */}
+            <input ref={camRef} type="file" accept="image/*" capture={pickerFor === "selfie" ? "user" : "environment"} onChange={onPicked} style={{ display:"none" }}/>
+            <input ref={libRef} type="file" accept="image/*" onChange={onPicked} style={{ display:"none" }}/>
             <div style={{ display:"flex", gap:9, marginBottom:9 }}>
-              {upBox("Frente", front, frontRef, "📄")}
-              {upBox("Reverso", back, backRef, "📄")}
+              {upBox("Documento por DELANTE", "front", "📄")}
+              {upBox("Documento por DETRÁS", "back", "📄")}
             </div>
-            <div style={{ display:"flex", gap:9, marginBottom:18 }}>
-              {upBox("Selfie sosteniendo el documento", selfie, selfieRef, "🤳")}
+            <div style={{ display:"flex", gap:9, alignItems:"stretch", marginBottom:8 }}>
+              {upBox("Tú sosteniendo el documento junto a tu cara", "selfie", "🤳")}
+              {!selfie && (
+                <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, background:`${C.accent}0a`, border:`1px dashed ${C.accent}44`, borderRadius:10, padding:"8px 6px" }}>
+                  <SelfieSample/>
+                  <span style={{ fontSize:9, color:C.textSecondary, fontWeight:600, textAlign:"center", lineHeight:1.3 }}>Así, con el documento a un lado de tu cara</span>
+                </div>
+              )}
             </div>
+            {missingSlots.length > 0 && (
+              <div style={{ fontSize:11, color:C.warning, fontWeight:700, marginBottom:14 }}>Falta: {missingSlots.join(", ")}</div>
+            )}
+            {missingSlots.length === 0 && <div style={{ marginBottom:14 }}/>}
+
             <div style={{ display:"flex", gap:9 }}>
               <button onClick={onClose} style={{ flex:1, height:44, borderRadius:10, background:C.surfaceTop, border:`1px solid ${C.border}`, color:C.textPrimary, fontSize:13, fontWeight:700, cursor:"pointer" }}>Cancelar</button>
               <button disabled={!valid || submitting} onClick={doSubmit} style={{ flex:1, height:44, borderRadius:10, background: (valid && !submitting) ? C.positive : C.surfaceTop, border:"none", color: (valid && !submitting) ? "#fff" : C.textSecondary, fontSize:13, fontWeight:800, cursor: (valid && !submitting) ? "pointer" : "default", opacity: (valid && !submitting) ? 1 : .6 }}>{submitting ? "Enviando…" : "Enviar solicitud"}</button>
@@ -1369,6 +1420,18 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
           </>}
         </>}
       </div>
+
+      {/* Hoja de acción: nunca se abre la cámara directo — siempre a elegir. */}
+      {pickerFor && (
+        <div onClick={() => setPickerFor(null)} style={{ position:"fixed", inset:0, zIndex:2100, background:"rgba(0,0,0,.55)", display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:C.surface, width:"100%", maxWidth:440, borderRadius:"16px 16px 0 0", padding:"10px 16px 24px", border:`1px solid ${C.border}` }}>
+            <div style={{ textAlign:"center", fontSize:11.5, fontWeight:700, color:C.textSecondary, padding:"8px 0 14px" }}>Añadir foto</div>
+            <button onClick={() => camRef.current?.click()} style={{ width:"100%", height:48, borderRadius:10, background:C.accent, border:"none", color:"#fff", fontSize:13.5, fontWeight:800, cursor:"pointer", marginBottom:9, display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>📷 Tomar foto</button>
+            <button onClick={() => libRef.current?.click()} style={{ width:"100%", height:48, borderRadius:10, background:C.surfaceTop, border:`1px solid ${C.border}`, color:C.textPrimary, fontSize:13.5, fontWeight:800, cursor:"pointer", marginBottom:9, display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>🖼️ Elegir de galería</button>
+            <button onClick={() => setPickerFor(null)} style={{ width:"100%", height:44, borderRadius:10, background:"none", border:"none", color:C.textSecondary, fontSize:13, fontWeight:700, cursor:"pointer" }}>Cancelar</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1500,7 +1563,9 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     getUserById(sellerId).then(p => {
       if (!alive || !p?.name) return;
       const uname = String(p.name).toLowerCase().replace(/[^a-z0-9._]/g, "");
-      setProfile(prev => ({ ...prev, name: p.name, username: uname, bio: p.bio || "", avatar: p.avatar ? { type: "photo", url: p.avatar } : prev.avatar }));
+      // El ✓ de "otro" usuario NUNCA sale del prop isVerified (ese es del dueño de
+      // la sesión) — se trae en vivo del backend (profiles.is_verified) aquí.
+      setProfile(prev => ({ ...prev, name: p.name, username: uname, bio: p.bio || "", avatar: p.avatar ? { type: "photo", url: p.avatar } : prev.avatar, isVerified: !!p.verified }));
       setPd(prev => ({ ...prev, name: p.name, username: uname, bio: p.bio || "" }));
     }).catch(() => {});
     return () => { alive = false; };
@@ -1640,7 +1705,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
           <div style={{ display:"flex", justifyContent:"space-between",
             alignItems:"flex-start", marginBottom:16 }}>
             <div style={{ position:"relative" }}>
-              <FP_Avatar avatar={profile.avatar} name={profile.name} size={72} verified={!!isVerified}/>
+              <FP_Avatar avatar={profile.avatar} name={profile.name} size={72} verified={!!isVerified || !!profile.isVerified}/>
               {/* FREE chip */}
               <div style={{ position:"absolute", bottom:-2, left:"50%",
                 transform:"translateX(-50%)",

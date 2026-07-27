@@ -1,6 +1,20 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getUserById, getUserName, getUserTrustStats, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getUserById, getUserName, getUserTrustStats, getVerifiedMap, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir } from "../shared/index.js";
+
+// ✓ real de vendedores en lote — se refresca cuando cambia el conjunto de
+// vendedores visible (evita 1 consulta por tarjeta). Fuente: profiles.is_verified.
+function useSellersVerified(products) {
+  const [map, setMap] = useState({});
+  const key = useMemo(() => [...new Set((products || []).map(p => p.seller_id).filter(Boolean))].sort().join(","), [products]);
+  useEffect(() => {
+    let alive = true;
+    if (!key) { setMap({}); return; }
+    getVerifiedMap(key.split(",")).then(m => { if (alive) setMap(m); }).catch(() => {});
+    return () => { alive = false; };
+  }, [key]);
+  return map;
+}
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -537,6 +551,7 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
   const [searchText, setSearchText] = useState("");
   const [quickFilter, setQuickFilter] = useState("TODOS");
   const feedAds = useFeedAds("busqueda"); // anuncios intercalados cada N productos
+  const sellersVerified = useSellersVerified(products);
 
   const { cats, subcats: allSubs } = useCatalog();
   const cat = selectedCat ? cats.find(c => c.id === selectedCat) : null;
@@ -666,12 +681,12 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
               view === "muro"
                 ? <div style={{ columnCount: densityCols(dMode, isDesktop, isTablet), columnGap: dt.grid.gap }}>
                     {feedRows(filtered, feedAds).map(it => it.t === "p"
-                      ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
+                      ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} verified={sellersVerified[it.p.seller_id]} />
                       : <div key={it.key} style={{ breakInside: "avoid", columnSpan: "all", margin: "6px 0" }}><BlockView m={it.m} onNav={onNav} /></div>)}
                   </div>
                 : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
                     {feedRows(filtered, feedAds).map(it => it.t === "p"
-                      ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
+                      ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} verified={sellersVerified[it.p.seller_id]} />
                       : <div key={it.key} style={{ gridColumn: "1 / -1" }}><BlockView m={it.m} onNav={onNav} /></div>)}
                   </div>
             )}
@@ -950,6 +965,7 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
   const { tokens: dt, mode: dMode } = useDensity();
   const plusBtnRef = useRef(null);
   const feedAds = useFeedAds("inicio"); // anuncios intercalados cada N productos
+  const sellersVerified = useSellersVerified(products);
   // Conserva la posición del scroll del feed: se guarda al scrollear y se
   // restaura al volver (entrar a un producto y regresar no salta al inicio).
   const feedRef = useRef(null);
@@ -1052,12 +1068,12 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
             : view === "muro"
               ? <div style={{ columnCount: densityCols(dMode, isDesktop, isTablet), columnGap: dt.grid.gap }}>
                   {feedRows(products, feedAds).map(it => it.t === "p"
-                    ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
+                    ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} verified={sellersVerified[it.p.seller_id]} />
                     : <div key={it.key} style={{ breakInside: "avoid", columnSpan: "all", margin: "6px 0" }}><BlockView m={it.m} onNav={onNav} /></div>)}
                 </div>
               : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
                   {feedRows(products, feedAds).map(it => it.t === "p"
-                    ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
+                    ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} verified={sellersVerified[it.p.seller_id]} />
                     : <div key={it.key} style={{ gridColumn: "1 / -1" }}><BlockView m={it.m} onNav={onNav} /></div>)}
                 </div>
         }
@@ -1179,8 +1195,8 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
   const addTier = () => setTiers(t => [...t, { min: "", pct: "" }]);
   const setTier = (i, k, v) => setTiers(t => t.map((row, j) => j === i ? { ...row, [k]: v } : row));
   const removeTier = (i) => setTiers(t => t.filter((_, j) => j !== i));
-  const [paymentMethods, setPaymentMethods] = useState(() => Array.isArray(product.paymentMethods) ? product.paymentMethods : []);
-  const togglePayment = (m) => setPaymentMethods(p => p.includes(m) ? p.filter(x => x !== m) : [...p, m]);
+  const [acceptedCurrencies, setAcceptedCurrencies] = useState(() => Array.isArray(product.acceptedCurrencies) ? product.acceptedCurrencies : []);
+  const toggleCurrency = (c) => setAcceptedCurrencies(a => a.includes(c) ? a.filter(x => x !== c) : [...a, c]);
   const save = () => {
     if (!title.trim()) { flash && flash("Ponle un título"); return; }
     if (!isService && !(Number(stock) > 0)) { flash && flash("⚠️ Indica la cantidad disponible (mínimo 1)"); return; }
@@ -1197,7 +1213,7 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
         shipModes, shippingPrice: Number(shipPrice) || 0, pickupAddress, pickupPhone,
         currency, stock: Number(stock) || 0,
         bulkDiscounts: tiers.filter(t => t.min && t.pct).map(t => ({ min: Number(t.min), pct: Number(t.pct) })),
-        paymentMethods,
+        acceptedCurrencies,
       }),
     });
     flash && flash(isService ? "✅ Servicio actualizado" : "✅ Producto actualizado");
@@ -1280,19 +1296,21 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
           </div>
         )}
 
-        {/* Métodos de pago (solo productos, multi-select opcional) */}
+        {/* Monedas que aceptas (solo productos, multi-select opcional) — es la
+            moneda en la que el vendedor acepta cobrar, NUNCA cómo se lo pagan
+            (eso lo acuerdan comprador y vendedor entre ellos). */}
         {!isService && (
           <div style={{ marginBottom: 16 }}>
-            <label style={lbl}>Métodos de pago que aceptas <span style={{ color: T3, fontWeight: 500 }}>(opcional)</span></label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
-              {["Efectivo USD", "Efectivo EUR", "Efectivo CUP", "Transferencia"].map(m => {
-                const on = paymentMethods.includes(m);
+            <label style={lbl}>Monedas que aceptas <span style={{ color: T3, fontWeight: 500 }}>(opcional — si no marcas ninguna, se asume solo la moneda del precio)</span></label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7 }}>
+              {["USD", "EUR", "CUP"].map(m => {
+                const on = acceptedCurrencies.includes(m);
                 return (
-                  <button key={m} onClick={() => togglePayment(m)} style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", background: on ? `${G}12` : "transparent", border: `1.5px solid ${on ? G : B}`, borderRadius: 10, padding: "9px 10px", cursor: "pointer" }}>
+                  <button key={m} onClick={() => toggleCurrency(m)} style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center", textAlign: "left", background: on ? `${G}12` : "transparent", border: `1.5px solid ${on ? G : B}`, borderRadius: 10, padding: "9px 10px", cursor: "pointer" }}>
                     <div style={{ width: 16, height: 16, borderRadius: 5, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: on ? G : "transparent", border: `1.5px solid ${on ? G : B}` }}>
                       {on && <svg width="9" height="7" viewBox="0 0 11 9" fill="none"><path d="M1 4.5l3 3 6-6.5" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                     </div>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, color: on ? G : T1 }}>{m}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: on ? G : T1 }}>{m}</span>
                   </button>
                 );
               })}
@@ -1598,12 +1616,14 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
           </div>
         )}
 
-        {/* Métodos de pago que acepta el vendedor (solo productos, si los definió) */}
-        {!isService && Array.isArray(p.paymentMethods) && p.paymentMethods.length > 0 && (
+        {/* Monedas que acepta el vendedor (solo productos, si las definió). Es
+            SOLO la moneda de cobro — cómo se paga (efectivo/transferencia) lo
+            acuerdan comprador y vendedor entre ellos, la app no opina de eso. */}
+        {!isService && Array.isArray(p.acceptedCurrencies) && p.acceptedCurrencies.length > 0 && (
           <div style={{ marginBottom: 16 }}>
-            <p style={{ fontSize: 9, fontWeight: 700, color: T2, marginBottom: 7, letterSpacing: .3 }}>MÉTODOS DE PAGO ACEPTADOS</p>
+            <p style={{ fontSize: 9, fontWeight: 700, color: T2, marginBottom: 7, letterSpacing: .3 }}>ACEPTA PAGOS EN</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-              {p.paymentMethods.map(m => (
+              {p.acceptedCurrencies.map(m => (
                 <span key={m} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: S, border: `1px solid ${B}`, borderRadius: 50, padding: "6px 11px", fontSize: 10, fontWeight: 700, color: T1 }}>{m}</span>
               ))}
             </div>
@@ -1759,7 +1779,7 @@ export function SellerProfile({ userId, currentUser, onBack, onChat, onProduct }
         {products.length === 0
           ? <p style={{ fontSize: 11, color: "#3e3e3e", textAlign: "center", padding: "24px 0" }}>Sin productos publicados aún</p>
           : <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols},1fr)`, gap: 8 }}>
-            {products.map(p => <PCard key={p.id} p={p} onClick={() => onProduct(p)} isFav={false} onFav={() => {}} />)}
+            {products.map(p => <PCard key={p.id} p={p} onClick={() => onProduct(p)} isFav={false} onFav={() => {}} verified={!!profile?.verified} />)}
           </div>
         }
       </div>
@@ -1773,7 +1793,7 @@ export function SellerProfile({ userId, currentUser, onBack, onChat, onProduct }
 // GRUPO 1 — Producto vs Servicio son DOS FLUJOS DE VERDAD, no un chip que
 // cambia campos dentro del mismo formulario: PubSheet solo decide cuál de los
 // dos montar. Cada uno tiene sus propios campos, validación y texto de ayuda.
-const PRODUCT_PAYMENT_METHODS = ["Efectivo USD", "Efectivo EUR", "Efectivo CUP", "Transferencia"];
+const PRODUCT_CURRENCIES_ACCEPTED = ["USD", "EUR", "CUP"];
 const DEFAULT_SERVICE_CATS = ["Diseño", "Reparaciones", "Transporte", "Clases", "Belleza", "Tecnología", "Construcción", "Limpieza", "Fotografía", "Otro"];
 
 // Envoltorio visual compartido (hoja inferior + header + botón cerrar) — igual
@@ -1825,7 +1845,7 @@ function PubChooser({ onClose, onPick }) {
 }
 
 // FLUJO PRODUCTO — completo: stock obligatorio, descuentos por cantidad,
-// moneda, métodos de pago aceptados (multi-select, opcional) y entrega.
+// moneda, monedas que acepta el vendedor (multi-select, opcional) y entrega.
 function PublishProductForm({ onClose, onBack, onPublish, user, flash }) {
   const { cols } = useR();
   const { cats, subcats } = useCatalog();
@@ -1838,7 +1858,7 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash }) {
     title: "", price: "", currency: "USD", orig: "", cat: "", subcat: "", desc: "",
     images: [], badge: "", stock: "",
     bulkDiscounts: [], // [{min,pct}]
-    paymentMethods: [], // selección múltiple, opcional
+    acceptedCurrencies: [], // monedas en las que el vendedor acepta cobrar (selección múltiple, opcional)
     shipModes: { local: true, intl: false, persona: false }, // combinables: el vendedor marca las que quiera
     location: "",
     pickupAddress: (() => { try { return JSON.parse(localStorage.getItem("retador_pickup") || "{}").address || ""; } catch (e) { return ""; } })(),
@@ -1869,7 +1889,7 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash }) {
   const addTier = () => set("bulkDiscounts", [...form.bulkDiscounts, { min: "", pct: "" }]);
   const setTier = (i, k, v) => set("bulkDiscounts", form.bulkDiscounts.map((t, j) => j === i ? { ...t, [k]: v } : t));
   const removeTier = (i) => set("bulkDiscounts", form.bulkDiscounts.filter((_, j) => j !== i));
-  const togglePayment = (m) => set("paymentMethods", form.paymentMethods.includes(m) ? form.paymentMethods.filter(x => x !== m) : [...form.paymentMethods, m]);
+  const toggleCurrency = (c) => set("acceptedCurrencies", form.acceptedCurrencies.includes(c) ? form.acceptedCurrencies.filter(x => x !== c) : [...form.acceptedCurrencies, c]);
 
   const anyShip = form.shipModes.local || form.shipModes.intl || form.shipModes.persona;
   const needsLoc = form.shipModes.local || form.shipModes.persona;
@@ -2088,20 +2108,21 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash }) {
         )}
       </div>
 
-      {/* MÉTODOS DE PAGO — selección múltiple, opcional: el vendedor marca los que
-          tenga (uno, varios o todos), nunca uno solo forzado. */}
+      {/* MONEDAS QUE ACEPTAS — selección múltiple, opcional: en qué moneda(s)
+          acepta cobrar el vendedor. NO es cómo le pagan (efectivo/transferencia):
+          eso lo acuerdan comprador y vendedor entre ellos, la app no lo gestiona. */}
       <div style={sectionStyle}>
-        <div style={sectionTitle}><span>💳</span> Métodos de pago que aceptas <span style={{ fontWeight: 500, color: T3, fontSize: 9 }}>(opcional)</span></div>
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 2)},1fr)`, gap: 7 }}>
-          {PRODUCT_PAYMENT_METHODS.map(m => {
-            const on = form.paymentMethods.includes(m);
+        <div style={sectionTitle}><span>💱</span> Monedas que aceptas <span style={{ fontWeight: 500, color: T3, fontSize: 9 }}>(opcional — si no marcas ninguna, se asume solo la moneda del precio)</span></div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 3)},1fr)`, gap: 7 }}>
+          {PRODUCT_CURRENCIES_ACCEPTED.map(c => {
+            const on = form.acceptedCurrencies.includes(c);
             return (
-              <button key={m} className="p" onClick={() => togglePayment(m)}
-                style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", background: on ? `${G}12` : isDark?"#0e0e0e":CARD, border: `1.5px solid ${on ? G : isDark?"#1a1a1a":B}`, borderRadius: 10, padding: "9px 10px" }}>
+              <button key={c} className="p" onClick={() => toggleCurrency(c)}
+                style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center", textAlign: "left", background: on ? `${G}12` : isDark?"#0e0e0e":CARD, border: `1.5px solid ${on ? G : isDark?"#1a1a1a":B}`, borderRadius: 10, padding: "9px 10px" }}>
                 <div style={{ width: 16, height: 16, borderRadius: 5, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: on ? G : "transparent", border: `1.5px solid ${on ? G : isDark?"#333":B}` }}>
                   {on && <svg width="9" height="7" viewBox="0 0 11 9" fill="none"><path d="M1 4.5l3 3 6-6.5" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                 </div>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: on ? G : isDark?"#fff":T1 }}>{m}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: on ? G : isDark?"#fff":T1 }}>{c}</span>
               </button>
             );
           })}

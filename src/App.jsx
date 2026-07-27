@@ -242,10 +242,10 @@ function AppShell({ sessionUser }) {
     if (changes.pickupPhone   !== undefined) upd.pickup_phone   = changes.pickupPhone || null;
     if (changes.location      !== undefined) upd.location       = changes.location || null;
     if (changes.currency      !== undefined) upd.currency       = changes.currency || "USD";
-    // GRUPO 1 — cantidad disponible, descuentos por cantidad, métodos de pago.
-    if (changes.stock          !== undefined) upd.stock           = Number(changes.stock) || 0;
-    if (changes.bulkDiscounts  !== undefined) upd.bulk_discounts  = Array.isArray(changes.bulkDiscounts) ? changes.bulkDiscounts : [];
-    if (changes.paymentMethods !== undefined) upd.payment_methods = Array.isArray(changes.paymentMethods) ? changes.paymentMethods : [];
+    // GRUPO 1 — cantidad disponible, descuentos por cantidad, monedas aceptadas.
+    if (changes.stock              !== undefined) upd.stock               = Number(changes.stock) || 0;
+    if (changes.bulkDiscounts      !== undefined) upd.bulk_discounts      = Array.isArray(changes.bulkDiscounts) ? changes.bulkDiscounts : [];
+    if (changes.acceptedCurrencies !== undefined) upd.accepted_currencies = Array.isArray(changes.acceptedCurrencies) ? changes.acceptedCurrencies : [];
     // Al editar, una publicación RETIRADA vuelve a quedar visible (approved).
     upd.moderation_status = "approved";
     let data, missing;
@@ -692,13 +692,14 @@ function AppShell({ sessionUser }) {
       location: d.location || null,   // zona (donde ofrece el servicio / ubicación del producto)
       pickup_address: isService ? null : (d.pickupAddress || null),
       pickup_phone: isService ? null : (d.pickupPhone || null),
-      // GRUPO 1 — cantidad disponible, descuentos por cantidad y métodos de pago
-      // aceptados (solo productos). stock/payment_methods son escritura resiliente:
-      // si el backend aún no tiene esas columnas, se reintenta sin ellas.
+      // GRUPO 1 — cantidad disponible, descuentos por cantidad y monedas que el
+      // vendedor acepta cobrar (solo productos; NO es método de pago). stock/
+      // accepted_currencies son escritura resiliente: si el backend aún no
+      // tiene esas columnas, se reintenta sin ellas.
       ...(isService ? {} : {
         stock: Number(d.stock) || 0,
         bulk_discounts: Array.isArray(d.bulkDiscounts) ? d.bulkDiscounts : [],
-        payment_methods: Array.isArray(d.paymentMethods) ? d.paymentMethods : [],
+        accepted_currencies: Array.isArray(d.acceptedCurrencies) ? d.acceptedCurrencies : [],
       }),
     };
     let data, missing;
@@ -1358,7 +1359,7 @@ function AppShell({ sessionUser }) {
       )}
       {showWallet && (() => {
         const meName = profileData?.name || user?.name || "Usuario";
-        const meUser = { name: meName, username: "@" + meName.toLowerCase().replace(/[^a-z0-9]/g, ""), omegaId: "RT-" + String(Math.abs([...meName].reduce((a, c) => a + c.charCodeAt(0), 0)) * 7).padStart(6, "0"), phone: profileData?.phone || "—", verifiedSince: verifiedUsers.includes(meName) ? "Cuenta verificada" : "Sin verificar" };
+        const meUser = { name: meName, username: "@" + meName.toLowerCase().replace(/[^a-z0-9]/g, ""), omegaId: "RT-" + String(Math.abs([...meName].reduce((a, c) => a + c.charCodeAt(0), 0)) * 7).padStart(6, "0"), phone: profileData?.phone || "—", verifiedSince: user?.verified ? "Cuenta verificada" : "Sin verificar" };
         // Contactos = otros usuarios conocidos (vendedores de productos)
         const seen = new Set([meName]);
         const contacts = [];
@@ -1478,7 +1479,7 @@ function AppShell({ sessionUser }) {
             onProfileUpdate={() => {}}
             isOwner={false}
             onChat={(id, name) => { setViewProfileId(null); requestChat(id, name); }}
-            isVerified={verifiedUsers.includes(viewProfileId)}
+            isVerified={false}
             onReport={(p) => addReport({ targetName: p.targetName, reason: p.reason, detail: p.detail, reporterName: user?.name || "Usuario" })}
             userProducts={products.filter(p => p.seller_id === viewProfileId)}
             onProduct={p => setViewProdOverlay(p)}
@@ -1605,7 +1606,7 @@ function AppShell({ sessionUser }) {
                 onProfileUpdate={() => {}}
                 isOwner={false}
                 onChat={requestChat}
-                isVerified={verifiedUsers.includes(selSeller)}
+                isVerified={false}
                 onReport={(p) => addReport({ targetName: p.targetName, reason: p.reason, detail: p.detail, reporterName: user?.name || "Usuario" })}
                 userProducts={products.filter(p => p.seller_name === selSeller || p.seller_id === selSeller)}
                 onProduct={p => { setSelProd(p); setProdBackTo("sellerProfile"); setMScr("product"); }}
@@ -1665,7 +1666,7 @@ function AppShell({ sessionUser }) {
             {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}
               productView={productView} onProductViewChange={setProductView}
               profileData={profileData} onProfileUpdate={setProfileData}
-              isVerified={verifiedUsers.includes(profileData?.name || user?.name)}
+              isVerified={!!user?.verified}
               onRequestVerification={() => setPScr("profile-full")}
               accountPassword={accountPassword} onSetPassword={setAccountPassword}
               blockedUsers={blockedUsers} onToggleBlock={toggleBlock}

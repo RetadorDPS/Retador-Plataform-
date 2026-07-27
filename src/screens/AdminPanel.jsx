@@ -3025,7 +3025,10 @@ function useToast(){
 
 function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
   const[col,setCol]=useState(false);
-  const[page,setPage]=useState(null);
+  // Al abrir desde una notificación de nueva solicitud, entra directo a su cola
+  // (data.initialPage). El chequeo de permiso de más abajo (pageAllowed / el
+  // useEffect que corrige la página) ya la redirige si no tiene acceso.
+  const[page,setPage]=useState(data.initialPage || null);
   const[narrow,setNarrow]=useState(false);
   const[mnav,setMnav]=useState(false);
   const rootRef=useRef(null);

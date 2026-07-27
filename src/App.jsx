@@ -309,6 +309,9 @@ function AppShell({ sessionUser }) {
   // (La suscripción realtime vive más abajo, en el CANAL GLOBAL único rt-global-<uid>,
   //  junto con la de pedidos — después de declarar loadOrders.)
   const [showAdmin,  setShowAdmin]  = useState(false);
+  // Página con la que abre el panel la PRÓXIMA vez que se monte (p.ej. al tocar
+  // una notificación de nueva solicitud). null = abre donde siempre (resumen).
+  const [adminOpenPage, setAdminOpenPage] = useState(null);
   // Solicitudes REALES de mensajero (courier_applications) para el panel admin.
   const [courierApps, setCourierApps] = useState([]);
   const reloadCourierApps = useCallback(() => {
@@ -929,8 +932,12 @@ function AppShell({ sessionUser }) {
     getNotifications(user.id).then(setBkNotifs).catch(() => {});
   }, [user?.id]);
   useEffect(() => { reloadBkNotifs(); }, [reloadBkNotifs]);
+  // Notificaciones de "nueva solicitud" al staff (verification_app/plan_app/
+  // courier_app): tocarlas lleva directo a su cola real en el panel, igual que
+  // los mensajes llevan directo al chat.
+  const QUEUE_PAGE_BY_KIND = { verification_app: "verif", plan_app: "plans", courier_app: "delivery" };
   const myNotifs = [
-    ...bkNotifs.map(n => ({ id: "bk" + n.id, text: n.text, orderId: n.kind === "order" ? n.ref_id : null, conversationId: n.kind === "message" ? n.ref_id : null, read: !!n.read, at: n.created_at ? new Date(n.created_at).getTime() : Date.now(), _bk: n.id })),
+    ...bkNotifs.map(n => ({ id: "bk" + n.id, text: n.text, orderId: n.kind === "order" ? n.ref_id : null, conversationId: n.kind === "message" ? n.ref_id : null, queuePage: QUEUE_PAGE_BY_KIND[n.kind] || null, read: !!n.read, at: n.created_at ? new Date(n.created_at).getTime() : Date.now(), _bk: n.id })),
     ...myLocalNotifs,
   ].sort((a, b) => (b.at || 0) - (a.at || 0));
   const unreadNotif = myNotifs.filter(n => !n.read).length;
@@ -1348,7 +1355,14 @@ function AppShell({ sessionUser }) {
       {/* Overlays */}
       {showCats   && <CatModal onClose={() => setShowCats(false)} onSelect={cat => { setActiveCat(cat); setShowCats(false); }} active={activeCat} />}
       {pubOpen    && <PubSheet onClose={() => setPubOpen(false)} onPublish={async d => { setPubOpen(false); await handlePublish(d); }} user={user} flash={flash} />}
-      {showNotif  && <NotifPanel onClose={() => { markNotifRead(null); setShowNotif(false); }} notifs={myNotifs} onRead={markNotifRead} onOpenOrder={(oid) => { setShowNotif(false); markNotifRead(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }} onOpenConversation={(cid) => { setShowNotif(false); markNotifRead(null); openConversationById(cid); }} />}
+      {showNotif  && <NotifPanel onClose={() => { markNotifRead(null); setShowNotif(false); }} notifs={myNotifs} onRead={markNotifRead} onOpenOrder={(oid) => { setShowNotif(false); markNotifRead(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }} onOpenConversation={(cid) => { setShowNotif(false); markNotifRead(null); openConversationById(cid); }}
+        onOpenQueue={(page) => {
+          // Si no tiene ningún acceso al panel, no intenta navegar ahí (el panel
+          // mismo bloquea además páginas puntuales sin permiso, como ya hace).
+          if (!hasPanel) return;
+          setShowNotif(false); markNotifRead(null);
+          setAdminOpenPage(page); setShowAdmin(true);
+        }} />}
       {/* Chat: capa OPACA a pantalla completa (inset 0 cubre TODO el viewport,
           estándar) — nada del producto/pantalla de atrás puede asomar. */}
       {chatOpen && selChat && (
@@ -1503,6 +1517,9 @@ function AppShell({ sessionUser }) {
       )}
       {showAdmin  && <OmniPanel onClose={() => setShowAdmin(false)} theme={appTk} zoom={densZoom} data={{
         meId: user?.id,
+        // Página con la que abrir esta vez (p.ej. al tocar una notificación de
+        // nueva solicitud de plan/verificación/mensajero). null = la de siempre.
+        initialPage: adminOpenPage,
         // Mensaje directo desde las colas del panel (Planes/Verificaciones): abre
         // el chat real con esa persona (se usa junto con sendMessage + meta para
         // dejar la mini-tarjeta de "a qué solicitud corresponde").
@@ -1685,7 +1702,7 @@ function AppShell({ sessionUser }) {
             <ProfileMenuDrawer open={profileMenuOpen} onClose={() => setProfileMenuOpen(false)} user={user} isOwner={hasPanel}
               onMessages={openMessages} onOrders={() => setPScr("orders")} onWallet={() => setShowWallet(true)}
               onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} onSettings={() => setPScr("settings")}
-              onAdmin={() => setShowAdmin(true)} messagesBadge={chatUnread} ordersBadge={ordersUnseen} adminBadge={courierApps.length} />
+              onAdmin={() => { setAdminOpenPage(null); setShowAdmin(true); }} messagesBadge={chatUnread} ordersBadge={ordersUnseen} adminBadge={courierApps.length} />
           </>}
         </>
       </div>

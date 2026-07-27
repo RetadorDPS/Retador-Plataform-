@@ -448,7 +448,6 @@ function AppShell({ sessionUser }) {
     // Ya NO se usa emoji como avatar por defecto.
     avatar: sessionUser?.avatar ? { type: "image", value: sessionUser.avatar } : null,
     name: sessionUser?.name || "Usuario",
-    username: (sessionUser?.email ? sessionUser.email.split("@")[0] : (sessionUser?.name || "usuario")).toLowerCase().replace(/[^a-z0-9._]/g, ""),
     email: sessionUser?.email || "",
     bio: "",
     rating: 0,
@@ -1359,11 +1358,11 @@ function AppShell({ sessionUser }) {
       )}
       {showWallet && (() => {
         const meName = profileData?.name || user?.name || "Usuario";
-        const meUser = { name: meName, username: "@" + meName.toLowerCase().replace(/[^a-z0-9]/g, ""), omegaId: "RT-" + String(Math.abs([...meName].reduce((a, c) => a + c.charCodeAt(0), 0)) * 7).padStart(6, "0"), phone: profileData?.phone || "—", verifiedSince: user?.verified ? "Cuenta verificada" : "Sin verificar" };
+        const meUser = { name: meName, omegaId: "RT-" + String(Math.abs([...meName].reduce((a, c) => a + c.charCodeAt(0), 0)) * 7).padStart(6, "0"), phone: profileData?.phone || "—", verifiedSince: user?.verified ? "Cuenta verificada" : "Sin verificar" };
         // Contactos = otros usuarios conocidos (vendedores de productos)
         const seen = new Set([meName]);
         const contacts = [];
-        products.forEach(p => { const n = p.seller_name; if (n && !seen.has(n)) { seen.add(n); contacts.push({ id: "u_" + n, name: n, username: "@" + String(n).toLowerCase().replace(/[^a-z0-9]/g, "") }); } });
+        products.forEach(p => { const n = p.seller_name; if (n && !seen.has(n)) { seen.add(n); contacts.push({ id: "u_" + n, name: n }); } });
         // Órdenes por pagar = las mías aún no pagadas por billetera
         const payable = orders.filter(o => !o.paidViaWallet).map(o => ({ id: o.id, vendor: o.sellerName || "Vendedor", item: o.title || "Pedido", amount: (Number(o.amount) || 0) + (Number(o.shipPrice) || 0), currency: o.currency || "CUP" }));
         // Tasas desde el panel de admin (Economía → FX): única fuente de verdad
@@ -1504,6 +1503,10 @@ function AppShell({ sessionUser }) {
       )}
       {showAdmin  && <OmniPanel onClose={() => setShowAdmin(false)} theme={appTk} zoom={densZoom} data={{
         meId: user?.id,
+        // Mensaje directo desde las colas del panel (Planes/Verificaciones): abre
+        // el chat real con esa persona (se usa junto con sendMessage + meta para
+        // dejar la mini-tarjeta de "a qué solicitud corresponde").
+        onOpenChat: (otherId, otherName) => { setShowAdmin(false); openChat(otherId, otherName); },
         // Al abrir una cola, marca LEÍDAS sus notificaciones de campanita (para que no
         // se acumulen). El badge de pendientes sigue su propia lógica (staff_pending_counts).
         onOpenQueue: (page) => {

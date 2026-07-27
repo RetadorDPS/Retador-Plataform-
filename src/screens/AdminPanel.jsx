@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -1836,7 +1836,7 @@ function ModeracionPublicaciones({ toast, onViewProfile, ro, onResolved }){
 // ── USUARIOS (con pestañas) — UNA sola fuente, la ficha es el ÚNICO sitio de acción ──
 // Pestañas: 👥 Todos · 🪪 Verificaciones pendientes · ⭐ Solicitudes de plan. Las filas
 // abren la FICHA del usuario; ahí viven TODAS las acciones (verificar/plan/suspender).
-function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, initialTab = 'all' }){
+function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, onOpenChat, initialTab = 'all' }){
   const PAGE = 20;
   const lvl = (k) => access[k] || 'none';
   const canUsers = lvl('users') !== 'none', canVerif = lvl('verif') !== 'none', canPlans = lvl('plans') !== 'none';
@@ -1911,6 +1911,20 @@ function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, initial
   const decidePlan = async (approve) => { const r=selPlan; setBusy('p'); try{ await adminReviewPlan(r.id,approve); toast(approve?`✅ Plan ${r.plan} aprobado`:'Solicitud de plan rechazada'); setSelPlan(null); afterChange(); }catch(e){ toast('⚠️ '+emsg(e)); } setBusy(null); };
   const doSuspend = async (u,suspended,why) => { setBusy('s'); try{ await adminSetSuspended(u.id,suspended,why||null); toast(suspended?`⛔ ${nmeOf(u)} suspendido`:`✅ ${nmeOf(u)} reactivado`); setSel(s=>s?{...s,is_suspended:suspended}:s); }catch(e){ toast('⚠️ '+emsg(e)); } setBusy(null); };
   const confirmSuspend = async () => { const u=suspendFor; setSuspendFor(null); await doSuspend(u,true,susReason.trim()); };
+
+  // Mensaje directo desde la ficha (Planes/Verificaciones): abre el chat real y
+  // deja el primer mensaje con una mini-tarjeta (messages.meta) indicando a qué
+  // solicitud corresponde, para coordinar manualmente (pago, foto, motivo…).
+  // Deja la estructura lista para cuando existan métodos de pago reales.
+  const sendReqMessage = async (u, title, subtitle) => {
+    if (!meId || !onOpenChat) return;
+    setBusy('m');
+    try {
+      await sendMessage(meId, u.id, "Hola, te escribo por tu solicitud 👋", { type: "admin_request", title, subtitle });
+      onOpenChat(u.id, nmeOf(u));
+    } catch (e) { toast('⚠️ ' + emsg(e)); }
+    setBusy(null);
+  };
 
   const chips = (u) => (
     <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
@@ -2085,6 +2099,7 @@ function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, initial
                             <button className="btn btd" style={{ flex:1 }} disabled={busy==='v'} onClick={()=>{ setReason(''); setRejectFor(selVerif); }}>🚫 Rechazar</button>
                           </div>
                         : <div style={{ textAlign:'center', fontSize:11, color:'var(--tx3)' }}>👁 Solo lectura</div>}
+                      {onOpenChat && <button className="btn sm" style={{ width:'100%', marginTop:8 }} disabled={busy==='m'} onClick={()=>sendReqMessage(sel, 'Verificación de perfil', 'Coordinemos tu solicitud por aquí')}>💬 Mensaje</button>}
                     </>
                   : <div style={{ fontSize:12, color:'var(--tx3)' }}>Sin solicitud de verificación de perfil. El ✓ se otorga solo cuando la persona envía sus documentos.</div>}
           </div>}
@@ -2099,6 +2114,7 @@ function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, initial
                   <button className="btn btd" style={{ flex:1 }} disabled={busy==='p'} onClick={()=>decidePlan(false)}>🚫 Rechazar</button>
                 </div>
               : <div style={{ textAlign:'center', fontSize:11, color:'var(--tx3)' }}>👁 Solo lectura</div>}
+            {onOpenChat && <button className="btn sm" style={{ width:'100%', marginTop:8 }} disabled={busy==='m'} onClick={()=>sendReqMessage(sel, `Solicitud de plan: ${selPlan.plan.charAt(0).toUpperCase()+selPlan.plan.slice(1)}`, 'Confirma el pago y coordinemos por aquí')}>💬 Mensaje</button>}
           </div>}
 
           {/* Acción de cuenta: suspender / reactivar */}
@@ -3138,7 +3154,7 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
               {page==='ops'&&<AdminOrders toast={add} onViewProfile={data.onViewProfile}/>}
               {page==='modq'&&<ModeracionPublicaciones toast={add} onViewProfile={data.onViewProfile} ro={curRO} onResolved={loadPending}/>}
               {page==='delivery'&&<Operaciones solo="Delivery" toast={add} data={data} ro={curRO} onResolved={loadPending}/>}
-              {(page==='users'||page==='verif'||page==='plans')&&<UsersHub toast={add} meId={data.meId} onViewProfile={data.onViewProfile} onResolved={loadPending}
+              {(page==='users'||page==='verif'||page==='plans')&&<UsersHub toast={add} meId={data.meId} onViewProfile={data.onViewProfile} onOpenChat={data.onOpenChat} onResolved={loadPending}
                 initialTab={page==='verif'?'verif':page==='plans'?'plans':'all'}
                 access={{ users:levelOf('users'), verif:levelOf('verifications'), plans:levelOf('plans') }}/>}
               {page==='editor'&&(curRO

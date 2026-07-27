@@ -111,18 +111,17 @@ const convertAmount = (amount, from, to, rates) => {
 
 const SEED_USER = {
   name: "Daniel",
-  username: "@daniel",
   omegaId: "OP-48213-7765",
   phone: "+34 612 345 678",
   verifiedSince: "12 de marzo de 2026",
 };
 
 const SEED_CONTACTS = [
-  { id: "c1", name: "Marta Ruiz", username: "@martaruiz" },
-  { id: "c2", name: "Carlos Peña", username: "@carlospena" },
-  { id: "c3", name: "Lucía Gómez", username: "@luciagomez" },
-  { id: "c4", name: "Javier Soto", username: "@javiersoto" },
-  { id: "c5", name: "Aitana Vidal", username: "@aitanavidal" },
+  { id: "c1", name: "Marta Ruiz" },
+  { id: "c2", name: "Carlos Peña" },
+  { id: "c3", name: "Lucía Gómez" },
+  { id: "c4", name: "Javier Soto" },
+  { id: "c5", name: "Aitana Vidal" },
 ];
 
 const SEED_ORDERS = [
@@ -771,7 +770,7 @@ function ProfileScreen({ user, wallet, openOverlay }) {
         <Avatar name={user.name} size="lg" />
         <div className="min-w-0">
           <p className="font-semibold text-slate-900">{user.name}</p>
-          <p className="text-xs text-slate-400">{user.username} · {user.omegaId}</p>
+          <p className="text-xs text-slate-400">{user.omegaId}</p>
           <div className="flex items-center gap-1 mt-1.5">
             <BadgeCheck className="h-3.5 w-3.5 text-amber-500" />
             <span className="text-2xs text-slate-500 font-medium">Verificado desde {user.verifiedSince}</span>
@@ -868,9 +867,7 @@ function SendMoneyOverlay({ contacts, wallet, storedPin, onClose, onSent, onGoTo
   const [pinError, setPinError] = useState("");
   const [processing, setProcessing] = useState(false);
 
-  const filtered = contacts.filter(
-    (c) => c.name.toLowerCase().includes(query.toLowerCase()) || c.username.toLowerCase().includes(query.toLowerCase())
-  );
+  const filtered = contacts.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
   const numAmount = parseFloat(amount || "0");
   const available = wallet.balances[currency];
   const insufficientFunds = numAmount > available;
@@ -942,7 +939,7 @@ function SendMoneyOverlay({ contacts, wallet, storedPin, onClose, onSent, onGoTo
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Buscar por nombre o @usuario"
+                  placeholder="Buscar por nombre"
                   className="w-full h-11 rounded-xl bg-slate-50 border border-slate-200 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200 transition"
                 />
               </div>
@@ -952,7 +949,6 @@ function SendMoneyOverlay({ contacts, wallet, storedPin, onClose, onSent, onGoTo
                     <Avatar name={c.name} />
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-slate-900">{c.name}</p>
-                      <p className="text-xs text-slate-400">{c.username}</p>
                     </div>
                   </button>
                 ))}
@@ -972,7 +968,7 @@ function SendMoneyOverlay({ contacts, wallet, storedPin, onClose, onSent, onGoTo
               />
               <button
                 disabled={phone.length < 9}
-                onClick={() => pickRecipient({ name: "Contacto nuevo", username: phone })}
+                onClick={() => pickRecipient({ name: phone, id: "phone_" + phone })}
                 className="w-full h-12 rounded-2xl bg-violet-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold text-sm active:scale-[0.98] transition"
               >
                 Buscar
@@ -1033,7 +1029,6 @@ function SendMoneyOverlay({ contacts, wallet, storedPin, onClose, onSent, onGoTo
             <Avatar name={recipient.name} />
             <div className="flex-1">
               <p className="text-sm font-medium text-slate-900">{recipient.name}</p>
-              <p className="text-xs text-slate-400">{recipient.username}</p>
             </div>
             <p className="font-mono font-semibold text-sm text-slate-900">{formatMoney(numAmount, currency)}</p>
           </div>
@@ -1103,7 +1098,7 @@ function ReceiveMoneyScreen({ user, wallet, onClose }) {
     try {
       if (navigator.share) {
         const amountText = requestAmount ? ` (${formatMoney(parseFloat(requestAmount), requestCurrency)})` : "";
-        navigator.share({ title: "Omega Pay", text: `Envíame dinero a ${user.username} en Omega Pay${amountText}` });
+        navigator.share({ title: "Omega Pay", text: `Envíame dinero a ${user.name} en Omega Pay${amountText}` });
       }
     } catch (e) { /* compartir no disponible */ }
   };
@@ -1115,7 +1110,7 @@ function ReceiveMoneyScreen({ user, wallet, onClose }) {
         <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm">
           <img src={qrUrl} alt="Código QR para recibir pagos" className="h-48 w-48 rounded-xl" />
         </div>
-        <p className="font-semibold text-slate-900 mt-5">{user.username}</p>
+        <p className="font-semibold text-slate-900 mt-5">{user.name}</p>
         <p className="text-xs text-slate-400 font-mono mt-0.5">{user.omegaId}</p>
 
         <button onClick={copyId} className="flex items-center gap-1.5 text-xs font-medium text-violet-600 mt-3">

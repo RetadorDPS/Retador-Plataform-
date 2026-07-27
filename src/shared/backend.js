@@ -27,9 +27,11 @@ export const getUserById = async (id) => {
   if (!id) return null;
   if (_profileCache.has(id)) return _profileCache.get(id);
   try {
-    const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url, bio, is_verified").eq("id", id).single();
+    const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url, bio, is_verified, email").eq("id", id).single();
     if (error || !data) { _profileCache.set(id, null); return null; }
-    const p = { id: data.id, name: data.full_name || "Usuario", avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified };
+    // El correo se expone tal cual (misma fuente que ve el dueño y el admin) —
+    // ya no hay "usuario"/@handle inventado a partir de él.
+    const p = { id: data.id, name: data.full_name || "Usuario", avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified, email: data.email || "" };
     _profileCache.set(id, p);
     return p;
   } catch (e) { return null; }

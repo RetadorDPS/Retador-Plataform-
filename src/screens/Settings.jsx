@@ -51,8 +51,8 @@ const CFG_INIT = {
     twoFactor:false, fingerprint:true, publicProfile:true,
     showLastSeen:false, showOnlineStatus:true,
     blockedUsers:[
-      { id:1, name:"Miguel Torres", username:"@miguel_t" },
-      { id:2, name:"Ana González",  username:"@ana_g"    },
+      { id:1, name:"Miguel Torres" },
+      { id:2, name:"Ana González"  },
     ],
   },
   chat:{ readReceipts:true, autoDownloadImages:false, autoDownloadVideos:false },

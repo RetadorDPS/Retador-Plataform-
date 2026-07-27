@@ -634,7 +634,7 @@ function FP_ReviewForm({ onSubmit, onCancel }) {
 }
 
 // ── PRO MODAL ─────────────────────────────────────────────────────
-function FP_ProModal({ onClose }) {
+function FP_ProModal({ onClose, onSeePlans }) {
   const FP_C = useFP_C();
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0,
@@ -684,7 +684,7 @@ function FP_ProModal({ onClose }) {
           </div>
         </div>
         <div style={{ padding:"20px 24px 24px" }}>
-          <FP_Btn style={{ width:"100%", marginBottom:8,
+          <FP_Btn onClick={onSeePlans} style={{ width:"100%", marginBottom:8,
             background:"linear-gradient(135deg,#5B45D4,#7C3AED)",
             boxShadow:"0 4px 20px rgba(91,69,212,0.3)" }}>
             Ver planes Pro
@@ -1110,7 +1110,7 @@ function FP_SettingsScreen({ onClose }) {
 }
 
 // ── VERIFICAR MI CUENTA (KYC real) ─────────────────────────────────
-function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash }) {
+function FP_VerifyModal({ user, isVerified, onClose, onSubmit, C, flash }) {
   const TYPES = ["Carnet de identidad", "Pasaporte", "Licencia de conducir"];
   const [loading, setLoading] = useState(true);
   const [myVerif, setMyVerif] = useState(null);
@@ -1149,7 +1149,6 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
   const missingSlots = [!front && "delantera", !back && "trasera", !selfie && "selfie con tu cara"].filter(Boolean);
   const valid = fullName.trim() && docNum.trim() && front && back && selfie;
   const flash_ = flash || (() => {});
-  const nameMismatch = !!(fullName.trim() && name && fullName.trim().toLowerCase() !== String(name).trim().toLowerCase());
 
   const doSubmit = async () => {
     if (!valid || submitting) return;
@@ -1218,8 +1217,7 @@ function FP_VerifyModal({ user, name, isVerified, onClose, onSubmit, C, flash })
             <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Nombre completo</div>
             <input value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Nombre completo, como en tu documento" style={{ width:"100%", boxSizing:"border-box", background:C.surfaceTop, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 12px", color:C.textPrimary, fontSize:13, outline:"none" }}/>
             <div style={{ fontSize:10.5, color:C.warning, fontWeight:700, margin:"6px 0 13px", lineHeight:1.4 }}>
-              ⚠️ Nombre COMPLETO, exactamente como aparece en tu documento de identidad. Puede ser diferente a tu nombre de usuario.
-              {nameMismatch && " Es distinto al nombre de tu perfil — no bloquea el envío, pero verifica que esté bien escrito."}
+              ⚠️ Nombre completo, exactamente como aparece en tu documento de identidad.
             </div>
             <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, marginBottom:6 }}>Número de documento</div>
             <input value={docNum} onChange={e=>setDocNum(e.target.value)} placeholder="Ej. 95010112345" style={{ width:"100%", boxSizing:"border-box", background:C.surfaceTop, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 12px", color:C.textPrimary, fontSize:13, marginBottom:13, outline:"none" }}/>
@@ -1376,14 +1374,16 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   const [showPlans,    setShowPlans]    = useState(false);
   const [toast,        setToast]        = useState(null);
 
+  // ÚNICA identidad pública: el nombre real (profiles.full_name). Ya no existe
+  // "usuario"/@handle — era un valor inventado en el frontend (pedazo del correo)
+  // sin columna real detrás. El correo es un dato aparte, de solo lectura, que
+  // se muestra igual (mismo valor) tanto en el perfil propio como en el ajeno.
+  // TODO (Pro): "nombre de marca destacado" — beneficio de pago, aún no construido.
   const defaultProfile = {
-    avatar:   initialProfile.avatar   || (isOwner && user?.avatar ? { type:"image", value: avatarUrlOf(user.avatar) } : null),
-    name:     initialProfile.name     || (isOwner ? (user?.name || "Usuario") : "Vendedor"),
-    username: initialProfile.username || (isOwner && user?.email ? user.email.split("@")[0] : ""),
-    // El correo es privado: solo se usa en el perfil PROPIO (nunca el del visitante
-    // como relleno del perfil de otra persona).
-    email:    initialProfile.email    || (isOwner ? (user?.email || "") : ""),
-    bio:      "",
+    avatar: initialProfile.avatar || (isOwner && user?.avatar ? { type:"image", value: avatarUrlOf(user.avatar) } : null),
+    name:   initialProfile.name   || (isOwner ? (user?.name || "Usuario") : "Vendedor"),
+    email:  initialProfile.email  || (isOwner ? (user?.email || "") : ""),
+    bio:    "",
     isVerified: false,
   };
 
@@ -1397,11 +1397,12 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     let alive = true;
     getUserById(sellerId).then(p => {
       if (!alive || !p?.name) return;
-      const uname = String(p.name).toLowerCase().replace(/[^a-z0-9._]/g, "");
       // El ✓ de "otro" usuario NUNCA sale del prop isVerified (ese es del dueño de
       // la sesión) — se trae en vivo del backend (profiles.is_verified) aquí.
-      setProfile(prev => ({ ...prev, name: p.name, username: uname, bio: p.bio || "", avatar: p.avatar ? { type: "photo", url: p.avatar } : prev.avatar, isVerified: !!p.verified }));
-      setPd(prev => ({ ...prev, name: p.name, username: uname, bio: p.bio || "" }));
+      // El correo también viene de aquí: mismo profiles.email que ve el dueño y
+      // el panel de admin, nunca un valor distinto.
+      setProfile(prev => ({ ...prev, name: p.name, email: p.email || "", bio: p.bio || "", avatar: p.avatar ? { type: "photo", url: p.avatar } : prev.avatar, isVerified: !!p.verified }));
+      setPd(prev => ({ ...prev, name: p.name, bio: p.bio || "" }));
     }).catch(() => {});
     return () => { alive = false; };
   }, [sellerId, isOwner]);
@@ -1429,7 +1430,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     setProfile(updated);
     setEditProfile(false);
     toast_("Perfil actualizado");
-    onProfileUpdate?.({ avatar: updated.avatar, name: updated.name, username: updated.username, email: updated.email, bio: updated.bio || "" });
+    onProfileUpdate?.({ avatar: updated.avatar, name: updated.name, email: updated.email, bio: updated.bio || "" });
     // Guarda en el backend (nombre, foto y BIOGRAFÍA). Así se refleja en TODOS
     // lados (perfil propio y público) y en el otro teléfono.
     if (isOwner && user?.id) {
@@ -1467,10 +1468,10 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
 
       {/* OVERLAYS */}
       {showPicker   && <FP_AvatarPicker current={pd.avatar} name={pd.name} userId={user?.id} onSelect={a=>{ setPd(d=>({...d,avatar:a})); setShowPicker(false); }} onClose={() => setShowPicker(false)}/>}
-      {showPro      && isOwner && <FP_ProModal onClose={() => setShowPro(false)}/>}
+      {showPro      && isOwner && <FP_ProModal onClose={() => setShowPro(false)} onSeePlans={() => { setShowPro(false); setShowPlans(true); }}/>}
       {showSettings && isOwner && <FP_SettingsScreen onClose={() => setShowSettings(false)}/>}
       {showReport && !isOwner && <FP_ReportModal targetName={profile.name} onClose={() => setShowReport(false)} onSubmit={(payload) => { onReport?.(payload); setShowReport(false); toast_("Reporte enviado. Gracias por avisar."); }} C={FP_C}/>}
-      {showVerify && isOwner && <FP_VerifyModal user={user} name={profile.name} isVerified={isVerified} onClose={() => setShowVerify(false)} onSubmit={() => onVerify?.()} C={FP_C} flash={toast_}/>}
+      {showVerify && isOwner && <FP_VerifyModal user={user} isVerified={isVerified} onClose={() => setShowVerify(false)} onSubmit={() => onVerify?.()} C={FP_C} flash={toast_}/>}
       {showPlans && isOwner && <FP_PlansModal user={user} plans={plans} current={currentPlan} onClose={() => setShowPlans(false)} C={FP_C} flash={toast_}/>}
 
       {/* TOAST */}
@@ -1570,16 +1571,12 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
             )}
           </div>
 
-          {/* Name / handle / location */}
+          {/* Nombre — ÚNICA identidad pública. Sin @handle: nunca se muestra un
+              valor inventado del correo, y el correo en sí va solo en "Acerca de". */}
           <div style={{ fontSize:20, fontWeight:700, color:FP_C.textPrimary,
-            fontFamily:FP_FH, marginBottom:3 }}>
+            fontFamily:FP_FH, marginBottom:8 }}>
             {profile.name}
           </div>
-          {profile.username ? (
-            <div style={{ fontSize:12, color:FP_C.textSecondary, marginBottom:8 }}>
-              @{profile.username}
-            </div>
-          ) : null}
 
           {/* Rating */}
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
@@ -1681,7 +1678,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
           </div>
 
           {(()=>{ 
-            const isCourier=(()=>{ try { const cs=JSON.parse(localStorage.getItem("retador_couriers")||"[]"); return cs.some(c=>c.status==="approved"&&(c.nombre===profile.name||c.name===profile.name||c.username===profile.username)); } catch(e){ return false; } })();
+            const isCourier=(()=>{ try { const cs=JSON.parse(localStorage.getItem("retador_couriers")||"[]"); return cs.some(c=>c.status==="approved"&&(c.nombre===profile.name||c.name===profile.name)); } catch(e){ return false; } })();
             if(!isCourier) return null;
             const cr=(typeof ratingForName==="function")?ratingForName(profile.name,"courier"):{avg:0,count:0,reviews:[]};
             return <div style={{ background:FP_C.surface, border:`1px solid ${FP_C.border}`, borderRadius:14, padding:"14px", marginTop:14 }}>
@@ -1763,17 +1760,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
               onFocus={e => e.target.style.borderColor = FP_C.accent}
               onBlur={e => e.target.style.borderColor = FP_C.border}
               style={fpInputStyle(FP_C)}/>
-          </FP_Field>
-          <FP_Field label="Usuario">
-            <div style={{ position:"relative" }}>
-              <span style={{ position:"absolute", left:12, top:"50%",
-                transform:"translateY(-50%)", color:FP_C.textMuted, fontSize:13 }}>@</span>
-              <input value={pd.username} placeholder="tunombre"
-                onChange={e => setPd(d => ({...d,username:e.target.value.toLowerCase().replace(/\s/g,"")}))}
-                onFocus={e => e.target.style.borderColor = FP_C.accent}
-                onBlur={e => e.target.style.borderColor = FP_C.border}
-                style={{...fpInputStyle(FP_C), paddingLeft:26}}/>
-            </div>
           </FP_Field>
           <FP_Field label="Bio">
             <textarea value={pd.bio} placeholder="Cuéntale a los compradores quién eres…"
@@ -1972,6 +1958,19 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                           fontWeight:600, fontFamily:FP_FH }}>Editar</span>
                       </button>
                     )}
+                  </FP_Row>
+
+                  {/* Correo de la cuenta — ÚNICO sitio donde se muestra, siempre de
+                      solo lectura y siempre profiles.email (mismo valor que ve el
+                      dueño y el panel de admin; nunca un dato distinto o inventado). */}
+                  <FP_Row border style={{ gap:12 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                      <FP_Icon d={FP_Icons.mail} size={15} color={FP_C.textSecondary}/>
+                      <div>
+                        <div style={{ fontSize:10, color:FP_C.textMuted, fontWeight:700, letterSpacing:"0.3px" }}>CORREO DE LA CUENTA</div>
+                        <div style={{ fontSize:13, color:FP_C.textSecondary }}>{profile.email || "—"}</div>
+                      </div>
+                    </div>
                   </FP_Row>
 
                   {[

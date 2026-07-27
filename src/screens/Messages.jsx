@@ -42,17 +42,20 @@ function OrderChatCard({ meta, orders = [], onOpenOrder, B, T1, T3, soft }) {
 // para que ambas partes sepan de qué se habla. Tocar → abre el detalle.
 function RefChatCard({ meta, onOpen, B, T1, T3, soft }) {
   const price = meta.price != null && meta.price !== "" ? money(Number(meta.price) || 0, meta.currency || "USD") : null;
+  const isAdminReq = meta.type === "admin_request";
   return (
     <div onClick={onOpen} className="p" style={{ display: "flex", alignItems: "center", gap: 11, background: soft, border: `1px solid ${B}`, borderRadius: 13, padding: "9px 11px", marginBottom: 7, cursor: onOpen ? "pointer" : "default", minWidth: 200, maxWidth: 280 }}>
       {meta.image
         ? <img src={meta.image} alt="" style={{ width: 56, height: 56, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />
-        : <div style={{ width: 56, height: 56, borderRadius: 10, background: "#8884", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>{meta.type === "order" ? "📦" : "🛍️"}</div>}
+        : <div style={{ width: 56, height: 56, borderRadius: 10, background: "#8884", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>{meta.type === "order" ? "📦" : isAdminReq ? "🪪" : "🛍️"}</div>}
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{ fontSize: 12.5, fontWeight: 800, color: T1, lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{meta.title || (meta.type === "order" ? "Pedido" : "Producto")}</p>
-        <p style={{ fontSize: 11, color: T3, marginTop: 3, fontWeight: 700 }}>
-          {price ? <span style={{ color: "#22C55E" }}>{price}</span> : (meta.type === "order" ? "Pedido" : "Producto")}
-          <span style={{ fontWeight: 600 }}> · Ver detalle ›</span>
-        </p>
+        {isAdminReq
+          ? <p style={{ fontSize: 11, color: T3, marginTop: 3, fontWeight: 700 }}>{meta.subtitle || "Coordinando por chat"}</p>
+          : <p style={{ fontSize: 11, color: T3, marginTop: 3, fontWeight: 700 }}>
+              {price ? <span style={{ color: "#22C55E" }}>{price}</span> : (meta.type === "order" ? "Pedido" : "Producto")}
+              <span style={{ fontWeight: 600 }}> · Ver detalle ›</span>
+            </p>}
       </div>
     </div>
   );
@@ -327,14 +330,14 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
                 if (meta?.type === "order" && !(m.text || "").trim()) {
                   return <OrderChatCard key={m.id} meta={meta} orders={orders} onOpenOrder={onOpenOrder} B={B} T1={T1} T3={T3} soft={soft} />;
                 }
-                const openRef = meta ? () => {
+                const openRef = (meta && (meta.type === "order" || meta.type === "product")) ? () => {
                   if (meta.type === "order") onOpenOrder && onOpenOrder(meta.order_id || meta.id);
-                  else if (meta.type === "product") onOpenProduct && onOpenProduct(meta.id);
+                  else onOpenProduct && onOpenProduct(meta.id);
                 } : null;
                 return (
                   <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
                     <div style={{ maxWidth: "78%", background: mine ? G : "#171717", border: mine ? "none" : `1px solid ${B}`, borderRadius: mine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "10px 13px" }}>
-                      {meta && (meta.type === "product" || meta.type === "order") && <RefChatCard meta={meta} onOpen={openRef} B={mine ? "#00000022" : B} T1={mine ? "#000" : T1} T3={mine ? "#00000088" : T3} soft={mine ? "#ffffff55" : soft} />}
+                      {meta && (meta.type === "product" || meta.type === "order" || meta.type === "admin_request") && <RefChatCard meta={meta} onOpen={openRef} B={mine ? "#00000022" : B} T1={mine ? "#000" : T1} T3={mine ? "#00000088" : T3} soft={mine ? "#ffffff55" : soft} />}
                       <p style={{ fontSize: 12, color: mine ? "#000" : "#eee", lineHeight: 1.5, wordBreak: "break-word" }}>{m.text}</p>
                       <p style={{ fontSize: 9, color: mine ? "#00000066" : "rgba(255,255,255,.55)", marginTop: 4, textAlign: "right" }}>
                         {new Date(m.created_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}

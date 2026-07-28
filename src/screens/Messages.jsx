@@ -310,17 +310,59 @@ function EmojiPickerModal({ onPick, onClose, CARD, B, T1, T2, isDark }) {
 
 // ── Barra superior de SELECCIÓN (reemplaza el encabezado normal del chat
 // mientras hay un mensaje elegido con "mantener presionado"): Responder,
-// Editar (solo mío y de texto), Eliminar. Nada inventado (sin "reenviar" ni
-// "anclar" — esas funciones no existen aún en el backend).
-function SelectionTopBar({ mine, isTextMsg, onClose, onReply, onEdit, onDelete, S, B, T1, isDark }) {
+// Reenviar, Editar (solo mío y de texto), Eliminar. Sin "anclar" — esa función
+// no existe aún en el backend, no se inventa.
+function SelectionTopBar({ mine, isTextMsg, onClose, onReply, onForward, onEdit, onDelete, S, B, T1, isDark }) {
   const btnStyle = { background: "none", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, color: T1, fontSize: 9.5, fontWeight: 600, padding: "4px 10px" };
   return (
     <div style={{ background: isDark ? "rgba(8,8,8,.97)" : "rgba(255,255,255,.98)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "9px 12px", display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
       <button onClick={onClose} style={{ background: "none", border: "none", color: T1, fontSize: 20, cursor: "pointer", padding: "0 8px 0 2px", lineHeight: 1 }}>×</button>
       <div style={{ flex: 1 }} />
       <button onClick={onReply} style={btnStyle}><span style={{ fontSize: 17 }}>↩️</span>Responder</button>
+      <button onClick={onForward} style={btnStyle}><span style={{ fontSize: 17 }}>↪️</span>Reenviar</button>
       {mine && isTextMsg && <button onClick={onEdit} style={btnStyle}><span style={{ fontSize: 17 }}>✏️</span>Editar</button>}
       {mine && <button onClick={onDelete} style={{ ...btnStyle, color: "#EF4444" }}><span style={{ fontSize: 17 }}>🗑️</span>Eliminar</button>}
+    </div>
+  );
+}
+
+// ── Selector de conversaciones para REENVIAR un mensaje (mismo listado que la
+// pantalla de Mensajes). Multi-selección con casillas; "Enviar" crea un
+// mensaje nuevo por cada conversación elegida con el mismo contenido.
+function ForwardPickerModal({ user, onClose, onConfirm, CARD, B, T1, T2, T3, isDark }) {
+  const [convs, setConvs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [picked, setPicked] = useState({});
+  useEffect(() => {
+    if (!user?.id) { setLoading(false); return; }
+    getMyConversations(user.id).then(d => { setConvs(d); setLoading(false); }).catch(() => setLoading(false));
+  }, [user?.id]);
+  const toggle = (otherId) => setPicked(p => ({ ...p, [otherId]: !p[otherId] }));
+  const chosen = Object.keys(picked).filter(k => picked[k]);
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 5200, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: CARD, width: "100%", maxWidth: 440, maxHeight: "72vh", borderRadius: "18px 18px 0 0", padding: "14px 14px 16px", border: `1px solid ${B}`, display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, padding: "0 4px" }}>
+          <p style={{ fontSize: 13, fontWeight: 800, color: T1 }}>Reenviar a…</p>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: T2, fontSize: 19, cursor: "pointer", padding: 4 }}>×</button>
+        </div>
+        <div style={{ overflowY: "auto", flex: 1, minHeight: 60 }}>
+          {loading
+            ? <div style={{ display: "flex", justifyContent: "center", padding: 20 }}><Spin size={20} /></div>
+            : convs.length === 0
+              ? <p style={{ fontSize: 12, color: T3, textAlign: "center", padding: 20 }}>Sin conversaciones</p>
+              : convs.map(c => (
+                  <div key={c.id} onClick={() => toggle(c.otherId)} className="cd" style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 6px", borderRadius: 12, cursor: "pointer" }}>
+                    <AvatarUser userId={c.otherId} name={c.name} size={38} />
+                    <p style={{ flex: 1, fontSize: 13, fontWeight: 600, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</p>
+                    <div style={{ width: 20, height: 20, borderRadius: "50%", border: `2px solid ${picked[c.otherId] ? G : B}`, background: picked[c.otherId] ? G : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#000", fontWeight: 800, flexShrink: 0 }}>{picked[c.otherId] ? "✓" : ""}</div>
+                  </div>
+                ))}
+        </div>
+        <button disabled={!chosen.length} onClick={() => onConfirm(chosen)} className="p" style={{ marginTop: 10, height: 44, borderRadius: 10, background: chosen.length ? G : "rgba(128,128,128,.25)", border: "none", color: chosen.length ? "#000" : T3, fontWeight: 800, fontSize: 13, cursor: chosen.length ? "pointer" : "default", flexShrink: 0 }}>
+          Enviar{chosen.length ? ` (${chosen.length})` : ""}
+        </button>
+      </div>
     </div>
   );
 }
@@ -553,8 +595,13 @@ function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, 
   } : null;
   const bubbleBg = mine ? G : CARD;
   const bubbleText = mine ? "#000" : T1;
+  // Quita el menú NATIVO del navegador (selección de texto / "buscar con
+  // Google...") al mantener presionado, en toda la burbuja — el gesto propio
+  // (useMessageGesture) ya maneja pointerdown/up y previene el contextmenu;
+  // esto además evita que el SO dispare su propia selección de texto encima.
+  const noNativeSelect = { userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" };
   return (
-    <div id={`msg-${m.id}`} style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start", padding: "3px 4px", margin: "-3px -4px", borderRadius: 12, background: selected ? (isDark ? "rgba(255,255,255,.07)" : "rgba(0,0,0,.05)") : "transparent", transition: "background .15s" }}>
+    <div id={`msg-${m.id}`} style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start", padding: "3px 4px", margin: "-3px -4px", borderRadius: 12, background: selected ? (isDark ? "rgba(255,255,255,.07)" : "rgba(0,0,0,.05)") : "transparent", position: "relative", zIndex: selected ? 15 : "auto", transition: "background .15s", ...noNativeSelect }}>
       {selected && (
         <QuickReactionBar current={myReaction} onPick={(e) => onReact(m.id, e)} onOpenFull={() => onReact(m.id, "__FULL__")} mine={mine} CARD={CARD} B={B} isDark={isDark} />
       )}
@@ -567,7 +614,7 @@ function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, 
           {meta && (meta.type === "product" || meta.type === "order" || meta.type === "admin_request") && <RefChatCard meta={meta} onOpen={openRef} orders={orders} B={mine ? "#00000022" : B} T1={mine ? "#000" : T1} T3={mine ? "#00000088" : T3} soft={mine ? "#ffffff55" : soft} />}
           {isVoice
             ? <VoiceMessage meta={meta} mine={mine} isDark={isDark} T1={bubbleText} T3={T3} accentBg={mine ? "#00000022" : `${G}33`} />
-            : <p style={{ fontSize: 12, color: bubbleText, lineHeight: 1.5, wordBreak: "break-word" }}>{m.text}</p>}
+            : <p style={{ fontSize: 12, color: bubbleText, lineHeight: 1.5, wordBreak: "break-word", ...noNativeSelect }}>{m.text}</p>}
           <p style={{ fontSize: 9, color: mine ? "#00000066" : T3, marginTop: 4, textAlign: "right" }}>
             {m.edited_at && <span style={{ fontStyle: "italic" }}>Editado · </span>}
             {new Date(m.created_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
@@ -596,6 +643,7 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
   const [selectedId, setSelectedId] = useState(null); // mensaje SELECCIONADO (mantener presionado)
   const [emojiPickerFor, setEmojiPickerFor] = useState(null); // id de mensaje con selector completo abierto
   const [replyTo,   setReplyTo]   = useState(null);   // { id, preview }
+  const [forwardMsg, setForwardMsg] = useState(null); // mensaje a reenviar (abre el picker de conversaciones)
   const [editing,   setEditing]   = useState(null);   // mensaje que se está editando
   const [highlightId, setHighlightId] = useState(null);
   // CONTEXTO (estilo AliExpress): si el chat se abrió desde un producto/pedido,
@@ -664,9 +712,20 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     return () => { a = false; };
   }, []);
 
+  // BUG REAL encontrado: toggleReaction dispara SU PROPIA loadReactions al
+  // terminar, y el eco del realtime de esa MISMA escritura dispara OTRA
+  // loadReactions por su cuenta — dos pedidos de red independientes para el
+  // mismo dato, que pueden resolver en CUALQUIER orden. Sin protección, la
+  // respuesta que llega ÚLTIMO gana, aunque sea la más VIEJA — si esa es la de
+  // antes de tu reacción, la pantalla "revierte" tu cambio (parece que no se
+  // pudo cambiar la reacción, aunque en la base sí quedó bien). Se arregla con
+  // un número de pedido: solo se aplica la respuesta del ÚLTIMO pedido hecho.
+  const reactionsReqRef = useRef(0);
   const loadReactions = useCallback((ids) => {
-    if (!ids.length) { setReactions({}); return; }
+    const myReq = ++reactionsReqRef.current;
+    if (!ids.length) { if (myReq === reactionsReqRef.current) setReactions({}); return; }
     getReactionsForMessages(ids).then(rows => {
+      if (myReq !== reactionsReqRef.current) return; // pedido viejo: se descarta
       const grouped = {};
       rows.forEach(r => { (grouped[r.message_id] ||= []).push(r); });
       setReactions(grouped);
@@ -765,6 +824,26 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     } catch (e) { flash("❌ No se pudo editar el mensaje"); }
   }, [editing, flash]);
 
+  // Reenviar: crea un mensaje NUEVO con el mismo contenido (texto, o el mismo
+  // audio_path si es nota de voz) en cada conversación elegida — un insert
+  // normal a messages, igual que enviar cualquier mensaje. Se quita reply_to
+  // del meta copiado (esa cita no existe/no aplica en la conversación destino).
+  const handleForwardTo = useCallback(async (otherIds) => {
+    if (!forwardMsg || !user?.id || !otherIds.length) return;
+    const meta = forwardMsg.meta && typeof forwardMsg.meta === "object" ? forwardMsg.meta : null;
+    const cleanMeta = meta ? { ...meta } : null;
+    if (cleanMeta) { delete cleanMeta.reply_to; delete cleanMeta.reply_preview; }
+    const text = (forwardMsg.text && forwardMsg.text.trim())
+      ? forwardMsg.text
+      : (meta?.type === "voice" ? "🎤 Mensaje de voz" : (meta?.title ? "🛍️ " + meta.title : "Mensaje reenviado"));
+    setForwardMsg(null);
+    let ok = 0;
+    for (const otherId of otherIds) {
+      try { await sendMessage(user.id, otherId, text, cleanMeta); ok++; } catch (e) {}
+    }
+    flash(ok ? `↪️ Reenviado a ${ok} conversación${ok > 1 ? "es" : ""}` : "❌ No se pudo reenviar");
+  }, [forwardMsg, user?.id, flash]);
+
   const handleDelete = useCallback(async (msg) => {
     setSelectedId(null);
     try {
@@ -815,6 +894,7 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
           isTextMsg={isSelectedTextMsg}
           onClose={() => setSelectedId(null)}
           onReply={() => { setReplyTo({ id: selectedMsg.id, preview: previewOf(selectedMsg) }); setEditing(null); setSelectedId(null); }}
+          onForward={() => { setForwardMsg(selectedMsg); setSelectedId(null); }}
           onEdit={() => { setEditing(selectedMsg); setReplyTo(null); setSelectedId(null); }}
           onDelete={() => handleDelete(selectedMsg)}
           S={S} B={B} T1={T1} isDark={isDark}
@@ -831,18 +911,18 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
           </div>
           <div style={{ position: "relative" }}>
             <button onClick={() => setChatOpts(o => !o)} style={{ background: "none", border: "none", color: T2, fontSize: 19, cursor: "pointer", lineHeight: 1 }}>⋯</button>
-            {chatOpts && <>
-              <div onClick={() => setChatOpts(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-              <div style={{ position: "absolute", top: 28, right: 0, background: CARD, border: `1px solid ${B}`, borderRadius: 12, boxShadow: isDark ? "0 8px 24px rgba(0,0,0,.35)" : "0 8px 24px rgba(0,0,0,.18)", overflow: "hidden", zIndex: 41, minWidth: 170 }}>
-                <button onClick={handleToggleBlock} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", padding: "12px 14px", fontSize: 12.5, fontWeight: 600, color: T1, cursor: "pointer" }}>{blocked ? "Desbloquear usuario" : "Bloquear usuario"}</button>
-                <button onClick={() => { setChatOpts(false); flash("Reporte enviado al equipo de RETADOR"); }} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderTop: `1px solid ${B}`, padding: "12px 14px", fontSize: 12.5, fontWeight: 600, color: "#ef4444", cursor: "pointer" }}>Reportar usuario</button>
-              </div>
-            </>}
           </div>
         </div>
       )}
 
-      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "12px clamp(18px,3vw,48px)", display: "flex", flexDirection: "column", gap: 7, ...chatBgStyle(isDark) }}>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "12px clamp(18px,3vw,48px)", display: "flex", flexDirection: "column", gap: 7, position: "relative", ...chatBgStyle(isDark) }}>
+        {/* Fondo oscurecido al seleccionar un mensaje (mantener presionado): tocar
+            en CUALQUIER parte fuera del mensaje seleccionado cancela la selección
+            sin forzar a elegir una reacción (el mensaje elegido queda POR ENCIMA
+            de este velo gracias a su z-index propio en MessageBubble). */}
+        {selectedId && (
+          <div onClick={() => setSelectedId(null)} style={{ position: "absolute", inset: 0, background: isDark ? "rgba(0,0,0,.45)" : "rgba(0,0,0,.25)", zIndex: 10 }} />
+        )}
         {loading
           ? <div style={{ display: "flex", justifyContent: "center", padding: "24px 0" }}><Spin size={22} /></div>
           : msgs.length === 0
@@ -883,6 +963,32 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
           onPick={(e) => handleReact(emojiPickerFor, e)}
         />
       )}
+
+      {forwardMsg && (
+        <ForwardPickerModal
+          user={user} CARD={CARD} B={B} T1={T1} T2={T2} T3={T3} isDark={isDark}
+          onClose={() => setForwardMsg(null)}
+          onConfirm={handleForwardTo}
+        />
+      )}
+
+      {/* Menú "⋮" (Bloquear/Reportar) — renderizado como HERMANO DE TOPE, fuera de
+          cualquier envoltura intermedia: un bug real encontrado en verificación
+          mostraba los mensajes pintándose POR ENCIMA del menú al desplazar el
+          chat, aunque el menú tuviera z-index mayor — un div de un mensaje
+          (position:relative, z-index:auto) dentro del contenedor con scroll
+          terminaba compitiendo por encima de un position:fixed anidado más
+          adentro del árbol. Sacarlo a este nivel (mismo nivel que los otros
+          modales) lo deja sin ambigüedad, siempre arriba de todo. Un overlay
+          invisible a pantalla completa cierra el menú al tocar CUALQUIER parte
+          fuera de él (no solo re-tocando "⋯"). */}
+      {chatOpts && <>
+        <div onClick={() => setChatOpts(false)} style={{ position: "fixed", inset: 0, zIndex: 5150 }} />
+        <div style={{ position: "fixed", top: "calc(11px + env(safe-area-inset-top, 0px) + 46px)", right: 14, background: CARD, border: `1px solid ${B}`, borderRadius: 12, boxShadow: isDark ? "0 8px 24px rgba(0,0,0,.35)" : "0 8px 24px rgba(0,0,0,.18)", overflow: "hidden", zIndex: 5151, minWidth: 170 }}>
+          <button onClick={handleToggleBlock} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", padding: "12px 14px", fontSize: 12.5, fontWeight: 600, color: T1, cursor: "pointer" }}>{blocked ? "Desbloquear usuario" : "Bloquear usuario"}</button>
+          <button onClick={() => { setChatOpts(false); flash("Reporte enviado al equipo de RETADOR"); }} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderTop: `1px solid ${B}`, padding: "12px 14px", fontSize: 12.5, fontWeight: 600, color: "#ef4444", cursor: "pointer" }}>Reportar usuario</button>
+        </div>
+      </>}
     </div>
   );
 }

@@ -1,31 +1,96 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { Avatar, AvatarUser, G, Ic, ORDER_FLOW, Spin, getMyConversations, getSB, getUserName, getProductById, isBlockedPair, isBlockSendError, toggleBlockUser, editMessage, sendReply, uploadVoiceNote, voiceNoteSignedUrl, toggleReaction, getReactionsForMessages, loadMessages, markRead, money, sendMessage, supabase, trackEvent, useAt, useR } from "../shared/index.js";
+import { Avatar, AvatarUser, G, Ic, ORDER_FLOW, Spin, getMyConversations, getSB, getUserName, getProductById, isBlockedPair, isBlockSendError, toggleBlockUser, editMessage, deleteMessage, uploadVoiceNote, voiceNoteSignedUrl, toggleReaction, getReactionsForMessages, loadMessages, markRead, money, sendMessage, supabase, trackEvent, useAt, useR } from "../shared/index.js";
 
-// Fondo del chat: textura MUY discreta con la identidad RETADOR (puntos dorados
-// finísimos sobre el tono oscuro/claro de siempre) — nunca compite con las burbujas.
+// Fondo del chat: textura de identidad RETADOR — sutil pero SÍ perceptible (un
+// patrón de puntos dorados en diagonal), en ambos temas. No compite con las
+// burbujas (siguen siendo lo más contrastado de la pantalla) pero ya no es
+// invisible como antes.
 const chatBgStyle = (isDark) => ({
-  backgroundColor: isDark ? "#0a0a0a" : "#f4f5f7",
-  backgroundImage: `radial-gradient(${isDark ? "rgba(255,192,30,.05)" : "rgba(180,130,0,.07)"} 1px, transparent 1px)`,
-  backgroundSize: "18px 18px",
+  backgroundColor: isDark ? "#0a0a0a" : "#f2f3f6",
+  backgroundImage: `radial-gradient(${isDark ? "rgba(255,192,30,.16)" : "rgba(180,130,0,.16)"} 1.6px, transparent 1.6px), radial-gradient(${isDark ? "rgba(255,192,30,.09)" : "rgba(180,130,0,.09)"} 1.6px, transparent 1.6px)`,
+  backgroundSize: "26px 26px, 26px 26px",
+  backgroundPosition: "0 0, 13px 13px",
 });
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+// Selector COMPLETO propio (sin librería externa ni picker nativo invocable por
+// JS): un grid ampliado, agrupado a ojo por familia, con scroll.
+const ALL_EMOJIS = [
+  "👍", "👎", "❤️", "😂", "😮", "😢", "🙏", "🔥", "🎉", "👏",
+  "😀", "😁", "😃", "😄", "😅", "😆", "🙂", "🙃", "😉", "😊",
+  "😍", "😘", "😜", "🤔", "😐", "😑", "😶", "🙄", "😏", "😒",
+  "😞", "😔", "😟", "😕", "🙁", "😩", "😫", "😤", "😠", "😡",
+  "🥳", "🥰", "😎", "🤩", "🥺", "😳", "😱", "😴", "🤗", "🤝",
+  "👌", "✌️", "🤞", "👊", "✊", "💪", "🙌", "👋", "🤙", "🖐️",
+  "💯", "✅", "❌", "⚠️", "❗", "❓", "💡", "⭐", "🌟", "✨",
+  "💰", "💵", "🛍️", "📦", "🚚", "⏰", "📌", "📍", "🎁", "🏆",
+];
 const ORDER_STATUS_ICON = { creada: "🕐", confirmado: "🕐", asignado: "📦", recogido: "📦", en_ruta: "🚚", en_reparto: "🚚", recibido: "📦", preparando: "📦", enviado: "🚚", en_aduana: "🛃", entregado: "✅", completado: "✅", cancelado: "❌", fallido: "❌" };
 
-// ── Long-press (touca o mouse mantenido) para abrir el menú de un mensaje ────
-function useLongPress(onLongPress, ms = 450) {
-  const timer = useRef(null);
-  const fired = useRef(false);
-  const start = (e) => {
-    fired.current = false;
-    timer.current = setTimeout(() => { fired.current = true; onLongPress(e); }, ms);
+// ── Gesto de un mensaje: mantener presionado = seleccionar (abre reacciones +
+// barra superior); deslizar de izquierda a derecha = responder. Un solo hook
+// coordina ambos para que no se disparen a la vez (si detecta arrastre, cancela
+// el temporizador de "mantener presionado"; si detecta scroll vertical o hacia
+// la izquierda, no hace nada y deja pasar el gesto nativo de la lista).
+function useMessageGesture({ onLongPress, onSwipeReply, disabled }) {
+  const [dx, setDx] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const st = useRef({ x: 0, y: 0, live: false, mode: null, timer: null });
+  const clearTimer = () => { if (st.current.timer) { clearTimeout(st.current.timer); st.current.timer = null; } };
+  const onDown = (e) => {
+    if (disabled) return;
+    const s = st.current;
+    s.x = e.clientX; s.y = e.clientY; s.live = true; s.mode = null;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    clearTimer();
+    s.timer = setTimeout(() => {
+      if (s.live && s.mode == null) { s.mode = "press"; s.live = false; onLongPress(); }
+    }, 450);
   };
-  const clear = () => { if (timer.current) clearTimeout(timer.current); };
+  const onMove = (e) => {
+    const s = st.current;
+    if (!s.live || s.mode) return;
+    const ddx = e.clientX - s.x, ddy = e.clientY - s.y;
+    if (Math.hypot(ddx, ddy) < 8) return;
+    if (Math.abs(ddy) > Math.abs(ddx) || ddx < 0) { s.mode = "scroll"; clearTimer(); return; }
+    s.mode = "swipe"; clearTimer(); setDragging(true);
+  };
+  const onContinue = (e) => {
+    const s = st.current;
+    if (s.mode !== "swipe") return;
+    const ddx = e.clientX - s.x;
+    setDx(Math.max(0, Math.min(64, ddx)));
+  };
+  const onUp = () => {
+    const s = st.current;
+    clearTimer();
+    if (s.mode === "swipe" && dx >= 42) onSwipeReply();
+    s.live = false; s.mode = null;
+    setDragging(false); setDx(0);
+  };
   return {
-    onMouseDown: start, onMouseUp: clear, onMouseLeave: clear,
-    onTouchStart: start, onTouchEnd: clear, onTouchCancel: clear,
-    onContextMenu: (e) => { e.preventDefault(); },
+    dx, dragging,
+    handlers: {
+      onPointerDown: onDown,
+      onPointerMove: (e) => { onMove(e); onContinue(e); },
+      onPointerUp: onUp, onPointerCancel: onUp, onPointerLeave: (e) => { if (st.current.mode === "swipe") onUp(); },
+      onContextMenu: (e) => e.preventDefault(),
+    },
   };
+}
+
+// ── Ícono de micrófono PROPIO (no literal): cápsula dorada con detalle propio,
+// dentro de un círculo con borde — distinto del botón de enviar (relleno G).
+function MicGlyph({ isDark }) {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+      <rect x="8" y="2.5" width="8" height="12.5" rx="4" fill={G} />
+      <circle cx="12" cy="7" r="1.15" fill={isDark ? "#000" : "#fff"} opacity=".85" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0" stroke={G} strokeWidth="2" strokeLinecap="round" fill="none" />
+      <path d="M12 17.5v3.2" stroke={G} strokeWidth="2" strokeLinecap="round" />
+      <path d="M8.6 20.7h6.8" stroke={G} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 // ── TARJETA DE PEDIDO EN EL CHAT ─────────────────────────────────────────────
@@ -66,17 +131,16 @@ function OrderChatCard({ meta, orders = [], onOpenOrder, B, T1, T3, soft }) {
 }
 
 // Tarjeta de REFERENCIA (producto o pedido) que acompaña a un mensaje con texto.
-// AGRANDADA (punto 7): foto más grande, título a dos líneas, precio, y el ESTADO
-// actual si está ligada a un pedido/envío (ej. "🚚 En camino"). Si el producto ya
-// no existe o está agotado (punto 8), se reduce a una versión chica sin precio ni
-// acción — el mensaje y el historial NUNCA se pierden, solo se opaca la tarjeta.
+// Foto más grande, título a dos líneas, precio, y el ESTADO actual si está ligada
+// a un pedido/envío (ej. "🚚 En camino"). Si el producto ya no existe o está
+// agotado, se reduce a una versión chica sin precio ni acción — el mensaje y el
+// historial NUNCA se pierden, solo se opaca la tarjeta.
 function RefChatCard({ meta, onOpen, orders = [], B, T1, T3, soft }) {
   const price = meta.price != null && meta.price !== "" ? money(Number(meta.price) || 0, meta.currency || "USD") : null;
   const isAdminReq = meta.type === "admin_request";
   const isOrder = meta.type === "order";
   const isProduct = meta.type === "product";
 
-  // Estado del pedido/envío ligado (si aplica) — misma fuente que OrderChatCard.
   const oid = isOrder ? (meta.order_id || meta.id) : null;
   const liveOrder = oid ? orders.find(o => o.id === oid) : null;
   const [fetchedOrder, setFetchedOrder] = useState(null);
@@ -92,8 +156,6 @@ function RefChatCard({ meta, onOpen, orders = [], B, T1, T3, soft }) {
   const statusLabel = status ? ((flow.find(s => s.key === status) || {}).label || status) : null;
   const statusIcon = status ? (ORDER_STATUS_ICON[status] || "📦") : null;
 
-  // Disponibilidad del producto (si aplica) — se trae una vez; si ya no existe o
-  // está agotado, la tarjeta se reduce (sin precio ni "Ver detalle").
   const [avail, setAvail] = useState(isProduct ? "checking" : "ok"); // checking | ok | gone
   useEffect(() => {
     if (!isProduct || !meta.id) { setAvail("ok"); return; }
@@ -141,7 +203,7 @@ function RefChatCard({ meta, onOpen, orders = [], B, T1, T3, soft }) {
 }
 
 // ── Reproductor de nota de voz ───────────────────────────────────────────────
-function VoiceMessage({ meta, mine, T1, T3, accentBg }) {
+function VoiceMessage({ meta, mine, isDark, T1, T3, accentBg }) {
   const [url, setUrl] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [cur, setCur] = useState(0);
@@ -154,6 +216,7 @@ function VoiceMessage({ meta, mine, T1, T3, accentBg }) {
     if (!el) return;
     if (playing) { el.pause(); } else { el.play().catch(() => {}); }
   };
+  const trackBg = mine ? "#00000022" : (isDark ? "#ffffff22" : "#00000018");
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 190, padding: "3px 2px" }}>
       {url && <audio ref={audioRef} src={url} preload="none"
@@ -163,7 +226,7 @@ function VoiceMessage({ meta, mine, T1, T3, accentBg }) {
         <span style={{ fontSize: 14, color: mine ? "#000" : "#fff" }}>{playing ? "⏸" : "▶️"}</span>
       </button>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ height: 3, borderRadius: 2, background: mine ? "#00000022" : "#ffffff22", overflow: "hidden" }}>
+        <div style={{ height: 3, borderRadius: 2, background: trackBg, overflow: "hidden" }}>
           <div style={{ height: "100%", width: `${total ? Math.min(100, (cur / total) * 100) : 0}%`, background: mine ? "#000" : G, transition: "width .1s linear" }} />
         </div>
         <p style={{ fontSize: 9.5, color: mine ? "#00000088" : (T3 || "rgba(255,255,255,.6)"), marginTop: 3 }}>🎤 {fmt(playing || cur ? cur : total)}</p>
@@ -173,11 +236,14 @@ function VoiceMessage({ meta, mine, T1, T3, accentBg }) {
 }
 
 // ── Franja "respondiendo a" dentro de una burbuja — tocarla salta al original.
-function ReplyStrip({ meta, onJump, mine }) {
+function ReplyStrip({ meta, onJump, mine, isDark }) {
+  const tint = mine ? "#00000014" : (isDark ? "#ffffff14" : "#00000010");
+  const barColor = mine ? "#00000055" : G;
+  const textColor = mine ? "#00000099" : (isDark ? "rgba(255,255,255,.72)" : "rgba(0,0,0,.62)");
   return (
-    <div onClick={onJump} className="p" style={{ display: "flex", gap: 7, alignItems: "stretch", marginBottom: 6, cursor: "pointer", background: mine ? "#00000014" : "#ffffff0f", borderRadius: 8, padding: "5px 8px" }}>
-      <div style={{ width: 3, borderRadius: 2, background: mine ? "#00000055" : G, flexShrink: 0 }} />
-      <p style={{ fontSize: 11, color: mine ? "#00000099" : "rgba(255,255,255,.72)", lineHeight: 1.35, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{meta.reply_preview || "Mensaje"}</p>
+    <div onClick={onJump} className="p" style={{ display: "flex", gap: 7, alignItems: "stretch", marginBottom: 6, cursor: "pointer", background: tint, borderRadius: 8, padding: "5px 8px" }}>
+      <div style={{ width: 3, borderRadius: 2, background: barColor, flexShrink: 0 }} />
+      <p style={{ fontSize: 11, color: textColor, lineHeight: 1.35, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{meta.reply_preview || "Mensaje"}</p>
     </div>
   );
 }
@@ -202,21 +268,59 @@ function ReactionsRow({ list = [], meId, onToggle, mine }) {
   );
 }
 
-// ── Hoja de acción de un mensaje: reaccionar / responder / editar (si es mío) ─
-function MessageActionSheet({ mine, isTextMsg, onClose, onReact, onReply, onEdit }) {
+// ── Tira de reacciones rápidas (WhatsApp-style): aparece SIEMPRE al mantener
+// presionado, muestre o no ya una reacción tuya — si ya reaccionaste, tu emoji
+// aparece resaltado entre los rápidos. Tocar otro reemplaza; tocar el mismo la
+// quita (mismo toggle de siempre). El "+" abre el selector completo.
+function QuickReactionBar({ current, onPick, onOpenFull, mine, CARD, B, isDark }) {
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "var(--card,#141414)", width: "100%", maxWidth: 440, borderRadius: "18px 18px 0 0", padding: "14px 16px 24px", border: "1px solid rgba(128,128,128,.2)" }}>
-        <div style={{ display: "flex", justifyContent: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-          {QUICK_EMOJIS.map(e => (
-            <button key={e} onClick={() => onReact(e)} className="p" style={{ fontSize: 24, background: "none", border: "none", cursor: "pointer", padding: 4 }}>{e}</button>
+    <div style={{ display: "flex", alignSelf: mine ? "flex-end" : "flex-start", alignItems: "center", gap: 3, background: CARD, border: `1px solid ${B}`, borderRadius: 100, padding: "5px 6px", marginBottom: 5, boxShadow: isDark ? "0 4px 14px rgba(0,0,0,.35)" : "0 4px 14px rgba(0,0,0,.12)" }}>
+      {QUICK_EMOJIS.map(e => {
+        const active = current === e;
+        return (
+          <button key={e} onClick={() => onPick(e)} className="p"
+            style={{ fontSize: 19, width: 30, height: 30, borderRadius: "50%", background: active ? `${G}33` : "transparent", border: active ? `1.5px solid ${G}` : "1.5px solid transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transform: active ? "scale(1.08)" : "scale(1)" }}>
+            {e}
+          </button>
+        );
+      })}
+      <button onClick={onOpenFull} className="p" style={{ width: 30, height: 30, borderRadius: "50%", background: "rgba(128,128,128,.14)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 800, color: G }}>+</button>
+    </div>
+  );
+}
+
+// ── Selector COMPLETO de emojis (grid propio, sin dependencias externas). ────
+function EmojiPickerModal({ onPick, onClose, CARD, B, T1, T2, isDark }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 5100, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: CARD, width: "100%", maxWidth: 440, maxHeight: "62vh", borderRadius: "18px 18px 0 0", padding: "14px 14px 20px", border: `1px solid ${B}`, display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, padding: "0 4px" }}>
+          <p style={{ fontSize: 13, fontWeight: 800, color: T1 }}>Elegir emoji</p>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: T2, fontSize: 19, cursor: "pointer", padding: 4 }}>×</button>
+        </div>
+        <div style={{ overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 2 }}>
+          {ALL_EMOJIS.map((e, i) => (
+            <button key={e + i} onClick={() => onPick(e)} className="p" style={{ fontSize: 22, background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 10 }}>{e}</button>
           ))}
         </div>
-        <button onClick={onReply} style={{ width: "100%", height: 46, borderRadius: 10, background: "rgba(128,128,128,.1)", border: "none", color: "var(--tx,#eee)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>↩️ Responder</button>
-        {mine && isTextMsg && (
-          <button onClick={onEdit} style={{ width: "100%", height: 46, borderRadius: 10, background: "rgba(128,128,128,.1)", border: "none", color: "var(--tx,#eee)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>✏️ Editar</button>
-        )}
       </div>
+    </div>
+  );
+}
+
+// ── Barra superior de SELECCIÓN (reemplaza el encabezado normal del chat
+// mientras hay un mensaje elegido con "mantener presionado"): Responder,
+// Editar (solo mío y de texto), Eliminar. Nada inventado (sin "reenviar" ni
+// "anclar" — esas funciones no existen aún en el backend).
+function SelectionTopBar({ mine, isTextMsg, onClose, onReply, onEdit, onDelete, S, B, T1, isDark }) {
+  const btnStyle = { background: "none", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, color: T1, fontSize: 9.5, fontWeight: 600, padding: "4px 10px" };
+  return (
+    <div style={{ background: isDark ? "rgba(8,8,8,.97)" : "rgba(255,255,255,.98)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "9px 12px", display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+      <button onClick={onClose} style={{ background: "none", border: "none", color: T1, fontSize: 20, cursor: "pointer", padding: "0 8px 0 2px", lineHeight: 1 }}>×</button>
+      <div style={{ flex: 1 }} />
+      <button onClick={onReply} style={btnStyle}><span style={{ fontSize: 17 }}>↩️</span>Responder</button>
+      {mine && isTextMsg && <button onClick={onEdit} style={btnStyle}><span style={{ fontSize: 17 }}>✏️</span>Editar</button>}
+      {mine && <button onClick={onDelete} style={{ ...btnStyle, color: "#EF4444" }}><span style={{ fontSize: 17 }}>🗑️</span>Eliminar</button>}
     </div>
   );
 }
@@ -317,7 +421,7 @@ export function MessagesScreen({ user, onBack, onChat, chatOpen = false }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // Input AISLADO: guarda su propio borrador, así los mensajes que llegan por
 // realtime (que re-renderizan el chat) NO le roban el foco ni borran las letras.
-const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, T1, T3, initialDraft = "", replyTo, onCancelReply, editing, onSaveEdit, onCancelEdit }) {
+const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, T1, T3, isDark, initialDraft = "", replyTo, onCancelReply, editing, onSaveEdit, onCancelEdit }) {
   // initialDraft: mensaje predefinido EDITABLE (ej. el cobro de deuda del admin).
   const [draft, setDraft] = useState(initialDraft || "");
   const inputRef = useRef(null);
@@ -329,10 +433,12 @@ const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, 
   useEffect(() => { if (editing) setDraft(editing.text || ""); }, [editing]);
 
   // Al enviar NO se hace blur: se limpia el texto y el input CONSERVA el foco,
-  // así el teclado se queda abierto (con botón y con Enter).
+  // así el teclado se queda abierto (con botón y con Enter). Al CONFIRMAR una
+  // edición el campo también se vacía (antes se quedaba con el texto editado
+  // dentro, con riesgo de reenviarlo por accidente como mensaje nuevo).
   const send = () => {
     const t = draft.trim(); if (!t) return;
-    if (editing) { onSaveEdit(t); return; }
+    if (editing) { onSaveEdit(t); setDraft(""); return; }
     setDraft(""); onSend(t); inputRef.current?.focus();
   };
 
@@ -417,8 +523,8 @@ const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, 
                 <Ic n="send" c="#000" s={20} />
               </button>
             : <button onClick={startRecording} disabled={!!editing} className="p" onPointerDown={e => e.preventDefault()}
-                style={{ width: 42, height: 42, background: editing ? "#141414" : S, border: `1px solid ${B}`, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: editing ? .4 : 1, cursor: editing ? "default" : "pointer" }}>
-                <span style={{ fontSize: 18 }}>🎤</span>
+                style={{ width: 42, height: 42, background: S, border: `2px solid ${editing ? T3 : G}`, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: editing ? .4 : 1, cursor: editing ? "default" : "pointer" }}>
+                <MicGlyph isDark={isDark} />
               </button>}
         </div>
       )}
@@ -426,15 +532,18 @@ const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, 
   );
 });
 
-// ── Burbuja de un mensaje individual — componente propio para que useLongPress
-// (un hook) se llame en su propio nivel superior, NUNCA dentro de un .map().
-function MessageBubble({ m, mine, isDark, B, T1, T3, orders, onOpenOrder, onOpenProduct, msgReactions, meId, isHighlighted, onLongPress, onJumpTo, onReact }) {
+// ── Burbuja de un mensaje individual — componente propio para que los hooks de
+// gesto se llamen en su propio nivel superior, NUNCA dentro de un .map().
+function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, onOpenProduct, msgReactions, meId, isHighlighted, selected, onLongPress, onSwipeReply, onJumpTo, onReact }) {
   const soft = isDark ? "#141417" : "#f1f5f9";
   const meta = m.meta && typeof m.meta === "object" ? m.meta : null;
   const isVoice = meta?.type === "voice";
   const isReply = meta?.reply_to;
-  const longPress = useLongPress(onLongPress);
-  // Tarjeta de PEDIDO automática (sin texto del usuario): centrada, en vivo.
+  const gesture = useMessageGesture({ onLongPress, onSwipeReply, disabled: !!meta && meta.type === "order" && !(m.text || "").trim() });
+  const myReaction = (msgReactions.find(r => r.user_id === meId) || {}).emoji || null;
+
+  // Tarjeta de PEDIDO automática (sin texto del usuario): centrada, en vivo — sin
+  // gestos (no es un mensaje de texto que se pueda responder/reaccionar así).
   if (meta?.type === "order" && !(m.text || "").trim()) {
     return <div id={`msg-${m.id}`}><OrderChatCard meta={meta} orders={orders} onOpenOrder={onOpenOrder} B={B} T1={T1} T3={T3} soft={soft} /></div>;
   }
@@ -442,19 +551,29 @@ function MessageBubble({ m, mine, isDark, B, T1, T3, orders, onOpenOrder, onOpen
     if (meta.type === "order") onOpenOrder && onOpenOrder(meta.order_id || meta.id);
     else onOpenProduct && onOpenProduct(meta.id);
   } : null;
+  const bubbleBg = mine ? G : CARD;
+  const bubbleText = mine ? "#000" : T1;
   return (
-    <div id={`msg-${m.id}`} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start" }}>
-      <div {...longPress} style={{ maxWidth: "78%", background: mine ? G : "#171717", border: mine ? "none" : `1px solid ${B}`, borderRadius: mine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "10px 13px", transition: "box-shadow .3s, outline .3s", outline: isHighlighted ? `2px solid ${G}` : "none", outlineOffset: 2, boxShadow: isHighlighted ? `0 0 0 5px ${G}22` : "none" }}>
-        {isReply && <ReplyStrip meta={meta} mine={mine} onJump={() => onJumpTo(meta.reply_to)} />}
-        {meta && (meta.type === "product" || meta.type === "order" || meta.type === "admin_request") && <RefChatCard meta={meta} onOpen={openRef} orders={orders} B={mine ? "#00000022" : B} T1={mine ? "#000" : T1} T3={mine ? "#00000088" : T3} soft={mine ? "#ffffff55" : soft} />}
-        {isVoice
-          ? <VoiceMessage meta={meta} mine={mine} T1={T1} T3={T3} accentBg={mine ? "#00000022" : `${G}33`} />
-          : <p style={{ fontSize: 12, color: mine ? "#000" : "#eee", lineHeight: 1.5, wordBreak: "break-word" }}>{m.text}</p>}
-        <p style={{ fontSize: 9, color: mine ? "#00000066" : "rgba(255,255,255,.55)", marginTop: 4, textAlign: "right" }}>
-          {m.edited_at && <span style={{ fontStyle: "italic" }}>Editado · </span>}
-          {new Date(m.created_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
-          {mine && (m.read_at ? " ✓✓" : " ✓")}
-        </p>
+    <div id={`msg-${m.id}`} style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start", padding: "3px 4px", margin: "-3px -4px", borderRadius: 12, background: selected ? (isDark ? "rgba(255,255,255,.07)" : "rgba(0,0,0,.05)") : "transparent", transition: "background .15s" }}>
+      {selected && (
+        <QuickReactionBar current={myReaction} onPick={(e) => onReact(m.id, e)} onOpenFull={() => onReact(m.id, "__FULL__")} mine={mine} CARD={CARD} B={B} isDark={isDark} />
+      )}
+      <div style={{ position: "relative", maxWidth: "78%" }}>
+        {gesture.dx > 4 && (
+          <div style={{ position: "absolute", top: "50%", left: -34, transform: "translateY(-50%)", opacity: Math.min(1, gesture.dx / 42), fontSize: 17 }}>↩️</div>
+        )}
+        <div {...gesture.handlers} style={{ touchAction: "pan-y", maxWidth: "100%", background: bubbleBg, border: mine ? "none" : `1px solid ${B}`, borderRadius: mine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "10px 13px", transform: gesture.dx ? `translateX(${gesture.dx}px)` : "none", transition: gesture.dragging ? "none" : "transform .25s cubic-bezier(.34,1.56,.64,1), outline .3s, box-shadow .3s", outline: isHighlighted ? `2px solid ${G}` : "none", outlineOffset: 2, boxShadow: isHighlighted ? `0 0 0 5px ${G}22` : "none" }}>
+          {isReply && <ReplyStrip meta={meta} mine={mine} isDark={isDark} onJump={() => onJumpTo(meta.reply_to)} />}
+          {meta && (meta.type === "product" || meta.type === "order" || meta.type === "admin_request") && <RefChatCard meta={meta} onOpen={openRef} orders={orders} B={mine ? "#00000022" : B} T1={mine ? "#000" : T1} T3={mine ? "#00000088" : T3} soft={mine ? "#ffffff55" : soft} />}
+          {isVoice
+            ? <VoiceMessage meta={meta} mine={mine} isDark={isDark} T1={bubbleText} T3={T3} accentBg={mine ? "#00000022" : `${G}33`} />
+            : <p style={{ fontSize: 12, color: bubbleText, lineHeight: 1.5, wordBreak: "break-word" }}>{m.text}</p>}
+          <p style={{ fontSize: 9, color: mine ? "#00000066" : T3, marginTop: 4, textAlign: "right" }}>
+            {m.edited_at && <span style={{ fontStyle: "italic" }}>Editado · </span>}
+            {new Date(m.created_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+            {mine && (m.read_at ? " ✓✓" : " ✓")}
+          </p>
+        </div>
       </div>
       <ReactionsRow list={msgReactions} meId={meId} mine={mine} onToggle={(emoji) => onReact(m.id, emoji)} />
     </div>
@@ -474,7 +593,8 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
   const [otherName, setOtherName] = useState(chat.otherName || chat.name || null);
   const [blocked,   setBlocked]   = useState(false);
   const [chatOpts,  setChatOpts]  = useState(false);
-  const [actionFor, setActionFor] = useState(null);   // mensaje sobre el que se abrió la hoja de acción
+  const [selectedId, setSelectedId] = useState(null); // mensaje SELECCIONADO (mantener presionado)
+  const [emojiPickerFor, setEmojiPickerFor] = useState(null); // id de mensaje con selector completo abierto
   const [replyTo,   setReplyTo]   = useState(null);   // { id, preview }
   const [editing,   setEditing]   = useState(null);   // mensaje que se está editando
   const [highlightId, setHighlightId] = useState(null);
@@ -565,9 +685,11 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
         scrollToEnd();
         if (user?.id && m.sender_id !== user.id) markRead(cid, user.id).catch(() => {});
       })
-      // UPDATE (p.ej. read_at, text editado): actualizo el mensaje en vivo.
+      // UPDATE (p.ej. read_at, text editado, o eliminado — deleted_at): actualizo
+      // el mensaje en vivo, o lo quito de la lista si acaba de borrarse.
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages", filter: `conversation_id=eq.${cid}` }, payload => {
         const m = payload.new;
+        if (m.deleted_at) { setMsgs(prev => prev.filter(x => x.id !== m.id)); return; }
         setMsgs(prev => prev.map(x => x.id === m.id ? { ...x, ...m } : x));
       })
       // Reacciones — la tabla no tiene conversation_id, así que se filtra en el
@@ -643,6 +765,14 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     } catch (e) { flash("❌ No se pudo editar el mensaje"); }
   }, [editing, flash]);
 
+  const handleDelete = useCallback(async (msg) => {
+    setSelectedId(null);
+    try {
+      await deleteMessage(msg.id);
+      setMsgs(prev => prev.filter(x => x.id !== msg.id));
+    } catch (e) { flash("❌ No se pudo eliminar el mensaje"); }
+  }, [flash]);
+
   const handleToggleBlock = useCallback(async () => {
     if (!chat.otherId) return;
     setChatOpts(false);
@@ -653,14 +783,18 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     } catch (e) { flash("❌ No se pudo actualizar el bloqueo"); }
   }, [chat.otherId, blocked, flash]);
 
+  // Reaccionar: SIEMPRE disponible (se reabre cada vez que se mantiene presionado,
+  // muestre ya una reacción tuya o no). "__FULL__" abre el selector completo en
+  // vez de reaccionar directo.
   const handleReact = useCallback(async (messageId, emoji) => {
     if (!user?.id) return;
-    setActionFor(null);
+    if (emoji === "__FULL__") { setEmojiPickerFor(messageId); return; }
+    setSelectedId(null); setEmojiPickerFor(null);
     try {
       await toggleReaction(messageId, user.id, emoji);
       loadReactions(msgsRef.current.map(m => m.id));
-    } catch (e) {}
-  }, [user?.id, loadReactions]);
+    } catch (e) { flash("❌ No se pudo reaccionar"); }
+  }, [user?.id, loadReactions, flash]);
 
   const displayName = otherName || "Usuario";
   const openProfile = () => { if (onViewProfile && chat.otherId) onViewProfile(chat.otherId); };
@@ -670,49 +804,64 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     if (meta?.type === "product" || meta?.type === "order") return (meta.title ? "🛍️ " + meta.title : (m.text || "").slice(0, 50));
     return (m.text || "").slice(0, 50);
   };
+  const selectedMsg = selectedId ? msgs.find(m => m.id === selectedId) || null : null;
+  const isSelectedTextMsg = selectedMsg ? !(selectedMsg.meta && typeof selectedMsg.meta === "object" && (selectedMsg.meta.type === "voice" || selectedMsg.meta.type === "admin_request")) : false;
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "11px 16px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-        <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c="#666" s={20} /></button>
-        <div onClick={openProfile} style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, cursor: onViewProfile && chat.otherId ? "pointer" : "default" }}>
-          <AvatarUser userId={chat.otherId} name={displayName} size={38} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: 13.5, fontWeight: 800, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</p>
-            <p style={{ fontSize: 10, color: blocked ? "#F87171" : (onViewProfile && chat.otherId ? G : "#22C55E"), marginTop: 1, fontWeight: 600 }}>{blocked ? "🚫 Bloqueado" : (onViewProfile && chat.otherId ? "Ver perfil ›" : "● Activo")}</p>
+      {selectedMsg ? (
+        <SelectionTopBar
+          mine={selectedMsg.sender_id === user?.id}
+          isTextMsg={isSelectedTextMsg}
+          onClose={() => setSelectedId(null)}
+          onReply={() => { setReplyTo({ id: selectedMsg.id, preview: previewOf(selectedMsg) }); setEditing(null); setSelectedId(null); }}
+          onEdit={() => { setEditing(selectedMsg); setReplyTo(null); setSelectedId(null); }}
+          onDelete={() => handleDelete(selectedMsg)}
+          S={S} B={B} T1={T1} isDark={isDark}
+        />
+      ) : (
+        <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "11px 16px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c={T2} s={20} /></button>
+          <div onClick={openProfile} style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, cursor: onViewProfile && chat.otherId ? "pointer" : "default" }}>
+            <AvatarUser userId={chat.otherId} name={displayName} size={38} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ fontSize: 13.5, fontWeight: 800, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</p>
+              <p style={{ fontSize: 10, color: blocked ? "#F87171" : (onViewProfile && chat.otherId ? G : "#22C55E"), marginTop: 1, fontWeight: 600 }}>{blocked ? "🚫 Bloqueado" : (onViewProfile && chat.otherId ? "Ver perfil ›" : "● Activo")}</p>
+            </div>
+          </div>
+          <div style={{ position: "relative" }}>
+            <button onClick={() => setChatOpts(o => !o)} style={{ background: "none", border: "none", color: T2, fontSize: 19, cursor: "pointer", lineHeight: 1 }}>⋯</button>
+            {chatOpts && <>
+              <div onClick={() => setChatOpts(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+              <div style={{ position: "absolute", top: 28, right: 0, background: CARD, border: `1px solid ${B}`, borderRadius: 12, boxShadow: isDark ? "0 8px 24px rgba(0,0,0,.35)" : "0 8px 24px rgba(0,0,0,.18)", overflow: "hidden", zIndex: 41, minWidth: 170 }}>
+                <button onClick={handleToggleBlock} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", padding: "12px 14px", fontSize: 12.5, fontWeight: 600, color: T1, cursor: "pointer" }}>{blocked ? "Desbloquear usuario" : "Bloquear usuario"}</button>
+                <button onClick={() => { setChatOpts(false); flash("Reporte enviado al equipo de RETADOR"); }} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderTop: `1px solid ${B}`, padding: "12px 14px", fontSize: 12.5, fontWeight: 600, color: "#ef4444", cursor: "pointer" }}>Reportar usuario</button>
+              </div>
+            </>}
           </div>
         </div>
-        <div style={{ position: "relative" }}>
-          <button onClick={() => setChatOpts(o => !o)} style={{ background: "none", border: "none", color: "var(--t2,#8a8a8a)", fontSize: 19, cursor: "pointer", lineHeight: 1 }}>⋯</button>
-          {chatOpts && <>
-            <div onClick={() => setChatOpts(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-            <div style={{ position: "absolute", top: 28, right: 0, background: "var(--card,#fff)", border: "1px solid rgba(128,128,128,.25)", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,.18)", overflow: "hidden", zIndex: 41, minWidth: 170 }}>
-              <button onClick={handleToggleBlock} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", padding: "12px 14px", fontSize: 12.5, fontWeight: 600, color: "var(--tx,#111)", cursor: "pointer" }}>{blocked ? "Desbloquear usuario" : "Bloquear usuario"}</button>
-              <button onClick={() => { setChatOpts(false); flash("Reporte enviado al equipo de RETADOR"); }} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderTop: "1px solid rgba(128,128,128,.18)", padding: "12px 14px", fontSize: 12.5, fontWeight: 600, color: "#ef4444", cursor: "pointer" }}>Reportar usuario</button>
-            </div>
-          </>}
-        </div>
-      </div>
+      )}
 
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "12px clamp(18px,3vw,48px)", display: "flex", flexDirection: "column", gap: 7, ...chatBgStyle(isDark) }}>
         {loading
           ? <div style={{ display: "flex", justifyContent: "center", padding: "24px 0" }}><Spin size={22} /></div>
           : msgs.length === 0
-            ? <div style={{ textAlign: "center", padding: "32px 0", color: "#1e1e1e" }}>
-                <p style={{ fontSize: 11 }}>Sé el primero en escribir</p>
+            ? <div style={{ textAlign: "center", padding: "32px 0" }}>
+                <p style={{ fontSize: 11, color: T3 }}>Sé el primero en escribir</p>
               </div>
             : msgs.map(m => (
-                <MessageBubble key={m.id} m={m} mine={m.sender_id === user?.id} isDark={isDark} B={B} T1={T1} T3={T3}
+                <MessageBubble key={m.id} m={m} mine={m.sender_id === user?.id} isDark={isDark} B={B} T1={T1} T3={T3} CARD={CARD}
                   orders={orders} onOpenOrder={onOpenOrder} onOpenProduct={onOpenProduct}
-                  msgReactions={reactions[m.id] || []} meId={user?.id} isHighlighted={highlightId === m.id}
-                  onLongPress={() => setActionFor(m)} onJumpTo={jumpToMessage} onReact={handleReact} />
+                  msgReactions={reactions[m.id] || []} meId={user?.id} isHighlighted={highlightId === m.id} selected={selectedId === m.id}
+                  onLongPress={() => setSelectedId(m.id)} onSwipeReply={() => setReplyTo({ id: m.id, preview: previewOf(m) })}
+                  onJumpTo={jumpToMessage} onReact={handleReact} />
               ))
         }
       </div>
 
       {/* Franja de contexto: "estás consultando sobre esto" (se limpia al enviar o con la X) */}
       {ctx && !blocked && (
-        <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 14px", borderTop: `1px solid ${B}`, background: isDark ? "#101012" : "#f8fafc", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 14px", borderTop: `1px solid ${B}`, background: S, flexShrink: 0 }}>
           {ctx.image && <img src={ctx.image} alt="" style={{ width: 34, height: 34, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />}
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={{ fontSize: 11.5, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ctx.type === "order" ? "📦 " : "🛍️ "}{ctx.title || ""}{ctx.price != null && ctx.price !== "" ? <span style={{ color: "#22C55E", fontWeight: 800 }}> · {money(Number(ctx.price) || 0, ctx.currency || "USD")}</span> : null}</p>
@@ -722,19 +871,16 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
         </div>
       )}
       <ChatInput
-        onSend={handleSend} onSendVoice={handleSendVoice} blocked={blocked} S={S} B={B} T1={T1} T3={T3} initialDraft={chat.draft || ""}
+        onSend={handleSend} onSendVoice={handleSendVoice} blocked={blocked} S={S} B={B} T1={T1} T3={T3} isDark={isDark} initialDraft={chat.draft || ""}
         replyTo={replyTo} onCancelReply={() => setReplyTo(null)}
         editing={editing} onSaveEdit={handleSaveEdit} onCancelEdit={() => setEditing(null)}
       />
 
-      {actionFor && (
-        <MessageActionSheet
-          mine={actionFor.sender_id === user?.id}
-          isTextMsg={!(actionFor.meta && typeof actionFor.meta === "object" && (actionFor.meta.type === "voice" || actionFor.meta.type === "admin_request"))}
-          onClose={() => setActionFor(null)}
-          onReact={(e) => handleReact(actionFor.id, e)}
-          onReply={() => { setReplyTo({ id: actionFor.id, preview: previewOf(actionFor) }); setEditing(null); setActionFor(null); }}
-          onEdit={() => { setEditing(actionFor); setReplyTo(null); setActionFor(null); }}
+      {emojiPickerFor && (
+        <EmojiPickerModal
+          CARD={CARD} B={B} T1={T1} T2={T2} isDark={isDark}
+          onClose={() => setEmojiPickerFor(null)}
+          onPick={(e) => handleReact(emojiPickerFor, e)}
         />
       )}
     </div>

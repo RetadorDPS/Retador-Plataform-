@@ -1600,6 +1600,7 @@ function AppShell({ sessionUser }) {
                 onPublish={() => setPubOpen(true)}
                 onPlusMenu={rect => setPlusMenu(rect)}
                 onOpenChats={openMessages}
+                messagesBadge={chatUnread}
                 onServices={() => setMScr("services")}
                 onNav={navTo}
               />

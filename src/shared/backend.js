@@ -241,6 +241,14 @@ export const editMessage = async (messageId, text) => {
   if (error) throw error;
   return data;
 };
+// Eliminar MI PROPIO mensaje — borrado suave (deleted_at), mismo criterio de
+// dueño que editMessage. loadMessages ya filtra deleted_at IS NULL.
+export const deleteMessage = async (messageId) => {
+  if (!messageId) throw new Error("Falta el mensaje");
+  const { data, error } = await supabase.from("messages").update({ deleted_at: new Date().toISOString() }).eq("id", messageId).select().single();
+  if (error) throw error;
+  return data;
+};
 
 // ── NOTAS DE VOZ (bucket privado 'voice-notes') ──────────────────────────────
 // Sube el audio grabado a su carpeta (su uid) y devuelve el PATH (no URL: el

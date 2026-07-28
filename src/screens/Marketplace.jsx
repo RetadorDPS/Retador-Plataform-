@@ -961,7 +961,7 @@ export function ChatsModal({ onClose, initial, orders = [], chatMsgs = {}, chatP
    reales RESPETANDO la posición: cada anuncio se renderiza en el tramo donde el
    usuario lo colocó, entre las partes fijas del sistema. Botones que navegan. */
 
-export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, onServices, onNav, hidden = false, scrollKeeper = null, view = "grid" }) {
+export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, messagesBadge = 0, onServices, onNav, hidden = false, scrollKeeper = null, view = "grid" }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { cats } = useCatalog();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
@@ -1029,6 +1029,11 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4A820" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
+            {messagesBadge > 0 && (
+              <div style={{ position: "absolute", top: -3, right: -3, minWidth: 15, height: 15, borderRadius: 100, background: "#D4A820", border: `1.5px solid ${BG}`, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px", fontSize: 7.5, fontWeight: 800, color: "#000" }}>
+                {messagesBadge > 9 ? "9+" : messagesBadge}
+              </div>
+            )}
           </button>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, saveSellerAbout } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, saveSellerAbout, getSellerReviews } from "../shared/index.js";
 
 // ─── TIRITA DE TASAS DEL DÍA ──────────────────────────────────────────────────
 // Franja discreta con las tasas del día que controla el admin (adminCfg.fx del
@@ -580,68 +580,14 @@ function FP_ProductCard({ product, onClick, onDelete, onEdit, onPromote }) {
   );
 }
 
-// ── REVIEW FORM (visitors) ────────────────────────────────────────
-function FP_ReviewForm({ onSubmit, onCancel }) {
-  const FP_C = useFP_C();
-  const [stars, setStars] = useState(0);
-  const [text,  setText]  = useState("");
-  const [name,  setName]  = useState("");
-  const ok = stars > 0 && text.trim().length > 5 && name.trim().length > 1;
-
-  const labels = ["","Malo","Regular","Bueno","Muy bueno","Excelente"];
-
-  return (
-    <div style={{ background:FP_C.surface, border:`1px solid ${FP_C.borderMid}`,
-      borderRadius:10, padding:"18px", marginBottom:12 }}>
-      <div style={{ fontSize:14, fontWeight:700, color:FP_C.textPrimary,
-        fontFamily:FP_FH, marginBottom:16 }}>
-        Escribir reseña
-      </div>
-
-      <FP_Field label="Tu nombre">
-        <input value={name} placeholder="Nombre"
-          onChange={e => setName(e.target.value)}
-          onFocus={e => e.target.style.borderColor = FP_C.accent}
-          onBlur={e => e.target.style.borderColor = FP_C.border}
-          style={fpInputStyle(FP_C)}/>
-      </FP_Field>
-
-      <div style={{ marginBottom:14 }}>
-        <FP_Label>Calificación</FP_Label>
-        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-          <FP_StarRow count={stars} size={22} interactive onSet={setStars}/>
-          {stars > 0 && (
-            <span style={{ fontSize:12, color:FP_C.textSecondary, fontFamily:FP_FB }}>
-              {labels[stars]}
-            </span>
-          )}
-        </div>
-      </div>
-
-      <FP_Field label="Comentario">
-        <textarea value={text} placeholder="Describe tu experiencia con este vendedor…"
-          onChange={e => setText(e.target.value)}
-          onFocus={e => e.target.style.borderColor = FP_C.accent}
-          onBlur={e => e.target.style.borderColor = FP_C.border}
-          rows={3} maxLength={300}
-          style={{ ...fpInputStyle(FP_C), resize:"none", lineHeight:1.55 }}/>
-        <div style={{ fontSize:10, color:FP_C.textMuted, textAlign:"right", marginTop:3 }}>
-          {text.length}/300
-        </div>
-      </FP_Field>
-
-      <div style={{ display:"flex", gap:8 }}>
-        <FP_Btn onClick={() => ok && onSubmit({ name, stars, text })}
-          disabled={!ok} style={{ flex:1 }}>
-          Publicar
-        </FP_Btn>
-        <FP_Btn variant="secondary" onClick={onCancel} style={{ flex:1 }}>
-          Cancelar
-        </FP_Btn>
-      </div>
-    </div>
-  );
-}
+// NOTA: el viejo formulario de reseñas de esta pantalla (con un campo libre
+// "Tu nombre" y que nunca guardaba nada en ningún backend) se quitó de aquí.
+// Las reseñas ahora son reales (tabla reviews: product_id/user_id/rating/
+// comment) y se escriben desde la ficha del producto reseñado —ver
+// ProductReviews en Marketplace.jsx—, nunca desde el perfil del vendedor en
+// general (un perfil no tiene un solo product_id al que atribuir la reseña).
+// Esta pestaña ahora solo MUESTRA, en modo lectura, las reseñas reales de
+// todos los productos de este vendedor (con nombre/avatar reales).
 
 // ── PRO MODAL ─────────────────────────────────────────────────────
 function FP_ProModal({ onClose, onSeePlans }) {
@@ -1379,7 +1325,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   // Editor UNIFICADO: "Editar perfil" y "Acerca de" ya no son dos flujos
   // separados — un solo booleano abre UN panel con ambas secciones dentro.
   const [editing,      setEditing]      = useState(false);
-  const [showRevForm,  setShowRevForm]  = useState(false);
   const [showReport,   setShowReport]   = useState(false);
   const [showVerify,   setShowVerify]   = useState(false);
   const [showPlans,    setShowPlans]    = useState(false);
@@ -1444,13 +1389,21 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     return () => { alive = false; };
   }, [aboutTargetId]);
 
-  const [reviews, setReviews] = useState(() => {
-    try {
-      const real = (typeof ratingForName === "function") ? ratingForName(initialProfile?.name, "seller").reviews : [];
-      if (real && real.length) return real.sort((a, b) => b.at - a.at).map((r, i) => ({ id: "r" + i, user: "Comprador verificado", stars: r.stars, text: r.msg, date: new Date(r.at).toLocaleDateString("es-ES", { day: "2-digit", month: "short" }) }));
-    } catch (e) {}
-    return [];
-  });
+  // Reseñas REALES de todos los productos de este vendedor (tabla reviews),
+  // nombre y avatar reales (profiles.full_name/avatar_url) — nunca inventados.
+  const [reviews, setReviews] = useState([]);
+  useEffect(() => {
+    if (!aboutTargetId) { setReviews([]); return; }
+    let alive = true;
+    getSellerReviews(aboutTargetId).then(list => {
+      if (!alive) return;
+      setReviews(list.map(r => ({
+        id: r.id, user: r.name, avatar: r.avatar, stars: r.rating, text: r.comment,
+        date: new Date(r.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short" }),
+      })));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [aboutTargetId]);
 
   function toast_(msg) { setToast(msg); setTimeout(() => setToast(null), 2500); }
   // Editor unificado: UN solo botón "Guardar" persiste datos básicos (perfil) y
@@ -1473,12 +1426,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     }
   }
   function cancelAll() { setPd({...profile}); setAd({...about}); setEditing(false); }
-
-  function submitReview({ name, stars, text }) {
-    setReviews(r => [{ id:Date.now(), user:name, stars, text, date:"justo ahora" }, ...r]);
-    setShowRevForm(false);
-    toast_("Reseña publicada");
-  }
 
   // Sin reseñas no hay promedio (evita NaN): avgRating queda null y se muestra "Nuevo".
   const avgRating = reviews.length ? (reviews.reduce((a,r) => a + r.stars, 0) / reviews.length).toFixed(1) : null;
@@ -2008,27 +1955,16 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
               </div>
             </div>
 
-            {/* Write review — visitors only */}
-            {!isOwner && !showRevForm && (
-              <button onClick={() => setShowRevForm(true)} style={{
-                width:"100%", background:FP_C.surface,
-                border:`1px solid ${FP_C.borderMid}`,
-                borderRadius:8, padding:"12px", cursor:"pointer",
-                display:"flex", alignItems:"center", justifyContent:"center",
-                gap:8, marginBottom:12, transition:"border-color 0.15s" }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = FP_C.borderHigh}
-                onMouseLeave={e => e.currentTarget.style.borderColor = FP_C.borderMid}>
-                <FP_Icon d={FP_Icons.edit} size={14} color={FP_C.textSecondary}/>
-                <span style={{ fontSize:13, color:FP_C.textSecondary, fontWeight:600, fontFamily:FP_FH }}>
-                  Escribir reseña
-                </span>
-              </button>
-            )}
-            {!isOwner && showRevForm && (
-              <FP_ReviewForm onSubmit={submitReview} onCancel={() => setShowRevForm(false)}/>
-            )}
+            {/* Para escribir una reseña real hace falta un producto concreto
+                (product_id): se hace desde la ficha del producto que compraste,
+                no desde el perfil general del vendedor. */}
 
             {/* Reviews list */}
+            {reviews.length === 0 && (
+              <p style={{ fontSize:12, color:FP_C.textMuted, textAlign:"center", padding:"18px 0" }}>
+                Todavía no hay reseñas para los productos de este vendedor.
+              </p>
+            )}
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
               {reviews.map(r => (
                 <div key={r.id} style={{ background:FP_C.surface,
@@ -2036,11 +1972,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                   <div style={{ display:"flex", alignItems:"center",
                     justifyContent:"space-between", marginBottom:8 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                      <div style={{ width:34, height:34, borderRadius:"50%",
-                        background:FP_C.surfaceTop, border:`1px solid ${FP_C.border}`,
-                        display:"flex", alignItems:"center", justifyContent:"center" }}>
-                        <FP_Icon d={FP_Icons.user} size={16} color={FP_C.textMuted}/>
-                      </div>
+                      <Avatar name={r.user} url={r.avatar} size={34}/>
                       <div>
                         <div style={{ fontSize:13, fontWeight:600,
                           color:FP_C.textPrimary, fontFamily:FP_FH }}>{r.user}</div>
@@ -2049,9 +1981,11 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                     </div>
                     <span style={{ fontSize:10, color:FP_C.textMuted }}>{r.date}</span>
                   </div>
-                  <div style={{ fontSize:13, color:FP_C.textSecondary, lineHeight:1.6 }}>
-                    {r.text}
-                  </div>
+                  {r.text && (
+                    <div style={{ fontSize:13, color:FP_C.textSecondary, lineHeight:1.6 }}>
+                      {r.text}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

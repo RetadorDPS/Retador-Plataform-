@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getUserById, getUserName, getUserTrustStats, getVerifiedMap, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getUserById, getUserName, getUserTrustStats, getVerifiedMap, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
 
 // ✓ real de vendedores en lote — se refresca cuando cambia el conjunto de
 // vendedores visible (evita 1 consulta por tarjeta). Fuente: profiles.is_verified.
@@ -560,22 +560,49 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
   const cat = selectedCat ? cats.find(c => c.id === selectedCat) : null;
   const subcats = selectedCat ? (allSubs[selectedCat] || []) : [];
 
+  // Búsqueda inteligente por categoría: si el texto normal no da resultados y el
+  // usuario no eligió una categoría a mano, se prueba match_category(término) en
+  // el backend. Si encuentra una categoría parecida, se muestran SUS productos
+  // (ignorando el texto, que ya sabemos que no calzó con ningún título) con un
+  // aviso claro — en vez de una pantalla vacía.
+  const [catSuggestion, setCatSuggestion] = useState(null); // { id, name, term }
+  useEffect(() => { setCatSuggestion(null); }, [searchText, selectedCat]);
+
   const _disc = p => p.orig_price && parseFloat(p.orig_price) > parseFloat(p.price || 0);
   const _sold = p => Number(p.sold_count ?? p.soldCount) || 0;
   const _created = p => p.created_at ? new Date(p.created_at).getTime() : 0;
+  const matchQuick = p => quickFilter === "TODOS"
+    || (quickFilter === "OFERTAS"     && _disc(p))
+    || (quickFilter === "NUEVO"       && (p.badge === "NUEVO" || !!p.created_at))
+    || (quickFilter === "RECOMENDADO" && (p.promoted || p.featured || p.badge === "RECOMENDADO"))
+    || (quickFilter === "MAS_VENDIDO" && _sold(p) > 0);
+  const effectiveCat = catSuggestion ? catSuggestion.id : selectedCat;
   let filtered = products.filter(p => {
-    const matchCat = (!selectedCat || p.cat === selectedCat) && (!selectedSubcat || p.subcat === selectedSubcat);
-    const matchSearch = !searchText || p.title.toLowerCase().includes(searchText.toLowerCase()) || p.description?.toLowerCase().includes(searchText.toLowerCase());
-    const matchQuick = quickFilter === "TODOS"
-      || (quickFilter === "OFERTAS"     && _disc(p))
-      || (quickFilter === "NUEVO"       && (p.badge === "NUEVO" || !!p.created_at))
-      || (quickFilter === "RECOMENDADO" && (p.promoted || p.featured || p.badge === "RECOMENDADO"))
-      || (quickFilter === "MAS_VENDIDO" && _sold(p) > 0);
-    return matchCat && matchSearch && matchQuick;
+    const matchCat = (!effectiveCat || p.cat === effectiveCat) && (!selectedSubcat || p.subcat === selectedSubcat);
+    const matchSearch = catSuggestion ? true : (!searchText || p.title.toLowerCase().includes(searchText.toLowerCase()) || p.description?.toLowerCase().includes(searchText.toLowerCase()));
+    return matchCat && matchSearch && matchQuick(p);
   });
   if (quickFilter === "NUEVO")            filtered = [...filtered].sort((a, b) => _created(b) - _created(a));
   else if (quickFilter === "MAS_VENDIDO") filtered = [...filtered].sort((a, b) => _sold(b) - _sold(a));
   else if (quickFilter === "OFERTAS")     filtered = [...filtered].sort((a, b) => (parseFloat(b.orig_price || 0) - parseFloat(b.price || 0)) - (parseFloat(a.orig_price || 0) - parseFloat(a.price || 0)));
+
+  // Solo se intenta match_category cuando la búsqueda de texto normal (sin
+  // sugerencia todavía) se quedó en cero, y el usuario no había elegido ya una
+  // categoría a mano (si eligió una, "sin resultados" ahí es su elección real).
+  const plainNoResults = searchText.trim() && !selectedCat && !catSuggestion && filtered.length === 0;
+  useEffect(() => {
+    if (!plainNoResults) return;
+    let alive = true;
+    const term = searchText.trim();
+    matchCategory(term).then(row => {
+      if (!alive || !row) return;
+      const catId = row.id || row.category_id;
+      const catObj = cats.find(c => c.id === catId);
+      if (catObj) setCatSuggestion({ id: catId, name: catObj.name, term });
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [plainNoResults, searchText]);
+  const effectiveCatObj = catSuggestion ? cats.find(c => c.id === catSuggestion.id) : cat;
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -669,9 +696,14 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
 
           {/* PRODUCTOS */}
           <div style={{ padding: "12px 14px 80px" }}>
+            {catSuggestion && (
+              <div style={{ background: `${G}12`, border: `1px solid ${G}30`, borderRadius: 10, padding: "9px 12px", marginBottom: 10, fontSize: 10.5, color: T1, lineHeight: 1.5 }}>
+                Sin resultados exactos para "{catSuggestion.term}" — mostrando la categoría <b>{catSuggestion.name}</b>
+              </div>
+            )}
             <div style={{ marginBottom: 10 }}>
               <h2 style={{ fontSize: 13 * ts, fontWeight: 800, marginBottom: 2, color: T1 }}>
-                {selectedSubcat ? selectedSubcat : selectedCat ? cat.name : "Todos los productos"}
+                {selectedSubcat ? selectedSubcat : effectiveCatObj ? effectiveCatObj.name : "Todos los productos"}
               </h2>
               <p style={{ color: T2, fontSize: 9 * ts }}>{filtered.length} resultados</p>
             </div>
@@ -1688,6 +1720,11 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
             })()}
           </div>
         </div>
+
+        {/* Reseñas reales del producto (tabla reviews) — nombre y avatar SIEMPRE
+            reales (profiles.full_name/avatar_url); rating/reviews_count del
+            producto los recalcula el trigger del backend, nunca el frontend. */}
+        <ProductReviews product={p} user={user} flash={flash} requireAuth={requireAuth} />
       </div>
 
       {/* Acciones */}
@@ -1721,6 +1758,124 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
           <Ic n="share" c={T2} s={17} />
         </button>
       </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// RESEÑAS REALES de un producto (tabla reviews) — lista + formulario propio.
+// El nombre/avatar de cada reseña SIEMPRE sale de profiles (real), nunca se
+// escribe a mano. Una reseña por persona por producto: si ya existe, este
+// formulario la EDITA (UPDATE) en vez de bloquear un segundo intento.
+// ═════════════════════════════════════════════════════════════════════════════
+function ProductReviews({ product, user, flash, requireAuth }) {
+  const { S, B, T1, T2, T3, isDark } = useAt();
+  const [reviews, setReviews] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [mine, setMine] = useState(null); // { id, rating, comment } si ya reseñé
+  const [showForm, setShowForm] = useState(false);
+  const [stars, setStars] = useState(0);
+  const [comment, setComment] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const reload = useCallback(() => {
+    if (!product?.id) return;
+    setLoading(true);
+    getProductReviews(product.id).then(setReviews).catch(() => setReviews([])).finally(() => setLoading(false));
+  }, [product?.id]);
+  useEffect(() => { reload(); }, [reload]);
+
+  useEffect(() => {
+    if (!product?.id || !user?.id) { setMine(null); return; }
+    let alive = true;
+    getMyProductReview(product.id, user.id).then(r => {
+      if (!alive) return;
+      setMine(r);
+      if (r) { setStars(r.rating); setComment(r.comment || ""); }
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [product?.id, user?.id]);
+
+  const openForm = () => requireAuth(() => setShowForm(true));
+
+  const submit = async () => {
+    if (!stars || saving) return;
+    setSaving(true);
+    try {
+      await submitProductReview(product.id, user.id, stars, comment.trim());
+      flash && flash(mine ? "Reseña actualizada" : "Reseña publicada");
+      setShowForm(false);
+      reload();
+      setMine({ id: mine?.id, rating: stars, comment: comment.trim() });
+    } catch (e) {
+      flash && flash("No se pudo guardar la reseña. Intenta de nuevo.");
+    } finally { setSaving(false); }
+  };
+
+  const starRow = (val, onSet, size = 22) => (
+    <div style={{ display: "flex", gap: 4 }}>
+      {[1, 2, 3, 4, 5].map(n => (
+        <button key={n} type="button" onClick={onSet ? () => onSet(n) : undefined}
+          style={{ background: "none", border: "none", padding: 0, cursor: onSet ? "pointer" : "default", fontSize: size, lineHeight: 1, color: n <= val ? "#FFC01E" : (isDark ? "#333" : "#dcdcdc") }}>★</button>
+      ))}
+    </div>
+  );
+
+  return (
+    <div style={{ marginTop: 4, marginBottom: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <p style={{ fontSize: 9, fontWeight: 700, color: T2, letterSpacing: .3 }}>
+          RESEÑAS {reviews.length > 0 ? `(${reviews.length})` : ""}
+        </p>
+        {!showForm && (
+          <button onClick={openForm} className="p" style={{ background: "none", border: `1px solid ${B}`, borderRadius: 50, padding: "5px 11px", fontSize: 10, fontWeight: 700, color: T2, cursor: "pointer" }}>
+            {mine ? "Editar mi reseña" : "Escribir reseña"}
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, padding: "14px", marginBottom: 14 }}>
+          <p style={{ fontSize: 10, fontWeight: 700, color: T2, marginBottom: 8, letterSpacing: .3 }}>TU CALIFICACIÓN</p>
+          {starRow(stars, setStars, 26)}
+          <textarea value={comment} onChange={e => setComment(e.target.value)}
+            placeholder="Comparte tu experiencia con este producto (opcional)…"
+            rows={3} maxLength={300}
+            style={{ width: "100%", marginTop: 12, background: isDark ? "#111" : "#F5F6F7", border: `1px solid ${B}`, borderRadius: 10, padding: "10px 12px", fontSize: 12, color: T1, resize: "none", lineHeight: 1.55, boxSizing: "border-box" }} />
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button onClick={submit} disabled={!stars || saving}
+              style={{ flex: 1, background: (!stars || saving) ? (isDark ? "#222" : "#e5e5e5") : G, border: "none", borderRadius: 50, padding: "11px", fontSize: 12, fontWeight: 800, color: (!stars || saving) ? T3 : "#000", cursor: (!stars || saving) ? "not-allowed" : "pointer" }}>
+              {saving ? "Guardando…" : "Publicar"}
+            </button>
+            <button onClick={() => { setShowForm(false); if (mine) { setStars(mine.rating); setComment(mine.comment || ""); } else { setStars(0); setComment(""); } }}
+              style={{ flex: 1, background: "none", border: `1px solid ${B}`, borderRadius: 50, padding: "11px", fontSize: 12, fontWeight: 700, color: T2, cursor: "pointer" }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <Spin size={22} />
+      ) : reviews.length === 0 ? (
+        <p style={{ fontSize: 11, color: T3 }}>Todavía no hay reseñas para este producto.</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {reviews.map(r => (
+            <div key={r.id} style={{ background: S, border: `1px solid ${B}`, borderRadius: 12, padding: "11px 13px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 6 }}>
+                <Avatar name={r.name} url={r.avatar} size={28} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 11.5, fontWeight: 700, color: T1 }}>{r.name}</p>
+                  {starRow(r.rating, null, 11)}
+                </div>
+                <p style={{ fontSize: 9, color: T3, flexShrink: 0 }}>{new Date(r.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short" })}</p>
+              </div>
+              {r.comment && <p style={{ fontSize: 11.5, color: T2, lineHeight: 1.55 }}>{r.comment}</p>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

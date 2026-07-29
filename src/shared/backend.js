@@ -179,6 +179,85 @@ export const getProductsBySeller = async (id) => {
   if (error) { console.error("getProductsBySeller:", error.message); return []; }
   return (data || []).map(mapProduct);
 };
+
+// ── Reseñas REALES de productos (tabla reviews: product_id, user_id, rating,
+// comment) — una por persona por producto. El rating/reviews_count del producto
+// se recalcula solo con un trigger del backend; aquí NUNCA se agrega a mano.
+export const getProductReviews = async (productId) => {
+  if (!productId) return [];
+  try {
+    const { data, error } = await supabase.from("reviews").select("id, user_id, rating, comment, created_at").eq("product_id", productId).order("created_at", { ascending: false });
+    if (error || !data) return [];
+    const ids = [...new Set(data.map(r => r.user_id))];
+    let profMap = {};
+    if (ids.length) {
+      const { data: profs } = await supabase.from("profiles").select("id, full_name, avatar_url").in("id", ids);
+      (profs || []).forEach(p => { profMap[p.id] = p; });
+    }
+    return data.map(r => {
+      const p = profMap[r.user_id];
+      return { id: r.id, userId: r.user_id, rating: r.rating, comment: r.comment || "", createdAt: r.created_at, name: p?.full_name || "Usuario", avatar: p?.avatar_url || null };
+    });
+  } catch (e) { return []; }
+};
+// La reseña propia (si existe) — para precargar el formulario en modo EDITAR
+// en vez de bloquear un segundo intento con un error de duplicado.
+export const getMyProductReview = async (productId, userId) => {
+  if (!productId || !userId) return null;
+  try {
+    const { data, error } = await supabase.from("reviews").select("id, rating, comment").eq("product_id", productId).eq("user_id", userId).maybeSingle();
+    if (error || !data) return null;
+    return { id: data.id, rating: data.rating, comment: data.comment || "" };
+  } catch (e) { return null; }
+};
+export const submitProductReview = async (productId, userId, rating, comment) => {
+  if (!productId || !userId) throw new Error("Sesión no válida");
+  const existing = await getMyProductReview(productId, userId);
+  if (existing) {
+    const { error } = await supabase.from("reviews").update({ rating, comment: comment || "" }).eq("id", existing.id);
+    if (error) throw error;
+  } else {
+    const { error } = await supabase.from("reviews").insert({ product_id: productId, user_id: userId, rating, comment: comment || "" });
+    if (error) throw error;
+  }
+};
+// Todas las reseñas REALES de los productos de un vendedor (para la pestaña
+// "Reseñas" de su perfil) — mismas reseñas que se ven en cada producto, solo
+// que agregadas por vendedor. Se escriben SIEMPRE desde el producto, nunca
+// desde aquí (evita reseñas sin un product_id real detrás).
+export const getSellerReviews = async (sellerId) => {
+  if (!sellerId) return [];
+  try {
+    const { data: prods } = await supabase.from("products").select("id").eq("seller_id", sellerId);
+    const ids = (prods || []).map(p => p.id);
+    if (!ids.length) return [];
+    const { data, error } = await supabase.from("reviews").select("id, user_id, rating, comment, created_at").in("product_id", ids).order("created_at", { ascending: false });
+    if (error || !data) return [];
+    const uids = [...new Set(data.map(r => r.user_id))];
+    let profMap = {};
+    if (uids.length) {
+      const { data: profs } = await supabase.from("profiles").select("id, full_name, avatar_url").in("id", uids);
+      (profs || []).forEach(p => { profMap[p.id] = p; });
+    }
+    return data.map(r => {
+      const p = profMap[r.user_id];
+      return { id: r.id, rating: r.rating, comment: r.comment || "", createdAt: r.created_at, name: p?.full_name || "Usuario", avatar: p?.avatar_url || null };
+    });
+  } catch (e) { return []; }
+};
+
+// ── Búsqueda inteligente por categoría: si la búsqueda de texto normal no da
+// resultados, match_category(p_query) busca la categoría más parecida (exacta,
+// por prefijo o por similitud) — o ninguna fila si no hay nada razonable. ──
+export const matchCategory = async (query) => {
+  if (!query || !query.trim()) return null;
+  try {
+    const { data, error } = await supabase.rpc("match_category", { p_query: query.trim() });
+    if (error || !data) return null;
+    const row = Array.isArray(data) ? data[0] : data;
+    return row || null;
+  } catch (e) { return null; }
+};
 // ── Subida REAL de imágenes de producto ──────────────────────────────────────
 // 1) Comprime la foto en el teléfono (máx. 1280px, JPEG) para que pese poco.
 // 2) La sube al almacenamiento de Supabase (bucket público "product-images") y

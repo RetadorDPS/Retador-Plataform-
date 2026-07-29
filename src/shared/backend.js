@@ -65,20 +65,21 @@ export const updateUserName = async (id, name) => {
 export const getSellerAbout = async (userId) => {
   if (!userId) return null;
   try {
-    const { data, error } = await supabase.from("profiles").select("city, country, seller_info").eq("id", userId).single();
+    const { data, error } = await supabase.from("profiles").select("city, country, seller_info, email_public").eq("id", userId).single();
     if (error || !data) return null;
     const si = (data.seller_info && typeof data.seller_info === "object") ? data.seller_info : {};
     return {
       city: data.city || "", country: data.country || "", state: si.state || "",
       responseTime: si.responseTime || "", shipping: si.shipping || "",
       instagram: si.instagram || "", facebook: si.facebook || "", tiktok: si.tiktok || "",
+      emailPublic: !!data.email_public,
     };
   } catch (e) { return null; }
 };
 export const saveSellerAbout = async (userId, about) => {
   if (!userId) throw new Error("Sesión no válida");
   const patch = {
-    city: about.city || "", country: about.country || "",
+    city: about.city || "", country: about.country || "", email_public: !!about.emailPublic,
     seller_info: {
       state: about.state || "", responseTime: about.responseTime || "", shipping: about.shipping || "",
       instagram: about.instagram || "", facebook: about.facebook || "", tiktok: about.tiktok || "",

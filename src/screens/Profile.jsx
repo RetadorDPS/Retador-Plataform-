@@ -1426,6 +1426,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     city:"", state:"", country:"",
     responseTime:"", shipping:"",
     instagram:"", facebook:"", tiktok:"",
+    emailPublic:false,
   });
   const [ad, setAd] = useState({ ...about });
 
@@ -1879,6 +1880,18 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                 </FP_Field>
               ))}
             </div>
+
+            <div style={{ background:FP_C.surfaceTop, borderRadius:8,
+              padding:"14px", marginBottom:4, border:`1px solid ${FP_C.border}` }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <FP_Icon d={FP_Icons.mail} size={15} color={FP_C.textSecondary}/>
+                  <span style={{ fontSize:13, color:FP_C.textSecondary }}>Mostrar mi correo en mi perfil público</span>
+                </div>
+                <FP_Toggle on={ad.emailPublic}
+                  onChange={() => setAd(d => ({...d, emailPublic:!d.emailPublic}))}/>
+              </div>
+            </div>
           </div>
 
           <div style={{ display:"flex", gap:8, marginTop:4 }}>
@@ -2067,18 +2080,22 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                     )}
                   </FP_Row>
 
-                  {/* Correo de la cuenta — ÚNICO sitio donde se muestra, siempre de
-                      solo lectura y siempre profiles.email (mismo valor que ve el
-                      dueño y el panel de admin; nunca un dato distinto o inventado). */}
-                  <FP_Row border style={{ gap:12 }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-                      <FP_Icon d={FP_Icons.mail} size={15} color={FP_C.textSecondary}/>
-                      <div>
-                        <div style={{ fontSize:10, color:FP_C.textMuted, fontWeight:700, letterSpacing:"0.3px" }}>CORREO DE LA CUENTA</div>
-                        <div style={{ fontSize:13, color:FP_C.textSecondary }}>{profile.email || "—"}</div>
+                  {/* Correo de la cuenta — siempre de solo lectura y siempre profiles.email
+                      (mismo valor que ve el dueño y el panel de admin; nunca un dato distinto
+                      o inventado). El DUEÑO lo ve siempre; a un visitante solo se le muestra
+                      si el dueño activó "Mostrar mi correo en mi perfil público" (privado
+                      por defecto). */}
+                  {(isOwner || about.emailPublic) && (
+                    <FP_Row border style={{ gap:12 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                        <FP_Icon d={FP_Icons.mail} size={15} color={FP_C.textSecondary}/>
+                        <div>
+                          <div style={{ fontSize:10, color:FP_C.textMuted, fontWeight:700, letterSpacing:"0.3px" }}>CORREO DE LA CUENTA</div>
+                          <div style={{ fontSize:13, color:FP_C.textSecondary }}>{profile.email || "—"}</div>
+                        </div>
                       </div>
-                    </div>
-                  </FP_Row>
+                    </FP_Row>
+                  )}
 
                   {[
                     (about.city || about.country) && { icon:FP_Icons.globe, text:[about.city, about.state, about.country].filter(Boolean).join(", ") },

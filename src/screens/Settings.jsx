@@ -439,24 +439,15 @@ function CFG_StepSlider({ index, count, labels, onChange, hint }) {
   );
 }
 
-// BUG REAL: densidad "cómoda" (la más grande) + texto "Máx" a la vez rompe el
-// layout visualmente (se ve rayado/con errores) — el zoom combinado de ambas
-// se sale de lo que la app puede maquetar bien. Se evita que los dos extremos
-// coincidan: si uno ya está al tope, subir el otro al tope también queda
-// bloqueado (con aviso), no en silencio.
-function CFG_DensitySelector({ appTextScale, flash }) {
+function CFG_DensitySelector() {
   const { mode, setMode, modes } = useDensity();
   const idx = modes.indexOf(mode);
-  const textIsMax = (appTextScale || 1) >= TEXT_STEPS[TEXT_STEPS.length - 1];
   return (
     <CFG_StepSlider
       index={idx < 0 ? 2 : idx}
       count={modes.length}
       labels={modes.map(m => DENSITY_TOKENS[m].label)}
-      onChange={i => {
-        if (i === modes.length - 1 && textIsMax) { flash && flash("⚠️ Baja el tamaño del texto para poder subir la densidad al máximo"); return; }
-        setMode(modes[i]);
-      }}
+      onChange={i => setMode(modes[i])}
       hint="Ajusta el tamaño y el aire de toda la app · 2 productos por fila"
     />
   );
@@ -467,8 +458,6 @@ function CFG_AppearanceScreen({ settings, upd, nav, appScale = 1, onScale, onThe
   const ap = settings.appearance;
   function set(k, v) { upd("appearance", { ...ap, [k]:v }); }
   const sizes = { small:12, normal:14, large:16 };
-  const { mode: densMode, modes: densModes } = useDensity();
-  const densityIsMax = densMode === densModes[densModes.length - 1];
   return (
     <div style={{ background:tk.BG }} className="">
       <CFG_Hdr title="Apariencia" onBack={() => nav("home")} />
@@ -489,18 +478,15 @@ function CFG_AppearanceScreen({ settings, upd, nav, appScale = 1, onScale, onThe
       </CFG_Crd>
       <CFG_Lbl>Densidad visual</CFG_Lbl>
       <CFG_Crd>
-        <CFG_DensitySelector appTextScale={appTextScale} flash={flash} />
+        <CFG_DensitySelector />
       </CFG_Crd>
       <CFG_Lbl>Tamaño del texto</CFG_Lbl>
       <CFG_Crd>
         <CFG_StepSlider
           index={(() => { let bi = 0, bd = 9; TEXT_STEPS.forEach((s, i) => { const d = Math.abs(s - (appTextScale || 1)); if (d < bd) { bd = d; bi = i; } }); return bi; })()}
           count={TEXT_STEPS.length}
-          labels={["Pequeño", "Normal", "Grande", "Máx"]}
-          onChange={i => {
-            if (i === TEXT_STEPS.length - 1 && densityIsMax) { flash && flash("⚠️ Baja la densidad para poder subir el texto al máximo"); return; }
-            onTextScaleChange?.(TEXT_STEPS[i]);
-          }}
+          labels={["Pequeño", "Normal", "Grande"]}
+          onChange={i => onTextScaleChange?.(TEXT_STEPS[i])}
           hint="Aplica a todo el texto de la app"
         />
         <CFG_Hr />

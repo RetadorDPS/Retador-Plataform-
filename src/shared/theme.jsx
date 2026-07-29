@@ -14,7 +14,7 @@ export const B  = "#1a1a1a";   // bordes
 // hay caché disponible (dev / primer arranque), cae a APP_VERSION_FALLBACK.
 // Al desplegar se sube el CACHE del SW y este número se refleja SOLO aquí, en ambos
 // sitios a la vez.
-export const APP_VERSION_FALLBACK = "95";
+export const APP_VERSION_FALLBACK = "96";
 export async function getDeployVersion() {
   try {
     if (typeof caches !== "undefined" && caches.keys) {
@@ -79,20 +79,25 @@ export const usePlatformCfg = () => useContext(PlatformCfgContext) || {};
 //  + provider + hooks. Persistencia adaptada a localStorage (igual que el
 //  tema), tal como indica la guía de integración del motor.
 // ═══════════════════════════════════════════════════════════════════
-export const DENSITY_MODES = ['pequena', 'compacta', 'normal', 'comoda'];
-// 4 niveles de densidad (slider). designW = ancho de diseño virtual (móvil): mayor =
+export const DENSITY_MODES = ['pequena', 'compacta', 'normal'];
+// 3 niveles de densidad (slider). designW = ancho de diseño virtual (móvil): mayor =
 // más zoom-out = todo más pequeño/elegante; menor = más grande. fixedZoom = tablet/PC.
 export const DENSITY_TOKENS = {
   pequena:  { name:'pequena',  label:'Pequeña',  designW:470, fixedZoom:0.88, grid:{ gap:8  } },
   compacta: { name:'compacta', label:'Compacta', designW:438, fixedZoom:0.94, grid:{ gap:10 } },
   normal:   { name:'normal',   label:'Normal',   designW:408, fixedZoom:1.00, grid:{ gap:12 } },
-  comoda:   { name:'comoda',   label:'Cómoda',   designW:380, fixedZoom:1.06, grid:{ gap:15 } },
 };
 export const DENSITY_STORAGE_KEY = 'retador_density';
 export const DensityContext = createContext(null);
 export function DensityProvider({ children, defaultMode = 'pequena' }) {
   const [mode, setModeState] = useState(() => {
-    try { const v = localStorage.getItem(DENSITY_STORAGE_KEY); return v && DENSITY_MODES.includes(v) ? v : defaultMode; } catch { return defaultMode; }
+    try {
+      const v = localStorage.getItem(DENSITY_STORAGE_KEY);
+      if (!v) return defaultMode;
+      if (DENSITY_MODES.includes(v)) return v;
+      // Nivel heredado ya eliminado (p.ej. "comoda"): cae al más alto disponible.
+      return DENSITY_MODES[DENSITY_MODES.length - 1];
+    } catch { return defaultMode; }
   });
   const setMode = useCallback((next) => {
     if (!DENSITY_MODES.includes(next)) return;
@@ -113,6 +118,6 @@ export function useDensity() {
 export function densityCols(mode, isDesktop, isTablet) {
   return isDesktop ? 5 : isTablet ? 3 : 2;
 }
-// Tamaño de texto: 4 pasos (Pequeño / Normal / Grande / Máx). El más pequeño se
+// Tamaño de texto: 3 pasos (Pequeño / Normal / Grande). El más pequeño se
 // mantiene y crece de forma proporcionada hacia arriba, sin desbordar la interfaz.
-export const TEXT_STEPS = [0.85, 1.0, 1.18, 1.4];
+export const TEXT_STEPS = [0.85, 1.0, 1.18];

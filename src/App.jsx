@@ -422,17 +422,25 @@ function AppShell({ sessionUser }) {
   // Marca si ya llegó la config del backend: mientras no llegue, exchange_rates puede
   // rellenar fx; cuando llega platform_config, ESA manda (fuente de verdad única).
   const cfgFromBackend = useRef(false);
-  // 1) CARGAR LA CONFIG DEL BACKEND al arrancar (fuente de verdad). localStorage
-  //    queda solo como caché de respaldo hasta que llega la del backend.
+  // 1) CARGAR LA CONFIG DEL BACKEND al arrancar — ÚNICA fuente de verdad para TODO
+  //    (incluida fx, la tirita de tasas). localStorage queda solo como caché de
+  //    respaldo hasta que llega la del backend. Con reintento: en redes
+  //    intermitentes, si el primer intento falla, la tasa se quedaría pegada al
+  //    valor cacheado sin corregirse nunca — este es el bug real que hacía que la
+  //    tirita a veces mostrara un valor viejo/incorrecto.
   useEffect(() => {
-    let alive = true;
-    getPlatformConfig().then(res => {
-      if (!alive || !res) return;
-      cfgFromBackend.current = true;
-      setAdminCfg(prev => ({ ...prev, ...res.config }));
-      if (res.updatedAt) setCfgUpdatedAt(res.updatedAt);
-    }).catch(() => {});
-    return () => { alive = false; };
+    let alive = true, retry = 0, timer = null;
+    const load = () => {
+      getPlatformConfig().then(res => {
+        if (!alive) return;
+        if (!res) { if (retry < 6) { retry++; timer = setTimeout(load, Math.min(1500 * 2 ** retry, 20000)); } return; }
+        cfgFromBackend.current = true;
+        setAdminCfg(prev => ({ ...prev, ...res.config }));
+        if (res.updatedAt) setCfgUpdatedAt(res.updatedAt);
+      }).catch(() => { if (alive && retry < 6) { retry++; timer = setTimeout(load, Math.min(1500 * 2 ** retry, 20000)); } });
+    };
+    load();
+    return () => { alive = false; if (timer) clearTimeout(timer); };
   }, []);
   const [buyModal,   setBuyModal]   = useState(null);
   const [plusMenu,   setPlusMenu]   = useState(null); // { top, right } posición del dropdown
@@ -472,54 +480,30 @@ function AppShell({ sessionUser }) {
   const [products,  setProducts]  = useState([]); // productos REALES del backend (kind='product')
   const [services,  setServices]  = useState([]); // SERVICIOS (kind='service') — mundo aparte
   const [loading,   setLoading]   = useState(true);
-  // Cargar productos reales al iniciar (sin login: política pública active+approved).
-  useEffect(() => {
-    let alive = true;
+  // Cargar productos reales (sin login: política pública active+approved). Se
+  // extrae a una función reutilizable para el pull-to-refresh de la Tienda —
+  // recarga los datos SIN navegar/recargar la página (así el scroll no salta).
+  const reloadFeed = useCallback(async () => {
     setLoading(true);
-    loadProducts()
+    try {
+      const list = await loadProducts();
       // DEMO_PRODUCT: tarjeta de ejemplo "llena" al frente (quitar cuando ya no se necesite).
-      .then(list => { if (alive) setProducts([DEMO_PRODUCT, ...list]); })
-      .finally(() => { if (alive) setLoading(false); });
-    loadServices().then(list => { if (alive) setServices(list); }).catch(() => {});
-    return () => { alive = false; };
+      setProducts([DEMO_PRODUCT, ...list]);
+    } finally { setLoading(false); }
+    try { setServices(await loadServices()); } catch (e) {}
   }, []);
+  useEffect(() => { reloadFeed(); }, []);
   // MIS publicaciones (productos + servicios, INCLUIDAS las retiradas): el dueño las
   // ve todas en su perfil, marcando las retiradas. Fuente: getProductsBySeller (sin filtrar).
   const [ownListings, setOwnListings] = useState([]);
   const reloadOwn = useCallback(() => { if (sessionUser?.id) getProductsBySeller(sessionUser.id).then(setOwnListings).catch(() => {}); }, [sessionUser?.id]);
   useEffect(() => { reloadOwn(); }, [reloadOwn]);
-  // Cargar TASAS DE CAMBIO reales del backend (lectura pública, sin login) y
-  // volcarlas en la config (usdToCup / eurToCup) para que toda la app las use.
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const { data, error } = await supabase
-          .from("exchange_rates")
-          .select("from_currency,to_currency,rate");
-        if (error) throw error;
-        if (!alive || !data) return;
-        const find = (f, t) => data.find(r => r.from_currency === f && r.to_currency === t)?.rate;
-        const usdToCup = Number(find("USD", "CUP"));
-        const eurToCup = Number(find("EUR", "CUP"));
-        // Si ya llegó la config del backend, ESA es la fuente de verdad de fx: no
-        // la pisamos con la tabla de tasas (que queda como respaldo si no hubo config).
-        if (cfgFromBackend.current) return;
-        if (usdToCup > 0 || eurToCup > 0) {
-          setAdminCfg(prev => ({
-            ...prev,
-            fx: {
-              usdToCup: usdToCup > 0 ? usdToCup : (prev.fx?.usdToCup ?? 400),
-              eurToCup: eurToCup > 0 ? eurToCup : (prev.fx?.eurToCup ?? 430),
-            },
-          }));
-        }
-      } catch (err) {
-        console.error("Tasas de cambio:", err?.message || err);
-      }
-    })();
-    return () => { alive = false; };
-  }, []);
+  // NOTA: antes había aquí una segunda consulta a la tabla `exchange_rates` como
+  // "respaldo" de las tasas mientras platform_config cargaba. Se quita: era una
+  // SEGUNDA fuente de verdad compitiendo con config.fx (el admin solo edita
+  // platform_config, nunca esa tabla), y si platform_config tardaba o fallaba,
+  // la tirita podía quedarse mostrando un valor de esa tabla distinto/desactualizado.
+  // Ahora fx sale SIEMPRE de config.fx (con reintento arriba, ver punto 9).
   const [search,    setSearch]    = useState("");
   const [filter,    setFilter]    = useState("TODOS");
   // VISTA de productos (Cuadrícula / Muro). Preferencia del usuario, persistente.
@@ -1603,6 +1587,7 @@ function AppShell({ sessionUser }) {
                 messagesBadge={chatUnread}
                 onServices={() => setMScr("services")}
                 onNav={navTo}
+                onRefresh={reloadFeed}
               />
             )}
             {mScr === "services" && (
@@ -1703,7 +1688,7 @@ function AppShell({ sessionUser }) {
               accountPassword={accountPassword} onSetPassword={setAccountPassword}
               blockedUsers={blockedUsers} onToggleBlock={toggleBlock}
               onOpenWallet={() => setShowWallet(true)} orders={orders.filter(o => (o.buyerId ? o.buyerId === user?.id : true))} />}
-            {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { setSelOrderId(o.id); setPScr("order-detail"); }} />}
+            {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { setSelOrderId(o.id); setPScr("order-detail"); }} onRefresh={loadOrders} />}
             {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => { const meSeller = (o.seller_id || o.sellerId) === user?.id; requestChat(meSeller ? (o.buyer_id || o.buyerId) : (o.seller_id || o.sellerId), meSeller ? (o.buyerName || "Comprador") : (o.sellerName || "Vendedor"), { type: "order", id: o.id, title: o.title || "Pedido", image: o.image || null }); }} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
             {/* Panel lateral del Perfil (☰): todo el menú que antes estaba apilado */}
             <ProfileMenuDrawer open={profileMenuOpen} onClose={() => setProfileMenuOpen(false)} user={user} isOwner={hasPanel}

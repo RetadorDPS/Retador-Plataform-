@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { Avatar, AvatarUser, G, Ic, ORDER_FLOW, Spin, getMyConversations, getSB, getUserName, getProductById, isBlockedPair, isBlockSendError, toggleBlockUser, editMessage, deleteMessage, uploadVoiceNote, voiceNoteSignedUrl, setReaction, getReactionsForMessages, loadMessages, markRead, money, pushBackHandler, sendMessage, supabase, trackEvent, useAt, useR } from "../shared/index.js";
+import { Avatar, AvatarUser, G, Ic, ORDER_FLOW, PullIndicator, Spin, getMyConversations, getSB, getUserName, getProductById, isBlockedPair, isBlockSendError, toggleBlockUser, editMessage, deleteMessage, uploadVoiceNote, voiceNoteSignedUrl, setReaction, getReactionsForMessages, loadMessages, markRead, money, pushBackHandler, sendMessage, supabase, trackEvent, useAt, useR, usePullToRefresh } from "../shared/index.js";
 
 // Fondo del chat: textura de identidad RETADOR — sutil pero SÍ perceptible (un
 // patrón de puntos dorados en diagonal), en ambos temas. No compite con las
@@ -379,8 +379,12 @@ export function MessagesScreen({ user, onBack, onChat, chatOpen = false }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const [convs,   setConvs]   = useState([]);
   const [loading, setLoading] = useState(true);
+  const listRef = useRef(null);
 
   const reload = useCallback(() => { if (user?.id) getMyConversations(user.id).then(setConvs).catch(() => {}); }, [user?.id]);
+  // Pull-to-refresh REAL: sin esto, deslizar hacia abajo en el tope disparaba el
+  // pull-to-refresh NATIVO del navegador (recarga completa, perdía el scroll).
+  const ptr = usePullToRefresh(listRef, reload);
   useEffect(() => {
     if (!user?.id) { setLoading(false); return; }
     getMyConversations(user.id).then(d => { setConvs(d); setLoading(false); });
@@ -424,7 +428,8 @@ export function MessagesScreen({ user, onBack, onChat, chatOpen = false }) {
   };
 
   return (
-    <div style={{ flex: 1, overflowY: "auto" }}>
+    <div ref={listRef} {...ptr.handlers} style={{ flex: 1, overflowY: "auto", overscrollBehaviorY: "contain" }}>
+      <PullIndicator pull={ptr.pull} refreshing={ptr.refreshing} />
       <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "13px 18px", display: "flex", alignItems: "center", gap: 8, position: "sticky", top: 0, zIndex: 2 }}>
         <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c={T2} s={20} /></button>
         <p style={{ fontSize: 15, fontWeight: 800, color: T1 }}>Mensajes</p>

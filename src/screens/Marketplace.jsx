@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getUserById, getUserName, getUserTrustStats, getVerifiedMap, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getUserById, getUserName, getUserTrustStats, getVerifiedMap, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh } from "../shared/index.js";
 
 // ✓ real de vendedores en lote — se refresca cuando cambia el conjunto de
 // vendedores visible (evita 1 consulta por tarjeta). Fuente: profiles.is_verified.
@@ -961,7 +961,7 @@ export function ChatsModal({ onClose, initial, orders = [], chatMsgs = {}, chatP
    reales RESPETANDO la posición: cada anuncio se renderiza en el tramo donde el
    usuario lo colocó, entre las partes fijas del sistema. Botones que navegan. */
 
-export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, messagesBadge = 0, onServices, onNav, hidden = false, scrollKeeper = null, view = "grid" }) {
+export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, messagesBadge = 0, onServices, onNav, hidden = false, scrollKeeper = null, view = "grid", onRefresh = null }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { cats } = useCatalog();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
@@ -975,9 +975,14 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
   useEffect(() => {
     if (feedRef.current && scrollKeeper && scrollKeeper.current > 0) feedRef.current.scrollTop = scrollKeeper.current;
   }, []);
+  // Pull-to-refresh REAL: sin él, deslizar hacia abajo en el tope disparaba el
+  // pull-to-refresh NATIVO del navegador (recarga completa de la página, con
+  // pérdida total del scroll). Este solo vuelve a pedir los productos.
+  const ptr = usePullToRefresh(feedRef, onRefresh, { disabled: !onRefresh });
 
   return (
-    <div ref={feedRef} onScroll={e => { if (scrollKeeper) scrollKeeper.current = e.currentTarget.scrollTop; }} style={{ flex: 1, overflowY: "auto" }}>
+    <div ref={feedRef} {...ptr.handlers} onScroll={e => { if (scrollKeeper) scrollKeeper.current = e.currentTarget.scrollTop; }} style={{ flex: 1, overflowY: "auto", overscrollBehaviorY: "contain" }}>
+      <PullIndicator pull={ptr.pull} refreshing={ptr.refreshing} />
       {/* Tramo: lo que pusiste ANTES del Encabezado (arriba del todo) */}
       <LiveSlot page="inicio" from={null} to="in_h" onNav={onNav} pad="12px 16px 0" />
       {/* Header */}

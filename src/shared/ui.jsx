@@ -116,6 +116,22 @@ export const Spin = ({ size = 20, color = G }) => (
   <div className="spn" style={{ width: size, height: size, border: `2px solid #181818`, borderTopColor: color, borderRadius: "50%", flexShrink: 0 }} />
 );
 
+// Indicador visual del pull-to-refresh PROPIO (ver usePullToRefresh en hooks.js):
+// crece con la distancia arrastrada y gira mientras refresca. Va como PRIMER
+// hijo del contenedor con scroll (empuja el contenido hacia abajo el mismo alto).
+export const PullIndicator = ({ pull = 0, refreshing = false, threshold = 64 }) => {
+  const h = refreshing ? 44 : Math.min(64, pull);
+  if (h < 2 && !refreshing) return null;
+  const ready = pull >= threshold || refreshing;
+  return (
+    <div style={{ height: h, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", transition: refreshing ? "height .15s" : "none" }}>
+      <div style={{ opacity: Math.min(1, h / 40), transform: `scale(${Math.min(1, h / 40)})`, transition: "opacity .1s, transform .1s" }}>
+        <Spin size={20} color={ready ? G : "#666"} />
+      </div>
+    </div>
+  );
+};
+
 // Saca la URL de la FOTO a partir de cualquiera de las formas que usa la app:
 // un string (avatar_url), o un objeto { type:"image"|"photo", value|url }. Los
 // avatares tipo "emoji" (formato viejo) se ignoran: ya no se muestran emojis.

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, useAt, useR } from "../shared/index.js";
+import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, useAt, useR, PullIndicator, usePullToRefresh } from "../shared/index.js";
 
 export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewProfile, flash, onSellerConfirm, onBuyerConfirm, onSellerPayment, onApproveFee }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
@@ -252,10 +252,12 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   );
 }
 
-export function OrdersScreen({ user, me, onBack, flash, orders = [], lastSeen = {}, onSeen, onOpen }) {
+export function OrdersScreen({ user, me, onBack, flash, orders = [], lastSeen = {}, onSeen, onOpen, onRefresh = null }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const [tab, setTab] = useState("compras");   // "compras" | "ventas"
+  const listRef = useRef(null);
+  const ptr = usePullToRefresh(listRef, onRefresh, { disabled: !onRefresh });
 
   // Rol de cada pedido según quién soy (por id de comprador/vendedor).
   const roleOf = (o) => o.role || (((o.buyerId ?? o.buyer_id) === user?.id) ? "compra" : "venta");
@@ -335,7 +337,8 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], lastSeen = 
     : { icon: "🏷️", title: "Aún no te han comprado nada.", sub: "Publica productos para empezar a vender." };
 
   return (
-    <div style={{ flex: 1, overflowY: "auto" }}>
+    <div ref={listRef} {...ptr.handlers} style={{ flex: 1, overflowY: "auto", overscrollBehaviorY: "contain" }}>
+      <PullIndicator pull={ptr.pull} refreshing={ptr.refreshing} />
       <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, position: "sticky", top: 0, zIndex: 5 }}>
         <div style={{ padding: "13px 18px", display: "flex", alignItems: "center", gap: 8 }}>
           <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c="#666" s={20} /></button>

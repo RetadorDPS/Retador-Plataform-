@@ -58,6 +58,36 @@ export const updateUserName = async (id, name) => {
   return { id, name };
 };
 
+// ── "Acerca de" del vendedor (profiles.city/country + profiles.seller_info jsonb) ──
+// city/country tienen columna propia; el resto (estado/provincia, tiempo de
+// respuesta, tiempo de envío, redes) vive dentro de seller_info. Antes NO había
+// dónde guardar nada de esto — por eso se "perdía" al recargar.
+export const getSellerAbout = async (userId) => {
+  if (!userId) return null;
+  try {
+    const { data, error } = await supabase.from("profiles").select("city, country, seller_info").eq("id", userId).single();
+    if (error || !data) return null;
+    const si = (data.seller_info && typeof data.seller_info === "object") ? data.seller_info : {};
+    return {
+      city: data.city || "", country: data.country || "", state: si.state || "",
+      responseTime: si.responseTime || "", shipping: si.shipping || "",
+      instagram: si.instagram || "", facebook: si.facebook || "", tiktok: si.tiktok || "",
+    };
+  } catch (e) { return null; }
+};
+export const saveSellerAbout = async (userId, about) => {
+  if (!userId) throw new Error("Sesión no válida");
+  const patch = {
+    city: about.city || "", country: about.country || "",
+    seller_info: {
+      state: about.state || "", responseTime: about.responseTime || "", shipping: about.shipping || "",
+      instagram: about.instagram || "", facebook: about.facebook || "", tiktok: about.tiktok || "",
+    },
+  };
+  const { error } = await supabase.from("profiles").update(patch).eq("id", userId);
+  if (error) throw error;
+};
+
 // Product functions
 // ── Productos REALES del backend ─────────────────────────────────────────────
 // Mapea las columnas del backend al formato que espera la app.

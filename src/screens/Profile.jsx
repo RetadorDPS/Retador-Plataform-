@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, saveSellerAbout } from "../shared/index.js";
 
 // ─── TIRITA DE TASAS DEL DÍA ──────────────────────────────────────────────────
 // Franja discreta con las tasas del día que controla el admin (adminCfg.fx del
@@ -198,6 +198,11 @@ const FP_DARK = {
   accent:      "#FFC01E",
   accentSoft:  "#2A2100",
   accentText:  "#FFC01E",
+  // Color dedicado del sello "Pro" — en oscuro el dorado de siempre luce bien,
+  // así que se mantiene igual al accent general.
+  pro:      "#FFC01E",
+  proSoft:  "#2A2100",
+  proText:  "#FFC01E",
   textPrimary:   "#f0f0f0",
   textSecondary: "#888888",
   textMuted:     "#3a3a3a",
@@ -216,6 +221,11 @@ const FP_LIGHT = {
   accent:      "#B8860B",
   accentSoft:  "#FFF6DF",
   accentText:  "#8A6D00",
+  // El dorado del sello "Pro" choca sobre fondo blanco — en tema claro usa un
+  // morado elegante propio (no reutiliza el accent general de botones/inputs).
+  pro:      "#7C3AED",
+  proSoft:  "#F3E8FF",
+  proText:  "#6D28D9",
   textPrimary:   "#050505",
   textSecondary: "#65676B",
   textMuted:     "#8A8D91",
@@ -1366,13 +1376,17 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   const [showPro,      setShowPro]      = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showPicker,   setShowPicker]   = useState(false);
-  const [editProfile,  setEditProfile]  = useState(false);
-  const [editAbout,    setEditAbout]    = useState(false);
+  // Editor UNIFICADO: "Editar perfil" y "Acerca de" ya no son dos flujos
+  // separados — un solo booleano abre UN panel con ambas secciones dentro.
+  const [editing,      setEditing]      = useState(false);
   const [showRevForm,  setShowRevForm]  = useState(false);
   const [showReport,   setShowReport]   = useState(false);
   const [showVerify,   setShowVerify]   = useState(false);
   const [showPlans,    setShowPlans]    = useState(false);
   const [toast,        setToast]        = useState(null);
+  // El botón "Editar" de Acerca de es un atajo DENTRO del mismo editor unificado:
+  // abre el mismo panel y baja hasta esta sección (no es un flujo aparte).
+  const aboutEditRef = useRef(null);
 
   // ÚNICA identidad pública: el nombre real (profiles.full_name). Ya no existe
   // "usuario"/@handle — era un valor inventado en el frontend (pedazo del correo)
@@ -1412,9 +1426,22 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     city:"", state:"", country:"",
     responseTime:"", shipping:"",
     instagram:"", facebook:"", tiktok:"",
-    acceptsOffers:false, shipsNational:false, shipsLocal:false,
   });
   const [ad, setAd] = useState({ ...about });
+
+  // Carga REAL "Acerca de" del backend (profiles.city/country + seller_info) —
+  // antes no había ninguna columna para esto, por eso nunca persistía. Se trae
+  // tanto para el dueño (su propia info) como para quien visita OTRO perfil.
+  const aboutTargetId = isOwner ? user?.id : sellerId;
+  useEffect(() => {
+    if (!aboutTargetId) return;
+    let alive = true;
+    getSellerAbout(aboutTargetId).then(a => {
+      if (!alive || !a) return;
+      setAbout(a); setAd(a);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [aboutTargetId]);
 
   const [reviews, setReviews] = useState(() => {
     try {
@@ -1425,24 +1452,26 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   });
 
   function toast_(msg) { setToast(msg); setTimeout(() => setToast(null), 2500); }
-  async function saveProfile() {
-    const updated = {...pd};
-    setProfile(updated);
-    setEditProfile(false);
+  // Editor unificado: UN solo botón "Guardar" persiste datos básicos (perfil) y
+  // "Acerca de" a la vez — dos updates al backend (perfiles distintos: profiles
+  // básico y profiles.city/country/seller_info), pero una sola acción del usuario.
+  async function saveAll() {
+    const updatedProfile = {...pd};
+    const updatedAbout = {...ad};
+    setProfile(updatedProfile);
+    setAbout(updatedAbout);
+    setEditing(false);
     toast_("Perfil actualizado");
-    onProfileUpdate?.({ avatar: updated.avatar, name: updated.name, email: updated.email, bio: updated.bio || "" });
-    // Guarda en el backend (nombre, foto y BIOGRAFÍA). Así se refleja en TODOS
-    // lados (perfil propio y público) y en el otro teléfono.
+    onProfileUpdate?.({ avatar: updatedProfile.avatar, name: updatedProfile.name, email: updatedProfile.email, bio: updatedProfile.bio || "" });
     if (isOwner && user?.id) {
-      const patch = { full_name: updated.name, bio: updated.bio || "" };
-      const url = avatarUrlOf(updated.avatar);
-      if (updated.avatar?.type === "image" && url) patch.avatar_url = url;
-      try { await supabase.from("profiles").update(patch).eq("id", user.id); } catch (e) { console.error("saveProfile:", e?.message || e); }
+      const patch = { full_name: updatedProfile.name, bio: updatedProfile.bio || "" };
+      const url = avatarUrlOf(updatedProfile.avatar);
+      if (updatedProfile.avatar?.type === "image" && url) patch.avatar_url = url;
+      try { await supabase.from("profiles").update(patch).eq("id", user.id); } catch (e) { console.error("saveAll (perfil):", e?.message || e); }
+      try { await saveSellerAbout(user.id, updatedAbout); } catch (e) { console.error("saveAll (acerca de):", e?.message || e); }
     }
   }
-  function saveAbout()   { setAbout({...ad});   setEditAbout(false);   toast_("Información actualizada"); }
-  function cancelProfile() { setPd({...profile}); setEditProfile(false); }
-  function cancelAbout()   { setAd({...about});   setEditAbout(false);   }
+  function cancelAll() { setPd({...profile}); setAd({...about}); setEditing(false); }
 
   function submitReview({ name, stars, text }) {
     setReviews(r => [{ id:Date.now(), user:name, stars, text, date:"justo ahora" }, ...r]);
@@ -1519,12 +1548,12 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
               <FP_Icon d={FP_Icons.settings} size={15} color={FP_C.textSecondary}/>
             </button>
             <button onClick={() => setShowPro(true)} style={{
-              background:FP_C.accentSoft, border:`1px solid ${FP_C.accent}33`,
+              background:FP_C.proSoft, border:`1px solid ${FP_C.pro}33`,
               borderRadius:6, padding:"0 12px", height:32, cursor:"pointer",
-              color:FP_C.accentText, fontSize:11, fontWeight:700, fontFamily:FP_FH,
+              color:FP_C.proText, fontSize:11, fontWeight:700, fontFamily:FP_FH,
               display:"flex", alignItems:"center", gap:5, letterSpacing:"0.3px",
             }}>
-              <FP_Icon d={FP_Icons.zap} size={12} color={FP_C.accentText}/>
+              <FP_Icon d={FP_Icons.zap} size={12} color={FP_C.proText}/>
               Pro
             </button>
           </div>
@@ -1535,13 +1564,13 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
       {onMenu && <div style={{ padding:"12px 20px 0" }}><FxTirita /></div>}
 
       {/* ── PROFILE HEADER ── */}
-      {!editProfile ? (
+      {!editing ? (
         <div style={{ padding:"24px 20px 0" }}>
 
           <div style={{ display:"flex", justifyContent:"space-between",
             alignItems:"flex-start", marginBottom:16 }}>
             <div style={{ position:"relative" }}>
-              <FP_Avatar avatar={profile.avatar} name={profile.name} size={72} verified={!!isVerified || !!profile.isVerified}/>
+              <FP_Avatar avatar={profile.avatar} name={profile.name} size={86} verified={!!isVerified || !!profile.isVerified}/>
               {/* Chip de plan — SOLO lo ve el dueño de la cuenta, nunca un visitante
                   (el plan no es información pública; además chocaba con el ✓). */}
               {isOwner && (
@@ -1557,7 +1586,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
             </div>
 
             {isOwner ? (
-              <button onClick={() => { setPd({...profile}); setEditProfile(true); }}
+              <button onClick={() => { setPd({...profile}); setAd({...about}); setEditing(true); }}
                 style={{ background:FP_C.surfaceTop, border:`1px solid ${FP_C.border}`,
                   borderRadius:6, padding:"0 14px", height:32, cursor:"pointer",
                   display:"flex", alignItems:"center", gap:6 }}>
@@ -1723,13 +1752,13 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
           </div>
         </div>
       ) : (
-        /* ── EDIT PROFILE ── */
+        /* ── EDITOR UNIFICADO: datos básicos + Acerca de, un solo Guardar ── */
         <div style={{ padding:"20px" }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
             <div style={{ fontSize:16, fontWeight:700, color:FP_C.textPrimary, fontFamily:FP_FH }}>
               Editar perfil
             </div>
-            <button onClick={cancelProfile} style={{ background:"none", border:"none",
+            <button onClick={cancelAll} style={{ background:"none", border:"none",
               cursor:"pointer", display:"flex" }}>
               <FP_Icon d={FP_Icons.x} size={20} color={FP_C.textSecondary}/>
             </button>
@@ -1738,7 +1767,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
           {/* Avatar edit */}
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", marginBottom:22 }}>
             <div style={{ position:"relative", cursor:"pointer" }} onClick={() => setShowPicker(true)}>
-              <FP_Avatar avatar={pd.avatar} name={pd.name} size={80}/>
+              <FP_Avatar avatar={pd.avatar} name={pd.name} size={92}/>
               <div style={{ position:"absolute", bottom:0, right:-4,
                 background:FP_C.accent, borderRadius:"50%", width:24, height:24,
                 display:"flex", alignItems:"center", justifyContent:"center",
@@ -1750,7 +1779,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
               background:"none", border:`1px solid ${FP_C.border}`,
               borderRadius:6, padding:"5px 14px", cursor:"pointer",
               color:FP_C.accentText, fontSize:11, fontWeight:600, fontFamily:FP_FH }}>
-              Cambiar foto o emoji
+              Cambiar foto
             </button>
           </div>
 
@@ -1772,9 +1801,89 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
               {pd.bio.length}/160
             </div>
           </FP_Field>
+
+          {/* ── Acerca de (mismo editor, no un flujo aparte) ── */}
+          <div ref={aboutEditRef} style={{ marginTop:8, paddingTop:18, borderTop:`1px solid ${FP_C.border}` }}>
+            <div style={{ fontSize:14, fontWeight:700, color:FP_C.textPrimary, fontFamily:FP_FH, marginBottom:14 }}>
+              Acerca de
+            </div>
+
+            <div style={{ background:FP_C.surfaceTop, borderRadius:8,
+              padding:"14px", marginBottom:14, border:`1px solid ${FP_C.border}` }}>
+              <FP_SectionHead>Ubicación</FP_SectionHead>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr",
+                gap:10, marginBottom:10 }}>
+                <FP_Field label="Ciudad">
+                  <input value={ad.city} placeholder="Ciudad"
+                    onChange={e => setAd(d => ({...d,city:e.target.value}))}
+                    onFocus={e => e.target.style.borderColor = FP_C.accent}
+                    onBlur={e => e.target.style.borderColor = FP_C.border}
+                    style={{...fpInputStyle(FP_C), padding:"9px 11px",fontSize:13}}/>
+                </FP_Field>
+                <FP_Field label="Estado">
+                  <input value={ad.state} placeholder="Estado"
+                    onChange={e => setAd(d => ({...d,state:e.target.value}))}
+                    onFocus={e => e.target.style.borderColor = FP_C.accent}
+                    onBlur={e => e.target.style.borderColor = FP_C.border}
+                    style={{...fpInputStyle(FP_C), padding:"9px 11px",fontSize:13}}/>
+                </FP_Field>
+              </div>
+              <FP_Field label="País">
+                <input value={ad.country} placeholder="País"
+                  onChange={e => setAd(d => ({...d,country:e.target.value}))}
+                  onFocus={e => e.target.style.borderColor = FP_C.accent}
+                  onBlur={e => e.target.style.borderColor = FP_C.border}
+                  style={{...fpInputStyle(FP_C), padding:"9px 11px",fontSize:13}}/>
+              </FP_Field>
+            </div>
+
+            <div style={{ background:FP_C.surfaceTop, borderRadius:8,
+              padding:"14px", marginBottom:14, border:`1px solid ${FP_C.border}` }}>
+              <FP_SectionHead>Tiempos</FP_SectionHead>
+              <FP_Field label="Tiempo de respuesta">
+                <select value={ad.responseTime}
+                  onChange={e => setAd(d => ({...d,responseTime:e.target.value}))}
+                  style={{...fpInputStyle(FP_C), appearance:"none", cursor:"pointer"}}>
+                  {FP_RESPONSE_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </FP_Field>
+              <FP_Field label="Tiempo de envío">
+                <select value={ad.shipping}
+                  onChange={e => setAd(d => ({...d,shipping:e.target.value}))}
+                  style={{...fpInputStyle(FP_C), appearance:"none", cursor:"pointer"}}>
+                  {FP_SHIPPING_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </FP_Field>
+            </div>
+
+            <div style={{ background:FP_C.surfaceTop, borderRadius:8,
+              padding:"14px", marginBottom:4, border:`1px solid ${FP_C.border}` }}>
+              <FP_SectionHead>Redes sociales</FP_SectionHead>
+              {[
+                { k:"instagram", label:"Instagram", icon:FP_Icons.instagram, ph:"usuario" },
+                { k:"facebook",  label:"Facebook",  icon:FP_Icons.facebook,  ph:"tu.perfil" },
+                { k:"tiktok",    label:"TikTok",    icon:FP_Icons.music,     ph:"usuario" },
+              ].map(s => (
+                <FP_Field key={s.k} label={s.label}>
+                  <div style={{ position:"relative" }}>
+                    <span style={{ position:"absolute", left:11, top:"50%",
+                      transform:"translateY(-50%)" }}>
+                      <FP_Icon d={s.icon} size={14} color={FP_C.textMuted}/>
+                    </span>
+                    <input value={ad[s.k]} placeholder={s.ph}
+                      onChange={e => setAd(d => ({...d,[s.k]:e.target.value.replace("@","")}))}
+                      onFocus={e => e.target.style.borderColor = FP_C.accent}
+                      onBlur={e => e.target.style.borderColor = FP_C.border}
+                      style={{...fpInputStyle(FP_C), paddingLeft:34}}/>
+                  </div>
+                </FP_Field>
+              ))}
+            </div>
+          </div>
+
           <div style={{ display:"flex", gap:8, marginTop:4 }}>
-            <FP_Btn onClick={saveProfile} style={{ flex:1 }}>Guardar</FP_Btn>
-            <FP_Btn variant="secondary" onClick={cancelProfile} style={{ flex:1 }}>Cancelar</FP_Btn>
+            <FP_Btn onClick={saveAll} style={{ flex:1 }}>Guardar</FP_Btn>
+            <FP_Btn variant="secondary" onClick={cancelAll} style={{ flex:1 }}>Cancelar</FP_Btn>
           </div>
         </div>
       )}
@@ -1939,8 +2048,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
         {/* ACERCA DE */}
         {tab === "acerca" && (
           <>
-            {!editAbout ? (
-              <>
                 <div style={{ background:FP_C.surface, border:`1px solid ${FP_C.border}`,
                   borderRadius:10, overflow:"hidden", marginBottom:10 }}>
                   <FP_Row style={{ borderBottom:`1px solid ${FP_C.border}` }}>
@@ -1949,7 +2056,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                       Información del vendedor
                     </span>
                     {isOwner && (
-                      <button onClick={() => { setAd({...about}); setEditAbout(true); }}
+                      <button onClick={() => { setPd({...profile}); setAd({...about}); setEditing(true); setTimeout(() => aboutEditRef.current?.scrollIntoView({ behavior:"smooth", block:"start" }), 60); }}
                         style={{ background:"none", border:`1px solid ${FP_C.border}`,
                           borderRadius:6, padding:"5px 10px", cursor:"pointer",
                           display:"flex", alignItems:"center", gap:5 }}>
@@ -1985,43 +2092,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                       </div>
                     </FP_Row>
                   ))}
-
-                  {(about.acceptsOffers || about.shipsNational || about.shipsLocal) && (
-                    <div style={{ padding:"10px 16px",
-                      borderTop:`1px solid ${FP_C.border}`,
-                      display:"flex", gap:6, flexWrap:"wrap" }}>
-                      {about.acceptsOffers && (
-                        <div style={{ display:"inline-flex", alignItems:"center", gap:5,
-                          background:FP_C.positiveDim, border:"1px solid #0D2218",
-                          borderRadius:6, padding:"4px 10px" }}>
-                          <FP_Icon d={FP_Icons.handshake} size={12} color={FP_C.positive}/>
-                          <span style={{ fontSize:11, color:FP_C.positive, fontWeight:600, fontFamily:FP_FH }}>
-                            Acepta ofertas
-                          </span>
-                        </div>
-                      )}
-                      {about.shipsNational && (
-                        <div style={{ display:"inline-flex", alignItems:"center", gap:5,
-                          background:FP_C.accentSoft, border:`1px solid ${FP_C.accentSoft}`,
-                          borderRadius:6, padding:"4px 10px" }}>
-                          <FP_Icon d={FP_Icons.globe} size={12} color={FP_C.accentText}/>
-                          <span style={{ fontSize:11, color:FP_C.accentText, fontWeight:600, fontFamily:FP_FH }}>
-                            Envío nacional
-                          </span>
-                        </div>
-                      )}
-                      {about.shipsLocal && (
-                        <div style={{ display:"inline-flex", alignItems:"center", gap:5,
-                          background:FP_C.warningDim, border:"1px solid #261C08",
-                          borderRadius:6, padding:"4px 10px" }}>
-                          <FP_Icon d={FP_Icons.radio} size={12} color={FP_C.warning}/>
-                          <span style={{ fontSize:11, color:FP_C.warning, fontWeight:600, fontFamily:FP_FH }}>
-                            Entrega local
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 {/* Social links */}
@@ -2075,7 +2145,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                     onMouseLeave={e => e.currentTarget.style.borderColor = FP_C.border}>
                     <div>
                       <div style={{ fontSize:13, fontWeight:600,
-                        color:FP_C.accentText, fontFamily:FP_FH, marginBottom:2 }}>
+                        color:FP_C.proText, fontFamily:FP_FH, marginBottom:2 }}>
                         ¿Vendes con frecuencia?
                       </div>
                       <div style={{ fontSize:11, color:FP_C.textSecondary }}>
@@ -2085,126 +2155,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                     <FP_Icon d={FP_Icons.chevronR} size={16} color={FP_C.textMuted}/>
                   </div>
                 )}
-              </>
-            ) : (
-              /* EDIT ABOUT */
-              <div style={{ background:FP_C.surface, border:`1px solid ${FP_C.border}`,
-                borderRadius:10, padding:"20px" }}>
-                <div style={{ display:"flex", alignItems:"center",
-                  justifyContent:"space-between", marginBottom:20 }}>
-                  <div style={{ fontSize:15, fontWeight:700,
-                    color:FP_C.textPrimary, fontFamily:FP_FH }}>
-                    Editar información
-                  </div>
-                  <button onClick={cancelAbout} style={{ background:"none",
-                    border:"none", cursor:"pointer", display:"flex" }}>
-                    <FP_Icon d={FP_Icons.x} size={18} color={FP_C.textSecondary}/>
-                  </button>
-                </div>
-
-                {/* Ubicación */}
-                <div style={{ background:FP_C.surfaceTop, borderRadius:8,
-                  padding:"14px", marginBottom:14, border:`1px solid ${FP_C.border}` }}>
-                  <FP_SectionHead>Ubicación</FP_SectionHead>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr",
-                    gap:10, marginBottom:10 }}>
-                    <FP_Field label="Ciudad">
-                      <input value={ad.city} placeholder="Ciudad"
-                        onChange={e => setAd(d => ({...d,city:e.target.value}))}
-                        onFocus={e => e.target.style.borderColor = FP_C.accent}
-                        onBlur={e => e.target.style.borderColor = FP_C.border}
-                        style={{...fpInputStyle(FP_C), padding:"9px 11px",fontSize:13}}/>
-                    </FP_Field>
-                    <FP_Field label="Estado">
-                      <input value={ad.state} placeholder="Estado"
-                        onChange={e => setAd(d => ({...d,state:e.target.value}))}
-                        onFocus={e => e.target.style.borderColor = FP_C.accent}
-                        onBlur={e => e.target.style.borderColor = FP_C.border}
-                        style={{...fpInputStyle(FP_C), padding:"9px 11px",fontSize:13}}/>
-                    </FP_Field>
-                  </div>
-                  <FP_Field label="País">
-                    <input value={ad.country} placeholder="País"
-                      onChange={e => setAd(d => ({...d,country:e.target.value}))}
-                      onFocus={e => e.target.style.borderColor = FP_C.accent}
-                      onBlur={e => e.target.style.borderColor = FP_C.border}
-                      style={{...fpInputStyle(FP_C), padding:"9px 11px",fontSize:13}}/>
-                  </FP_Field>
-                </div>
-
-                {/* Tiempos */}
-                <div style={{ background:FP_C.surfaceTop, borderRadius:8,
-                  padding:"14px", marginBottom:14, border:`1px solid ${FP_C.border}` }}>
-                  <FP_SectionHead>Tiempos</FP_SectionHead>
-                  <FP_Field label="Tiempo de respuesta">
-                    <select value={ad.responseTime}
-                      onChange={e => setAd(d => ({...d,responseTime:e.target.value}))}
-                      style={{...fpInputStyle(FP_C), appearance:"none", cursor:"pointer"}}>
-                      {FP_RESPONSE_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  </FP_Field>
-                  <FP_Field label="Tiempo de envío">
-                    <select value={ad.shipping}
-                      onChange={e => setAd(d => ({...d,shipping:e.target.value}))}
-                      style={{...fpInputStyle(FP_C), appearance:"none", cursor:"pointer"}}>
-                      {FP_SHIPPING_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  </FP_Field>
-                </div>
-
-                {/* Preferencias */}
-                <div style={{ background:FP_C.surfaceTop, borderRadius:8,
-                  padding:"14px", marginBottom:14, border:`1px solid ${FP_C.border}` }}>
-                  <FP_SectionHead>Preferencias de venta</FP_SectionHead>
-                  {[
-                    { k:"acceptsOffers", l:"Acepto ofertas / negociación", icon:FP_Icons.handshake },
-                    { k:"shipsNational", l:"Hago envíos nacionales",       icon:FP_Icons.globe     },
-                    { k:"shipsLocal",    l:"Entrega en persona / local",   icon:FP_Icons.radio     },
-                  ].map((opt, i, arr) => (
-                    <div key={opt.k} style={{ display:"flex", alignItems:"center",
-                      justifyContent:"space-between", padding:"11px 0",
-                      borderBottom:i<arr.length-1?`1px solid ${FP_C.border}`:"none" }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                        <FP_Icon d={opt.icon} size={15} color={FP_C.textSecondary}/>
-                        <span style={{ fontSize:13, color:FP_C.textSecondary }}>{opt.l}</span>
-                      </div>
-                      <FP_Toggle on={ad[opt.k]}
-                        onChange={() => setAd(d => ({...d,[opt.k]:!d[opt.k]}))}/>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Redes */}
-                <div style={{ background:FP_C.surfaceTop, borderRadius:8,
-                  padding:"14px", marginBottom:20, border:`1px solid ${FP_C.border}` }}>
-                  <FP_SectionHead>Redes sociales</FP_SectionHead>
-                  {[
-                    { k:"instagram", label:"Instagram", icon:FP_Icons.instagram, ph:"usuario" },
-                    { k:"facebook",  label:"Facebook",  icon:FP_Icons.facebook,  ph:"tu.perfil" },
-                    { k:"tiktok",    label:"TikTok",    icon:FP_Icons.music,     ph:"usuario" },
-                  ].map(s => (
-                    <FP_Field key={s.k} label={s.label}>
-                      <div style={{ position:"relative" }}>
-                        <span style={{ position:"absolute", left:11, top:"50%",
-                          transform:"translateY(-50%)" }}>
-                          <FP_Icon d={s.icon} size={14} color={FP_C.textMuted}/>
-                        </span>
-                        <input value={ad[s.k]} placeholder={s.ph}
-                          onChange={e => setAd(d => ({...d,[s.k]:e.target.value.replace("@","")}))}
-                          onFocus={e => e.target.style.borderColor = FP_C.accent}
-                          onBlur={e => e.target.style.borderColor = FP_C.border}
-                          style={{...fpInputStyle(FP_C), paddingLeft:34}}/>
-                      </div>
-                    </FP_Field>
-                  ))}
-                </div>
-
-                <div style={{ display:"flex", gap:8 }}>
-                  <FP_Btn onClick={saveAbout} style={{ flex:1 }}>Guardar cambios</FP_Btn>
-                  <FP_Btn variant="secondary" onClick={cancelAbout} style={{ flex:1 }}>Cancelar</FP_Btn>
-                </div>
-              </div>
-            )}
           </>
         )}
       </div>

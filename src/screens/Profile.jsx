@@ -1,6 +1,16 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, saveSellerAbout, getSellerReviews } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, saveSellerAbout, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats } from "../shared/index.js";
+
+// Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
+// decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
+function fmtBig(n) {
+  n = Number(n) || 0;
+  if (n < 1000) return String(n);
+  const v = Math.round((n / 1000) * 10) / 10;
+  const s = Number.isInteger(v) ? String(v) : String(v).replace(".", ",");
+  return s + "K";
+}
 
 // ─── TIRITA DE TASAS DEL DÍA ──────────────────────────────────────────────────
 // Franja discreta con las tasas del día que controla el admin (adminCfg.fx del
@@ -1405,6 +1415,18 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     return () => { alive = false; };
   }, [aboutTargetId]);
 
+  // Encabezado: calificación real del vendedor (profiles.seller_rating/
+  // seller_reviews_count) + estadísticas reales (get_profile_header_stats).
+  const [sellerRatingInfo, setSellerRatingInfo] = useState(null); // { rating, count } | null mientras carga
+  const [headerStats, setHeaderStats] = useState({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
+  useEffect(() => {
+    if (!aboutTargetId) return;
+    let alive = true;
+    getSellerRatingInfo(aboutTargetId).then(r => { if (alive) setSellerRatingInfo(r); }).catch(() => {});
+    getProfileHeaderStats(aboutTargetId).then(s => { if (alive) setHeaderStats(s); }).catch(() => {});
+    return () => { alive = false; };
+  }, [aboutTargetId]);
+
   function toast_(msg) { setToast(msg); setTimeout(() => setToast(null), 2500); }
   // Editor unificado: UN solo botón "Guardar" persiste datos básicos (perfil) y
   // "Acerca de" a la vez — dos updates al backend (perfiles distintos: profiles
@@ -1488,6 +1510,12 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
 
         {isOwner ? (
           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            {/* Seguidores — discreto, cerca de los íconos del dueño (el propio
+                dueño también quiere ver cuántos seguidores tiene). */}
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", lineHeight:1.1 }}>
+              <span style={{ fontSize:12, fontWeight:800, color:FP_C.textPrimary, fontFamily:FP_FH }}>{fmtBig(headerStats.seguidores)}</span>
+              <span style={{ fontSize:7.5, color:FP_C.textMuted, letterSpacing:"0.3px" }}>SEGUIDORES</span>
+            </div>
             <button onClick={() => setShowSettings(true)} style={{
               background:"none", border:`1px solid ${FP_C.border}`,
               borderRadius:6, width:32, height:32, cursor:"pointer",
@@ -1505,7 +1533,26 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
               Pro
             </button>
           </div>
-        ) : <div style={{ width:80 }}/>}
+        ) : (
+          /* Seguir — movido aquí desde el cuerpo (misma lógica, sin tocar), con
+             el conteo real de seguidores integrado debajo, discreto. */
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
+            <button onClick={() => setFollowing(!following)} style={{
+              background: following ? FP_C.surfaceTop : FP_C.accent,
+              border:`1px solid ${following ? FP_C.border : FP_C.accent}`,
+              borderRadius:6, height:32, padding:"0 13px", cursor:"pointer",
+              color: following ? FP_C.textPrimary : "#fff",
+              fontSize:12, fontWeight:700, fontFamily:FP_FH,
+              display:"flex", alignItems:"center", gap:5, transition:"all 0.2s",
+            }}>
+              {following
+                ? <><FP_Icon d={FP_Icons.check} size={12} color={FP_C.textPrimary}/> Siguiendo</>
+                : <><FP_Icon d={FP_Icons.plus}  size={12} color="#fff"/> Seguir</>
+              }
+            </button>
+            <span style={{ fontSize:9, color:FP_C.textMuted, fontWeight:600 }}>{fmtBig(headerStats.seguidores)} seguidores</span>
+          </div>
+        )}
       </div>
 
       {/* Tirita de tasas del día — visible en la vista principal del perfil (informativa) */}
@@ -1515,16 +1562,44 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
       {!editing ? (
         <div style={{ padding:"24px 20px 0" }}>
 
+          {/* Nombre a la izquierda, avatar a la derecha, a la misma altura
+              (calcado de la referencia: no centrado arriba como antes). */}
           <div style={{ display:"flex", justifyContent:"space-between",
-            alignItems:"flex-start", marginBottom:16 }}>
-            <div style={{ position:"relative" }}>
-              <FP_Avatar avatar={profile.avatar} name={profile.name} size={86} verified={!!isVerified || !!profile.isVerified}/>
+            alignItems:"center", gap:14, marginBottom:10 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              {/* Nombre — ÚNICA identidad pública. Sin @handle: nunca se muestra un
+                  valor inventado del correo, y el correo en sí va solo en "Acerca de". */}
+              <div style={{ fontSize:21, fontWeight:800, color:FP_C.textPrimary,
+                fontFamily:FP_FH, lineHeight:1.2 }}>
+                {profile.name}
+              </div>
+              {/* "✓ Perfil verificado" — SOLO si is_verified es real. Nunca fingido. */}
+              {(isVerified || profile.isVerified) && (
+                <div style={{ display:"flex", alignItems:"center", gap:5, marginTop:6 }}>
+                  <FP_Icon d={FP_Icons.check} size={13} color={FP_C.positive}/>
+                  <span style={{ fontSize:12.5, color:FP_C.positive, fontWeight:600, fontFamily:FP_FH }}>
+                    Perfil verificado
+                  </span>
+                </div>
+              )}
+            </div>
+            <div style={{ position:"relative", flexShrink:0, display:"flex", flexDirection:"column", alignItems:"center", gap:5 }}>
+              <div style={{ position:"relative" }}>
+                <FP_Avatar avatar={profile.avatar} name={profile.name} size={64}/>
+                {isOwner && (
+                  <button onClick={() => { setPd({...profile}); setAd({...about}); setEditing(true); }}
+                    aria-label="Editar perfil"
+                    style={{ position:"absolute", bottom:-2, right:-2, width:24, height:24,
+                      borderRadius:"50%", background:FP_C.accent, border:`2px solid ${FP_C.bg}`,
+                      display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>
+                    <FP_Icon d={FP_Icons.edit} size={11} color="#fff"/>
+                  </button>
+                )}
+              </div>
               {/* Chip de plan — SOLO lo ve el dueño de la cuenta, nunca un visitante
-                  (el plan no es información pública; además chocaba con el ✓). */}
+                  (el plan no es información pública). */}
               {isOwner && (
-                <div style={{ position:"absolute", bottom:-2, left:"50%",
-                  transform:"translateX(-50%)",
-                  background:FP_C.bg, border:`1px solid ${FP_C.borderMid}`,
+                <div style={{ background:FP_C.surfaceTop, border:`1px solid ${FP_C.borderMid}`,
                   borderRadius:4, padding:"1px 6px",
                   fontSize:8, fontWeight:800, color:FP_C.textMuted,
                   fontFamily:FP_FH, letterSpacing:"0.8px", whiteSpace:"nowrap" }}>
@@ -1532,38 +1607,44 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                 </div>
               )}
             </div>
+          </div>
 
-            {isOwner ? (
-              <button onClick={() => { setPd({...profile}); setAd({...about}); setEditing(true); }}
-                style={{ background:FP_C.surfaceTop, border:`1px solid ${FP_C.border}`,
-                  borderRadius:6, padding:"0 14px", height:32, cursor:"pointer",
-                  display:"flex", alignItems:"center", gap:6 }}>
-                <FP_Icon d={FP_Icons.edit} size={13} color={FP_C.textSecondary}/>
-                <span style={{ fontSize:12, fontWeight:600, color:FP_C.textSecondary, fontFamily:FP_FH }}>
-                  Editar
+          {/* Estrellas + calificación real (profiles.seller_rating/seller_reviews_count).
+              Sin reseñas todavía → nunca "0 estrellas", se dice tal cual. */}
+          <div style={{ marginBottom:14 }}>
+            {sellerRatingInfo && sellerRatingInfo.count > 0 ? (
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <FP_StarRow count={Math.round(sellerRatingInfo.rating || 0)} size={14}/>
+                <span style={{ fontSize:14, fontWeight:700, color:FP_C.textPrimary, fontFamily:FP_FH }}>
+                  {(sellerRatingInfo.rating || 0).toFixed(1).replace(".", ",")}
                 </span>
-              </button>
+                <span style={{ fontSize:12.5, color:FP_C.textSecondary }}>
+                  ({fmtBig(sellerRatingInfo.count)})
+                </span>
+              </div>
             ) : (
-              <div style={{ width:80 }}/>
+              <span style={{ fontSize:12.5, color:FP_C.textSecondary }}>Sin valoraciones aún</span>
             )}
           </div>
 
-          {/* Nombre — ÚNICA identidad pública. Sin @handle: nunca se muestra un
-              valor inventado del correo, y el correo en sí va solo en "Acerca de". */}
-          <div style={{ fontSize:20, fontWeight:700, color:FP_C.textPrimary,
-            fontFamily:FP_FH, marginBottom:8 }}>
-            {profile.name}
-          </div>
-
-          {/* Rating */}
-          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
-            <FP_StarRow count={avgRating ? Math.round(parseFloat(avgRating)) : 0} size={13}/>
-            <span style={{ fontSize:13, fontWeight:700, color:FP_C.textPrimary, fontFamily:FP_FH }}>
-              {avgRating ?? "Nuevo"}
-            </span>
-            <span style={{ fontSize:12, color:FP_C.textSecondary }}>
-              · {reviews.length} reseñas
-            </span>
+          {/* Estadísticas reales (get_profile_header_stats) — sin distancia/ubicación. */}
+          <div style={{ marginBottom:16 }}>
+            <div style={{ display:"flex", alignItems:"baseline", gap:6, marginBottom:7, flexWrap:"wrap" }}>
+              <span style={{ fontSize:14 }}>📊</span>
+              <span style={{ fontSize:13.5, color:FP_C.textPrimary }}>
+                <b style={{ fontFamily:FP_FH, fontWeight:800 }}>{fmtBig(headerStats.ventas)}</b> Ventas
+              </span>
+              <span style={{ color:FP_C.textMuted }}>·</span>
+              <span style={{ fontSize:13.5, color:FP_C.textPrimary }}>
+                <b style={{ fontFamily:FP_FH, fontWeight:800 }}>{fmtBig(headerStats.compras)}</b> Compras
+              </span>
+            </div>
+            <div style={{ display:"flex", alignItems:"baseline", gap:6 }}>
+              <span style={{ fontSize:14 }}>📦</span>
+              <span style={{ fontSize:13.5, color:FP_C.textPrimary }}>
+                <b style={{ fontFamily:FP_FH, fontWeight:800 }}>{fmtBig(headerStats.envios)}</b> Envíos
+              </span>
+            </div>
           </div>
 
           {/* Bio (solo si hay; para el dueño, invita a escribirla) */}
@@ -1573,30 +1654,15 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
             </div>
           )}
 
-          {/* Acciones (visitante): seguir + mensaje, a lo ancho */}
+          {/* Mensaje (visitante) — Seguir ya vive arriba, junto a Atrás. */}
           {!isOwner && (
-            <div style={{ display:"flex", gap:8, marginBottom:16 }}>
-              <button onClick={() => setFollowing(!following)} style={{
-                flex:1, background: following ? FP_C.surfaceTop : FP_C.accent,
-                border:`1px solid ${following ? FP_C.border : FP_C.accent}`,
-                borderRadius:8, height:38, cursor:"pointer",
-                color: following ? FP_C.textPrimary : "#fff",
-                fontSize:13, fontWeight:700, fontFamily:FP_FH,
-                display:"flex", alignItems:"center", justifyContent:"center", gap:6, transition:"all 0.2s",
-              }}>
-                {following
-                  ? <><FP_Icon d={FP_Icons.check} size={14} color={FP_C.textPrimary}/> Siguiendo</>
-                  : <><FP_Icon d={FP_Icons.plus}  size={14} color="#fff"/> Seguir</>
-                }
-              </button>
-              <button onClick={() => onChat?.(sellerId, profile.name)} style={{
-                flex:1, background:FP_C.surfaceTop, border:`1px solid ${FP_C.border}`,
-                borderRadius:8, height:38, cursor:"pointer",
-                color:FP_C.textPrimary, fontSize:13, fontWeight:700, fontFamily:FP_FH,
-                display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-                <FP_Icon d={FP_Icons.message} size={15} color={FP_C.textPrimary}/> Mensaje
-              </button>
-            </div>
+            <button onClick={() => onChat?.(sellerId, profile.name)} style={{
+              width:"100%", background:FP_C.surfaceTop, border:`1px solid ${FP_C.border}`,
+              borderRadius:8, height:38, cursor:"pointer", marginBottom:12,
+              color:FP_C.textPrimary, fontSize:13, fontWeight:700, fontFamily:FP_FH,
+              display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+              <FP_Icon d={FP_Icons.message} size={15} color={FP_C.textPrimary}/> Mensaje
+            </button>
           )}
           {!isOwner && (
             <button onClick={() => setShowReport(true)} style={{
@@ -1636,29 +1702,11 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
             </div>
           )}
 
-          {/* Stats */}
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr",
-            border:`1px solid ${FP_C.border}`, borderRadius:8, overflow:"hidden",
-            marginBottom:14 }}>
-            {[{v:"0",l:"Ventas"},(()=>{ const sr=(typeof ratingForName==='function')?ratingForName(profile.name,"seller"):{avg:0,count:0}; return {v: sr.count?("⭐"+sr.avg):"—", l: sr.count?(sr.count+" reseñas"):"Sin reseñas"}; })(),{v:"0",l:"Seguidores"}].map((s,i)=>(
-              <div key={s.l} style={{ textAlign:"center", padding:"10px 6px",
-                borderRight:i<2?`1px solid ${FP_C.border}`:"none",
-                background:FP_C.surface }}>
-                <div style={{ fontFamily:FP_FH, fontWeight:700, fontSize:17, color:FP_C.textPrimary }}>
-                  {s.v}
-                </div>
-                <div style={{ fontSize:10, color:FP_C.textSecondary, marginTop:2, letterSpacing:"0.3px" }}>
-                  {s.l.toUpperCase()}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {(()=>{ 
+          {(()=>{
             const isCourier=(()=>{ try { const cs=JSON.parse(localStorage.getItem("retador_couriers")||"[]"); return cs.some(c=>c.status==="approved"&&(c.nombre===profile.name||c.name===profile.name)); } catch(e){ return false; } })();
             if(!isCourier) return null;
             const cr=(typeof ratingForName==="function")?ratingForName(profile.name,"courier"):{avg:0,count:0,reviews:[]};
-            return <div style={{ background:FP_C.surface, border:`1px solid ${FP_C.border}`, borderRadius:14, padding:"14px", marginTop:14 }}>
+            return <div style={{ background:FP_C.surface, border:`1px solid ${FP_C.border}`, borderRadius:14, padding:"14px", marginBottom:14 }}>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:cr.reviews.length?10:2 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                   <span style={{ fontSize:17 }}>🛵</span>
@@ -1674,30 +1722,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
               ))}
             </div>;
           })()}
-
-          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:20 }}>
-
-            {/* INTEGRATION POINT: isVerified viene del backend (proceso KYFP_C).
-                Solo mostrar si profile.isVerified === true.
-                Nunca activar por defecto ni automáticamente. */}
-            {(isVerified || profile.isVerified) && (
-              <div style={{ display:"inline-flex", alignItems:"center", gap:5,
-                background:FP_C.positiveDim, border:"1px solid #0D2218",
-                borderRadius:6, padding:"4px 10px" }}>
-                <FP_Icon d={FP_Icons.shield} size={12} color={FP_C.positive}/>
-                <span style={{ fontSize:11, color:FP_C.positive, fontWeight:600,
-                  fontFamily:FP_FH, letterSpacing:"0.2px" }}>
-                  Verificado
-                </span>
-              </div>
-            )}
-
-            {/* INTEGRATION POINT: aquí van las insignias reales cuando el backend
-                las provea — "Resp. rápida" (si avgResponseTime < 2h) y el conteo
-                real de ventas. Se quitaron las versiones de ejemplo ("60 ventas")
-                para no mostrar datos falsos a los usuarios. */}
-
-          </div>
         </div>
       ) : (
         /* ── EDITOR UNIFICADO: datos básicos + Acerca de, un solo Guardar ── */
@@ -1850,34 +1874,30 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
 
       <FP_Divider/>
 
-      {/* ── TABS ── */}
+      {/* ── TABS: número/símbolo arriba, palabra abajo, la activa subrayada ── */}
       <div style={{ display:"flex", background:FP_C.bg,
         borderBottom:`1px solid ${FP_C.border}`,
         position:"sticky", top:50, zIndex:90 }}>
         {[
-          { k:"productos", l:"Productos", b:String(userProducts.length) },
-          { k:"reseñas",   l:"Reseñas",   b:String(reviews.length)  },
-          { k:"acerca",    l:"Acerca de", b:null                    },
+          { k:"productos", top:fmtBig(userProducts.length), l:"En venta" },
+          { k:"reseñas",   top:fmtBig(sellerRatingInfo?.count || 0), l:"Valoraciones" },
+          { k:"acerca",    top:"+", l:"Info" },
         ].map(t => (
           <button key={t.k} onClick={() => setTab(t.k)} style={{
-            background:"none", border:"none", cursor:"pointer",
-            padding:"13px 20px", fontSize:13,
-            fontWeight: tab===t.k ? 700 : 400,
-            color: tab===t.k ? FP_C.textPrimary : FP_C.textSecondary,
-            fontFamily:FP_FB,
+            flex:1, background:"none", border:"none", cursor:"pointer",
+            padding:"11px 8px 12px", fontFamily:FP_FB,
             borderBottom: tab===t.k ? `2px solid ${FP_C.accent}` : "2px solid transparent",
             transition:"all 0.15s",
-            display:"flex", alignItems:"center", gap:7,
-            whiteSpace:"nowrap", flexShrink:0,
+            display:"flex", flexDirection:"column", alignItems:"center", gap:3,
           }}>
-            {t.l}
-            {t.b && (
-              <span style={{ background:FP_C.surfaceTop, border:`1px solid ${FP_C.border}`,
-                borderRadius:4, padding:"1px 6px",
-                fontSize:10, color:FP_C.textSecondary, fontWeight:600 }}>
-                {t.b}
-              </span>
-            )}
+            <span style={{ fontSize:15, fontWeight:800, fontFamily:FP_FH,
+              color: tab===t.k ? FP_C.textPrimary : FP_C.textSecondary }}>
+              {t.top}
+            </span>
+            <span style={{ fontSize:10.5, fontWeight: tab===t.k ? 700 : 500,
+              color: tab===t.k ? FP_C.textPrimary : FP_C.textSecondary }}>
+              {t.l}
+            </span>
           </button>
         ))}
       </div>

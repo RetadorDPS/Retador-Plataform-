@@ -246,6 +246,38 @@ export const getSellerReviews = async (sellerId) => {
   } catch (e) { return []; }
 };
 
+// ── Encabezado del perfil (calificación del vendedor + estadísticas reales) ──
+// profiles.seller_rating/seller_reviews_count: promedio y conteo REALES de
+// reseñas del vendedor (mismo dato agregado que respalda la pestaña Valoraciones).
+export const getSellerRatingInfo = async (userId) => {
+  if (!userId) return null;
+  try {
+    const { data, error } = await supabase.from("profiles").select("seller_rating, seller_reviews_count").eq("id", userId).single();
+    if (error || !data) return null;
+    return {
+      rating: data.seller_rating != null ? Number(data.seller_rating) : null,
+      count: Number(data.seller_reviews_count) || 0,
+    };
+  } catch (e) { return null; }
+};
+// get_profile_header_stats(p_user_id) — ventas/compras/envíos/seguidores reales
+// del encabezado del perfil. Nunca se calculan a mano en el frontend.
+export const getProfileHeaderStats = async (userId) => {
+  const empty = { ventas: 0, compras: 0, envios: 0, seguidores: 0 };
+  if (!userId) return empty;
+  try {
+    const { data, error } = await supabase.rpc("get_profile_header_stats", { p_user_id: userId });
+    if (error || !data) return empty;
+    const row = Array.isArray(data) ? (data[0] || {}) : data;
+    return {
+      ventas: Number(row.ventas) || 0,
+      compras: Number(row.compras) || 0,
+      envios: Number(row.envios) || 0,
+      seguidores: Number(row.seguidores ?? row.followers) || 0,
+    };
+  } catch (e) { return empty; }
+};
+
 // ── Búsqueda inteligente por categoría: si la búsqueda de texto normal no da
 // resultados, match_category(p_query) busca la categoría más parecida (exacta,
 // por prefijo o por similitud) — o ninguna fila si no hay nada razonable. ──

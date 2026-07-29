@@ -270,23 +270,23 @@ export const voiceNoteSignedUrl = async (path, expiresIn = 3600) => {
 };
 
 // ── REACCIONES (message_reactions, una fila por persona por mensaje) ────────
-// Mismo emoji de nuevo → se quita. Emoji distinto → reemplaza la fila (nunca
-// dos reacciones de la misma persona en el mismo mensaje).
-export const toggleReaction = async (messageId, userId, emoji) => {
-  const { data: existing } = await supabase.from("message_reactions").select("id, emoji").eq("message_id", messageId).eq("user_id", userId).maybeSingle();
-  if (existing) {
-    if (existing.emoji === emoji) {
-      const { error } = await supabase.from("message_reactions").delete().eq("id", existing.id);
-      if (error) throw error;
-      return null;
-    }
-    const { data, error } = await supabase.from("message_reactions").update({ emoji }).eq("id", existing.id).select().single();
-    if (error) throw error;
-    return data;
-  }
-  const { data, error } = await supabase.from("message_reactions").insert({ message_id: messageId, user_id: userId, emoji }).select().single();
+// TODA la decisión la toma el BACKEND en una sola llamada atómica: misma
+// reacción → la quita (devuelve null) · reacción distinta → la cambia
+// (devuelve el emoji nuevo) · sin reacción previa → la pone.
+// Aquí NO se hace insert/update/delete ni se consulta antes: la tabla tiene
+// clave primaria (message_id, user_id), así que un insert "a mano" de una
+// segunda reacción de la misma persona en el mismo mensaje VIOLA esa clave y
+// falla — que es exactamente por lo que antes no se podía cambiar la reacción.
+// Devuelve el emoji resultante (string) o null si quedó sin reacción.
+export const setReaction = async (messageId, emoji) => {
+  const { data, error } = await supabase.rpc("set_reaction", { p_message_id: messageId, p_emoji: emoji });
   if (error) throw error;
-  return data;
+  // Tolerante con la forma exacta que devuelva la función (texto plano, fila
+  // con columna emoji, o lista de una fila).
+  if (data == null) return null;
+  if (typeof data === "string") return data || null;
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row && (row.emoji ?? row.set_reaction)) || null;
 };
 // Trae TODAS las reacciones de un lote de mensajes (la conversación cargada) de
 // una vez — se agrupan por mensaje en el cliente.

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { Avatar, AvatarUser, G, Ic, ORDER_FLOW, Spin, getMyConversations, getSB, getUserName, getProductById, isBlockedPair, isBlockSendError, toggleBlockUser, editMessage, deleteMessage, uploadVoiceNote, voiceNoteSignedUrl, toggleReaction, getReactionsForMessages, loadMessages, markRead, money, sendMessage, supabase, trackEvent, useAt, useR } from "../shared/index.js";
+import { Avatar, AvatarUser, G, Ic, ORDER_FLOW, Spin, getMyConversations, getSB, getUserName, getProductById, isBlockedPair, isBlockSendError, toggleBlockUser, editMessage, deleteMessage, uploadVoiceNote, voiceNoteSignedUrl, setReaction, getReactionsForMessages, loadMessages, markRead, money, pushBackHandler, sendMessage, supabase, trackEvent, useAt, useR } from "../shared/index.js";
 
 // Fondo del chat: textura de identidad RETADOR — sutil pero SÍ perceptible (un
 // patrón de puntos dorados en diagonal), en ambos temas. No compite con las
@@ -32,7 +32,7 @@ const ORDER_STATUS_ICON = { creada: "🕐", confirmado: "🕐", asignado: "📦"
 // coordina ambos para que no se disparen a la vez (si detecta arrastre, cancela
 // el temporizador de "mantener presionado"; si detecta scroll vertical o hacia
 // la izquierda, no hace nada y deja pasar el gesto nativo de la lista).
-function useMessageGesture({ onLongPress, onSwipeReply, disabled }) {
+function useMessageGesture({ onLongPress, onTap, onSwipeReply, disabled }) {
   const [dx, setDx] = useState(0);
   const [dragging, setDragging] = useState(false);
   const st = useRef({ x: 0, y: 0, live: false, mode: null, timer: null });
@@ -65,6 +65,9 @@ function useMessageGesture({ onLongPress, onSwipeReply, disabled }) {
     const s = st.current;
     clearTimer();
     if (s.mode === "swipe" && dx >= 42) onSwipeReply();
+    // Toque CORTO (soltó antes de que saltara el temporizador y sin arrastrar):
+    // en modo selección, añade/quita este mensaje.
+    else if (s.live && s.mode == null && onTap) onTap();
     s.live = false; s.mode = null;
     setDragging(false); setDx(0);
   };
@@ -312,16 +315,20 @@ function EmojiPickerModal({ onPick, onClose, CARD, B, T1, T2, isDark }) {
 // mientras hay un mensaje elegido con "mantener presionado"): Responder,
 // Reenviar, Editar (solo mío y de texto), Eliminar. Sin "anclar" — esa función
 // no existe aún en el backend, no se inventa.
-function SelectionTopBar({ mine, isTextMsg, onClose, onReply, onForward, onEdit, onDelete, S, B, T1, isDark }) {
+// Responder y Editar solo tienen sentido con UN mensaje elegido (igual que
+// WhatsApp); Reenviar y Eliminar funcionan en lote. Las acciones que no aplican
+// llegan como null y no se pintan.
+function SelectionTopBar({ count = 1, allMine, isTextMsg, onClose, onReply, onForward, onEdit, onDelete, S, B, T1, isDark }) {
   const btnStyle = { background: "none", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, color: T1, fontSize: 9.5, fontWeight: 600, padding: "4px 10px" };
   return (
     <div style={{ background: isDark ? "rgba(8,8,8,.97)" : "rgba(255,255,255,.98)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "9px 12px", display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
       <button onClick={onClose} style={{ background: "none", border: "none", color: T1, fontSize: 20, cursor: "pointer", padding: "0 8px 0 2px", lineHeight: 1 }}>×</button>
+      <p style={{ fontSize: 14, fontWeight: 800, color: T1 }}>{count}</p>
       <div style={{ flex: 1 }} />
-      <button onClick={onReply} style={btnStyle}><span style={{ fontSize: 17 }}>↩️</span>Responder</button>
-      <button onClick={onForward} style={btnStyle}><span style={{ fontSize: 17 }}>↪️</span>Reenviar</button>
-      {mine && isTextMsg && <button onClick={onEdit} style={btnStyle}><span style={{ fontSize: 17 }}>✏️</span>Editar</button>}
-      {mine && <button onClick={onDelete} style={{ ...btnStyle, color: "#EF4444" }}><span style={{ fontSize: 17 }}>🗑️</span>Eliminar</button>}
+      {onReply && <button onClick={onReply} style={btnStyle}><span style={{ fontSize: 17 }}>↩️</span>Responder</button>}
+      {onForward && <button onClick={onForward} style={btnStyle}><span style={{ fontSize: 17 }}>↪️</span>Reenviar</button>}
+      {onEdit && <button onClick={onEdit} style={btnStyle}><span style={{ fontSize: 17 }}>✏️</span>Editar</button>}
+      {onDelete && <button onClick={onDelete} style={{ ...btnStyle, color: "#EF4444" }}><span style={{ fontSize: 17 }}>🗑️</span>Eliminar</button>}
     </div>
   );
 }
@@ -329,7 +336,7 @@ function SelectionTopBar({ mine, isTextMsg, onClose, onReply, onForward, onEdit,
 // ── Selector de conversaciones para REENVIAR un mensaje (mismo listado que la
 // pantalla de Mensajes). Multi-selección con casillas; "Enviar" crea un
 // mensaje nuevo por cada conversación elegida con el mismo contenido.
-function ForwardPickerModal({ user, onClose, onConfirm, CARD, B, T1, T2, T3, isDark }) {
+function ForwardPickerModal({ user, count = 1, onClose, onConfirm, CARD, B, T1, T2, T3, isDark }) {
   const [convs, setConvs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [picked, setPicked] = useState({});
@@ -343,7 +350,7 @@ function ForwardPickerModal({ user, onClose, onConfirm, CARD, B, T1, T2, T3, isD
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 5200, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
       <div onClick={e => e.stopPropagation()} style={{ background: CARD, width: "100%", maxWidth: 440, maxHeight: "72vh", borderRadius: "18px 18px 0 0", padding: "14px 14px 16px", border: `1px solid ${B}`, display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, padding: "0 4px" }}>
-          <p style={{ fontSize: 13, fontWeight: 800, color: T1 }}>Reenviar a…</p>
+          <p style={{ fontSize: 13, fontWeight: 800, color: T1 }}>Reenviar{count > 1 ? ` ${count} mensajes` : ""} a…</p>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T2, fontSize: 19, cursor: "pointer", padding: 4 }}>×</button>
         </div>
         <div style={{ overflowY: "auto", flex: 1, minHeight: 60 }}>
@@ -576,12 +583,20 @@ const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, 
 
 // ── Burbuja de un mensaje individual — componente propio para que los hooks de
 // gesto se llamen en su propio nivel superior, NUNCA dentro de un .map().
-function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, onOpenProduct, msgReactions, meId, isHighlighted, selected, onLongPress, onSwipeReply, onJumpTo, onReact }) {
+function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, onOpenProduct, msgReactions, meId, isHighlighted, selected, selectionMode, showQuickBar, onLongPress, onTap, onSwipeReply, onJumpTo, onReact }) {
   const soft = isDark ? "#141417" : "#f1f5f9";
   const meta = m.meta && typeof m.meta === "object" ? m.meta : null;
   const isVoice = meta?.type === "voice";
   const isReply = meta?.reply_to;
-  const gesture = useMessageGesture({ onLongPress, onSwipeReply, disabled: !!meta && meta.type === "order" && !(m.text || "").trim() });
+  // Estando en modo selección, un toque corto añade/quita este mensaje de la
+  // selección (WhatsApp). Fuera del modo, el toque corto no hace nada especial
+  // (los enlaces/tarjetas internas siguen funcionando como siempre).
+  const gesture = useMessageGesture({
+    onLongPress,
+    onTap: selectionMode ? onTap : null,
+    onSwipeReply,
+    disabled: !!meta && meta.type === "order" && !(m.text || "").trim(),
+  });
   const myReaction = (msgReactions.find(r => r.user_id === meId) || {}).emoji || null;
 
   // Tarjeta de PEDIDO automática (sin texto del usuario): centrada, en vivo — sin
@@ -601,8 +616,18 @@ function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, 
   // esto además evita que el SO dispare su propia selección de texto encima.
   const noNativeSelect = { userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" };
   return (
-    <div id={`msg-${m.id}`} style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start", padding: "3px 4px", margin: "-3px -4px", borderRadius: 12, background: selected ? (isDark ? "rgba(255,255,255,.07)" : "rgba(0,0,0,.05)") : "transparent", position: "relative", zIndex: selected ? 15 : "auto", transition: "background .15s", ...noNativeSelect }}>
-      {selected && (
+    <div id={`msg-${m.id}`} style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start", padding: "3px 4px", margin: "-3px -4px", paddingRight: selectionMode ? 28 : 4, borderRadius: 12, background: selected ? `${G}26` : "transparent", position: "relative", zIndex: selectionMode ? 15 : "auto", transition: "background .15s, padding-right .15s", ...noNativeSelect }}>
+      {/* Marca de selección: pegada al borde derecho de la FILA (no de la burbuja),
+          para que nunca quede cortada fuera de la pantalla. La fila reserva el
+          espacio con paddingRight mientras dura el modo selección. */}
+      {selectionMode && (
+        <div style={{ position: "absolute", top: "50%", right: 2, transform: "translateY(-50%)", width: 19, height: 19, borderRadius: "50%", border: `2px solid ${selected ? G : (isDark ? "#555" : "#bbb")}`, background: selected ? G : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#000", zIndex: 2 }}>
+          {selected ? "✓" : ""}
+        </div>
+      )}
+      {/* La tira de reacciones solo aparece con UN mensaje elegido — con varios
+          seleccionados se ofrecen únicamente las acciones en lote (como WhatsApp). */}
+      {showQuickBar && (
         <QuickReactionBar current={myReaction} onPick={(e) => onReact(m.id, e)} onOpenFull={() => onReact(m.id, "__FULL__")} mine={mine} CARD={CARD} B={B} isDark={isDark} />
       )}
       <div style={{ position: "relative", maxWidth: "78%" }}>
@@ -640,10 +665,31 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
   const [otherName, setOtherName] = useState(chat.otherName || chat.name || null);
   const [blocked,   setBlocked]   = useState(false);
   const [chatOpts,  setChatOpts]  = useState(false);
-  const [selectedId, setSelectedId] = useState(null); // mensaje SELECCIONADO (mantener presionado)
+  // MODO SELECCIÓN (estilo WhatsApp): mantener presionado entra al modo con ese
+  // mensaje marcado; estando dentro, tocar otros los añade/quita. Lista vacía =
+  // fuera del modo. (Se declara aquí arriba, junto a su estado, porque varios
+  // manejadores de más abajo dependen de clearSelection.)
+  const [selectedIds, setSelectedIds] = useState([]);
+  const selectionMode = selectedIds.length > 0;
+  const clearSelection = useCallback(() => setSelectedIds([]), []);
+  const enterSelection = useCallback((id) => setSelectedIds([id]), []);
+  // Tocar un mensaje ESTANDO en modo selección lo añade/quita. Si se quita el
+  // último, la lista queda vacía y se sale del modo solo (forma "b" de salir).
+  const toggleSelected = useCallback((id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }, []);
+  // Forma "c" de salir: el botón ATRÁS del teléfono cancela la selección en vez
+  // de cerrar el chat. Se registra como una capa más del back-stack de la app
+  // (mismo mecanismo que el visor de fotos o el perfil flotante), así que solo
+  // intercepta el atrás mientras hay algo seleccionado; sin selección, el atrás
+  // cierra el chat como siempre.
+  useEffect(() => {
+    if (!selectionMode) return;
+    return pushBackHandler(() => clearSelection());
+  }, [selectionMode, clearSelection]);
   const [emojiPickerFor, setEmojiPickerFor] = useState(null); // id de mensaje con selector completo abierto
   const [replyTo,   setReplyTo]   = useState(null);   // { id, preview }
-  const [forwardMsg, setForwardMsg] = useState(null); // mensaje a reenviar (abre el picker de conversaciones)
+  const [forwardMsgs, setForwardMsgs] = useState([]); // mensajes a reenviar (abre el picker de conversaciones)
   const [editing,   setEditing]   = useState(null);   // mensaje que se está editando
   const [highlightId, setHighlightId] = useState(null);
   // CONTEXTO (estilo AliExpress): si el chat se abrió desde un producto/pedido,
@@ -712,14 +758,10 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     return () => { a = false; };
   }, []);
 
-  // BUG REAL encontrado: toggleReaction dispara SU PROPIA loadReactions al
-  // terminar, y el eco del realtime de esa MISMA escritura dispara OTRA
-  // loadReactions por su cuenta — dos pedidos de red independientes para el
-  // mismo dato, que pueden resolver en CUALQUIER orden. Sin protección, la
-  // respuesta que llega ÚLTIMO gana, aunque sea la más VIEJA — si esa es la de
-  // antes de tu reacción, la pantalla "revierte" tu cambio (parece que no se
-  // pudo cambiar la reacción, aunque en la base sí quedó bien). Se arregla con
-  // un número de pedido: solo se aplica la respuesta del ÚLTIMO pedido hecho.
+  // Carga INICIAL de reacciones (solo lectura, al abrir la conversación o al
+  // recargar la lista de mensajes). Después de ESCRIBIR nunca se recarga: el
+  // estado se actualiza con lo que devuelve la RPC (ver handleReact). El número
+  // de pedido evita que una carga inicial lenta pise datos más nuevos.
   const reactionsReqRef = useRef(0);
   const loadReactions = useCallback((ids) => {
     const myReq = ++reactionsReqRef.current;
@@ -730,6 +772,20 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
       rows.forEach(r => { (grouped[r.message_id] ||= []).push(r); });
       setReactions(grouped);
     }).catch(() => {});
+  }, []);
+
+  // Aplica UNA reacción concreta al estado local, sin tocar la red: una persona
+  // tiene como máximo una reacción por mensaje (así lo garantiza la clave
+  // primaria de message_reactions), así que se reemplaza la suya y ya.
+  // emoji = null → se le quita.
+  const applyReaction = useCallback((messageId, userId, emoji) => {
+    setReactions(prev => {
+      const list = (prev[messageId] || []).filter(r => r.user_id !== userId);
+      if (emoji) list.push({ message_id: messageId, user_id: userId, emoji });
+      const next = { ...prev };
+      if (list.length) next[messageId] = list; else delete next[messageId];
+      return next;
+    });
   }, []);
 
   const subscribe = useCallback(async (cid) => {
@@ -751,17 +807,22 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
         if (m.deleted_at) { setMsgs(prev => prev.filter(x => x.id !== m.id)); return; }
         setMsgs(prev => prev.map(x => x.id === m.id ? { ...x, ...m } : x));
       })
-      // Reacciones — la tabla no tiene conversation_id, así que se filtra en el
-      // cliente contra los mensajes YA cargados de este chat (igual que el resto
-      // de canales "amplios" que ya usa la app, p.ej. la lista de mensajes).
+      // Reacciones de la OTRA persona — la tabla no tiene conversation_id, así
+      // que se filtra en el cliente contra los mensajes YA cargados de este chat.
+      // MIS propias reacciones NO se aplican aquí: ya quedaron en pantalla con lo
+      // que devolvió la RPC. Reaccionar al eco de mi propia escritura era lo que
+      // provocaba que la reacción "volviera atrás" sola.
       .on("postgres_changes", { event: "*", schema: "public", table: "message_reactions" }, payload => {
-        const row = payload.new || payload.old;
-        if (!row || !msgsRef.current.some(m => m.id === row.message_id)) return;
-        loadReactions(msgsRef.current.map(m => m.id));
+        const fresh = payload.new && Object.keys(payload.new).length ? payload.new : null;
+        const row = fresh || payload.old;
+        if (!row || !row.message_id) return;
+        if (!msgsRef.current.some(m => m.id === row.message_id)) return;
+        if (row.user_id === user?.id) return;                 // eco de lo mío: ignorar
+        applyReaction(row.message_id, row.user_id, fresh ? fresh.emoji : null);
       })
       .subscribe();
     subRef.current = sub;
-  }, [scrollToEnd, user?.id, loadReactions]);
+  }, [scrollToEnd, user?.id, applyReaction]);
 
   useEffect(() => {
     let alive = true;
@@ -828,29 +889,37 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
   // audio_path si es nota de voz) en cada conversación elegida — un insert
   // normal a messages, igual que enviar cualquier mensaje. Se quita reply_to
   // del meta copiado (esa cita no existe/no aplica en la conversación destino).
+  // Admite VARIOS mensajes a la vez (selección múltiple), en su orden original.
   const handleForwardTo = useCallback(async (otherIds) => {
-    if (!forwardMsg || !user?.id || !otherIds.length) return;
-    const meta = forwardMsg.meta && typeof forwardMsg.meta === "object" ? forwardMsg.meta : null;
-    const cleanMeta = meta ? { ...meta } : null;
-    if (cleanMeta) { delete cleanMeta.reply_to; delete cleanMeta.reply_preview; }
-    const text = (forwardMsg.text && forwardMsg.text.trim())
-      ? forwardMsg.text
-      : (meta?.type === "voice" ? "🎤 Mensaje de voz" : (meta?.title ? "🛍️ " + meta.title : "Mensaje reenviado"));
-    setForwardMsg(null);
+    if (!forwardMsgs.length || !user?.id || !otherIds.length) return;
+    const lote = forwardMsgs;
+    setForwardMsgs([]);
     let ok = 0;
     for (const otherId of otherIds) {
-      try { await sendMessage(user.id, otherId, text, cleanMeta); ok++; } catch (e) {}
+      for (const fm of lote) {
+        const meta = fm.meta && typeof fm.meta === "object" ? fm.meta : null;
+        const cleanMeta = meta ? { ...meta } : null;
+        if (cleanMeta) { delete cleanMeta.reply_to; delete cleanMeta.reply_preview; }
+        const text = (fm.text && fm.text.trim())
+          ? fm.text
+          : (meta?.type === "voice" ? "🎤 Mensaje de voz" : (meta?.title ? "🛍️ " + meta.title : "Mensaje reenviado"));
+        try { await sendMessage(user.id, otherId, text, cleanMeta); ok++; } catch (e) {}
+      }
     }
-    flash(ok ? `↪️ Reenviado a ${ok} conversación${ok > 1 ? "es" : ""}` : "❌ No se pudo reenviar");
-  }, [forwardMsg, user?.id, flash]);
+    flash(ok ? `↪️ Reenviado (${ok})` : "❌ No se pudo reenviar");
+  }, [forwardMsgs, user?.id, flash]);
 
-  const handleDelete = useCallback(async (msg) => {
-    setSelectedId(null);
-    try {
-      await deleteMessage(msg.id);
-      setMsgs(prev => prev.filter(x => x.id !== msg.id));
-    } catch (e) { flash("❌ No se pudo eliminar el mensaje"); }
-  }, [flash]);
+  // Eliminar: admite varios a la vez (solo los MÍOS — el backend igual rechaza
+  // los ajenos, pero la barra ya solo ofrece Eliminar si toda la selección es mía).
+  const handleDelete = useCallback(async (msgList) => {
+    const lote = Array.isArray(msgList) ? msgList : [msgList];
+    clearSelection();
+    let ok = 0;
+    for (const m of lote) {
+      try { await deleteMessage(m.id); setMsgs(prev => prev.filter(x => x.id !== m.id)); ok++; } catch (e) {}
+    }
+    if (ok < lote.length) flash("❌ No se pudieron eliminar todos los mensajes");
+  }, [flash, clearSelection]);
 
   const handleToggleBlock = useCallback(async () => {
     if (!chat.otherId) return;
@@ -862,18 +931,20 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     } catch (e) { flash("❌ No se pudo actualizar el bloqueo"); }
   }, [chat.otherId, blocked, flash]);
 
-  // Reaccionar: SIEMPRE disponible (se reabre cada vez que se mantiene presionado,
-  // muestre ya una reacción tuya o no). "__FULL__" abre el selector completo en
-  // vez de reaccionar directo.
+  // Reaccionar: UNA sola llamada atómica al backend (set_reaction). El backend
+  // decide poner / cambiar / quitar y devuelve el emoji resultante (o null). El
+  // estado local se actualiza con ESA respuesta — nunca se recarga la lista
+  // después de escribir. "__FULL__" abre el selector completo en vez de
+  // reaccionar directo.
   const handleReact = useCallback(async (messageId, emoji) => {
     if (!user?.id) return;
     if (emoji === "__FULL__") { setEmojiPickerFor(messageId); return; }
-    setSelectedId(null); setEmojiPickerFor(null);
+    setSelectedIds([]); setEmojiPickerFor(null);
     try {
-      await toggleReaction(messageId, user.id, emoji);
-      loadReactions(msgsRef.current.map(m => m.id));
+      const result = await setReaction(messageId, emoji); // emoji nuevo o null
+      applyReaction(messageId, user.id, result);
     } catch (e) { flash("❌ No se pudo reaccionar"); }
-  }, [user?.id, loadReactions, flash]);
+  }, [user?.id, applyReaction, flash]);
 
   const displayName = otherName || "Usuario";
   const openProfile = () => { if (onViewProfile && chat.otherId) onViewProfile(chat.otherId); };
@@ -883,20 +954,25 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     if (meta?.type === "product" || meta?.type === "order") return (meta.title ? "🛍️ " + meta.title : (m.text || "").slice(0, 50));
     return (m.text || "").slice(0, 50);
   };
-  const selectedMsg = selectedId ? msgs.find(m => m.id === selectedId) || null : null;
-  const isSelectedTextMsg = selectedMsg ? !(selectedMsg.meta && typeof selectedMsg.meta === "object" && (selectedMsg.meta.type === "voice" || selectedMsg.meta.type === "admin_request")) : false;
+  // Mensajes seleccionados, en el ORDEN en que están en el chat (no en el que se
+  // fueron tocando) — importa al reenviar y al eliminar en lote.
+  const selectedMsgs = selectedIds.length ? msgs.filter(m => selectedIds.includes(m.id)) : [];
+  const oneSelected = selectedMsgs.length === 1 ? selectedMsgs[0] : null;
+  const allMine = selectedMsgs.length > 0 && selectedMsgs.every(m => m.sender_id === user?.id);
+  const isSelectedTextMsg = oneSelected ? !(oneSelected.meta && typeof oneSelected.meta === "object" && (oneSelected.meta.type === "voice" || oneSelected.meta.type === "admin_request")) : false;
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      {selectedMsg ? (
+      {selectionMode ? (
         <SelectionTopBar
-          mine={selectedMsg.sender_id === user?.id}
+          count={selectedMsgs.length}
+          allMine={allMine}
           isTextMsg={isSelectedTextMsg}
-          onClose={() => setSelectedId(null)}
-          onReply={() => { setReplyTo({ id: selectedMsg.id, preview: previewOf(selectedMsg) }); setEditing(null); setSelectedId(null); }}
-          onForward={() => { setForwardMsg(selectedMsg); setSelectedId(null); }}
-          onEdit={() => { setEditing(selectedMsg); setReplyTo(null); setSelectedId(null); }}
-          onDelete={() => handleDelete(selectedMsg)}
+          onClose={clearSelection}
+          onReply={oneSelected ? () => { setReplyTo({ id: oneSelected.id, preview: previewOf(oneSelected) }); setEditing(null); clearSelection(); } : null}
+          onForward={() => { setForwardMsgs(selectedMsgs); clearSelection(); }}
+          onEdit={oneSelected && allMine && isSelectedTextMsg ? () => { setEditing(oneSelected); setReplyTo(null); clearSelection(); } : null}
+          onDelete={allMine ? () => handleDelete(selectedMsgs) : null}
           S={S} B={B} T1={T1} isDark={isDark}
         />
       ) : (
@@ -916,12 +992,14 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
       )}
 
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "12px clamp(18px,3vw,48px)", display: "flex", flexDirection: "column", gap: 7, position: "relative", ...chatBgStyle(isDark) }}>
-        {/* Fondo oscurecido al seleccionar un mensaje (mantener presionado): tocar
-            en CUALQUIER parte fuera del mensaje seleccionado cancela la selección
-            sin forzar a elegir una reacción (el mensaje elegido queda POR ENCIMA
-            de este velo gracias a su z-index propio en MessageBubble). */}
-        {selectedId && (
-          <div onClick={() => setSelectedId(null)} style={{ position: "absolute", inset: 0, background: isDark ? "rgba(0,0,0,.45)" : "rgba(0,0,0,.25)", zIndex: 10 }} />
+        {/* Forma "a" de salir del modo selección: tocar en cualquier parte fuera
+            de los mensajes cancela la selección (sin forzar a elegir reacción).
+            Los mensajes SELECCIONADOS quedan por encima de este velo (z-index
+            propio en MessageBubble); los no seleccionados quedan debajo, así que
+            tocarlos también cancela — salvo que se toquen "a través" del modo
+            selección, que es justo lo que hace onTap más abajo. */}
+        {selectionMode && (
+          <div onClick={clearSelection} style={{ position: "absolute", inset: 0, background: isDark ? "rgba(0,0,0,.45)" : "rgba(0,0,0,.25)", zIndex: 10 }} />
         )}
         {loading
           ? <div style={{ display: "flex", justifyContent: "center", padding: "24px 0" }}><Spin size={22} /></div>
@@ -932,8 +1010,10 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
             : msgs.map(m => (
                 <MessageBubble key={m.id} m={m} mine={m.sender_id === user?.id} isDark={isDark} B={B} T1={T1} T3={T3} CARD={CARD}
                   orders={orders} onOpenOrder={onOpenOrder} onOpenProduct={onOpenProduct}
-                  msgReactions={reactions[m.id] || []} meId={user?.id} isHighlighted={highlightId === m.id} selected={selectedId === m.id}
-                  onLongPress={() => setSelectedId(m.id)} onSwipeReply={() => setReplyTo({ id: m.id, preview: previewOf(m) })}
+                  msgReactions={reactions[m.id] || []} meId={user?.id} isHighlighted={highlightId === m.id}
+                  selected={selectedIds.includes(m.id)} selectionMode={selectionMode} showQuickBar={oneSelected?.id === m.id}
+                  onLongPress={() => enterSelection(m.id)} onTap={() => toggleSelected(m.id)}
+                  onSwipeReply={() => setReplyTo({ id: m.id, preview: previewOf(m) })}
                   onJumpTo={jumpToMessage} onReact={handleReact} />
               ))
         }
@@ -964,10 +1044,11 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
         />
       )}
 
-      {forwardMsg && (
+      {forwardMsgs.length > 0 && (
         <ForwardPickerModal
+          count={forwardMsgs.length}
           user={user} CARD={CARD} B={B} T1={T1} T2={T2} T3={T3} isDark={isDark}
-          onClose={() => setForwardMsg(null)}
+          onClose={() => setForwardMsgs([])}
           onConfirm={handleForwardTo}
         />
       )}

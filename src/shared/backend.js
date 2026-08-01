@@ -58,6 +58,22 @@ export const updateUserName = async (id, name) => {
   return { id, name };
 };
 
+// Datos básicos del perfil (nombre/avatar/bio/verificado), SIEMPRE frescos —
+// a propósito NO usa el caché de getUserById (ese vive toda la sesión y podría
+// devolver una bio vieja después de guardar). Lo usa el editor de perfil para
+// precargarse con lo que de verdad hay en el backend, nunca con un valor por
+// defecto en blanco: root cause real de la bio "perdida" — el editor abría
+// con bio="" (nunca se recargaba para el dueño) y "Guardar" mandaba esa
+// cadena vacía real, que la RPC toma como "bórralo", no como "no toques".
+export const getProfileBasic = async (userId) => {
+  if (!userId) return null;
+  try {
+    const { data, error } = await supabase.from("profiles").select("full_name, avatar_url, bio, is_verified, email").eq("id", userId).single();
+    if (error || !data) return null;
+    return { name: data.full_name || "", avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified, email: data.email || "" };
+  } catch (e) { return null; }
+};
+
 // ── "Acerca de" del vendedor (profiles.city/country + profiles.seller_info jsonb) ──
 // city/country tienen columna propia; el resto (estado/provincia, tiempo de
 // respuesta, tiempo de envío, redes) vive dentro de seller_info. Antes NO había

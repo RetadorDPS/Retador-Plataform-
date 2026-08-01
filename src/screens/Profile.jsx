@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -1365,29 +1365,39 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     avatar: initialProfile.avatar || (isOwner && user?.avatar ? { type:"image", value: avatarUrlOf(user.avatar) } : null),
     name:   initialProfile.name   || (isOwner ? (user?.name || "Usuario") : "Vendedor"),
     email:  initialProfile.email  || (isOwner ? (user?.email || "") : ""),
-    bio:    "",
+    bio:    initialProfile.bio    || "",
     isVerified: false,
   };
 
   const [profile, setProfile] = useState(defaultProfile);
   const [pd, setPd] = useState({ ...defaultProfile });
+  // Confirma que `profile` (sobre todo la bio) ya viene del backend de verdad,
+  // no del valor por defecto en blanco — el editor y "Guardar" lo usan para
+  // no mandar "" por omisión (ver saveAll).
+  const [profileLoaded, setProfileLoaded] = useState(false);
 
-  // Perfil de OTRO usuario: trae su nombre/avatar reales desde la tabla profiles
-  // del backend (por su id). Mientras carga se muestra "Vendedor", nunca el id.
+  // Nombre/avatar/bio/verificado REALES — tanto del DUEÑO como de OTRO usuario
+  // — SIEMPRE recargados de punta a punta desde el backend (getProfileBasic,
+  // sin caché) al entrar a este perfil. ANTES esto solo pasaba para "otro"
+  // usuario; el dueño se quedaba con bio="" del valor por defecto para
+  // siempre, así que el editor la abría vacía aunque sí hubiera una guardada
+  // — y "Guardar" la borraba de verdad al mandar esa cadena vacía real.
+  const profileTargetId = isOwner ? user?.id : sellerId;
   useEffect(() => {
-    if (!sellerId || isOwner) return;
+    if (!profileTargetId) return;
     let alive = true;
-    getUserById(sellerId).then(p => {
-      if (!alive || !p?.name) return;
-      // El ✓ de "otro" usuario NUNCA sale del prop isVerified (ese es del dueño de
-      // la sesión) — se trae en vivo del backend (profiles.is_verified) aquí.
-      // El correo también viene de aquí: mismo profiles.email que ve el dueño y
-      // el panel de admin, nunca un valor distinto.
-      setProfile(prev => ({ ...prev, name: p.name, email: p.email || "", bio: p.bio || "", avatar: p.avatar ? { type: "photo", url: p.avatar } : prev.avatar, isVerified: !!p.verified }));
-      setPd(prev => ({ ...prev, name: p.name, bio: p.bio || "" }));
+    setProfileLoaded(false);
+    getProfileBasic(profileTargetId).then(p => {
+      if (!alive || !p) return;
+      setProfile(prev => ({
+        ...prev, name: p.name || prev.name, email: p.email || prev.email, bio: p.bio || "",
+        avatar: p.avatar ? { type: "image", value: p.avatar } : prev.avatar,
+        isVerified: isOwner ? prev.isVerified : !!p.verified,
+      }));
+      setProfileLoaded(true);
     }).catch(() => {});
     return () => { alive = false; };
-  }, [sellerId, isOwner]);
+  }, [profileTargetId, isOwner]);
 
   // Sin datos inventados: todo vacío hasta que la persona lo llene de verdad.
   const [about, setAbout] = useState({
@@ -1397,6 +1407,10 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     emailPublic:false,
   });
   const [ad, setAd] = useState({ ...about });
+  // Igual que profileLoaded: confirma que "Acerca de" ya vino del backend
+  // (nunca del default en blanco) antes de dejar que "Guardar" mande "" por
+  // omisión en estos campos.
+  const [aboutLoaded, setAboutLoaded] = useState(false);
 
   // Carga REAL "Acerca de" del backend (profiles.city/country + seller_info) —
   // antes no había ninguna columna para esto, por eso nunca persistía. Se trae
@@ -1405,9 +1419,11 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   useEffect(() => {
     if (!aboutTargetId) return;
     let alive = true;
+    setAboutLoaded(false);
     getSellerAbout(aboutTargetId).then(a => {
       if (!alive || !a) return;
       setAbout(a); setAd(a);
+      setAboutLoaded(true);
     }).catch(() => {});
     return () => { alive = false; };
   }, [aboutTargetId]);
@@ -1460,17 +1476,21 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     setSavingProfile(true);
     try {
       const photoUrl = (updatedProfile.avatar?.type === "image" && avatarUrlOf(updatedProfile.avatar)) || null;
+      // NUNCA mandar "" por omisión: si "Acerca de" o la bio real todavía no
+      // terminaron de cargar del backend (p.ej. se abrió el editor muy rápido),
+      // se manda null para esos campos — la RPC conserva lo que ya había en
+      // vez de sobrescribirlo con vacío. Root cause real de la bio "perdida".
       const saved = await saveProfileAll({
         fullName: updatedProfile.name || "",
-        bio: updatedProfile.bio || "",
+        bio: profileLoaded ? (updatedProfile.bio || "") : null,
         avatarUrl: photoUrl,
-        city: updatedAbout.city || "",
-        country: updatedAbout.country || "",
-        sellerInfo: {
+        city: aboutLoaded ? (updatedAbout.city || "") : null,
+        country: aboutLoaded ? (updatedAbout.country || "") : null,
+        sellerInfo: aboutLoaded ? {
           state: updatedAbout.state || "", responseTime: updatedAbout.responseTime || "", shipping: updatedAbout.shipping || "",
           instagram: updatedAbout.instagram || "", facebook: updatedAbout.facebook || "", tiktok: updatedAbout.tiktok || "",
-        },
-        emailPublic: !!updatedAbout.emailPublic,
+        } : null,
+        emailPublic: aboutLoaded ? !!updatedAbout.emailPublic : null,
       });
       // El estado local sale SIEMPRE de lo que la RPC devolvió, no de `updatedProfile`/`updatedAbout`.
       const si = (saved?.seller_info && typeof saved.seller_info === "object") ? saved.seller_info : {};

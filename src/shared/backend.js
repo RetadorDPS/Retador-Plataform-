@@ -78,15 +78,22 @@ export const getSellerAbout = async (userId) => {
 };
 export const saveSellerAbout = async (userId, about) => {
   if (!userId) throw new Error("Sesión no válida");
-  const patch = {
-    city: about.city || "", country: about.country || "", email_public: !!about.emailPublic,
+  const core = {
+    city: about.city || "", country: about.country || "",
     seller_info: {
       state: about.state || "", responseTime: about.responseTime || "", shipping: about.shipping || "",
       instagram: about.instagram || "", facebook: about.facebook || "", tiktok: about.tiktok || "",
     },
   };
-  const { error } = await supabase.from("profiles").update(patch).eq("id", userId);
-  if (error) throw error;
+  const { error } = await supabase.from("profiles").update({ ...core, email_public: !!about.emailPublic }).eq("id", userId);
+  if (!error) return;
+  // Si falló CON email_public incluido (p.ej. esa columna todavía no existe en
+  // este entorno), reintenta SIN ese campo para no perder ciudad/tiempos/redes
+  // por un problema ajeno a ellos — antes un solo campo roto tumbaba TODO el
+  // guardado sin que nadie se enterara.
+  const { error: err2 } = await supabase.from("profiles").update(core).eq("id", userId);
+  if (err2) throw err2; // fallo real: ni lo básico se pudo guardar.
+  console.error("saveSellerAbout: se guardó todo menos 'mostrar correo público' —", error.message);
 };
 
 // Product functions

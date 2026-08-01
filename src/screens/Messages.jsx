@@ -205,13 +205,23 @@ function RefChatCard({ meta, onOpen, orders = [], B, T1, T3, soft }) {
   );
 }
 
+// Solo un audio puede sonar a la vez en TODO el chat: guarda el elemento
+// <audio> activo. Al empezar otro, el que sonaba se PAUSA (nunca se reinicia
+// — pause() nunca toca currentTime, así que queda listo para retomar donde iba).
+let _activeVoiceAudio = null;
+
 // ── Reproductor de nota de voz ───────────────────────────────────────────────
-function VoiceMessage({ meta, mine, isDark, T1, T3, accentBg }) {
+function VoiceMessage({ meta, mine, isDark, T1, T3, accentBg, autoPlay, onEnded }) {
   const [url, setUrl] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [cur, setCur] = useState(0);
   const audioRef = useRef(null);
   useEffect(() => { let a = true; voiceNoteSignedUrl(meta.audio_path).then(u => { if (a) setUrl(u); }).catch(() => {}); return () => { a = false; }; }, [meta.audio_path]);
+  // Reproducción en cadena: si el mensaje anterior (un audio) acaba de terminar
+  // y este es el siguiente, arranca solo en cuanto la URL esté lista.
+  useEffect(() => {
+    if (autoPlay && url && audioRef.current) audioRef.current.play().catch(() => {});
+  }, [autoPlay, url]);
   const total = Number(meta.duration) || 0;
   const fmt = (s) => { const m = Math.floor(s / 60), r = Math.floor(s % 60); return `${m}:${String(r).padStart(2, "0")}`; };
   const toggle = () => {
@@ -223,7 +233,13 @@ function VoiceMessage({ meta, mine, isDark, T1, T3, accentBg }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 190, padding: "3px 2px" }}>
       {url && <audio ref={audioRef} src={url} preload="none"
-        onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false); setCur(0); }}
+        onPlay={() => {
+          setPlaying(true);
+          if (_activeVoiceAudio && _activeVoiceAudio !== audioRef.current) _activeVoiceAudio.pause();
+          _activeVoiceAudio = audioRef.current;
+        }}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setCur(0); if (_activeVoiceAudio === audioRef.current) _activeVoiceAudio = null; onEnded?.(); }}
         onTimeUpdate={e => setCur(e.target.currentTime)} />}
       <button onClick={toggle} disabled={!url} className="p" style={{ width: 34, height: 34, borderRadius: "50%", background: accentBg, border: "none", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: url ? "pointer" : "default" }}>
         <span style={{ fontSize: 14, color: mine ? "#000" : "#fff" }}>{playing ? "⏸" : "▶️"}</span>
@@ -588,7 +604,7 @@ const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, 
 
 // ── Burbuja de un mensaje individual — componente propio para que los hooks de
 // gesto se llamen en su propio nivel superior, NUNCA dentro de un .map().
-function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, onOpenProduct, msgReactions, meId, isHighlighted, selected, selectionMode, showQuickBar, onLongPress, onTap, onSwipeReply, onJumpTo, onReact }) {
+function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, onOpenProduct, msgReactions, meId, isHighlighted, selected, selectionMode, showQuickBar, onLongPress, onTap, onSwipeReply, onJumpTo, onReact, autoPlayVoice, onVoiceEnded }) {
   const soft = isDark ? "#141417" : "#f1f5f9";
   const meta = m.meta && typeof m.meta === "object" ? m.meta : null;
   const isVoice = meta?.type === "voice";
@@ -643,7 +659,7 @@ function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, 
           {isReply && <ReplyStrip meta={meta} mine={mine} isDark={isDark} onJump={() => onJumpTo(meta.reply_to)} />}
           {meta && (meta.type === "product" || meta.type === "order" || meta.type === "admin_request") && <RefChatCard meta={meta} onOpen={openRef} orders={orders} B={mine ? "#00000022" : B} T1={mine ? "#000" : T1} T3={mine ? "#00000088" : T3} soft={mine ? "#ffffff55" : soft} />}
           {isVoice
-            ? <VoiceMessage meta={meta} mine={mine} isDark={isDark} T1={bubbleText} T3={T3} accentBg={mine ? "#00000022" : `${G}33`} />
+            ? <VoiceMessage meta={meta} mine={mine} isDark={isDark} T1={bubbleText} T3={T3} accentBg={mine ? "#00000022" : `${G}33`} autoPlay={autoPlayVoice} onEnded={onVoiceEnded} />
             : <p style={{ fontSize: 12, color: bubbleText, lineHeight: 1.5, wordBreak: "break-word", ...noNativeSelect }}>{m.text}</p>}
           <p style={{ fontSize: 9, color: mine ? "#00000066" : T3, marginTop: 4, textAlign: "right" }}>
             {m.edited_at && <span style={{ fontStyle: "italic" }}>Editado · </span>}
@@ -666,6 +682,10 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
   useEffect(() => { onConvId && onConvId(convId || null); }, [convId, onConvId]);
   const [msgs,      setMsgs]      = useState([]);
   const [reactions, setReactions] = useState({}); // { [messageId]: [{id,user_id,emoji}] }
+  // Reproducción en cadena de audios: cuando un mensaje de voz termina, si el
+  // SIGUIENTE mensaje también es un audio, se reproduce solo. Este id le dice
+  // a ESE VoiceMessage puntual que le toca arrancar.
+  const [autoPlayId, setAutoPlayId] = useState(null);
   const [loading,   setLoading]   = useState(true);
   const [otherName, setOtherName] = useState(chat.otherName || chat.name || null);
   const [blocked,   setBlocked]   = useState(false);
@@ -1012,15 +1032,21 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
             ? <div style={{ textAlign: "center", padding: "32px 0" }}>
                 <p style={{ fontSize: 11, color: T3 }}>Sé el primero en escribir</p>
               </div>
-            : msgs.map(m => (
-                <MessageBubble key={m.id} m={m} mine={m.sender_id === user?.id} isDark={isDark} B={B} T1={T1} T3={T3} CARD={CARD}
-                  orders={orders} onOpenOrder={onOpenOrder} onOpenProduct={onOpenProduct}
-                  msgReactions={reactions[m.id] || []} meId={user?.id} isHighlighted={highlightId === m.id}
-                  selected={selectedIds.includes(m.id)} selectionMode={selectionMode} showQuickBar={oneSelected?.id === m.id}
-                  onLongPress={() => enterSelection(m.id)} onTap={() => toggleSelected(m.id)}
-                  onSwipeReply={() => setReplyTo({ id: m.id, preview: previewOf(m) })}
-                  onJumpTo={jumpToMessage} onReact={handleReact} />
-              ))
+            : msgs.map((m, i) => {
+                const next = msgs[i + 1];
+                const nextIsVoice = next?.meta && typeof next.meta === "object" && next.meta.type === "voice";
+                return (
+                  <MessageBubble key={m.id} m={m} mine={m.sender_id === user?.id} isDark={isDark} B={B} T1={T1} T3={T3} CARD={CARD}
+                    orders={orders} onOpenOrder={onOpenOrder} onOpenProduct={onOpenProduct}
+                    msgReactions={reactions[m.id] || []} meId={user?.id} isHighlighted={highlightId === m.id}
+                    selected={selectedIds.includes(m.id)} selectionMode={selectionMode} showQuickBar={oneSelected?.id === m.id}
+                    onLongPress={() => enterSelection(m.id)} onTap={() => toggleSelected(m.id)}
+                    onSwipeReply={() => setReplyTo({ id: m.id, preview: previewOf(m) })}
+                    onJumpTo={jumpToMessage} onReact={handleReact}
+                    autoPlayVoice={autoPlayId === m.id}
+                    onVoiceEnded={() => { if (nextIsVoice) setAutoPlayId(next.id); }} />
+                );
+              })
         }
       </div>
 

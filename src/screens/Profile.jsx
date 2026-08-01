@@ -1339,6 +1339,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   const [showVerify,   setShowVerify]   = useState(false);
   const [showPlans,    setShowPlans]    = useState(false);
   const [toast,        setToast]        = useState(null);
+  const [savingProfile, setSavingProfile] = useState(false);
   // El botón "Editar" de Acerca de es un atajo DENTRO del mismo editor unificado:
   // abre el mismo panel y baja hasta esta sección (no es un flujo aparte).
   const aboutEditRef = useRef(null);
@@ -1431,20 +1432,44 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   // Editor unificado: UN solo botón "Guardar" persiste datos básicos (perfil) y
   // "Acerca de" a la vez — dos updates al backend (perfiles distintos: profiles
   // básico y profiles.city/country/seller_info), pero una sola acción del usuario.
+  // ANTES: esta función marcaba "Perfil actualizado" y cerraba el editor de
+  // inmediato, ANTES de siquiera intentar los updates al backend — si el
+  // guardado fallaba (red, RLS, una columna nueva que no existiera todavía),
+  // el error se perdía en un console.error y el dueño se quedaba viendo su
+  // cambio solo en su sesión actual (estado local optimista), nunca en la
+  // base real. Por eso "no persistía": el fallo era real y silencioso. Ahora
+  // se espera la confirmación del backend, se relee en fresco (nunca se
+  // confía en el eco local) y solo entonces se avisa que se guardó — si algo
+  // falla de verdad, se avisa también.
   async function saveAll() {
     const updatedProfile = {...pd};
     const updatedAbout = {...ad};
-    setProfile(updatedProfile);
-    setAbout(updatedAbout);
-    setEditing(false);
-    toast_("Perfil actualizado");
-    onProfileUpdate?.({ avatar: updatedProfile.avatar, name: updatedProfile.name, email: updatedProfile.email, bio: updatedProfile.bio || "" });
-    if (isOwner && user?.id) {
+    if (!isOwner || !user?.id) {
+      setProfile(updatedProfile); setAbout(updatedAbout); setEditing(false);
+      return;
+    }
+    setSavingProfile(true);
+    try {
       const patch = { full_name: updatedProfile.name, bio: updatedProfile.bio || "" };
       const url = avatarUrlOf(updatedProfile.avatar);
       if (updatedProfile.avatar?.type === "image" && url) patch.avatar_url = url;
-      try { await supabase.from("profiles").update(patch).eq("id", user.id); } catch (e) { console.error("saveAll (perfil):", e?.message || e); }
-      try { await saveSellerAbout(user.id, updatedAbout); } catch (e) { console.error("saveAll (acerca de):", e?.message || e); }
+      const { error: profErr } = await supabase.from("profiles").update(patch).eq("id", user.id);
+      if (profErr) throw profErr;
+      await saveSellerAbout(user.id, updatedAbout);
+      // Confirmación real: se relee la fila (no se asume que el update "debió"
+      // funcionar solo porque no tiró error).
+      const fresh = await getSellerAbout(user.id);
+      setProfile(updatedProfile);
+      setAbout(fresh || updatedAbout);
+      setAd(fresh || updatedAbout);
+      setEditing(false);
+      onProfileUpdate?.({ avatar: updatedProfile.avatar, name: updatedProfile.name, email: updatedProfile.email, bio: updatedProfile.bio || "" });
+      toast_("Perfil actualizado");
+    } catch (e) {
+      console.error("saveAll:", e?.message || e);
+      toast_("No se pudo guardar. Revisa tu conexión e intenta de nuevo.");
+    } finally {
+      setSavingProfile(false);
     }
   }
   function cancelAll() { setPd({...profile}); setAd({...about}); setEditing(false); }
@@ -1534,24 +1559,9 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
             </button>
           </div>
         ) : (
-          /* Seguir — movido aquí desde el cuerpo (misma lógica, sin tocar), con
-             el conteo real de seguidores integrado debajo, discreto. */
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
-            <button onClick={() => setFollowing(!following)} style={{
-              background: following ? FP_C.surfaceTop : FP_C.accent,
-              border:`1px solid ${following ? FP_C.border : FP_C.accent}`,
-              borderRadius:6, height:32, padding:"0 13px", cursor:"pointer",
-              color: following ? FP_C.textPrimary : "#fff",
-              fontSize:12, fontWeight:700, fontFamily:FP_FH,
-              display:"flex", alignItems:"center", gap:5, transition:"all 0.2s",
-            }}>
-              {following
-                ? <><FP_Icon d={FP_Icons.check} size={12} color={FP_C.textPrimary}/> Siguiendo</>
-                : <><FP_Icon d={FP_Icons.plus}  size={12} color="#fff"/> Seguir</>
-              }
-            </button>
-            <span style={{ fontSize:9, color:FP_C.textMuted, fontWeight:600 }}>{fmtBig(headerStats.seguidores)} seguidores</span>
-          </div>
+          /* Seguir vuelve a su posición original, en pareja con Mensaje, más
+             abajo cerca del nombre/avatar — aquí solo queda el espaciador. */
+          <div style={{ width:80 }}/>
         )}
       </div>
 
@@ -1562,14 +1572,15 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
       {!editing ? (
         <div style={{ padding:"24px 20px 0" }}>
 
-          {/* Nombre a la izquierda, avatar a la derecha, a la misma altura
-              (calcado de la referencia: no centrado arriba como antes). */}
+          {/* Nombre a la izquierda, avatar a la derecha. El nombre queda un poco
+              POR ENCIMA del centro vertical del avatar (alignItems:flex-start),
+              no centrado con él — se ve menos "vacío", más como la referencia. */}
           <div style={{ display:"flex", justifyContent:"space-between",
-            alignItems:"center", gap:14, marginBottom:10 }}>
+            alignItems:"flex-start", gap:14, marginBottom:10 }}>
             <div style={{ flex:1, minWidth:0 }}>
               {/* Nombre — ÚNICA identidad pública. Sin @handle: nunca se muestra un
                   valor inventado del correo, y el correo en sí va solo en "Acerca de". */}
-              <div style={{ fontSize:21, fontWeight:800, color:FP_C.textPrimary,
+              <div style={{ fontSize:23, fontWeight:800, color:FP_C.textPrimary,
                 fontFamily:FP_FH, lineHeight:1.2 }}>
                 {profile.name}
               </div>
@@ -1610,21 +1621,19 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
           </div>
 
           {/* Estrellas + calificación real (profiles.seller_rating/seller_reviews_count).
-              Sin reseñas todavía → nunca "0 estrellas", se dice tal cual. */}
-          <div style={{ marginBottom:14 }}>
-            {sellerRatingInfo && sellerRatingInfo.count > 0 ? (
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <FP_StarRow count={Math.round(sellerRatingInfo.rating || 0)} size={14}/>
-                <span style={{ fontSize:14, fontWeight:700, color:FP_C.textPrimary, fontFamily:FP_FH }}>
-                  {(sellerRatingInfo.rating || 0).toFixed(1).replace(".", ",")}
-                </span>
-                <span style={{ fontSize:12.5, color:FP_C.textSecondary }}>
-                  ({fmtBig(sellerRatingInfo.count)})
-                </span>
-              </div>
-            ) : (
-              <span style={{ fontSize:12.5, color:FP_C.textSecondary }}>Sin valoraciones aún</span>
+              SIEMPRE 5 estrellas — vacías/outline si aún no hay calificación (el
+              propio FP_StarRow ya las dibuja así con count=0), llenas según el
+              promedio si lo hay. El conteo real va entre paréntesis, "(0)" incluido. */}
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
+            <FP_StarRow count={sellerRatingInfo ? Math.round(sellerRatingInfo.rating || 0) : 0} size={14}/>
+            {sellerRatingInfo && sellerRatingInfo.rating != null && (
+              <span style={{ fontSize:14, fontWeight:700, color:FP_C.textPrimary, fontFamily:FP_FH }}>
+                {sellerRatingInfo.rating.toFixed(1).replace(".", ",")}
+              </span>
             )}
+            <span style={{ fontSize:12.5, color:FP_C.textSecondary }}>
+              ({fmtBig(sellerRatingInfo?.count || 0)})
+            </span>
           </div>
 
           {/* Estadísticas reales (get_profile_header_stats) — sin distancia/ubicación. */}
@@ -1654,15 +1663,37 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
             </div>
           )}
 
-          {/* Mensaje (visitante) — Seguir ya vive arriba, junto a Atrás. */}
+          {/* Seguir + Mensaje en pareja, en su posición original (no arriba en
+              la barra superior) — con el conteo de seguidores discreto junto
+              a Seguir. */}
           {!isOwner && (
-            <button onClick={() => onChat?.(sellerId, profile.name)} style={{
-              width:"100%", background:FP_C.surfaceTop, border:`1px solid ${FP_C.border}`,
-              borderRadius:8, height:38, cursor:"pointer", marginBottom:12,
-              color:FP_C.textPrimary, fontSize:13, fontWeight:700, fontFamily:FP_FH,
-              display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-              <FP_Icon d={FP_Icons.message} size={15} color={FP_C.textPrimary}/> Mensaje
-            </button>
+            <div style={{ marginBottom:12 }}>
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={() => setFollowing(!following)} style={{
+                  flex:1, background: following ? FP_C.surfaceTop : FP_C.accent,
+                  border:`1px solid ${following ? FP_C.border : FP_C.accent}`,
+                  borderRadius:8, height:38, cursor:"pointer",
+                  color: following ? FP_C.textPrimary : "#fff",
+                  fontSize:13, fontWeight:700, fontFamily:FP_FH,
+                  display:"flex", alignItems:"center", justifyContent:"center", gap:6, transition:"all 0.2s",
+                }}>
+                  {following
+                    ? <><FP_Icon d={FP_Icons.check} size={14} color={FP_C.textPrimary}/> Siguiendo</>
+                    : <><FP_Icon d={FP_Icons.plus}  size={14} color="#fff"/> Seguir</>
+                  }
+                </button>
+                <button onClick={() => onChat?.(sellerId, profile.name)} style={{
+                  flex:1, background:FP_C.surfaceTop, border:`1px solid ${FP_C.border}`,
+                  borderRadius:8, height:38, cursor:"pointer",
+                  color:FP_C.textPrimary, fontSize:13, fontWeight:700, fontFamily:FP_FH,
+                  display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                  <FP_Icon d={FP_Icons.message} size={15} color={FP_C.textPrimary}/> Mensaje
+                </button>
+              </div>
+              <div style={{ textAlign:"center", fontSize:10.5, color:FP_C.textMuted, fontWeight:600, marginTop:5 }}>
+                {fmtBig(headerStats.seguidores)} seguidores
+              </div>
+            </div>
           )}
           {!isOwner && (
             <button onClick={() => setShowReport(true)} style={{
@@ -1866,8 +1897,10 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
           </div>
 
           <div style={{ display:"flex", gap:8, marginTop:4 }}>
-            <FP_Btn onClick={saveAll} style={{ flex:1 }}>Guardar</FP_Btn>
-            <FP_Btn variant="secondary" onClick={cancelAll} style={{ flex:1 }}>Cancelar</FP_Btn>
+            <FP_Btn onClick={saveAll} disabled={savingProfile} style={{ flex:1 }}>
+              {savingProfile ? "Guardando…" : "Guardar"}
+            </FP_Btn>
+            <FP_Btn variant="secondary" onClick={cancelAll} disabled={savingProfile} style={{ flex:1 }}>Cancelar</FP_Btn>
           </div>
         </div>
       )}

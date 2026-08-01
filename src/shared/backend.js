@@ -201,7 +201,14 @@ export const DEMO_PRODUCT = mapProduct({
 });
 export const getFeed = async (ctx) => loadProducts();
 export const saveProduct = async (data, userId) => ({ ...data, id: Date.now(), seller_id: userId, seller_name: MOCK_USER.name });
-export const deleteProduct = async (id) => {};
+// Elimina de verdad contra el backend (soft-delete: status='deleted'). El RLS
+// ya hace invisible cualquier producto no-activo para quien no sea su dueño o
+// admin — esto solo ejecuta el cambio real (antes era un stub que no hacía nada).
+export const deleteProduct = async (id) => {
+  const { error } = await supabase.from("products").update({ status: "deleted" }).eq("id", id);
+  if (error) { console.error("deleteProduct:", error.message); throw error; }
+  return true;
+};
 export const getProductsBySeller = async (id) => {
   const { data, error } = await supabase.from("products").select("*").eq("seller_id", id).neq("status", "deleted").order("created_at", { ascending: false });
   if (error) { console.error("getProductsBySeller:", error.message); return []; }

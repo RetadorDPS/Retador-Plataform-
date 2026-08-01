@@ -144,6 +144,19 @@ export const avatarUrlOf = (a) => {
 };
 // Colores de relleno para la inicial (deterministas por nombre).
 const _AV_COLORS = ["#6366F1", "#0EA5E9", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#14B8A6"];
+
+// ── INSIGNIA DE VERIFICADO — ÚNICO componente para el sello ✓ en TODA la app
+// (avatares, tarjetas de producto, chat, perfil…). Fondo SÓLIDO dorado (sello
+// de garantía, no un detalle), palomita negra dentro, con sombra propia para
+// que "flote" sobre lo que tenga debajo. Cambiar esto lo cambia en todos lados.
+export const VerifiedTick = ({ size = 10, color = "#0a0a0a" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+);
+export const VerifiedBadge = ({ size = 18, style }) => (
+  <div title="Verificado" style={{ width: size, height: size, borderRadius: "50%", background: G, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 0 2px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.45)", ...style }}>
+    <VerifiedTick size={Math.round(size * 0.58)} />
+  </div>
+);
 // AVATAR REUTILIZABLE — único en toda la app. Si hay foto muestra <img>; si no,
 // la inicial del nombre en un círculo de color (o un ícono de persona). NUNCA emoji.
 export const Avatar = ({ url, avatar, name, size = 40, style, verified = false }) => {
@@ -159,13 +172,12 @@ export const Avatar = ({ url, avatar, name, size = 40, style, verified = false }
         {letter || <Ic n="user" c="#fff" s={Math.round(size * 0.55)} />}
       </div>;
   if (!verified) return face;
-  // Verificado: insignia dorada ✓ (perfil verificado) anclada abajo-derecha.
-  const tick = Math.max(12, Math.round(size * 0.34));
+  // Verificado: insignia dorada ✓ anclada abajo-derecha, con más presencia (más
+  // grande que antes) y su propia sombra para que "flote" sobre la foto.
+  const tick = Math.max(14, Math.round(size * 0.4));
   return <div style={{ position: "relative", width: size, height: size, flexShrink: 0, ...style }}>
     {face}
-    <div title="Perfil verificado" style={{ position: "absolute", right: -1, bottom: -1, width: tick, height: tick, borderRadius: "50%", background: G, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 0 2px rgba(0,0,0,.55)" }}>
-      <svg width={Math.round(tick * 0.6)} height={Math.round(tick * 0.6)} viewBox="0 0 24 24" fill="none" stroke="#1a1a1a" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-    </div>
+    <VerifiedBadge size={tick} style={{ position: "absolute", right: -2, bottom: -2 }} />
   </div>;
 };
 // Igual que Avatar, pero resuelve la foto, el nombre y el ✓ REALES de una persona por

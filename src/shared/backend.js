@@ -76,24 +76,29 @@ export const getSellerAbout = async (userId) => {
     };
   } catch (e) { return null; }
 };
-export const saveSellerAbout = async (userId, about) => {
-  if (!userId) throw new Error("Sesión no válida");
-  const core = {
-    city: about.city || "", country: about.country || "",
-    seller_info: {
-      state: about.state || "", responseTime: about.responseTime || "", shipping: about.shipping || "",
-      instagram: about.instagram || "", facebook: about.facebook || "", tiktok: about.tiktok || "",
-    },
-  };
-  const { error } = await supabase.from("profiles").update({ ...core, email_public: !!about.emailPublic }).eq("id", userId);
-  if (!error) return;
-  // Si falló CON email_public incluido (p.ej. esa columna todavía no existe en
-  // este entorno), reintenta SIN ese campo para no perder ciudad/tiempos/redes
-  // por un problema ajeno a ellos — antes un solo campo roto tumbaba TODO el
-  // guardado sin que nadie se enterara.
-  const { error: err2 } = await supabase.from("profiles").update(core).eq("id", userId);
-  if (err2) throw err2; // fallo real: ni lo básico se pudo guardar.
-  console.error("saveSellerAbout: se guardó todo menos 'mostrar correo público' —", error.message);
+// Guarda TODO el editor de perfil (datos básicos + Acerca de) en UNA sola
+// llamada real: save_profile_all(p_full_name, p_bio, p_avatar_url, p_city,
+// p_country, p_seller_info, p_email_public) — auth.uid() identifica al dueño
+// por dentro, sin pasar user_id. Los campos en null conservan su valor previo
+// (COALESCE del lado del backend); aquí SIEMPRE mandamos el valor real del
+// formulario (incluida cadena vacía si el usuario borró algo), nunca null,
+// porque este editor guarda todo junto de una vez.
+// Reemplaza el UPDATE directo a `profiles` (sujeto a RLS y a que TODAS las
+// columnas del patch existan a la vez) — la RPC devuelve la fila YA guardada,
+// así el estado local nunca se basa en lo que había en pantalla sino en lo
+// que el backend confirma que quedó escrito.
+export const saveProfileAll = async ({ fullName, bio, avatarUrl, city, country, sellerInfo, emailPublic }) => {
+  const { data, error } = await supabase.rpc("save_profile_all", {
+    p_full_name: fullName ?? null,
+    p_bio: bio ?? null,
+    p_avatar_url: avatarUrl ?? null,
+    p_city: city ?? null,
+    p_country: country ?? null,
+    p_seller_info: sellerInfo ?? null,
+    p_email_public: emailPublic ?? null,
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] : data;
 };
 
 // Product functions
@@ -1011,12 +1016,18 @@ export const getMyVerification = async (userId) => {
   if (error) { console.error("getMyVerification:", error.message); return null; }
   return data || null;
 };
-// Enviar una solicitud de verificación (el usuario inserta la suya, status pending).
-export const submitVerification = async (userId, { full_name, doc_type, doc_number, doc_front, doc_back, selfie }) => {
-  const row = { user_id: userId, full_name, doc_type, doc_number, doc_front, doc_back, selfie, status: "pending" };
-  const { data, error } = await supabase.from("verifications").insert(row).select().single();
-  if (error) { console.error("submitVerification:", error.message); throw error; }
-  return data;
+// Enviar una solicitud de verificación. ANTES: insert directo a `verifications`,
+// sujeto de lleno a RLS de INSERT (evidencia real: "new row violates row-level
+// security policy"). Ahora pasa por la RPC submit_verification — auth.uid()
+// identifica al usuario por dentro, sin pasar user_id, y el camino de RLS en
+// el INSERT queda eliminado del todo.
+export const submitVerification = async ({ full_name, doc_type, doc_number, doc_front, doc_back, selfie }) => {
+  const { data, error } = await supabase.rpc("submit_verification", {
+    p_full_name: full_name, p_doc_type: doc_type, p_doc_number: doc_number,
+    p_doc_front: doc_front, p_doc_back: doc_back, p_selfie: selfie,
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] : data;
 };
 // Admin: lista de verificaciones por estado (pending|approved|rejected|all).
 export const adminListVerifications = async ({ status = "pending", from = 0, to = 49 } = {}) => {
@@ -1070,23 +1081,20 @@ export const getMyCourierApplication = async (userId) => {
 };
 // KYC completo (mismo nivel que verificar perfil): nombre legal, documento y
 // las 3 fotos, además de los datos operativos (teléfono, zona, vehículo).
-export const submitCourierApplication = async ({ userId, name, phone, zone, vehicle, full_name, doc_type, doc_number, doc_front, doc_back, selfie }) => {
-  const row = { user_id: userId, name, phone, zone, vehicle, full_name, doc_type, doc_number, doc_front, doc_back, selfie };
-  try {
-    await writeProductRow((r) => supabase.from("courier_applications").insert(r), row);
-    return;
-  } catch (error) {
-    // Mismo patrón que verificación: si el rechazo previo dejó una fila única
-    // por usuario, en vez de fallar la reactivamos a 'pending' con los datos nuevos.
-    if (!/duplicate|unique/i.test(error.message || "")) throw error;
-    const prev = await getMyCourierApplication(userId);
-    if (prev && prev.status !== "pending" && prev.status !== "approved") {
-      const patch = { ...row, status: "pending", reject_reason: null, reviewed_by: null, reviewed_at: null };
-      await writeProductRow((r) => supabase.from("courier_applications").update(r).eq("id", prev.id), patch);
-      return;
-    }
-    throw error;
-  }
+// ANTES: insert/update directo a courier_applications, con una reactivación
+// de solicitudes rechazadas hecha a mano en el frontend — y ahí fue donde
+// salió el error real "Could not find the 'reviewed_by' column... in the
+// schema cache" (la columna faltaba en la tabla). Ahora todo pasa por la RPC
+// submit_courier_application, que resuelve la fila única y la reactivación
+// de rechazadas POR DENTRO, en el backend — auth.uid() identifica al usuario.
+export const submitCourierApplication = async ({ name, phone, zone, vehicle, full_name, doc_type, doc_number, doc_front, doc_back, selfie }) => {
+  const { data, error } = await supabase.rpc("submit_courier_application", {
+    p_name: name, p_phone: phone, p_zone: zone, p_vehicle: vehicle,
+    p_full_name: full_name, p_doc_type: doc_type, p_doc_number: doc_number,
+    p_doc_front: doc_front, p_doc_back: doc_back, p_selfie: selfie,
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] : data;
 };
 export const getPendingCourierApplications = async () => {
   const { data, error } = await supabase.from("courier_applications").select("*").eq("status", "pending").order("created_at", { ascending: true });

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, saveSellerAbout, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -1119,18 +1119,30 @@ function FP_VerifyModal({ user, isVerified, onClose, onSubmit, C, flash }) {
   const doSubmit = async () => {
     if (!valid || submitting) return;
     setSubmitting(true);
+    // Rutas: ${user.id}/front.jpg, ${user.id}/back.jpg, ${user.id}/selfie.jpg
+    // (bucket privado 'kyc', vía uploadKyc) — mismo formato que exige la
+    // política del bucket (carpeta = uid del propio usuario).
+    let pf, pb, ps;
     try {
-      const [pf, pb, ps] = await Promise.all([
+      [pf, pb, ps] = await Promise.all([
         uploadKyc(front.file, user.id, "front"),
         uploadKyc(back.file, user.id, "back"),
         uploadKyc(selfie.file, user.id, "selfie"),
       ]);
-      await submitVerification(user.id, { full_name: fullName.trim(), doc_type: docType, doc_number: docNum.trim(), doc_front: pf, doc_back: pb, selfie: ps });
+    } catch (e) {
+      flash_("⚠️ No se pudo subir una foto: " + (e?.message || "intenta de nuevo"));
+      setSubmitting(false);
+      return;
+    }
+    try {
+      // La RPC identifica al usuario con auth.uid() por dentro — elimina el
+      // camino de RLS en el INSERT directo (causa real del error reportado).
+      await submitVerification({ full_name: fullName.trim(), doc_type: docType, doc_number: docNum.trim(), doc_front: pf, doc_back: pb, selfie: ps });
       onSubmit?.();
       flash_("✅ Solicitud de verificación de perfil enviada — la revisaremos pronto");
       onClose();
     } catch (e) {
-      flash_("⚠️ " + (e?.message || "No se pudo enviar la verificación"));
+      flash_("⚠️ No se pudo enviar la solicitud: " + (e?.message || "intenta de nuevo"));
     }
     setSubmitting(false);
   };
@@ -1428,19 +1440,16 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     return () => { alive = false; };
   }, [aboutTargetId]);
 
-  function toast_(msg) { setToast(msg); setTimeout(() => setToast(null), 2500); }
+  function toast_(msg, isError = false) { setToast({ msg, isError }); setTimeout(() => setToast(null), isError ? 4000 : 2500); }
   // Editor unificado: UN solo botón "Guardar" persiste datos básicos (perfil) y
-  // "Acerca de" a la vez — dos updates al backend (perfiles distintos: profiles
-  // básico y profiles.city/country/seller_info), pero una sola acción del usuario.
-  // ANTES: esta función marcaba "Perfil actualizado" y cerraba el editor de
-  // inmediato, ANTES de siquiera intentar los updates al backend — si el
-  // guardado fallaba (red, RLS, una columna nueva que no existiera todavía),
-  // el error se perdía en un console.error y el dueño se quedaba viendo su
-  // cambio solo en su sesión actual (estado local optimista), nunca en la
-  // base real. Por eso "no persistía": el fallo era real y silencioso. Ahora
-  // se espera la confirmación del backend, se relee en fresco (nunca se
-  // confía en el eco local) y solo entonces se avisa que se guardó — si algo
-  // falla de verdad, se avisa también.
+  // "Acerca de" a la vez, en UNA sola llamada real: save_profile_all (RPC).
+  // ANTES esto eran dos UPDATE directos a `profiles` — sujetos a RLS, y con un
+  // fallo real (evidencia dura: updated_at idéntico al microsegundo antes y
+  // después de "guardar") que quedaba en un console.error invisible mientras
+  // el editor cerraba mostrando éxito igual. Ahora: la RPC devuelve la fila
+  // YA guardada — el estado local se arma SIEMPRE con esa respuesta (nunca
+  // con lo que había en pantalla), y "Guardado ✓" solo aparece si la RPC
+  // respondió bien. Si falla, se muestra el error tal cual, sin cerrar nada.
   async function saveAll() {
     const updatedProfile = {...pd};
     const updatedAbout = {...ad};
@@ -1450,24 +1459,42 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     }
     setSavingProfile(true);
     try {
-      const patch = { full_name: updatedProfile.name, bio: updatedProfile.bio || "" };
-      const url = avatarUrlOf(updatedProfile.avatar);
-      if (updatedProfile.avatar?.type === "image" && url) patch.avatar_url = url;
-      const { error: profErr } = await supabase.from("profiles").update(patch).eq("id", user.id);
-      if (profErr) throw profErr;
-      await saveSellerAbout(user.id, updatedAbout);
-      // Confirmación real: se relee la fila (no se asume que el update "debió"
-      // funcionar solo porque no tiró error).
-      const fresh = await getSellerAbout(user.id);
-      setProfile(updatedProfile);
-      setAbout(fresh || updatedAbout);
-      setAd(fresh || updatedAbout);
+      const photoUrl = (updatedProfile.avatar?.type === "image" && avatarUrlOf(updatedProfile.avatar)) || null;
+      const saved = await saveProfileAll({
+        fullName: updatedProfile.name || "",
+        bio: updatedProfile.bio || "",
+        avatarUrl: photoUrl,
+        city: updatedAbout.city || "",
+        country: updatedAbout.country || "",
+        sellerInfo: {
+          state: updatedAbout.state || "", responseTime: updatedAbout.responseTime || "", shipping: updatedAbout.shipping || "",
+          instagram: updatedAbout.instagram || "", facebook: updatedAbout.facebook || "", tiktok: updatedAbout.tiktok || "",
+        },
+        emailPublic: !!updatedAbout.emailPublic,
+      });
+      // El estado local sale SIEMPRE de lo que la RPC devolvió, no de `updatedProfile`/`updatedAbout`.
+      const si = (saved?.seller_info && typeof saved.seller_info === "object") ? saved.seller_info : {};
+      const newProfile = {
+        ...profile,
+        name: saved?.full_name || updatedProfile.name,
+        bio: saved?.bio || "",
+        avatar: saved?.avatar_url ? { type: "image", value: saved.avatar_url } : updatedProfile.avatar,
+      };
+      const newAbout = {
+        city: saved?.city || "", country: saved?.country || "",
+        state: si.state || "", responseTime: si.responseTime || "", shipping: si.shipping || "",
+        instagram: si.instagram || "", facebook: si.facebook || "", tiktok: si.tiktok || "",
+        emailPublic: !!saved?.email_public,
+      };
+      setProfile(newProfile);
+      setAbout(newAbout);
+      setAd(newAbout);
       setEditing(false);
-      onProfileUpdate?.({ avatar: updatedProfile.avatar, name: updatedProfile.name, email: updatedProfile.email, bio: updatedProfile.bio || "" });
-      toast_("Perfil actualizado");
+      onProfileUpdate?.({ avatar: newProfile.avatar, name: newProfile.name, email: newProfile.email, bio: newProfile.bio });
+      toast_("Guardado ✓");
     } catch (e) {
-      console.error("saveAll:", e?.message || e);
-      toast_("No se pudo guardar. Revisa tu conexión e intenta de nuevo.");
+      // Prohibido fingir éxito: se muestra el error real del backend tal cual.
+      toast_(e?.message || "No se pudo guardar.", true);
     } finally {
       setSavingProfile(false);
     }
@@ -1498,17 +1525,19 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
       {showVerify && isOwner && <FP_VerifyModal user={user} isVerified={isVerified} onClose={() => setShowVerify(false)} onSubmit={() => onVerify?.()} C={FP_C} flash={toast_}/>}
       {showPlans && isOwner && <FP_PlansModal user={user} plans={plans} current={currentPlan} onClose={() => setShowPlans(false)} C={FP_C} flash={toast_}/>}
 
-      {/* TOAST */}
+      {/* TOAST — rojo/⚠ si es un error real (nunca se finge éxito con un ✓ verde) */}
       {toast && (
         <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)",
-          background:FP_C.surfaceTop, color:FP_C.positive,
-          border:`1px solid ${FP_C.positiveDim}`,
+          background:FP_C.surfaceTop, color: toast.isError ? FP_C.danger : FP_C.positive,
+          border:`1px solid ${toast.isError ? FP_C.danger + "55" : FP_C.positiveDim}`,
           borderRadius:8, padding:"9px 16px", fontSize:12, fontWeight:600,
           fontFamily:FP_FH, zIndex:700, boxShadow:"0 8px 24px rgba(0,0,0,0.6)",
-          display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap",
+          display:"flex", alignItems:"center", gap:8, maxWidth:"88vw",
           letterSpacing:"0.2px" }}>
-          <FP_Icon d={FP_Icons.check} size={14} color={FP_C.positive}/>
-          {toast}
+          {toast.isError
+            ? <FP_Icon d={FP_Icons.x} size={14} color={FP_C.danger}/>
+            : <FP_Icon d={FP_Icons.check} size={14} color={FP_C.positive}/>}
+          <span style={{ whiteSpace: toast.isError ? "normal" : "nowrap" }}>{toast.msg}</span>
         </div>
       )}
 

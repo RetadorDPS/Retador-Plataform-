@@ -540,23 +540,31 @@ export function CourierFlow({ myRecord, user, flash, onClose, dark, meName, meId
     if (!docFront || !docBack || !selfie) return setErr("Faltan fotos: " + missingSlots.join(", ") + ".");
     if (!f.acepta) return setErr("Debes aceptar la cláusula de responsabilidad.");
     setErr(""); setSending(true);
+    // Rutas: ${user.id}/courier_front.jpg, ${user.id}/courier_back.jpg,
+    // ${user.id}/courier_selfie.jpg (bucket privado 'kyc', vía uploadKyc).
+    let pf, pb, ps;
     try {
-      const [pf, pb, ps] = await Promise.all([
+      [pf, pb, ps] = await Promise.all([
         uploadKyc(docFront.file, user.id, "courier_front"),
         uploadKyc(docBack.file, user.id, "courier_back"),
         uploadKyc(selfie.file, user.id, "courier_selfie"),
       ]);
+    } catch (e) {
+      setErr("No se pudo subir una foto: " + (e?.message || "intenta de nuevo"));
+      setSending(false);
+      return;
+    }
+    try {
+      // La RPC resuelve la fila única y la reactivación de solicitudes
+      // rechazadas por dentro — ya no hace falta manejar "duplicate/unique" aquí.
       await submitCourierApplication({
-        userId: user?.id, name: f.nombre.trim(), phone: f.telefono.trim(), zone: f.zona.trim(), vehicle: f.vehiculo,
+        name: f.nombre.trim(), phone: f.telefono.trim(), zone: f.zona.trim(), vehicle: f.vehiculo,
         full_name: f.nombre.trim(), doc_type: f.docType, doc_number: f.docNumber.trim(), doc_front: pf, doc_back: pb, selfie: ps,
       });
       setApp({ status: "pending" });
       flash && flash("🛵 Solicitud enviada — en revisión");
     } catch (e) {
-      if (/duplicate|unique/i.test(e?.message || "")) {
-        const d = await getMyCourierApplication(user?.id).catch(() => null);
-        setApp(d || { status: "pending" });
-      } else setErr("No se pudo enviar: " + (e?.message || "intenta de nuevo"));
+      setErr("No se pudo enviar la solicitud: " + (e?.message || "intenta de nuevo"));
     } finally { setSending(false); }
   };
   const upBox = (label, slot, hint) => {

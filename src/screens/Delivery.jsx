@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import IntlShippingApp from "./IntlShipping.jsx";
-import { LiveSlot, useAt, usePlatformCfg } from "../shared/index.js";
+import { LiveSlot, useAt, usePlatformCfg, createPackageDelivery, uploadImage } from "../shared/index.js";
 
 const DELIVERY_LOCAL_CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=Outfit:wght@300;400;500;600;700&display=swap');
@@ -216,7 +216,7 @@ const T = {
 };
 
 /* ── ROOT ───────────────────────────────────────────────────────── */
-export function LocalDelivery({ onBack, onNav, onChat }) {
+export function LocalDelivery({ onBack, onNav, onChat, flash, user, onTrackOrder }) {
   const { isDark } = useAt();
   const [screen, setScreen] = useState('home');
   // El chat del seguimiento abre el chat REAL conectado (conversations/messages),
@@ -226,7 +226,7 @@ export function LocalDelivery({ onBack, onNav, onChat }) {
     <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column', background: isDark ? DL_DARK.bg : DL_LIGHT.bg, fontFamily:"'Outfit',sans-serif", color: isDark ? DL_DARK.text1 : DL_LIGHT.text1 }}>
       <style>{DELIVERY_LOCAL_CSS}</style>
       {screen==='home'     && <DLHomeScreen      key="home"     onNew={()=>setScreen('nuevo')} onRastrear={()=>setScreen('rastrear')} onMenuBack={onBack} onNav={onNav}/>}
-      {screen==='nuevo'    && <DLNuevoEnvioScreen key="nuevo"   onBack={()=>setScreen('home')}/>}
+      {screen==='nuevo'    && <DLNuevoEnvioScreen key="nuevo"   onBack={()=>setScreen('home')} user={user} flash={flash} onTrackOrder={onTrackOrder}/>}
       {screen==='rastrear' && <DLRastrearScreen   key="rastrear" onBack={()=>setScreen('home')} onChat={openConnectedChat}/>}
     </div>
   );
@@ -239,7 +239,7 @@ function DLNavHeader({ title, showBack, onBack, onMenuBack }) {
     <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 18px', height:54, borderBottom:`1px solid ${C.border}` }}>
       <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
         <div style={{ ...T.display, fontSize:22, letterSpacing:'-0.03em', lineHeight:1, background:'linear-gradient(135deg,#FFC01E 0%,#E5A912 55%,#D99A0A 100%)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text' }}>RETADOR</div>
-        <div style={{ ...T.semibold, fontSize:8, color:C.text3, letterSpacing:'0.22em', textTransform:'uppercase', lineHeight:1 }}>SERVICIO DE ENTREGAS</div>
+        <div style={{ ...T.semibold, fontSize:9.3, color:C.text3, letterSpacing:'0.22em', textTransform:'uppercase', lineHeight:1 }}>SERVICIO DE ENTREGAS</div>
       </div>
       {onMenuBack && <button className="dl-tap" onClick={onMenuBack} style={{ background:'rgba(255,255,255,0.052)', border:`1px solid ${C.border}`, borderRadius:10, width:32, height:32, display:'flex', alignItems:'center', justifyContent:'center' }}>
         <svg width="7" height="12" viewBox="0 0 7 12" fill="none"><path d="M6 1L1 6l5 5" stroke={C.text1} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -290,7 +290,7 @@ function DLLiveTicker() {
   return (
     <div style={{ height:27, overflow:'hidden', background:'rgba(196,152,46,0.038)', borderBottom:`1px solid rgba(196,152,46,0.08)`, display:'flex', alignItems:'center' }}>
       <div className="dl-ticker-track" style={{ display:'flex' }}>
-        {[text,text].map((t,i)=><span key={i} style={{ ...T.medium, fontSize:9.5, color:'rgba(196,152,46,0.52)', letterSpacing:'0.02em', paddingRight:55 }}>{t}</span>)}
+        {[text,text].map((t,i)=><span key={i} style={{ ...T.medium, fontSize:10.3, color:'rgba(196,152,46,0.52)', letterSpacing:'0.02em', paddingRight:55 }}>{t}</span>)}
       </div>
     </div>
   );
@@ -327,18 +327,18 @@ function DLHeroSection() {
       <div style={{ position:'absolute', top:0, left:0, right:0, height:40, background:'linear-gradient(to bottom,rgba(12,12,16,0.48),transparent)' }}/>
       <div style={{ position:'relative', zIndex:2, padding:'15px 17px 18px' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:14 }}>
-          <div style={{ ...T.medium, fontSize:9, color:'rgba(196,152,46,0.48)', letterSpacing:'0.15em', textTransform:'uppercase' }}>{heroLabel}</div>
+          <div style={{ ...T.medium, fontSize:9.8, color:'rgba(196,152,46,0.48)', letterSpacing:'0.15em', textTransform:'uppercase' }}>{heroLabel}</div>
           <div style={{ display:'flex', alignItems:'center', gap:5.5, background:C.greenDim, border:`1px solid ${C.greenBdr}`, borderRadius:20, padding:'4px 10px 4px 7px' }}>
             <div style={{ position:'relative', width:7, height:7, flexShrink:0 }}>
               <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:svcOn?C.green:'#ef4444', animation:svcOn?'dl-ring 2.2s ease-out infinite':'none' }}/>
               <div style={{ position:'relative', width:7, height:7, borderRadius:'50%', background:svcOn?C.green:'#ef4444', animation:svcOn?'dl-pulse 2.2s ease-in-out infinite':'none' }}/>
             </div>
-            <span style={{ ...T.semibold, fontSize:9.5, color:svcOn?C.green:'#ef4444', letterSpacing:'0.07em' }}>{svcOn?'OPERATIVO':'NO OPERATIVO'}</span>
+            <span style={{ ...T.semibold, fontSize:10.3, color:svcOn?C.green:'#ef4444', letterSpacing:'0.07em' }}>{svcOn?'OPERATIVO':'NO OPERATIVO'}</span>
           </div>
         </div>
         <div style={{ marginBottom:16 }}>
           <div style={{ ...T.display, fontSize:27, color:'rgba(240,240,242,0.95)', letterSpacing:'-0.026em', lineHeight:1.06, marginBottom:6 }}>Servicio<br/><span style={{ color:svcOn?C.goldBright:'#ef4444' }}>{svcOn?'Activo':'Inactivo'}</span></div>
-          <div style={{ ...T.body, fontSize:11, color:'rgba(240,240,242,0.55)' }}>{heroSub}</div>
+          <div style={{ ...T.body, fontSize:11.4, color:'rgba(240,240,242,0.55)' }}>{heroSub}</div>
         </div>
         {/* (Las estadísticas demo — mensajeros/respuesta/cobertura — se quitaron:
             volverán cuando salgan de datos reales del backend.) */}
@@ -358,7 +358,7 @@ function DLCTASection({ onNew }) {
           </div>
           <div style={{ textAlign:'left' }}>
             <div style={{ ...T.heading, fontSize:14, color:'#060608', letterSpacing:'-0.012em', marginBottom:1.5 }}>Crear Nuevo Envío</div>
-            <div style={{ ...T.body, fontSize:10.5, color:'rgba(6,6,8,0.48)' }}>Asignación inmediata · Sin esperas</div>
+            <div style={{ ...T.body, fontSize:10.9, color:'rgba(6,6,8,0.48)' }}>Asignación inmediata · Sin esperas</div>
           </div>
         </div>
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M6.5 4.5l5 4.5-5 4.5" stroke="#060608" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -381,13 +381,13 @@ function DLActiveSection({ onRastrear }) {
             <div>
               <div style={{ display:'flex', alignItems:'center', gap:5.5, marginBottom:3.5 }}>
                 <div style={{ width:6.5, height:6.5, borderRadius:'50%', background:C.green, animation:'dl-pulse 1.9s ease-in-out infinite' }}/>
-                <span style={{ ...T.semibold, fontSize:9.5, color:C.green, letterSpacing:'0.07em' }}>EN CAMINO</span>
+                <span style={{ ...T.semibold, fontSize:10.3, color:C.green, letterSpacing:'0.07em' }}>EN CAMINO</span>
               </div>
               <div style={{ ...T.subhead, fontSize:12.5, color:C.text1, letterSpacing:'-0.01em' }}>Envío #DL-2847</div>
             </div>
             <div style={{ background:C.goldDim, border:`1px solid ${C.goldBorder}`, borderRadius:11, padding:'6px 11px', textAlign:'center' }}>
-              <div style={{ ...T.heading, fontSize:19, color:C.goldText, lineHeight:1, letterSpacing:'-0.02em' }}>18<span style={{ fontSize:11, fontWeight:600 }}>'</span></div>
-              <div style={{ ...T.body, fontSize:8, color:'rgba(212,168,74,0.5)', marginTop:1.5, letterSpacing:'0.06em', textTransform:'uppercase' }}>ETA</div>
+              <div style={{ ...T.heading, fontSize:19, color:C.goldText, lineHeight:1, letterSpacing:'-0.02em' }}>18<span style={{ fontSize:11.4, fontWeight:600 }}>'</span></div>
+              <div style={{ ...T.body, fontSize:9.3, color:'rgba(212,168,74,0.5)', marginTop:1.5, letterSpacing:'0.06em', textTransform:'uppercase' }}>ETA</div>
             </div>
           </div>
           <div style={{ marginBottom:12 }}>
@@ -397,14 +397,14 @@ function DLActiveSection({ onRastrear }) {
                 <div style={{ width:1, height:20, background:'linear-gradient(180deg,rgba(196,152,46,0.28),rgba(255,255,255,0.05))' }}/>
               </div>
               <div style={{ paddingBottom:10 }}>
-                <div style={{ ...T.body, fontSize:9.5, color:C.text3, marginBottom:1.5, letterSpacing:'0.03em' }}>ORIGEN</div>
+                <div style={{ ...T.body, fontSize:10.3, color:C.text3, marginBottom:1.5, letterSpacing:'0.03em' }}>ORIGEN</div>
                 <div style={{ ...T.medium, fontSize:12.5, color:C.text1 }}>Edificio FOCSA</div>
               </div>
             </div>
             <div style={{ display:'flex', alignItems:'flex-start', gap:10 }}>
               <div style={{ flexShrink:0, paddingTop:3.5 }}><div style={{ width:7.5, height:7.5, borderRadius:2.2, background:C.green, border:'1.5px solid rgba(44,184,122,0.32)' }}/></div>
               <div>
-                <div style={{ ...T.body, fontSize:9.5, color:C.text3, marginBottom:1.5, letterSpacing:'0.03em' }}>DESTINO</div>
+                <div style={{ ...T.body, fontSize:10.3, color:C.text3, marginBottom:1.5, letterSpacing:'0.03em' }}>DESTINO</div>
                 <div style={{ ...T.medium, fontSize:12.5, color:C.text1 }}>Calle 23, El Vedado</div>
               </div>
             </div>
@@ -414,15 +414,15 @@ function DLActiveSection({ onRastrear }) {
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
               <div style={{ width:31, height:31, borderRadius:9, background:C.blueDim, border:`1px solid ${C.blueBdr}`, display:'flex', alignItems:'center', justifyContent:'center', ...T.heading, fontSize:13, color:C.blue }}>A</div>
               <div>
-                <div style={{ ...T.medium, fontSize:12, color:C.text1, marginBottom:1.5 }}>Alex Ramírez</div>
+                <div style={{ ...T.medium, fontSize:12.4, color:C.text1, marginBottom:1.5 }}>Alex Ramírez</div>
                 <div style={{ display:'flex', alignItems:'center', gap:3 }}>
                   <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 1l1.2 2.5L9 3.8l-2.1 2 .5 2.8L5 7.3 2.6 8.6l.5-2.8L1 3.8l2.8-.3z" fill="#E5A912"/></svg>
-                  <span style={{ ...T.semibold, fontSize:11, color:C.text2 }}>4.9</span>
-                  <span style={{ ...T.body, fontSize:10.5, color:C.text3 }}> · 847 entregas</span>
+                  <span style={{ ...T.semibold, fontSize:11.4, color:C.text2 }}>4.9</span>
+                  <span style={{ ...T.body, fontSize:10.9, color:C.text3 }}> · 847 entregas</span>
                 </div>
               </div>
             </div>
-            <button className="dl-tap" onClick={onRastrear} style={{ height:31, borderRadius:9, padding:'0 11px', background:'rgba(255,255,255,0.06)', border:`1px solid ${C.border}`, ...T.medium, fontSize:11.5, color:C.text1, cursor:'pointer' }}>Rastrear</button>
+            <button className="dl-tap" onClick={onRastrear} style={{ height:31, borderRadius:9, padding:'0 11px', background:'rgba(255,255,255,0.06)', border:`1px solid ${C.border}`, ...T.medium, fontSize:11.9, color:C.text1, cursor:'pointer' }}>Rastrear</button>
           </div>
         </div>
       </div>
@@ -440,8 +440,8 @@ function DLStatsStrip() {
           <div key={l} style={{ flex:1, background:g?'rgba(196,152,46,0.065)':C.bg1, border:`1px solid ${g?C.goldBorder:C.border}`, borderRadius:17, padding:'13px 11px' }}>
             <div style={{ marginBottom:8, color:g?C.goldText:C.text2 }}>{icon}</div>
             <div style={{ ...T.heading, fontSize:17, letterSpacing:'-0.022em', lineHeight:1, color:g?C.goldText:C.text1, marginBottom:3.5 }}>{v}</div>
-            <div style={{ ...T.medium, fontSize:10, color:C.text2, lineHeight:1.3, marginBottom:2.5 }}>{l}</div>
-            <div style={{ ...T.body, fontSize:9, color:C.text3 }}>{s}</div>
+            <div style={{ ...T.medium, fontSize:10.8, color:C.text2, lineHeight:1.3, marginBottom:2.5 }}>{l}</div>
+            <div style={{ ...T.body, fontSize:9.8, color:C.text3 }}>{s}</div>
           </div>
         ))}
       </div>
@@ -504,21 +504,21 @@ function DLHistorySection() {
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <span style={{ ...T.heading, fontSize:14.5, color:C.text1, letterSpacing:'-0.012em' }}>Historial</span>
-          <span style={{ background:'rgba(255,255,255,0.06)', border:`1px solid ${C.border}`, borderRadius:20, padding:'2px 8px', ...T.semibold, fontSize:9.5, color:C.text2 }}>{filtered.length} envíos</span>
+          <span style={{ background:'rgba(255,255,255,0.06)', border:`1px solid ${C.border}`, borderRadius:20, padding:'2px 8px', ...T.semibold, fontSize:10.3, color:C.text2 }}>{filtered.length} envíos</span>
         </div>
-        <button className="dl-tap" onClick={()=>{setExpanded(false);setPage(1);setFilter('all');}} style={{ background:'none', border:'none', cursor:'pointer', ...T.medium, fontSize:12, color:C.text3, fontFamily:"'Outfit',sans-serif" }}>Cerrar</button>
+        <button className="dl-tap" onClick={()=>{setExpanded(false);setPage(1);setFilter('all');}} style={{ background:'none', border:'none', cursor:'pointer', ...T.medium, fontSize:12.4, color:C.text3, fontFamily:"'Outfit',sans-serif" }}>Cerrar</button>
       </div>
 
       {/* Filter pills */}
       <div style={{ display:'flex', gap:6, marginBottom:12, overflowX:'auto', paddingBottom:2 }}>
         {FILTERS.map(({k,l})=>(
-          <button key={k} className="dl-tap" onClick={()=>{setFilter(k);setPage(1);}} style={{ background:filter===k?C.goldDim2:'rgba(255,255,255,0.04)', border:`1px solid ${filter===k?C.goldBorder:C.border}`, borderRadius:20, padding:'4px 11px', cursor:'pointer', ...T.medium, fontSize:11, color:filter===k?C.goldText:C.text2, flexShrink:0, transition:'all .14s ease', whiteSpace:'nowrap' }}>{l}</button>
+          <button key={k} className="dl-tap" onClick={()=>{setFilter(k);setPage(1);}} style={{ background:filter===k?C.goldDim2:'rgba(255,255,255,0.04)', border:`1px solid ${filter===k?C.goldBorder:C.border}`, borderRadius:20, padding:'4px 11px', cursor:'pointer', ...T.medium, fontSize:11.4, color:filter===k?C.goldText:C.text2, flexShrink:0, transition:'all .14s ease', whiteSpace:'nowrap' }}>{l}</button>
         ))}
       </div>
 
       <div style={{ background:C.bg1, border:`1px solid ${C.border}`, borderRadius:20, overflow:'hidden' }}>
         {pageItems.length===0
-          ? <div style={{ padding:'24px 16px', textAlign:'center', ...T.body, fontSize:12, color:C.text3 }}>Sin envíos en esta categoría</div>
+          ? <div style={{ padding:'24px 16px', textAlign:'center', ...T.body, fontSize:12.4, color:C.text3 }}>Sin envíos en esta categoría</div>
           : pageItems.map((e,i)=><div key={e.id}><DLHistoryRow e={e}/>{i<pageItems.length-1&&<div style={{ height:1, background:C.border, margin:'0 13px' }}/>}</div>)
         }
       </div>
@@ -530,7 +530,7 @@ function DLHistorySection() {
             <svg width="7" height="11" viewBox="0 0 7 11" fill="none"><path d="M5.5 1.5L1.5 5.5l4 4" stroke={C.text2} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
           {Array.from({length:totalPages},(_,i)=>i+1).map(n=>(
-            <button key={n} className="dl-tap" onClick={()=>setPage(n)} style={{ width:32, height:32, borderRadius:10, background:n===page?C.goldDim2:'transparent', border:`1px solid ${n===page?C.goldBorder:'transparent'}`, ...T.semibold, fontSize:12, color:n===page?C.goldText:C.text3 }}>{n}</button>
+            <button key={n} className="dl-tap" onClick={()=>setPage(n)} style={{ width:32, height:32, borderRadius:10, background:n===page?C.goldDim2:'transparent', border:`1px solid ${n===page?C.goldBorder:'transparent'}`, ...T.semibold, fontSize:12.4, color:n===page?C.goldText:C.text3 }}>{n}</button>
           ))}
           <button className="dl-tap" onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages} style={{ width:32, height:32, borderRadius:10, background:page===totalPages?'transparent':C.bg2, border:`1px solid ${page===totalPages?'transparent':C.border}`, display:'flex', alignItems:'center', justifyContent:'center', opacity:page===totalPages?.3:1 }}>
             <svg width="7" height="11" viewBox="0 0 7 11" fill="none"><path d="M1.5 1.5l4 4-4 4" stroke={C.text2} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -570,15 +570,15 @@ function DLHistoryRow({ e }) {
       </div>
       <div style={{ flex:1, minWidth:0 }}>
         <div style={{ display:'flex', justifyContent:'space-between', marginBottom:2.5 }}>
-          <div style={{ ...T.medium, fontSize:12, color:C.text1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:162 }}>{e.from} → {e.to}</div>
+          <div style={{ ...T.medium, fontSize:12.4, color:C.text1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:162 }}>{e.from} → {e.to}</div>
           <div style={{ ...T.heading, fontSize:12.5, color:C.text1, flexShrink:0, marginLeft:7 }}>{e.price}</div>
         </div>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <div style={{ ...T.body, fontSize:10.5, color:C.text3 }}>{e.id} · {e.date}</div>
-          <div style={{ ...T.semibold, fontSize:10, color:cfg.color }}>{cfg.label}</div>
+          <div style={{ ...T.body, fontSize:10.9, color:C.text3 }}>{e.id} · {e.date}</div>
+          <div style={{ ...T.semibold, fontSize:10.8, color:cfg.color }}>{cfg.label}</div>
         </div>
         {e.reason && (
-          <div style={{ ...T.body, fontSize:10, color:C.text3, marginTop:3, display:'flex', alignItems:'center', gap:4 }}>
+          <div style={{ ...T.body, fontSize:10.8, color:C.text3, marginTop:3, display:'flex', alignItems:'center', gap:4 }}>
             <div style={{ width:3, height:3, borderRadius:'50%', background:cfg.color, opacity:.6, flexShrink:0 }}/>
             {e.reason}
           </div>
@@ -590,12 +590,16 @@ function DLHistoryRow({ e }) {
 }
 
 /* ── NUEVO ENVÍO ─────────────────────────────────────────────────── */
-function DLNuevoEnvioScreen({ onBack }) {
+function DLNuevoEnvioScreen({ onBack, user, flash, onTrackOrder }) {
   const C = useC();
   const platformCfg = usePlatformCfg(); // tarifa local desde la config GLOBAL del backend
   const [form,setForm]=useState({pickAddr:'',pickRef:'',pickName:'',pickPhone:'',dropAddr:'',dropRef:'',dropName:'',dropPhone:'',article:''});
   const [touched,setTouched]=useState({});
   const [submitted,setSubmitted]=useState(false);
+  const [submitting,setSubmitting]=useState(false);
+  const [createdId,setCreatedId]=useState(null);
+  const [photo,setPhoto]=useState(null);
+  const [uploadingPhoto,setUploadingPhoto]=useState(false);
   const [shakeTrg,setShakeTrg]=useState(false);
   const btnRef=useRef(null);
   const req=['pickAddr','pickPhone','dropAddr','dropPhone','article'];
@@ -609,7 +613,44 @@ function DLNuevoEnvioScreen({ onBack }) {
   const distKm=4.2; // distancia de ejemplo (sin GPS aún)
   const localPrice=Math.round(localRate.base+localRate.perKm*distKm);
   const summary=hasBoth?{dist:distKm+' km',time:'22 min',price:'$'+localPrice.toLocaleString()+' CUP'}:null;
-  const submit=()=>{if(!isValid){const t={};req.forEach(k=>t[k]=true);setTouched(t);setShakeTrg(p=>!p);return;}setSubmitted(true);};
+  const pickPhoto=async(file)=>{
+    if(!file||!user?.id)return;
+    setUploadingPhoto(true);
+    try{ const url=await uploadImage(file,user.id); setPhoto(url); }
+    catch(e){ flash&&flash('⚠️ No se pudo subir la foto'); }
+    finally{ setUploadingPhoto(false); }
+  };
+  // Crea el envío de VERDAD (create_package_delivery) — MISMO pool/flujo de
+  // mensajero que un pedido de compra (misma tabla, mismos estados). ANTES
+  // este botón solo mostraba una animación local; nada se guardaba nunca.
+  const submit=async()=>{
+    if(!isValid){const t={};req.forEach(k=>t[k]=true);setTouched(t);setShakeTrg(p=>!p);return;}
+    if(!user?.id){flash&&flash('Inicia sesión para crear un envío');return;}
+    if(submitting)return;
+    setSubmitting(true);
+    try{
+      // MISMA forma que arma un pedido de compra normal con ship_mode "local"
+      // (ver Marketplace.jsx: mode/name/phone/address/ref/pickup/pickupAddress/
+      // pickupPhone) — así el detalle del pedido y la tarjeta del mensajero
+      // pintan la recogida/entrega sin ninguna rama especial para "paquete".
+      const delivery={
+        mode:'local',
+        address:form.dropAddr.trim(), name:form.dropName.trim()||undefined, phone:form.dropPhone.trim(),
+        ref:form.dropRef.trim()||undefined,
+        pickup:form.pickName.trim()||'Punto de recogida', pickupAddress:form.pickAddr.trim(), pickupPhone:form.pickPhone.trim(),
+      };
+      const res=await createPackageDelivery({
+        title:form.article.trim(), image:photo||null,
+        shipPrice:localPrice, shipTo:form.dropAddr.trim(), delivery,
+      });
+      setCreatedId(res.id);
+      setSubmitted(true);
+    }catch(e){
+      flash&&flash('⚠️ No se pudo crear el envío: '+(e?.message||'Intenta de nuevo'));
+    }finally{
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="screen-forward" style={{ height:'100%', display:'flex', flexDirection:'column' }}>
@@ -617,7 +658,7 @@ function DLNuevoEnvioScreen({ onBack }) {
       <div className="ne-scroll" style={{ flex:1, overflowY:'auto', paddingBottom:28 }}>
         <div className="ne-s1" style={{ padding:'14px 18px 0' }}>
           <div style={{ ...T.heading, fontSize:20, color:C.text1, letterSpacing:'-0.024em', lineHeight:1.1, marginBottom:5 }}>Nuevo envío</div>
-          <div style={{ ...T.body, fontSize:11.5, color:'rgba(152,152,166,0.65)', lineHeight:1.55 }}>Solicita un mensajero para recoger y entregar un artículo dentro de tu ciudad.</div>
+          <div style={{ ...T.body, fontSize:11.9, color:'rgba(152,152,166,0.65)', lineHeight:1.55 }}>Solicita un mensajero para recoger y entregar un artículo dentro de tu ciudad.</div>
         </div>
         <div className="ne-s2" style={{ padding:'11px 18px 0' }}><DLAvailabilityStrip/></div>
         <div className="ne-s3" style={{ padding:'11px 18px 0' }}>
@@ -644,11 +685,24 @@ function DLNuevoEnvioScreen({ onBack }) {
         <div className="ne-s4" style={{ padding:'10px 18px 0' }}>
           <DLSectionCard icon={<DLPkgIcon/>} label="¿Qué envías?" accentKey="blue">
             <DLArticleField value={form.article} onChange={v=>upd('article',v)} onBlur={()=>blr('article')} error={err('article')}/>
+            <div style={{ marginTop:8 }}>
+              {photo ? (
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <img src={photo} alt="" style={{ width:40, height:40, borderRadius:8, objectFit:'cover', flexShrink:0 }} onError={e=>{e.target.style.display='none';}}/>
+                  <button type="button" onClick={()=>setPhoto(null)} style={{ background:'none', border:'none', color:C.text3, ...T.body, fontSize:10.3, cursor:'pointer', textDecoration:'underline' }}>Quitar foto</button>
+                </div>
+              ) : (
+                <label style={{ display:'inline-flex', alignItems:'center', gap:6, cursor:'pointer' }}>
+                  <input type="file" accept="image/*" style={{ display:'none' }} disabled={uploadingPhoto} onChange={e=>{const f=e.target.files?.[0]; if(f)pickPhoto(f); e.target.value='';}}/>
+                  <span style={{ border:`1px dashed ${C.border}`, borderRadius:8, padding:'6px 10px', ...T.medium, fontSize:10.8, color:C.text2 }}>{uploadingPhoto?'Subiendo…':'📷 Agregar foto (opcional)'}</span>
+                </label>
+              )}
+            </div>
           </DLSectionCard>
         </div>
         {summary&&<div className="ne-s5 ne-summary" style={{ padding:'10px 18px 0' }}><DLSummaryCard summary={summary}/></div>}
         <div className="ne-s5" style={{ padding:'11px 18px 0' }}><DLValidationStatus isValid={isValid} missing={missing}/></div>
-        <div className="ne-s6" style={{ padding:'9px 18px 0' }}><DLCTAButton enabled={isValid} submitted={submitted} onClick={submit} shakeTrg={shakeTrg} btnRef={btnRef}/></div>
+        <div className="ne-s6" style={{ padding:'9px 18px 0' }}><DLCTAButton enabled={isValid} submitting={submitting} submitted={submitted} onClick={submit} shakeTrg={shakeTrg} btnRef={btnRef} onTrack={createdId&&onTrackOrder?()=>onTrackOrder(createdId):null}/></div>
       </div>
     </div>
   );
@@ -665,20 +719,20 @@ function DLAvailabilityStrip() {
         </div>
         <div>
           <div style={{ ...T.heading, fontSize:15, color:C.text1, lineHeight:1, letterSpacing:'-0.015em' }}>8</div>
-          <div style={{ ...T.body, fontSize:8.5, color:C.text3, marginTop:1.5, letterSpacing:'0.03em', textTransform:'uppercase' }}>Disponibles</div>
+          <div style={{ ...T.body, fontSize:9.8, color:C.text3, marginTop:1.5, letterSpacing:'0.03em', textTransform:'uppercase' }}>Disponibles</div>
         </div>
       </div>
       <div style={{ flex:1, display:'flex', alignItems:'center', gap:8, background:C.goldDim, border:`1px solid ${C.goldBorder}`, borderRadius:13, padding:'9px 11px' }}>
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink:0 }}><circle cx="6.5" cy="6.5" r="5" stroke={C.goldText} strokeWidth="1.2"/><path d="M6.5 4v2.5l1.7 1.7" stroke={C.goldText} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
         <div>
-          <div style={{ ...T.heading, fontSize:15, color:C.goldText, lineHeight:1, letterSpacing:'-0.015em' }}>~22<span style={{ fontSize:10.5, fontWeight:600 }}>'</span></div>
-          <div style={{ ...T.body, fontSize:8.5, color:'rgba(196,152,46,0.46)', marginTop:1.5, letterSpacing:'0.03em', textTransform:'uppercase' }}>Respuesta</div>
+          <div style={{ ...T.heading, fontSize:15, color:C.goldText, lineHeight:1, letterSpacing:'-0.015em' }}>~22<span style={{ fontSize:10.9, fontWeight:600 }}>'</span></div>
+          <div style={{ ...T.body, fontSize:9.8, color:'rgba(196,152,46,0.46)', marginTop:1.5, letterSpacing:'0.03em', textTransform:'uppercase' }}>Respuesta</div>
         </div>
       </div>
       <div style={{ display:'flex', alignItems:'center', background:C.greenDim, border:`1px solid ${C.greenBdr}`, borderRadius:13, padding:'9px 11px' }}>
         <div>
-          <div style={{ ...T.semibold, fontSize:8.5, color:C.green, letterSpacing:'0.07em', textTransform:'uppercase', lineHeight:1.4 }}>SERVICIO</div>
-          <div style={{ ...T.semibold, fontSize:8.5, color:C.green, letterSpacing:'0.07em', textTransform:'uppercase', lineHeight:1.4 }}>ACTIVO</div>
+          <div style={{ ...T.semibold, fontSize:9.8, color:C.green, letterSpacing:'0.07em', textTransform:'uppercase', lineHeight:1.4 }}>SERVICIO</div>
+          <div style={{ ...T.semibold, fontSize:9.8, color:C.green, letterSpacing:'0.07em', textTransform:'uppercase', lineHeight:1.4 }}>ACTIVO</div>
         </div>
       </div>
     </div>
@@ -691,7 +745,7 @@ function DLSectionCard({ icon, label, accentKey, children }) {
   return (
     <div style={{ background:C.bg1, border:`1px solid ${C.border}`, borderRadius:18, overflow:'hidden' }}>
       <div style={{ display:'flex', alignItems:'center', gap:7, padding:'10px 13px 9px', borderBottom:`1px solid ${C.border}`, background:`linear-gradient(90deg,${a.bg} 0%,transparent 80%)` }}>
-        {icon}<span style={{ ...T.subhead, fontSize:11.5, color:C.text1 }}>{label}</span>
+        {icon}<span style={{ ...T.subhead, fontSize:11.9, color:C.text1 }}>{label}</span>
       </div>
       <div style={{ padding:'11px 12px 12px', display:'flex', flexDirection:'column' }}>{children}</div>
     </div>
@@ -706,9 +760,9 @@ function DLFieldAddress({ placeholder, value, onChange, onBlur, error }) {
         <div style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none' }}>
           <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1A2.7 2.7 0 002.8 3.7c0 2.3 2.7 6.8 2.7 6.8S8.2 6 8.2 3.7A2.7 2.7 0 005.5 1z" stroke={error?C.red:'rgba(152,152,166,0.38)'} strokeWidth="1.1"/><circle cx="5.5" cy="3.7" r="1" fill={error?C.red:'rgba(152,152,166,0.38)'}/></svg>
         </div>
-        <input className="ne-field" type="text" placeholder={placeholder} value={value} onChange={e=>onChange(e.target.value)} onBlur={onBlur} style={{ width:'100%', height:36, background:error?C.redDim:'rgba(255,255,255,0.034)', border:`1px solid ${error?C.redBdr:C.border}`, borderRadius:11, paddingLeft:27, paddingRight:10, ...T.medium, fontSize:12, color:C.text1 }}/>
+        <input className="ne-field" type="text" placeholder={placeholder} value={value} onChange={e=>onChange(e.target.value)} onBlur={onBlur} style={{ width:'100%', height:36, background:error?C.redDim:'rgba(255,255,255,0.034)', border:`1px solid ${error?C.redBdr:C.border}`, borderRadius:11, paddingLeft:27, paddingRight:10, ...T.medium, fontSize:12.4, color:C.text1 }}/>
       </div>
-      {error&&<div style={{ ...T.body, fontSize:9.5, color:C.red, marginTop:3.5, paddingLeft:3.5, animation:'ne-slide-down .2s ease both' }}>Este campo es requerido</div>}
+      {error&&<div style={{ ...T.body, fontSize:10.3, color:C.red, marginTop:3.5, paddingLeft:3.5, animation:'ne-slide-down .2s ease both' }}>Este campo es requerido</div>}
     </div>
   );
 }
@@ -718,8 +772,8 @@ function DLFieldRef({ hint, value, onChange }) {
   const max=150;
   return (
     <div style={{ position:'relative', marginTop:5.5 }}>
-      <input className="ne-field" type="text" placeholder={`Punto de referencia · ${hint}`} value={value} onChange={e=>{if(e.target.value.length<=max)onChange(e.target.value);}} style={{ width:'100%', height:34, background:'rgba(255,255,255,0.024)', border:`1px solid ${C.border}`, borderRadius:10, paddingLeft:10, paddingRight:value.length>0?33:10, ...T.body, fontSize:11.5, color:'rgba(240,240,242,0.7)' }}/>
-      {value.length>0&&<div style={{ position:'absolute', right:9, top:'50%', transform:'translateY(-50%)', ...T.body, fontSize:8.5, color:C.text3 }}>{max-value.length}</div>}
+      <input className="ne-field" type="text" placeholder={`Punto de referencia · ${hint}`} value={value} onChange={e=>{if(e.target.value.length<=max)onChange(e.target.value);}} style={{ width:'100%', height:34, background:'rgba(255,255,255,0.024)', border:`1px solid ${C.border}`, borderRadius:10, paddingLeft:10, paddingRight:value.length>0?33:10, ...T.body, fontSize:11.9, color:'rgba(240,240,242,0.7)' }}/>
+      {value.length>0&&<div style={{ position:'absolute', right:9, top:'50%', transform:'translateY(-50%)', ...T.body, fontSize:9.8, color:C.text3 }}>{max-value.length}</div>}
     </div>
   );
 }
@@ -728,8 +782,8 @@ function DLFieldSmall({ placeholder, value, onChange, onBlur, type='text', error
   const C = useC();
   return (
     <div>
-      <input className="ne-field" type={type} placeholder={placeholder} value={value} onChange={e=>onChange(e.target.value)} onBlur={onBlur} style={{ width:'100%', height:34, background:error?C.redDim:'rgba(255,255,255,0.034)', border:`1px solid ${error?C.redBdr:C.border}`, borderRadius:10, padding:'0 10px', ...T.medium, fontSize:11.5, color:C.text1 }}/>
-      {error&&<div style={{ ...T.body, fontSize:9.5, color:C.red, marginTop:3, paddingLeft:3, animation:'ne-slide-down .2s ease both' }}>Requerido</div>}
+      <input className="ne-field" type={type} placeholder={placeholder} value={value} onChange={e=>onChange(e.target.value)} onBlur={onBlur} style={{ width:'100%', height:34, background:error?C.redDim:'rgba(255,255,255,0.034)', border:`1px solid ${error?C.redBdr:C.border}`, borderRadius:10, padding:'0 10px', ...T.medium, fontSize:11.9, color:C.text1 }}/>
+      {error&&<div style={{ ...T.body, fontSize:10.3, color:C.red, marginTop:3, paddingLeft:3, animation:'ne-slide-down .2s ease both' }}>Requerido</div>}
     </div>
   );
 }
@@ -741,12 +795,12 @@ function DLArticleField({ value, onChange, onBlur, error }) {
   return (
     <div>
       <div style={{ position:'relative' }}>
-        <input className="ne-field" type="text" placeholder={hints[0]} value={value} onChange={e=>{if(e.target.value.length<=max)onChange(e.target.value);}} onBlur={onBlur} style={{ width:'100%', height:36, background:error?C.redDim:'rgba(255,255,255,0.034)', border:`1px solid ${error?C.redBdr:C.border}`, borderRadius:11, padding:'0 36px 0 10px', ...T.medium, fontSize:12, color:C.text1 }}/>
-        <div style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', ...T.body, fontSize:9, color:C.text3 }}>{max-value.length}</div>
+        <input className="ne-field" type="text" placeholder={hints[0]} value={value} onChange={e=>{if(e.target.value.length<=max)onChange(e.target.value);}} onBlur={onBlur} style={{ width:'100%', height:36, background:error?C.redDim:'rgba(255,255,255,0.034)', border:`1px solid ${error?C.redBdr:C.border}`, borderRadius:11, padding:'0 36px 0 10px', ...T.medium, fontSize:12.4, color:C.text1 }}/>
+        <div style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', ...T.body, fontSize:9.8, color:C.text3 }}>{max-value.length}</div>
       </div>
-      {error&&<div style={{ ...T.body, fontSize:9.5, color:C.red, marginTop:3.5, paddingLeft:3.5, animation:'ne-slide-down .2s ease both' }}>Describe brevemente qué envías</div>}
+      {error&&<div style={{ ...T.body, fontSize:10.3, color:C.red, marginTop:3.5, paddingLeft:3.5, animation:'ne-slide-down .2s ease both' }}>Describe brevemente qué envías</div>}
       <div style={{ display:'flex', gap:5, marginTop:7, flexWrap:'wrap' }}>
-        {hints.map(h=><button key={h} className="ne-tap" onClick={()=>onChange(h)} style={{ background:value===h?C.goldDim2:'rgba(255,255,255,0.036)', border:`1px solid ${value===h?C.goldBorder:C.border}`, borderRadius:20, padding:'3.5px 9px', cursor:'pointer', ...T.body, fontSize:10.5, color:value===h?C.goldText:C.text3, transition:'all .14s ease' }}>{h}</button>)}
+        {hints.map(h=><button key={h} className="ne-tap" onClick={()=>onChange(h)} style={{ background:value===h?C.goldDim2:'rgba(255,255,255,0.036)', border:`1px solid ${value===h?C.goldBorder:C.border}`, borderRadius:20, padding:'3.5px 9px', cursor:'pointer', ...T.body, fontSize:10.9, color:value===h?C.goldText:C.text3, transition:'all .14s ease' }}>{h}</button>)}
       </div>
     </div>
   );
@@ -757,7 +811,7 @@ function DLRouteConnector() {
   return (
     <div style={{ display:'flex', alignItems:'center', padding:'0 28px', height:22 }}>
       <div style={{ width:1, height:22, background:'linear-gradient(180deg,rgba(196,152,46,0.3),rgba(44,184,122,0.3))', marginLeft:5 }}/>
-      <div style={{ ...T.body, fontSize:9.5, color:C.text3, letterSpacing:'0.1em', textTransform:'uppercase', marginLeft:14 }}>ruta de entrega</div>
+      <div style={{ ...T.body, fontSize:10.3, color:C.text3, letterSpacing:'0.1em', textTransform:'uppercase', marginLeft:14 }}>ruta de entrega</div>
     </div>
   );
 }
@@ -768,14 +822,14 @@ function DLSummaryCard({ summary }) {
     <div style={{ background:C.goldDim, border:`1px solid ${C.goldBorder}`, borderRadius:18, overflow:'hidden' }}>
       <div style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 13px 9px', borderBottom:`1px solid rgba(196,152,46,0.10)` }}>
         <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1 5.5h9M5.5 1l4.5 4.5-4.5 4.5" stroke={C.goldText} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-        <span style={{ ...T.subhead, fontSize:11.5, color:C.goldText }}>Resumen del servicio</span>
-        <div style={{ marginLeft:'auto', ...T.body, fontSize:9.5, color:'rgba(196,152,46,0.4)', letterSpacing:'0.06em', textTransform:'uppercase' }}>Estimado</div>
+        <span style={{ ...T.subhead, fontSize:11.9, color:C.goldText }}>Resumen del servicio</span>
+        <div style={{ marginLeft:'auto', ...T.body, fontSize:10.3, color:'rgba(196,152,46,0.4)', letterSpacing:'0.06em', textTransform:'uppercase' }}>Estimado</div>
       </div>
       <div style={{ display:'flex', padding:'12px 13px' }}>
         {[{v:summary.dist,l:'Distancia',m:false},{v:summary.time,l:'Tiempo',m:false},{v:summary.price,l:'Precio',m:true}].map(({v,l,m},i,a)=>(
           <div key={l} style={{ flex:1, textAlign:'center', borderRight:i<a.length-1?'1px solid rgba(196,152,46,0.10)':'none' }}>
             <div style={{ ...T.heading, fontSize:m?18:15, color:m?C.goldText:C.text1, letterSpacing:'-0.02em', lineHeight:1, marginBottom:4 }}>{v}</div>
-            <div style={{ ...T.body, fontSize:8.5, color:'rgba(196,152,46,0.42)', textTransform:'uppercase', letterSpacing:'0.08em' }}>{l}</div>
+            <div style={{ ...T.body, fontSize:9.8, color:'rgba(196,152,46,0.42)', textTransform:'uppercase', letterSpacing:'0.08em' }}>{l}</div>
           </div>
         ))}
       </div>
@@ -791,8 +845,8 @@ function DLValidationStatus({ isValid, missing }) {
         <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1.5 4l2.5 2.5 4.5-5.5" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </div>
       <div>
-        <div style={{ ...T.semibold, fontSize:11.5, color:C.green, lineHeight:1.25 }}>Envío listo para solicitar</div>
-        <div style={{ ...T.body, fontSize:10, color:'rgba(44,184,122,0.5)', marginTop:1 }}>Todos los datos completados</div>
+        <div style={{ ...T.semibold, fontSize:11.9, color:C.green, lineHeight:1.25 }}>Envío listo para solicitar</div>
+        <div style={{ ...T.body, fontSize:10.8, color:'rgba(44,184,122,0.5)', marginTop:1 }}>Todos los datos completados</div>
       </div>
     </div>
   );
@@ -802,39 +856,44 @@ function DLValidationStatus({ isValid, missing }) {
         <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><circle cx="4" cy="4" r="3" stroke={C.text3} strokeWidth="1.1"/><path d="M4 2.5v2M4 5.8v.3" stroke={C.text3} strokeWidth="1.1" strokeLinecap="round"/></svg>
       </div>
       <div>
-        <div style={{ ...T.semibold, fontSize:11.5, color:C.text2, lineHeight:1.25 }}>{missing===1?'Falta 1 campo requerido':`Faltan ${missing} campos requeridos`}</div>
-        <div style={{ ...T.body, fontSize:10, color:C.text3, marginTop:1 }}>Completa la información para continuar</div>
+        <div style={{ ...T.semibold, fontSize:11.9, color:C.text2, lineHeight:1.25 }}>{missing===1?'Falta 1 campo requerido':`Faltan ${missing} campos requeridos`}</div>
+        <div style={{ ...T.body, fontSize:10.8, color:C.text3, marginTop:1 }}>Completa la información para continuar</div>
       </div>
     </div>
   );
 }
 
-function DLCTAButton({ enabled, submitted, onClick, shakeTrg, btnRef }) {
+function DLCTAButton({ enabled, submitting, submitted, onClick, shakeTrg, btnRef, onTrack }) {
   const C = useC();
   const localRef=useRef(null);
   const ref=btnRef||localRef;
   useEffect(()=>{if(!enabled&&ref.current){ref.current.classList.remove('ne-shake');void ref.current.offsetWidth;ref.current.classList.add('ne-shake');}},[shakeTrg]);
   if (submitted) return (
-    <div className="ne-check-in" style={{ borderRadius:18, padding:'13px 15px', background:'linear-gradient(135deg,#1E3A2E 0%,#152E22 100%)', border:`1px solid ${C.greenBdr}`, display:'flex', alignItems:'center', justifyContent:'center', gap:9 }}>
-      <div style={{ width:26, height:26, borderRadius:8.5, background:C.green, display:'flex', alignItems:'center', justifyContent:'center' }}>
-        <svg width="12" height="10" viewBox="0 0 12 10" fill="none"><path d="M1.5 5l3.5 3.5 5.5-7" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    <div className="ne-check-in" style={{ display:'flex', flexDirection:'column', gap:8 }}>
+      <div style={{ borderRadius:18, padding:'13px 15px', background:'linear-gradient(135deg,#1E3A2E 0%,#152E22 100%)', border:`1px solid ${C.greenBdr}`, display:'flex', alignItems:'center', justifyContent:'center', gap:9 }}>
+        <div style={{ width:26, height:26, borderRadius:8.5, background:C.green, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+          <svg width="12" height="10" viewBox="0 0 12 10" fill="none"><path d="M1.5 5l3.5 3.5 5.5-7" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </div>
+        <div>
+          <div style={{ ...T.heading, fontSize:13.5, color:C.green }}>¡Envío creado!</div>
+          <div style={{ ...T.body, fontSize:10.9, color:'rgba(44,184,122,0.56)', marginTop:1 }}>Buscando mensajero disponible…</div>
+        </div>
       </div>
-      <div>
-        <div style={{ ...T.heading, fontSize:13.5, color:C.green }}>¡Mensajero solicitado!</div>
-        <div style={{ ...T.body, fontSize:10.5, color:'rgba(44,184,122,0.56)', marginTop:1 }}>Asignación en curso · ~3 min</div>
-      </div>
+      {onTrack && (
+        <button onClick={onTrack} className="ne-tap" style={{ width:'100%', border:`1px solid ${C.border}`, borderRadius:14, padding:'11px 15px', background:'rgba(255,255,255,0.045)', cursor:'pointer', ...T.heading, fontSize:12.4, color:C.text1 }}>Ver seguimiento →</button>
+      )}
     </div>
   );
   return (
     <div ref={ref}>
-      <button onClick={onClick} className={enabled?'ne-btn-glow ne-tap':'ne-tap'} style={{ width:'100%', border:'none', borderRadius:18, padding:'13px 15px', display:'flex', alignItems:'center', justifyContent:'space-between', cursor:enabled?'pointer':'default', background:enabled?'linear-gradient(135deg,#E5A912 0%,#FFC01E 50%,#E5A912 100%)':C.bg3, borderTop:enabled?'1px solid rgba(196,152,46,0.26)':`1px solid ${C.border}`, opacity:enabled?1:.66, transition:'background .24s ease,opacity .24s ease' }}>
+      <button onClick={onClick} disabled={submitting} className={enabled?'ne-btn-glow ne-tap':'ne-tap'} style={{ width:'100%', border:'none', borderRadius:18, padding:'13px 15px', display:'flex', alignItems:'center', justifyContent:'space-between', cursor:enabled&&!submitting?'pointer':'default', background:enabled?'linear-gradient(135deg,#E5A912 0%,#FFC01E 50%,#E5A912 100%)':C.bg3, borderTop:enabled?'1px solid rgba(196,152,46,0.26)':`1px solid ${C.border}`, opacity:enabled?(submitting?.7:1):.66, transition:'background .24s ease,opacity .24s ease' }}>
         <div style={{ display:'flex', alignItems:'center', gap:11 }}>
           <div style={{ width:35, height:35, borderRadius:11, flexShrink:0, background:enabled?'rgba(0,0,0,0.15)':'rgba(255,255,255,0.05)', border:enabled?'1px solid rgba(0,0,0,0.09)':`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'center' }}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5v11M3 6l4-4.5L11 6" stroke={enabled?'#060608':C.text3} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </div>
           <div>
-            <div style={{ ...T.heading, fontSize:13.5, color:enabled?'#060608':C.text3, letterSpacing:'-0.012em' }}>Solicitar mensajero</div>
-            <div style={{ ...T.body, fontSize:10.5, color:enabled?'rgba(6,6,8,0.46)':C.text3, marginTop:1 }}>{enabled?'Asignación inmediata · sin esperas':'Completa los campos para continuar'}</div>
+            <div style={{ ...T.heading, fontSize:13.5, color:enabled?'#060608':C.text3, letterSpacing:'-0.012em' }}>{submitting?'Creando envío…':'Solicitar mensajero'}</div>
+            <div style={{ ...T.body, fontSize:10.9, color:enabled?'rgba(6,6,8,0.46)':C.text3, marginTop:1 }}>{enabled?'Asignación inmediata · sin esperas':'Completa los campos para continuar'}</div>
           </div>
         </div>
         <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M6 4l5 4.5-5 4.5" stroke={enabled?'#060608':C.text3} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -882,14 +941,14 @@ function DLRastrearScreen({ onBack, onChat }) {
                     <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:reassigning?C.blue:C.green, animation:'rt-ring 2.2s ease-out infinite' }}/>
                     <div style={{ position:'relative', width:7, height:7, borderRadius:'50%', background:reassigning?C.blue:C.green, animation:'rt-pulse 2.2s ease-in-out infinite' }}/>
                   </div>
-                  <span style={{ ...T.semibold, fontSize:9.5, color:reassigning?C.blue:C.green, letterSpacing:'0.07em' }}>
+                  <span style={{ ...T.semibold, fontSize:10.3, color:reassigning?C.blue:C.green, letterSpacing:'0.07em' }}>
                     {reassigning ? 'REASIGNANDO' : 'EN RUTA'}
                   </span>
                 </div>
                 {!reassigning && (
                   <div style={{ background:C.goldDim, border:`1px solid ${C.goldBorder}`, borderRadius:12, padding:'6px 11px', textAlign:'center' }}>
-                    <div style={{ ...T.heading, fontSize:20, color:C.goldText, lineHeight:1, letterSpacing:'-0.02em' }}>18<span style={{ fontSize:12, fontWeight:600 }}>'</span></div>
-                    <div style={{ ...T.body, fontSize:8, color: isDark ? 'rgba(212,168,74,0.5)' : 'rgba(168,122,14,0.6)', marginTop:1, letterSpacing:'0.07em', textTransform:'uppercase' }}>ETA</div>
+                    <div style={{ ...T.heading, fontSize:20, color:C.goldText, lineHeight:1, letterSpacing:'-0.02em' }}>18<span style={{ fontSize:12.4, fontWeight:600 }}>'</span></div>
+                    <div style={{ ...T.body, fontSize:9.3, color: isDark ? 'rgba(212,168,74,0.5)' : 'rgba(168,122,14,0.6)', marginTop:1, letterSpacing:'0.07em', textTransform:'uppercase' }}>ETA</div>
                   </div>
                 )}
               </div>
@@ -898,7 +957,7 @@ function DLRastrearScreen({ onBack, onChat }) {
                 <div style={{ ...T.display, fontSize:24, color:C.text1, letterSpacing:'-0.028em', lineHeight:1.06, marginBottom:6 }}>
                   {reassigning ? <>Buscando<br/><span style={{ color:C.blue }}>nuevo mensajero</span></> : <>El mensajero<br/><span style={{ color:C.green }}>va en camino</span></>}
                 </div>
-                <div style={{ ...T.body, fontSize:11.5, color: isDark ? 'rgba(240,240,242,0.42)' : 'rgba(24,24,44,0.55)', lineHeight:1.55 }}>
+                <div style={{ ...T.body, fontSize:11.9, color: isDark ? 'rgba(240,240,242,0.42)' : 'rgba(24,24,44,0.55)', lineHeight:1.55 }}>
                   {reassigning
                     ? 'El mensajero anterior canceló. El sistema está buscando uno nuevo automáticamente.'
                     : 'Alex ya recogió el paquete y se dirige al destino en El Vedado.'}
@@ -908,13 +967,13 @@ function DLRastrearScreen({ onBack, onChat }) {
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:5 }}>
                   <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><circle cx="5" cy="5" r="4" stroke={C.text3} strokeWidth="1"/><path d="M5 3v2l1.3 1.3" stroke={C.text3} strokeWidth="1" strokeLinecap="round"/></svg>
-                  <span style={{ ...T.body, fontSize:10.5, color:C.text3 }}>Actualizado hace {elapsed} {elapsed===1?'minuto':'minutos'}</span>
+                  <span style={{ ...T.body, fontSize:10.9, color:C.text3 }}>Actualizado hace {elapsed} {elapsed===1?'minuto':'minutos'}</span>
                   <div style={{ width:2.5, height:2.5, borderRadius:'50%', background:C.text3, marginLeft:1 }}/>
-                  <span style={{ ...T.body, fontSize:10.5, color:C.text3 }}>Envío #DL-2847</span>
+                  <span style={{ ...T.body, fontSize:10.9, color:C.text3 }}>Envío #DL-2847</span>
                 </div>
                 {/* Demo toggle */}
                 <button className="rt-tap" onClick={()=>setReassigning(p=>!p)} style={{ background:reassigning?C.blueDim:(isDark?'rgba(255,255,255,0.04)':'rgba(24,24,44,0.05)'), border:`1px solid ${reassigning?C.blueBdr:C.border}`, borderRadius:8, padding:'3px 8px', cursor:'pointer' }}>
-                  <span style={{ ...T.body, fontSize:9, color:reassigning?C.blue:C.text3, letterSpacing:'0.04em', textTransform:'uppercase' }}>Demo</span>
+                  <span style={{ ...T.body, fontSize:9.8, color:reassigning?C.blue:C.text3, letterSpacing:'0.04em', textTransform:'uppercase' }}>Demo</span>
                 </button>
               </div>
             </div>
@@ -924,7 +983,7 @@ function DLRastrearScreen({ onBack, onChat }) {
         {/* TIMELINE */}
         <div className="rt-s2" style={{ padding:'11px 14px 0' }}>
           <div style={{ background:C.bg1, border:`1px solid ${C.border}`, borderRadius:20, padding:'15px 15px 13px' }}>
-            <div style={{ ...T.subhead, fontSize:10.5, color:C.text2, letterSpacing:'0.09em', textTransform:'uppercase', marginBottom:14 }}>Progreso del envío</div>
+            <div style={{ ...T.subhead, fontSize:10.9, color:C.text2, letterSpacing:'0.09em', textTransform:'uppercase', marginBottom:14 }}>Progreso del envío</div>
             {steps.map((step,i)=>{
               const isLast    = i===steps.length-1;
               const accentCol = step.accent || C.green;
@@ -943,8 +1002,8 @@ function DLRastrearScreen({ onBack, onChat }) {
                   </div>
                   <div style={{ paddingBottom:isLast?0:10, paddingTop:1, flex:1, display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
                     <span style={{ ...T.medium, fontSize:12.5, color:step.done?C.text1:step.current?accentCol:C.text3 }}>{step.label}</span>
-                    {step.time   && <span style={{ ...T.body, fontSize:10, color:C.text3, marginTop:1 }}>{step.time}</span>}
-                    {step.current && <span style={{ ...T.semibold, fontSize:9.5, color:accentCol, letterSpacing:'0.05em' }}>AHORA</span>}
+                    {step.time   && <span style={{ ...T.body, fontSize:10.8, color:C.text3, marginTop:1 }}>{step.time}</span>}
+                    {step.current && <span style={{ ...T.semibold, fontSize:10.3, color:accentCol, letterSpacing:'0.05em' }}>AHORA</span>}
                   </div>
                 </div>
               );
@@ -977,14 +1036,14 @@ function DLRastrearScreen({ onBack, onChat }) {
             <div style={{ position:'absolute', bottom:0, left:0, right:0, height:44, background:'linear-gradient(to bottom,transparent,rgba(14,14,17,.88))' }}/>
             <div style={{ position:'absolute', top:10, left:10, right:10, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <div style={{ background:'rgba(7,7,9,0.84)', border:`1px solid ${C.border}`, backdropFilter:'blur(8px)', borderRadius:9, padding:'4px 9px', display:'flex', alignItems:'center', gap:5 }}>
-                <div style={{ width:5.5, height:5.5, borderRadius:'50%', background:C.gold, flexShrink:0 }}/><span style={{ ...T.medium, fontSize:10, color:'rgba(248,248,248,0.75)' }}>El Vedado</span>
+                <div style={{ width:5.5, height:5.5, borderRadius:'50%', background:C.gold, flexShrink:0 }}/><span style={{ ...T.medium, fontSize:10.8, color:'rgba(248,248,248,0.75)' }}>El Vedado</span>
               </div>
               <div style={{ background:'rgba(7,7,9,0.84)', border:`1px solid ${C.greenBdr}`, backdropFilter:'blur(8px)', borderRadius:9, padding:'4px 9px', display:'flex', alignItems:'center', gap:5 }}>
-                <div style={{ width:5.5, height:5.5, borderRadius:1.5, background:C.green, flexShrink:0 }}/><span style={{ ...T.medium, fontSize:10, color:'rgba(248,248,248,0.75)' }}>El Vedado</span>
+                <div style={{ width:5.5, height:5.5, borderRadius:1.5, background:C.green, flexShrink:0 }}/><span style={{ ...T.medium, fontSize:10.8, color:'rgba(248,248,248,0.75)' }}>El Vedado</span>
               </div>
             </div>
             <div style={{ position:'absolute', bottom:10, right:10, background:'rgba(7,7,9,0.86)', border:`1px solid ${C.border}`, backdropFilter:'blur(8px)', borderRadius:9, padding:'4px 10px' }}>
-              <span style={{ ...T.semibold, fontSize:10.5, color:'#F8F8F8' }}>4.2 km</span><span style={{ ...T.body, fontSize:10, color:'rgba(248,248,248,0.4)' }}> · en ruta</span>
+              <span style={{ ...T.semibold, fontSize:10.9, color:'#F8F8F8' }}>4.2 km</span><span style={{ ...T.body, fontSize:10.8, color:'rgba(248,248,248,0.4)' }}> · en ruta</span>
             </div>
           </div>
         </div>
@@ -1001,20 +1060,20 @@ function DLRastrearScreen({ onBack, onChat }) {
               <div style={{ display:'flex', alignItems:'center', gap:7 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:3 }}>
                   <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 1l1.2 2.5L9 3.8l-2.1 2 .5 2.8L5 7.3 2.6 8.6l.5-2.8L1 3.8l2.8-.3z" fill="#E5A912"/></svg>
-                  <span style={{ ...T.semibold, fontSize:11, color:C.text2 }}>4.9</span>
+                  <span style={{ ...T.semibold, fontSize:11.4, color:C.text2 }}>4.9</span>
                 </div>
                 <div style={{ width:2.5, height:2.5, borderRadius:'50%', background:C.text3 }}/>
-                <span style={{ ...T.body, fontSize:10.5, color:C.text3 }}>847 entregas</span>
+                <span style={{ ...T.body, fontSize:10.9, color:C.text3 }}>847 entregas</span>
                 <div style={{ width:2.5, height:2.5, borderRadius:'50%', background:C.text3 }}/>
                 <div style={{ display:'flex', alignItems:'center', gap:3 }}>
                   <svg width="12" height="10" viewBox="0 0 12 10" fill="none"><path d="M1 7h10M2 7V5l1.8-2.5h4.4L10 5v2" stroke={C.text3} strokeWidth="1.1" strokeLinejoin="round"/><circle cx="3.2" cy="7.8" r="1.1" fill={C.text3}/><circle cx="8.8" cy="7.8" r="1.1" fill={C.text3}/></svg>
-                  <span style={{ ...T.body, fontSize:10.5, color:C.text3 }}>Moto</span>
+                  <span style={{ ...T.body, fontSize:10.9, color:C.text3 }}>Moto</span>
                 </div>
               </div>
             </div>
             <div style={{ background:C.bg3, border:`1px solid ${C.border}`, borderRadius:9, padding:'5px 9px', textAlign:'center', flexShrink:0 }}>
-              <div style={{ ...T.semibold, fontSize:11, color:C.text1, letterSpacing:'0.07em' }}>MX-2847</div>
-              <div style={{ ...T.body, fontSize:8.5, color:C.text3, marginTop:1, textTransform:'uppercase', letterSpacing:'0.06em' }}>Placa</div>
+              <div style={{ ...T.semibold, fontSize:11.4, color:C.text1, letterSpacing:'0.07em' }}>MX-2847</div>
+              <div style={{ ...T.body, fontSize:9.8, color:C.text3, marginTop:1, textTransform:'uppercase', letterSpacing:'0.06em' }}>Placa</div>
             </div>
           </div>
         </div>
@@ -1027,8 +1086,8 @@ function DLRastrearScreen({ onBack, onChat }) {
               <div style={{ position:'absolute', top:-2, right:-2, width:7, height:7, borderRadius:'50%', background:C.green, border:`1.5px solid ${C.bg}` }}/>
             </div>
             <div style={{ textAlign:'left' }}>
-              <div style={{ ...T.semibold, fontSize:12, color:C.text1, lineHeight:1.2 }}>Chat</div>
-              <div style={{ ...T.body, fontSize:10, color:C.text3, marginTop:1 }}>con el mensajero</div>
+              <div style={{ ...T.semibold, fontSize:12.4, color:C.text1, lineHeight:1.2 }}>Chat</div>
+              <div style={{ ...T.body, fontSize:10.8, color:C.text3, marginTop:1 }}>con el mensajero</div>
             </div>
             <svg width="6" height="11" viewBox="0 0 6 11" fill="none" style={{ marginLeft:'auto', flexShrink:0 }}><path d="M1 1.5l3.5 4L1 9.5" stroke={C.text3} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
@@ -1037,8 +1096,8 @@ function DLRastrearScreen({ onBack, onChat }) {
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="10" height="10" rx="2.5" stroke={detailsOpen?C.goldText:C.text2} strokeWidth="1.2"/><path d="M3.5 4.5h5M3.5 6.5h5M3.5 8.5h3" stroke={detailsOpen?C.goldText:C.text2} strokeWidth="1.1" strokeLinecap="round"/></svg>
             </div>
             <div style={{ textAlign:'left' }}>
-              <div style={{ ...T.semibold, fontSize:12, color:detailsOpen?C.goldText:C.text1, lineHeight:1.2 }}>Detalles</div>
-              <div style={{ ...T.body, fontSize:10, color:detailsOpen?'rgba(212,168,74,0.52)':C.text3, marginTop:1 }}>del envío</div>
+              <div style={{ ...T.semibold, fontSize:12.4, color:detailsOpen?C.goldText:C.text1, lineHeight:1.2 }}>Detalles</div>
+              <div style={{ ...T.body, fontSize:10.8, color:detailsOpen?'rgba(212,168,74,0.52)':C.text3, marginTop:1 }}>del envío</div>
             </div>
           </button>
         </div>
@@ -1048,8 +1107,8 @@ function DLRastrearScreen({ onBack, onChat }) {
           <div className="rt-details-open" style={{ padding:'9px 14px 0' }}>
             <div style={{ background:C.bg1, border:`1px solid ${C.goldBorder}`, borderRadius:18, overflow:'hidden' }}>
               <div style={{ padding:'12px 14px 11px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                <span style={{ ...T.subhead, fontSize:12, color:C.goldText }}>Detalles del envío</span>
-                <span style={{ ...T.body, fontSize:10, color:C.text3 }}>#DL-2847</span>
+                <span style={{ ...T.subhead, fontSize:12.4, color:C.goldText }}>Detalles del envío</span>
+                <span style={{ ...T.body, fontSize:10.8, color:C.text3 }}>#DL-2847</span>
               </div>
               {[
                 {label:'Origen',     val:'Edificio FOCSA, El Vedado'},
@@ -1063,8 +1122,8 @@ function DLRastrearScreen({ onBack, onChat }) {
                 <div key={label}>
                   <div style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'10px 14px' }}>
                     <div style={{ flex:1 }}>
-                      <div style={{ ...T.body, fontSize:9.5, color:C.text3, letterSpacing:'0.04em', textTransform:'uppercase', marginBottom:2.5 }}>{label}</div>
-                      <div style={{ ...T.medium, fontSize:12, color:C.text1, lineHeight:1.4 }}>{val}</div>
+                      <div style={{ ...T.body, fontSize:10.3, color:C.text3, letterSpacing:'0.04em', textTransform:'uppercase', marginBottom:2.5 }}>{label}</div>
+                      <div style={{ ...T.medium, fontSize:12.4, color:C.text1, lineHeight:1.4 }}>{val}</div>
                     </div>
                   </div>
                   {i<arr.length-1&&<div style={{ height:1, background:C.border, margin:'0 14px' }}/>}
@@ -1149,13 +1208,13 @@ function DLChatScreen({ onBack }) {
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ ...T.heading, fontSize:13.5, color:C.text1, letterSpacing:'-0.014em', lineHeight:1.15 }}>Entrega #DL-45821</div>
             <div style={{ display:'flex', alignItems:'center', gap:5, marginTop:2 }}>
-              <span style={{ ...T.body, fontSize:10.5, color:C.text2 }}>Alex Ramírez</span>
+              <span style={{ ...T.body, fontSize:10.9, color:C.text2 }}>Alex Ramírez</span>
               <div style={{ width:2.5, height:2.5, borderRadius:'50%', background:C.text3 }}/>
               {archived
-                ? <span style={{ ...T.semibold, fontSize:10, color:finalCfg?.color, letterSpacing:'0.04em' }}>{finalCfg?.label}</span>
+                ? <span style={{ ...T.semibold, fontSize:10.8, color:finalCfg?.color, letterSpacing:'0.04em' }}>{finalCfg?.label}</span>
                 : <div style={{ display:'flex', alignItems:'center', gap:3.5 }}>
                     <div style={{ width:5.5, height:5.5, borderRadius:'50%', background:C.green, animation:'ch-pulse 2.2s ease-in-out infinite' }}/>
-                    <span style={{ ...T.semibold, fontSize:10, color:C.green, letterSpacing:'0.04em' }}>En ruta</span>
+                    <span style={{ ...T.semibold, fontSize:10.8, color:C.green, letterSpacing:'0.04em' }}>En ruta</span>
                   </div>
               }
             </div>
@@ -1163,10 +1222,10 @@ function DLChatScreen({ onBack }) {
           {/* Demo state selector */}
           {!archived
             ? <button className="ch-tap" onClick={()=>triggerFinal('delivered')} style={{ background:'rgba(255,255,255,0.05)', border:`1px solid ${C.border}`, borderRadius:9, padding:'5px 9px', flexShrink:0 }}>
-                <span style={{ ...T.body, fontSize:9, color:C.text3, letterSpacing:'0.05em', textTransform:'uppercase' }}>Demo</span>
+                <span style={{ ...T.body, fontSize:9.8, color:C.text3, letterSpacing:'0.05em', textTransform:'uppercase' }}>Demo</span>
               </button>
             : <button className="ch-tap" onClick={()=>{setFinalState(null);setMessages(INITIAL_MSGS);}} style={{ background:'rgba(255,255,255,0.05)', border:`1px solid ${C.border}`, borderRadius:9, padding:'5px 9px', flexShrink:0 }}>
-                <span style={{ ...T.body, fontSize:9, color:C.text3, letterSpacing:'0.05em', textTransform:'uppercase' }}>Reset</span>
+                <span style={{ ...T.body, fontSize:9.8, color:C.text3, letterSpacing:'0.05em', textTransform:'uppercase' }}>Reset</span>
               </button>
           }
         </div>
@@ -1174,9 +1233,9 @@ function DLChatScreen({ onBack }) {
         {/* Demo final state pills — only visible when active */}
         {!archived && (
           <div style={{ display:'flex', gap:5, padding:'8px 14px', borderBottom:`1px solid ${C.border}`, overflowX:'auto' }}>
-            <span style={{ ...T.body, fontSize:9.5, color:C.text3, flexShrink:0, alignSelf:'center', paddingRight:4 }}>Simular:</span>
+            <span style={{ ...T.body, fontSize:10.3, color:C.text3, flexShrink:0, alignSelf:'center', paddingRight:4 }}>Simular:</span>
             {Object.entries(DL_STATUS_CFG).map(([k,v])=>(
-              <button key={k} className="ch-tap" onClick={()=>triggerFinal(k)} style={{ background:v.dim, border:`1px solid ${v.bdr}`, borderRadius:20, padding:'3px 9px', cursor:'pointer', ...T.medium, fontSize:9.5, color:v.color, flexShrink:0, whiteSpace:'nowrap' }}>{v.label}</button>
+              <button key={k} className="ch-tap" onClick={()=>triggerFinal(k)} style={{ background:v.dim, border:`1px solid ${v.bdr}`, borderRadius:20, padding:'3px 9px', cursor:'pointer', ...T.medium, fontSize:10.3, color:v.color, flexShrink:0, whiteSpace:'nowrap' }}>{v.label}</button>
             ))}
           </div>
         )}
@@ -1193,16 +1252,16 @@ function DLChatScreen({ onBack }) {
               </div>
             </div>
             <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ ...T.semibold, fontSize:11.5, color:archived?finalCfg?.color||C.text2:C.green, lineHeight:1.2, marginBottom:2 }}>
+              <div style={{ ...T.semibold, fontSize:11.9, color:archived?finalCfg?.color||C.text2:C.green, lineHeight:1.2, marginBottom:2 }}>
                 {archived ? finalCfg?.label||'Finalizado' : 'En ruta · En camino'}
               </div>
-              <div style={{ ...T.body, fontSize:10.5, color:C.text3, lineHeight:1.4 }}>
+              <div style={{ ...T.body, fontSize:10.9, color:C.text3, lineHeight:1.4 }}>
                 {archived ? 'Conversación archivada · Solo lectura' : 'Artículo recogido · ETA 18 min'}
               </div>
             </div>
             {!archived&&<div style={{ background:C.goldDim, border:`1px solid ${C.goldBorder}`, borderRadius:9, padding:'5px 9px', textAlign:'center', flexShrink:0 }}>
-              <div style={{ ...T.heading, fontSize:17, color:C.goldText, lineHeight:1, letterSpacing:'-0.02em' }}>18<span style={{ fontSize:10, fontWeight:600 }}>'</span></div>
-              <div style={{ ...T.body, fontSize:7.5, color:'rgba(212,168,74,0.48)', marginTop:1, textTransform:'uppercase', letterSpacing:'0.07em' }}>ETA</div>
+              <div style={{ ...T.heading, fontSize:17, color:C.goldText, lineHeight:1, letterSpacing:'-0.02em' }}>18<span style={{ fontSize:10.8, fontWeight:600 }}>'</span></div>
+              <div style={{ ...T.body, fontSize:8.8, color:'rgba(212,168,74,0.48)', marginTop:1, textTransform:'uppercase', letterSpacing:'0.07em' }}>ETA</div>
             </div>}
           </div>
         </div>
@@ -1222,8 +1281,8 @@ function DLChatScreen({ onBack }) {
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 5h8v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5zM1 3h10v2H1V3z" stroke={finalCfg?.color||C.text3} strokeWidth="1.1" strokeLinejoin="round"/></svg>
             </div>
             <div>
-              <div style={{ ...T.semibold, fontSize:12, color:finalCfg?.color||C.text2, marginBottom:3 }}>Conversación archivada</div>
-              <div style={{ ...T.body, fontSize:11, color:C.text3, lineHeight:1.5 }}>Esta entrega ha finalizado. Los mensajes permanecen disponibles como registro del servicio.</div>
+              <div style={{ ...T.semibold, fontSize:12.4, color:finalCfg?.color||C.text2, marginBottom:3 }}>Conversación archivada</div>
+              <div style={{ ...T.body, fontSize:11.4, color:C.text3, lineHeight:1.5 }}>Esta entrega ha finalizado. Los mensajes permanecen disponibles como registro del servicio.</div>
             </div>
           </div>
         ):(
@@ -1249,26 +1308,26 @@ function DLChatMessage({ m, prev }) {
     <>
       {showDate&&m.date&&(
         <div style={{ display:'flex', alignItems:'center', gap:8, margin:'10px 0 8px' }}>
-          <div style={{ flex:1, height:1, background:C.border }}/><span style={{ ...T.body, fontSize:9.5, color:C.text3, letterSpacing:'0.06em', textTransform:'uppercase' }}>{m.date}</span><div style={{ flex:1, height:1, background:C.border }}/>
+          <div style={{ flex:1, height:1, background:C.border }}/><span style={{ ...T.body, fontSize:10.3, color:C.text3, letterSpacing:'0.06em', textTransform:'uppercase' }}>{m.date}</span><div style={{ flex:1, height:1, background:C.border }}/>
         </div>
       )}
       {m.type==='system'&&(
         <div style={{ display:'flex', justifyContent:'center', margin:'6px 0' }}>
           <div style={{ background:'rgba(255,255,255,0.04)', border:`1px solid ${C.border}`, borderRadius:20, padding:'4px 12px', display:'flex', alignItems:'center', gap:6 }}>
             <div style={{ width:5, height:5, borderRadius:'50%', background:m.color||C.green, flexShrink:0 }}/>
-            <span style={{ ...T.medium, fontSize:10.5, color:C.text2 }}>{m.text}</span>
-            <span style={{ ...T.body, fontSize:9.5, color:C.text3 }}>{m.time}</span>
+            <span style={{ ...T.medium, fontSize:10.9, color:C.text2 }}>{m.text}</span>
+            <span style={{ ...T.body, fontSize:10.3, color:C.text3 }}>{m.time}</span>
           </div>
         </div>
       )}
       {m.type==='courier'&&(
         <div style={{ display:'flex', alignItems:'flex-end', gap:7, marginBottom:4, animation:'ch-msg-in .22s ease both' }}>
-          <div style={{ width:26, height:26, borderRadius:9, background:'linear-gradient(135deg,#1E3248,#172840)', border:`1px solid ${C.blueBdr}`, display:'flex', alignItems:'center', justifyContent:'center', ...T.heading, fontSize:10, color:C.blue, flexShrink:0, opacity:showSender?1:0 }}>R</div>
+          <div style={{ width:26, height:26, borderRadius:9, background:'linear-gradient(135deg,#1E3248,#172840)', border:`1px solid ${C.blueBdr}`, display:'flex', alignItems:'center', justifyContent:'center', ...T.heading, fontSize:10.8, color:C.blue, flexShrink:0, opacity:showSender?1:0 }}>R</div>
           <div style={{ maxWidth:'72%' }}>
-            {showSender&&<div style={{ ...T.body, fontSize:9.5, color:C.text3, marginBottom:4, paddingLeft:2 }}>Rodrigo · Mensajero</div>}
+            {showSender&&<div style={{ ...T.body, fontSize:10.3, color:C.text3, marginBottom:4, paddingLeft:2 }}>Rodrigo · Mensajero</div>}
             <div style={{ background:C.bg2, border:`1px solid rgba(255,255,255,0.065)`, borderRadius:'14px 14px 14px 4px', padding:'9px 12px' }}>
               <div style={{ ...T.body, fontSize:12.5, color:C.text1, lineHeight:1.5 }}>{m.text}</div>
-              <div style={{ ...T.body, fontSize:9, color:C.text3, marginTop:4, textAlign:'right' }}>{m.time}</div>
+              <div style={{ ...T.body, fontSize:9.8, color:C.text3, marginTop:4, textAlign:'right' }}>{m.time}</div>
             </div>
           </div>
         </div>
@@ -1278,7 +1337,7 @@ function DLChatMessage({ m, prev }) {
           <div style={{ maxWidth:'72%', background:'linear-gradient(135deg,rgba(196,152,46,0.14),rgba(196,152,46,0.08))', border:`1px solid rgba(196,152,46,0.18)`, borderRadius:'14px 14px 4px 14px', padding:'9px 12px' }}>
             <div style={{ ...T.medium, fontSize:12.5, color:C.text1, lineHeight:1.5 }}>{m.text}</div>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'flex-end', gap:4, marginTop:4 }}>
-              <span style={{ ...T.body, fontSize:9, color:'rgba(196,152,46,0.45)' }}>{m.time}</span>
+              <span style={{ ...T.body, fontSize:9.8, color:'rgba(196,152,46,0.45)' }}>{m.time}</span>
               <svg width="14" height="9" viewBox="0 0 14 9" fill="none"><path d="M1 4.5l2.5 3L8 1" stroke="rgba(196,152,46,0.55)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M5.5 4.5L8 7.5 12.5 1" stroke="rgba(196,152,46,0.55)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
           </div>
@@ -1295,9 +1354,9 @@ function DLSectionTitle({ title, badge, badgeColor, badgeBg, badgeBdr, linkLabel
     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
       <div style={{ display:'flex', alignItems:'center', gap:7 }}>
         <span style={{ ...T.heading, fontSize:14.5, color:C.text1, letterSpacing:'-0.012em' }}>{title}</span>
-        {badge&&<span style={{ background:badgeBg, border:`1px solid ${badgeBdr}`, borderRadius:20, padding:'2px 8px', ...T.semibold, fontSize:9.5, color:badgeColor }}>{badge}</span>}
+        {badge&&<span style={{ background:badgeBg, border:`1px solid ${badgeBdr}`, borderRadius:20, padding:'2px 8px', ...T.semibold, fontSize:10.3, color:badgeColor }}>{badge}</span>}
       </div>
-      {linkLabel&&<button onClick={onLink} style={{ background:'none', border:'none', cursor:'pointer', ...T.medium, fontSize:12, color:C.goldText, fontFamily:"'Outfit',sans-serif" }}>{linkLabel}</button>}
+      {linkLabel&&<button onClick={onLink} style={{ background:'none', border:'none', cursor:'pointer', ...T.medium, fontSize:12.4, color:C.goldText, fontFamily:"'Outfit',sans-serif" }}>{linkLabel}</button>}
     </div>
   );
 }

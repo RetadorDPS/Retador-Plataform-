@@ -48,7 +48,9 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={{ fontSize: 10, color: T3, marginBottom: 2 }}>Pedido #{String(o.id).slice(-8).toUpperCase()}</p>
             <p style={{ fontSize: 13, fontWeight: 800, color: T1 }}>{o.title}{o.qty > 1 ? ` ×${o.qty}` : ""}</p>
-            <p style={{ fontSize: 16, fontWeight: 900, color: G, marginTop: 3 }}>{money(o.amount, cur)}</p>
+            {/* Paquete suelto: no hay costo de producto (amount=0 siempre) — el
+                precio real es el propio envío. */}
+            <p style={{ fontSize: 16, fontWeight: 900, color: G, marginTop: 3 }}>{money(o.shipType === "paquete" ? o.shipPrice : o.amount, cur)}</p>
             {(() => {
               const sellerId = o.sellerId || o.seller_id, buyerId = o.buyerId || o.buyer_id;
               const link = { color: G, fontWeight: 700, cursor: "pointer", textDecoration: "underline" };
@@ -97,6 +99,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
         <div style={{ background: soft, border: `1px solid ${B}`, borderRadius: 13, padding: "12px 13px", marginBottom: 14 }}>
           <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>{md.desc}.</p>
           {o.shipType === "intl" && o.shipPrice ? <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}><span style={{ fontSize: 11, color: T2 }}>Envío internacional</span><span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(o.shipPrice, cur)}</span></div> : null}
+          {o.shipType === "paquete" && o.shipPrice ? <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}><span style={{ fontSize: 11, color: T2 }}>Precio del envío</span><span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(o.shipPrice, cur)}</span></div> : null}
           {viewerIsSeller && !viewerLooksBuyer && <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}><span style={{ fontSize: 11, color: T2 }}>Comisión plataforma ({o.commissionPct || 0}%)</span><span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(commission, cur)}</span></div>}
         </div>
 

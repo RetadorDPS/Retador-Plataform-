@@ -699,6 +699,23 @@ export const createOrder = async (data) => {
   const id = (orderId && typeof orderId === "object") ? (orderId.id ?? orderId[0]?.id) : orderId;
   return { ...data, id, status: "creada", createdAt: Date.now() };
 };
+// Envío suelto SIN producto ni vendedor (create_package_delivery): usa el
+// MISMO pool/flujo de mensajero que un pedido de compra (misma tabla orders,
+// mismos estados, mismo get_available_deliveries) — ship_mode='paquete' y
+// nace directo en 'confirmado' (no hay vendedor que la confirme).
+export const createPackageDelivery = async (data) => {
+  const { data: orderId, error } = await supabase.rpc("create_package_delivery", {
+    p_title: data.title,
+    p_description: data.description || null,
+    p_image: data.image || null,
+    p_ship_price: Number(data.shipPrice) || 0,
+    p_ship_to: data.shipTo || null,
+    p_delivery: data.delivery || null,
+  });
+  if (error) throw error;
+  const id = (orderId && typeof orderId === "object") ? (orderId.id ?? orderId[0]?.id) : orderId;
+  return { id, status: "confirmado", createdAt: Date.now() };
+};
 // Stock REAL disponible de un producto (descuenta lo comprometido en pedidos
 // vivos). Se consulta al ver el detalle y al abrir el diálogo de compra, para que
 // el selector de cantidad nunca permita pedir más de lo que de verdad hay.
@@ -1195,11 +1212,23 @@ export const ORDER_FLOW = {
     { key: "confirmado", label: "Confirmado por el vendedor",   actor: "vendedor" },
     { key: "entregado",  label: "Entregado en persona",        actor: "ambos" },
   ],
+  // Paquete suelto (create_package_delivery): MISMOS estados que "local" (el
+  // backend los recorre con is_valid_transition('paquete',...) igual que
+  // local), pero sin "vendedor" — solo la etiqueta del paso 2 cambia.
+  paquete: [
+    { key: "creada",     label: "Envío creado",                actor: "comprador" },
+    { key: "confirmado", label: "Listo para asignar mensajero", actor: "sistema" },
+    { key: "asignado",   label: "Mensajero asignado",          actor: "sistema" },
+    { key: "recogido",   label: "Paquete recogido",            actor: "mensajero" },
+    { key: "en_ruta",    label: "En camino",                   actor: "mensajero" },
+    { key: "entregado",  label: "Entregado",                   actor: "mensajero" },
+  ],
 };
 export const SHIP_LABELS = {
   local:   { icon: "🛵", label: "Delivery local" },
   intl:    { icon: "✈️", label: "Envío internacional" },
   persona: { icon: "🤝", label: "Entrega en persona" },
+  paquete: { icon: "📦", label: "Delivery local" },
 };
 export const MODALIDAD_LABELS = {
   local:     { label: "Local",       desc: "Pago coordinado por fuera" },

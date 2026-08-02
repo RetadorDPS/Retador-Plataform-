@@ -132,17 +132,20 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
           : <div style={{ width: 52, height: 52, borderRadius: 11, background: AC + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>📦</div>}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 800, color: t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.title || "Pedido"}{o.qty > 1 ? ` ×${o.qty}` : ""}</div>
-          <div style={{ fontSize: 10.5, color: t3, marginTop: 2 }}>{o.cat || "Producto"} · {fmtDate(o.createdAt)}</div>
+          <div style={{ fontSize: 10.5, color: t3, marginTop: 2 }}>{o.cat || (o.sellerId ? "Producto" : "Paquete")} · {fmtDate(o.createdAt)}</div>
         </div>
         <span style={{ fontSize: 16, fontWeight: 900, color: "#22C55E", whiteSpace: "nowrap" }}>+{money(feeOf(o))}</span>
       </div>
       <div style={{ borderTop: `1px solid ${bd}`, borderBottom: `1px solid ${bd}`, margin: "2px 0 10px" }}>
-        {row("🏪", "Recoger en", o.pickup_address || "Coordinar con el vendedor", o.pickup_phone ? "Tel: " + o.pickup_phone : null)}
+        {/* Sin vendedor (paquete suelto): la recogida viene en o.delivery.pickupAddress
+            en vez de la columna del producto — mismo dato que ya usa la tarjeta
+            "Mi entrega" tras aceptar. */}
+        {row("🏪", "Recoger en", o.pickup_address || o.delivery?.pickupAddress || "Coordinar con el vendedor", (o.pickup_phone || o.delivery?.pickupPhone) ? "Tel: " + (o.pickup_phone || o.delivery?.pickupPhone) : null)}
         <div style={{ height: 1, background: bd }} />
         {row("📍", "Entregar en", dropOf(o) || "Ver con el comprador", dropNameOf(o))}
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 11 }}>
-        <ProfileChip id={o.sellerId} fallback="Vendedor" role="Vendedor" onOpen={onViewProfile} dark={dark} />
+        {o.sellerId && <ProfileChip id={o.sellerId} fallback="Vendedor" role="Vendedor" onOpen={onViewProfile} dark={dark} />}
         <ProfileChip id={o.buyerId} fallback="Comprador" role="Comprador" onOpen={onViewProfile} dark={dark} />
         <span style={{ marginLeft: "auto" }}>{payBadge(o)}</span>
       </div>
@@ -210,9 +213,11 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
         {/* Recogida y entrega con perfiles tocables */}
         <div style={{ borderTop: `1px solid ${bd}`, borderBottom: `1px solid ${bd}`, marginBottom: 10 }}>
           {row("🏪", "Recoger en", pickupAddr || "Coordinar con el vendedor", pickupPhone ? "Tel: " + pickupPhone : null)}
-          <div style={{ display: "flex", gap: 8, padding: "0 0 8px 38px" }}>
-            <ProfileChip id={o.sellerId || o.seller_id} fallback={o.sellerName || "Vendedor"} role="Vendedor" onOpen={onViewProfile} dark={dark} />
-          </div>
+          {(o.sellerId || o.seller_id) && (
+            <div style={{ display: "flex", gap: 8, padding: "0 0 8px 38px" }}>
+              <ProfileChip id={o.sellerId || o.seller_id} fallback={o.sellerName || "Vendedor"} role="Vendedor" onOpen={onViewProfile} dark={dark} />
+            </div>
+          )}
           <div style={{ height: 1, background: bd }} />
           {row("📍", "Entregar en", dropOf(o) || "Ver con el comprador", dropNameOf(o) + (dropPhoneOf(o) ? " · " + dropPhoneOf(o) : ""))}
           {refOf(o) && row("📝", "Referencia", refOf(o))}

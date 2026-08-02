@@ -1650,7 +1650,7 @@ function AppShell({ sessionUser }) {
 
           {tab === "envios" && <>
             {eScr === "menu"  && <EnviosMenu onLocal={() => setEScr("local")} onIntl={() => setEScr("intl")} user={user} requireAuth={requireAuth} />}
-            {eScr === "local" && <SectionGate enabled={sections.deliveryLocal} dark={isDarkTheme} onClose={() => setEScr("menu")}><LocalDelivery onBack={() => setEScr("menu")} flash={flash} cfg={adminCfg} user={user} onNav={navTo} onChat={openMessages} /></SectionGate>}
+            {eScr === "local" && <SectionGate enabled={sections.deliveryLocal} dark={isDarkTheme} onClose={() => setEScr("menu")}><LocalDelivery onBack={() => setEScr("menu")} flash={flash} cfg={adminCfg} user={user} onNav={navTo} onChat={openMessages} onTrackOrder={openOrderById} /></SectionGate>}
             {eScr === "intl"  && <SectionGate enabled={sections.intlShipping} dark={isDarkTheme} onClose={() => setEScr("menu")}><IntlShipping  onBack={() => setEScr("menu")} flash={flash} cfg={cfg} onNav={navTo} /></SectionGate>}
           </>}
 

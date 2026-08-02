@@ -505,6 +505,9 @@ const FP_TAG_STYLE = {
 function FP_ProductCard({ product, onClick, onDelete, onEdit, onPromote }) {
   const FP_C = useFP_C();
   const [liked, setLiked] = useState(false);
+  // Si la foto falla al cargar (archivo roto, borrado del storage, etc.),
+  // caemos al ícono simple — nunca la interfaz de error cruda del navegador.
+  const [imgError, setImgError] = useState(false);
   const tc = FP_TAG_STYLE[product.tag] || {};
   const own = !!(onDelete || onEdit);
   const rejected = product.moderation_status === "rejected";
@@ -570,7 +573,7 @@ function FP_ProductCard({ product, onClick, onDelete, onEdit, onPromote }) {
       )}
       <div style={{ height:110, background:FP_C.surfaceHigh, position:"relative",
         display:"flex", alignItems:"center", justifyContent:"center", fontSize:44, overflow:"hidden" }}>
-        {product.image ? <img src={product.image} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", filter: rejected ? "grayscale(1) brightness(.5)" : soldOut ? "grayscale(.75) brightness(.65)" : "none" }} onError={e => e.target.style.display="none"}/> : (product.emoji || (isService ? "🛠️" : "📦"))}
+        {(product.image && !imgError) ? <img src={product.image} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", filter: rejected ? "grayscale(1) brightness(.5)" : soldOut ? "grayscale(.75) brightness(.65)" : "none" }} onError={() => setImgError(true)}/> : (product.emoji || (isService ? "🛠️" : "📦"))}
         {rejected && (
           <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,.45)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 10px", textAlign:"center" }}>
             <span style={{ fontSize:11, fontWeight:800, color:"#ff6b6b" }}>🚫 Retirado</span>

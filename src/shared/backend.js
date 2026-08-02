@@ -41,23 +41,6 @@ export const getUserById = async (id) => {
     return p;
   } catch (e) { console.error("getUserById (excepción):", e?.message || e, "| id:", id); return null; }
 };
-// Estado de verificación REAL en lote — para tarjetas de producto (evita 1
-// consulta por vendedor). ids repetidos/nulos se ignoran; devuelve {id: bool}.
-// Si esto devuelve {} para TODOS los vendedores (incluso uno confirmado
-// is_verified=true en la tabla), el error queda en consola: revisar ahí si el
-// RLS de "profiles" está negando la lectura de is_verified para otros usuarios.
-export const getVerifiedMap = async (ids) => {
-  const uniq = [...new Set((ids || []).filter(Boolean))];
-  if (!uniq.length) return {};
-  try {
-    const { data, error } = await supabase.from("profiles").select("id, is_verified").in("id", uniq);
-    if (error) { console.error("getVerifiedMap:", error.message, "| ids:", uniq); return {}; }
-    if (!data) return {};
-    const map = {};
-    data.forEach(r => { map[r.id] = !!r.is_verified; });
-    return map;
-  } catch (e) { console.error("getVerifiedMap (excepción):", e?.message || e, "| ids:", uniq); return {}; }
-};
 export const getUserName = async (id) => {
   const p = await getUserById(id);
   return p?.name || "Vendedor";
@@ -130,27 +113,46 @@ export const saveProfileAll = async ({ fullName, bio, avatarUrl, city, country, 
 // ── Productos REALES del backend ─────────────────────────────────────────────
 // Mapea las columnas del backend al formato que espera la app.
 // La foto vive en `images` (lista); la tarjeta usa una sola → image = images[0].
-export const mapProduct = (p) => ({
-  ...p,
-  image: Array.isArray(p.images) ? (p.images[0] || null) : (p.images || null),
-  shipModes: p.ship_modes || { local: true },
-  shippingPrice: p.ship_price ?? 0,
-  // Dirección/teléfono de recogida que escribió el vendedor al publicar.
-  pickupAddress: p.pickup_address || "",
-  pickupPhone: p.pickup_phone || "",
-  // Cantidad total listada (fuente del "available_stock" real del backend) y
-  // tramos de descuento por cantidad, en camelCase para el resto de la app.
-  stock: p.stock ?? p.qty_available ?? null,
-  bulkDiscounts: Array.isArray(p.bulk_discounts) ? p.bulk_discounts : [],
-  // Monedas en las que el vendedor acepta cobrar (USD/EUR/CUP) — NO es método
-  // de pago (eso lo acuerdan comprador y vendedor entre ellos).
-  acceptedCurrencies: Array.isArray(p.accepted_currencies) ? p.accepted_currencies : [],
-});
+// El vendedor (is_verified/full_name/avatar_url) llega EMBEBIDO en la misma
+// fila (join por products.seller_id → profiles.id, ver PRODUCT_SELECT abajo) —
+// ya NO se consulta aparte con un mapa en lote (getVerifiedMap): esa consulta
+// se quitó por completo porque, aunque en pruebas devolvía bien el dato, en
+// producción la insignia seguía sin llegar a la tarjeta; embeber el vendedor en
+// el mismo viaje elimina esa segunda consulta como posible punto de falla.
+export const mapProduct = (p) => {
+  const seller = p.seller || null;
+  return {
+    ...p,
+    image: Array.isArray(p.images) ? (p.images[0] || null) : (p.images || null),
+    shipModes: p.ship_modes || { local: true },
+    shippingPrice: p.ship_price ?? 0,
+    // Dirección/teléfono de recogida que escribió el vendedor al publicar.
+    pickupAddress: p.pickup_address || "",
+    pickupPhone: p.pickup_phone || "",
+    // Cantidad total listada (fuente del "available_stock" real del backend) y
+    // tramos de descuento por cantidad, en camelCase para el resto de la app.
+    stock: p.stock ?? p.qty_available ?? null,
+    bulkDiscounts: Array.isArray(p.bulk_discounts) ? p.bulk_discounts : [],
+    // Monedas en las que el vendedor acepta cobrar (USD/EUR/CUP) — NO es método
+    // de pago (eso lo acuerdan comprador y vendedor entre ellos).
+    acceptedCurrencies: Array.isArray(p.accepted_currencies) ? p.accepted_currencies : [],
+    // Vendedor embebido — `??` conserva seller_verified si ya venía literal en
+    // el objeto (caso del DEMO_PRODUCT, que no tiene fila real que unir).
+    seller_verified: seller ? !!seller.is_verified : (p.seller_verified ?? false),
+    seller_name: p.seller_name || seller?.full_name || undefined,
+    seller_avatar_url: seller?.avatar_url || p.seller_avatar_url || null,
+  };
+};
+// SELECT compartido por toda consulta que arma tarjetas de producto: trae el
+// vendedor EN EL MISMO viaje (products.seller_id → profiles.id, FK real:
+// products_seller_id_fkey) — nunca una segunda consulta aparte para saber si
+// el vendedor está verificado.
+const PRODUCT_SELECT = "*, seller:profiles!seller_id(is_verified, full_name, avatar_url)";
 // Un solo producto por id (para leer la dirección de recogida en el detalle del
 // mensajero cuando el producto no está cargado en memoria).
 export const getProductById = async (id) => {
   if (!id) return null;
-  const { data, error } = await supabase.from("products").select("*").eq("id", id).single();
+  const { data, error } = await supabase.from("products").select(PRODUCT_SELECT).eq("id", id).single();
   if (error || !data) return null;
   return mapProduct(data);
 };
@@ -163,7 +165,7 @@ export const getProductById = async (id) => {
 export const loadProducts = async () => {
   const { data, error } = await supabase
     .from("products")
-    .select("*")
+    .select(PRODUCT_SELECT)
     .eq("status", "active")
     .eq("moderation_status", "approved")
     .or("kind.eq.product,kind.is.null")
@@ -176,7 +178,7 @@ export const loadProducts = async () => {
 export const loadServices = async () => {
   const { data, error } = await supabase
     .from("products")
-    .select("*")
+    .select(PRODUCT_SELECT)
     .eq("status", "active")
     .eq("moderation_status", "approved")
     .eq("kind", "service")
@@ -227,7 +229,7 @@ export const deleteProduct = async (id) => {
 // el propio dueño gestionando "En venta"): trae TODO, agotados incluidos, para
 // que pueda reponerlos o borrarlos.
 export const getProductsBySeller = async (id, { publicView = false } = {}) => {
-  let q = supabase.from("products").select("*").eq("seller_id", id).neq("status", "deleted").order("created_at", { ascending: false });
+  let q = supabase.from("products").select(PRODUCT_SELECT).eq("seller_id", id).neq("status", "deleted").order("created_at", { ascending: false });
   if (publicView) q = q.or("kind.eq.service,stock.is.null,stock.gt.0");
   const { data, error } = await q;
   if (error) { console.error("getProductsBySeller:", error.message); return []; }
@@ -571,7 +573,7 @@ export const toggleFavorite = async (productId) => {
 // get_my_favorites() → filas de productos favoritos del usuario. Devuelve la lista
 // mapeada al formato de la app (para la pantalla de Favoritos) + el set de ids.
 export const getMyFavorites = async () => {
-  const { data, error } = await supabase.rpc("get_my_favorites");
+  const { data, error } = await supabase.rpc("get_my_favorites").select(PRODUCT_SELECT);
   if (error) { console.error("getMyFavorites:", error.message); return { products: [], ids: [] }; }
   const rows = Array.isArray(data) ? data : [];
   // La RPC puede devolver filas de producto completas o solo ids/product_id.

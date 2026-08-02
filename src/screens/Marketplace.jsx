@@ -1,20 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getUserById, getUserName, getVerifiedMap, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
-
-// ✓ real de vendedores en lote — se refresca cuando cambia el conjunto de
-// vendedores visible (evita 1 consulta por tarjeta). Fuente: profiles.is_verified.
-function useSellersVerified(products) {
-  const [map, setMap] = useState({});
-  const key = useMemo(() => [...new Set((products || []).map(p => p.seller_id).filter(Boolean))].sort().join(","), [products]);
-  useEffect(() => {
-    let alive = true;
-    if (!key) { setMap({}); return; }
-    getVerifiedMap(key.split(",")).then(m => { if (alive) setMap(m); }).catch(() => {});
-    return () => { alive = false; };
-  }, [key]);
-  return map;
-}
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getUserById, getUserName, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -554,7 +540,6 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
   const [searchText, setSearchText] = useState("");
   const [quickFilter, setQuickFilter] = useState("TODOS");
   const feedAds = useFeedAds("busqueda"); // anuncios intercalados cada N productos
-  const sellersVerified = useSellersVerified(products);
 
   const { cats, subcats: allSubs } = useCatalog();
   const cat = selectedCat ? cats.find(c => c.id === selectedCat) : null;
@@ -716,12 +701,12 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
               view === "muro"
                 ? <div style={{ columnCount: densityCols(dMode, isDesktop, isTablet), columnGap: dt.grid.gap }}>
                     {feedRows(filtered, feedAds).map(it => it.t === "p"
-                      ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} verified={sellersVerified[it.p.seller_id]} />
+                      ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
                       : <div key={it.key} style={{ breakInside: "avoid", columnSpan: "all", margin: "6px 0" }}><BlockView m={it.m} onNav={onNav} /></div>)}
                   </div>
                 : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
                     {feedRows(filtered, feedAds).map(it => it.t === "p"
-                      ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} verified={sellersVerified[it.p.seller_id]} />
+                      ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
                       : <div key={it.key} style={{ gridColumn: "1 / -1" }}><BlockView m={it.m} onNav={onNav} /></div>)}
                   </div>
             )}
@@ -1000,7 +985,6 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
   const { tokens: dt, mode: dMode } = useDensity();
   const plusBtnRef = useRef(null);
   const feedAds = useFeedAds("inicio"); // anuncios intercalados cada N productos
-  const sellersVerified = useSellersVerified(products);
   // Conserva la posición del scroll del feed: se guarda al scrollear y se
   // restaura al volver (entrar a un producto y regresar no salta al inicio).
   const feedRef = useRef(null);
@@ -1113,12 +1097,12 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
             : view === "muro"
               ? <div style={{ columnCount: densityCols(dMode, isDesktop, isTablet), columnGap: dt.grid.gap }}>
                   {feedRows(products, feedAds).map(it => it.t === "p"
-                    ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} verified={sellersVerified[it.p.seller_id]} />
+                    ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
                     : <div key={it.key} style={{ breakInside: "avoid", columnSpan: "all", margin: "6px 0" }}><BlockView m={it.m} onNav={onNav} /></div>)}
                 </div>
               : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
                   {feedRows(products, feedAds).map(it => it.t === "p"
-                    ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} verified={sellersVerified[it.p.seller_id]} />
+                    ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
                     : <div key={it.key} style={{ gridColumn: "1 / -1" }}><BlockView m={it.m} onNav={onNav} /></div>)}
                 </div>
         }
@@ -1140,7 +1124,7 @@ const flagOf = (o) => { if (!o) return null; const k = String(o).trim().toLowerC
 // TARJETA DE PRODUCTO estilo AliExpress con la identidad RETADOR (dorado/gris/negro).
 // view: "grid" (foto cuadrada, alturas parejas) | "muro" (foto en su proporción real).
 // SIN nombre ni ubicación del vendedor (privacidad): eso vive en el detalle.
-function PCard({ p, onClick, isFav, onFav, view = "grid", verified = false }) {
+function PCard({ p, onClick, isFav, onFav, view = "grid" }) {
   const { S, B, T1, T2, T3, ts } = useAt();
   const img = p.img || p.image || (p.images && p.images[0]) || "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400";
   const hasDisc = p.orig_price && parseFloat(p.orig_price) > parseFloat(p.price || 0);
@@ -1159,7 +1143,9 @@ function PCard({ p, onClick, isFav, onFav, view = "grid", verified = false }) {
   if (soldOut) return null;
   const lowStock = stock != null && Number(stock) > 0 && Number(stock) <= 5;
   const flag = flagOf(p.origin || p.country);
-  const isVerified = verified || p.seller_verified || p.verified;
+  // Verificado del vendedor: embebido EN LA MISMA fila del producto (join
+  // products.seller_id → profiles.id), nunca una consulta aparte.
+  const isVerified = !!(p.seller_verified || p.verified);
   const isPromo = !!(p.promoted || p.featured);
   const isOffer = !!(p.on_sale || p.oferta || p.promo);
 
@@ -1290,7 +1276,7 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
           {imgs.map((src, i) => (
             <div key={i} style={{ position: "relative", width: 76, height: 76, borderRadius: 10, overflow: "hidden", border: `1px solid ${B}` }}>
-              <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
               <button onClick={() => setImgs(prev => prev.filter((_, j) => j !== i))} style={{ position: "absolute", top: 2, right: 2, width: 20, height: 20, borderRadius: "50%", border: "none", background: "rgba(0,0,0,.7)", color: "#fff", fontSize: 12, cursor: "pointer", lineHeight: 1 }}>×</button>
               {i === 0 && <span style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,.6)", color: "#fff", fontSize: 8, textAlign: "center", padding: "1px 0" }}>Principal</span>}
             </div>
@@ -1972,7 +1958,7 @@ export function SellerProfile({ userId, currentUser, onBack, onChat, onProduct }
         {products.length === 0
           ? <p style={{ fontSize: 11, color: "#3e3e3e", textAlign: "center", padding: "24px 0" }}>Sin productos publicados aún</p>
           : <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols},1fr)`, gap: 8 }}>
-            {products.map(p => <PCard key={p.id} p={p} onClick={() => onProduct(p)} isFav={false} onFav={() => {}} verified={!!profile?.verified} />)}
+            {products.map(p => <PCard key={p.id} p={p} onClick={() => onProduct(p)} isFav={false} onFav={() => {}} />)}
           </div>
         }
       </div>
@@ -2119,7 +2105,7 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash }) {
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 3)},1fr)`, gap: 8, marginBottom: 12 }}>
             {form.images.map((img, i) => (
               <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: isDark?"#141414":CARD }}>
-                <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
                 <button onClick={() => removeImage(i)} className="p" style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,.85)", border: "none", borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", color: isDark?"#fff":T1, fontSize: 12, fontWeight: 700 }}>×</button>
                 {i === 0 && <div style={{ position: "absolute", bottom: 4, left: 4, background: G, color: "#000", fontSize: 9, fontWeight: 800, padding: "3px 7px", borderRadius: 4 }}>PRINCIPAL</div>}
               </div>
@@ -2412,7 +2398,7 @@ function PublishServiceForm({ onClose, onBack, onPublish, user, flash }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 12 }}>
             {form.images.map((img, i) => (
               <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: isDark?"#141414":CARD }}>
-                <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
                 <button onClick={() => removeImage(i)} className="p" style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,.85)", border: "none", borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", color: isDark?"#fff":T1, fontSize: 12, fontWeight: 700 }}>×</button>
                 {i === 0 && <div style={{ position: "absolute", bottom: 4, left: 4, background: G, color: "#000", fontSize: 9, fontWeight: 800, padding: "3px 7px", borderRadius: 4 }}>PRINCIPAL</div>}
               </div>

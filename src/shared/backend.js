@@ -28,26 +28,35 @@ export const getUserById = async (id) => {
   if (_profileCache.has(id)) return _profileCache.get(id);
   try {
     const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url, bio, is_verified, email").eq("id", id).single();
-    if (error || !data) { _profileCache.set(id, null); return null; }
+    // ANTES esto se tragaba en silencio: si el RLS/permiso de "profiles" bloquea
+    // la lectura de la fila de OTRO usuario (p.ej. is_verified restringido a su
+    // propio dueño), la consulta falla con error y esto devolvía null sin dejar
+    // rastro — imposible de diagnosticar desde el navegador. Ahora queda logeado.
+    if (error) { console.error("getUserById:", error.message, "| id:", id); _profileCache.set(id, null); return null; }
+    if (!data) { _profileCache.set(id, null); return null; }
     // El correo se expone tal cual (misma fuente que ve el dueño y el admin) —
     // ya no hay "usuario"/@handle inventado a partir de él.
     const p = { id: data.id, name: data.full_name || "Usuario", avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified, email: data.email || "" };
     _profileCache.set(id, p);
     return p;
-  } catch (e) { return null; }
+  } catch (e) { console.error("getUserById (excepción):", e?.message || e, "| id:", id); return null; }
 };
 // Estado de verificación REAL en lote — para tarjetas de producto (evita 1
 // consulta por vendedor). ids repetidos/nulos se ignoran; devuelve {id: bool}.
+// Si esto devuelve {} para TODOS los vendedores (incluso uno confirmado
+// is_verified=true en la tabla), el error queda en consola: revisar ahí si el
+// RLS de "profiles" está negando la lectura de is_verified para otros usuarios.
 export const getVerifiedMap = async (ids) => {
   const uniq = [...new Set((ids || []).filter(Boolean))];
   if (!uniq.length) return {};
   try {
     const { data, error } = await supabase.from("profiles").select("id, is_verified").in("id", uniq);
-    if (error || !data) return {};
+    if (error) { console.error("getVerifiedMap:", error.message, "| ids:", uniq); return {}; }
+    if (!data) return {};
     const map = {};
     data.forEach(r => { map[r.id] = !!r.is_verified; });
     return map;
-  } catch (e) { return {}; }
+  } catch (e) { console.error("getVerifiedMap (excepción):", e?.message || e, "| ids:", uniq); return {}; }
 };
 export const getUserName = async (id) => {
   const p = await getUserById(id);
@@ -148,6 +157,9 @@ export const getProductById = async (id) => {
 // Listado público del marketplace (sin login): solo PRODUCTOS activos y aprobados.
 // Los servicios (kind='service') NO se mezclan aquí; los rechazados quedan fuera.
 // `kind` puede venir null en filas antiguas → se tratan como producto.
+// AGOTADOS (stock=0) tampoco: en cuanto el stock llega a 0 el producto deja de
+// traerse aquí — invisible al instante en feed/búsqueda (mismo listado para
+// ambos), sin plazo de gracia. Vuelve a aparecer solo si el dueño lo repone.
 export const loadProducts = async () => {
   const { data, error } = await supabase
     .from("products")
@@ -155,6 +167,7 @@ export const loadProducts = async () => {
     .eq("status", "active")
     .eq("moderation_status", "approved")
     .or("kind.eq.product,kind.is.null")
+    .or("stock.is.null,stock.gt.0")
     .order("created_at", { ascending: false });
   if (error) { console.error("loadProducts:", error.message); return []; }
   return (data || []).map(mapProduct);
@@ -209,8 +222,14 @@ export const deleteProduct = async (id) => {
   if (error) { console.error("deleteProduct:", error.message); throw error; }
   return true;
 };
-export const getProductsBySeller = async (id) => {
-  const { data, error } = await supabase.from("products").select("*").eq("seller_id", id).neq("status", "deleted").order("created_at", { ascending: false });
+// publicView=true (cualquier visitante viendo el perfil de OTRO vendedor):
+// nunca agotados — misma regla que el feed/búsqueda. publicView=false (default,
+// el propio dueño gestionando "En venta"): trae TODO, agotados incluidos, para
+// que pueda reponerlos o borrarlos.
+export const getProductsBySeller = async (id, { publicView = false } = {}) => {
+  let q = supabase.from("products").select("*").eq("seller_id", id).neq("status", "deleted").order("created_at", { ascending: false });
+  if (publicView) q = q.or("kind.eq.service,stock.is.null,stock.gt.0");
+  const { data, error } = await q;
   if (error) { console.error("getProductsBySeller:", error.message); return []; }
   return (data || []).map(mapProduct);
 };

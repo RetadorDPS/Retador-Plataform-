@@ -510,11 +510,17 @@ function FP_ProductCard({ product, onClick, onDelete, onEdit, onPromote }) {
   const rejected = product.moderation_status === "rejected";
   const rejectReason = product.moderation_reason || product.rejection_reason || product.rejected_reason || "";
   const isService = product.kind === "service";
+  // AGOTADO (stock=0): invisible para cualquier visitante (feed/búsqueda/perfil
+  // público) — SOLO el dueño lo sigue viendo aquí, en su gestión "En venta",
+  // atenuado y agrupado al final. "Editar" (repone stock) y "Borrar" siguen
+  // disponibles igual que cualquier otro producto propio.
+  const soldOut = !isService && product.stock != null && Number(product.stock) <= 0;
   const ownBtn = { background:"rgba(0,0,0,.35)", backdropFilter:"blur(6px)", WebkitBackdropFilter:"blur(6px)", borderRadius:8, width:28, height:28, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" };
   return (
     <div onClick={onClick} style={{ background:FP_C.surface, borderRadius:10, overflow:"hidden",
       border:`1px solid ${FP_C.border}`, cursor:"pointer", position:"relative",
-      transition:"border-color 0.15s, transform 0.15s" }}
+      opacity: soldOut ? 0.5 : 1,
+      transition:"border-color 0.15s, transform 0.15s, opacity 0.15s" }}
       onMouseEnter={e => { e.currentTarget.style.borderColor=FP_C.borderMid; e.currentTarget.style.transform="translateY(-1px)"; }}
       onMouseLeave={e => { e.currentTarget.style.borderColor=FP_C.border; e.currentTarget.style.transform="none"; }}>
 
@@ -564,12 +570,17 @@ function FP_ProductCard({ product, onClick, onDelete, onEdit, onPromote }) {
       )}
       <div style={{ height:110, background:FP_C.surfaceHigh, position:"relative",
         display:"flex", alignItems:"center", justifyContent:"center", fontSize:44, overflow:"hidden" }}>
-        {product.image ? <img src={product.image} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", filter: rejected ? "grayscale(1) brightness(.5)" : "none" }} onError={e => e.target.style.display="none"}/> : (product.emoji || (isService ? "🛠️" : "📦"))}
+        {product.image ? <img src={product.image} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", filter: rejected ? "grayscale(1) brightness(.5)" : soldOut ? "grayscale(.75) brightness(.65)" : "none" }} onError={e => e.target.style.display="none"}/> : (product.emoji || (isService ? "🛠️" : "📦"))}
         {rejected && (
           <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,.45)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 10px", textAlign:"center" }}>
             <span style={{ fontSize:11, fontWeight:800, color:"#ff6b6b" }}>🚫 Retirado</span>
             {rejectReason && <span style={{ fontSize:9, color:"#fff", marginTop:2, lineHeight:1.3, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{rejectReason}</span>}
             <span style={{ fontSize:8, color:"rgba(255,255,255,.7)", marginTop:3 }}>Edítalo para volver a publicarlo</span>
+          </div>
+        )}
+        {soldOut && !rejected && (
+          <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+            <span style={{ fontSize:10.5, fontWeight:800, color:"#fff", background:"rgba(0,0,0,.6)", border:"1px solid rgba(255,255,255,.3)", borderRadius:999, padding:"4px 12px", letterSpacing:.3 }}>Agotado</span>
           </div>
         )}
       </div>
@@ -1633,13 +1644,17 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                 fontFamily:FP_FH, lineHeight:1.2 }}>
                 {profile.name}
               </div>
-              {/* "✓ Perfil verificado" — SOLO si is_verified es real. Nunca fingido. */}
+              {/* "✓ Verificado" — SOLO si is_verified es real. Nunca fingido.
+                  Mismo chip (contorno fino dorado) que en las tarjetas de
+                  producto, para que el estilo de la insignia sea consistente
+                  por SITIO — no la insignia redonda sólida del avatar (esa se
+                  queda igual). Va en el mismo espacio donde antes iba el texto
+                  "Perfil verificado", sin agregar alto extra. */}
               {(isVerified || profile.isVerified) && (
-                <div style={{ display:"flex", alignItems:"center", gap:5, marginTop:6 }}>
-                  <FP_Icon d={FP_Icons.check} size={13} color={FP_C.positive}/>
-                  <span style={{ fontSize:12.5, color:FP_C.positive, fontWeight:600, fontFamily:FP_FH }}>
-                    Perfil verificado
-                  </span>
+                <div style={{ display:"inline-flex", alignItems:"center", gap:4, marginTop:7,
+                  fontSize:11, fontWeight:800, lineHeight:1.4, padding:"2px 9px",
+                  borderRadius:999, background:"transparent", color:G, border:`1px solid ${G}` }}>
+                  ✓ Verificado
                 </div>
               )}
             </div>
@@ -1998,7 +2013,13 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
               <div style={{ display:"grid",
                 gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",
                 gap:10, marginBottom:12 }}>
-                {userProducts.map(p => <FP_ProductCard key={p.id} product={p} onClick={() => onProduct && onProduct(p)} onDelete={onDeleteProduct ? (() => onDeleteProduct(p.id)) : null} onEdit={onEditProduct ? (() => onEditProduct(p)) : null} onPromote={(promoOn && onPromoteProduct && !p.promoted && p.kind !== "service") ? (() => onPromoteProduct(p)) : null}/>)}
+                {/* Agotados (stock=0) agrupados AL FINAL, después de todos los
+                    activos — solo el dueño ve esta lista completa; el resto del
+                    sitio ya no trae agotados ni en el feed ni en su perfil público. */}
+                {[...userProducts].sort((a, b) => {
+                  const so = p => p.kind !== "service" && p.stock != null && Number(p.stock) <= 0 ? 1 : 0;
+                  return so(a) - so(b);
+                }).map(p => <FP_ProductCard key={p.id} product={p} onClick={() => onProduct && onProduct(p)} onDelete={onDeleteProduct ? (() => onDeleteProduct(p.id)) : null} onEdit={onEditProduct ? (() => onEditProduct(p)) : null} onPromote={(promoOn && onPromoteProduct && !p.promoted && p.kind !== "service") ? (() => onPromoteProduct(p)) : null}/>)}
               </div>
             )}
             {isOwner && (

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, VerifiedTick, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getUserById, getUserName, getUserTrustStats, getVerifiedMap, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getUserById, getUserName, getUserTrustStats, getVerifiedMap, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
 
 // ✓ real de vendedores en lote — se refresca cuando cambia el conjunto de
 // vendedores visible (evita 1 consulta por tarjeta). Fuente: profiles.is_verified.
@@ -1150,11 +1150,14 @@ function PCard({ p, onClick, isFav, onFav, view = "grid", verified = false }) {
   const sold = Number(p.sold_count ?? p.soldCount) || 0;
   const stock = (p.stock ?? p.qty_available);
   const isService = p.kind === "service";
-  // AGOTADO — stock=0 debe verse SIEMPRE en la tarjeta, no solo en el detalle
-  // (antes esta tarjeta nunca lo mostraba: se veía "disponible" y el sistema
-  // la rechazaba recién al intentar comprar/escribir). Los servicios no aplican.
+  // AGOTADO (stock=0) ya NO debe llegar aquí: el backend deja de traer estos
+  // productos en el feed/búsqueda/perfil público en cuanto stock=0 (ver
+  // loadProducts/getProductsBySeller). Este return null es solo un cierre de
+  // seguridad por si un producto agotado llega igual por otra vía (p.ej. la
+  // lista local de favoritos) — nunca debe verse como "disponible".
   const soldOut = !isService && stock != null && Number(stock) <= 0;
-  const lowStock = !soldOut && stock != null && Number(stock) > 0 && Number(stock) <= 5;
+  if (soldOut) return null;
+  const lowStock = stock != null && Number(stock) > 0 && Number(stock) <= 5;
   const flag = flagOf(p.origin || p.country);
   const isVerified = verified || p.seller_verified || p.verified;
   const isPromo = !!(p.promoted || p.featured);
@@ -1169,26 +1172,20 @@ function PCard({ p, onClick, isFav, onFav, view = "grid", verified = false }) {
 
   // ── Chips (solo los que apliquen). La fila se omite entera si no hay ninguno.
   const chips = [];
-  if (disc > 0 && !soldOut) chips.push({ k: "disc", t: `-${disc}%`, bg: "#ef4444", fg: "#fff", bd: "transparent" });
-  else if (isOffer && !soldOut) chips.push({ k: "offer", t: "Oferta", bg: "rgba(239,68,68,.14)", fg: "#ef4444", bd: "transparent" });
-  if (isPromo && !soldOut) chips.push({ k: "promo", t: "Destacado", bg: G, fg: "#000", bd: "transparent" });
-  // Insignia de verificado: FONDO SÓLIDO dorado (sello de garantía), no un
-  // contorno fino — mismo componente/ícono (VerifiedTick) que en avatares.
-  if (isVerified) chips.push({ k: "ver", custom: true });
+  if (disc > 0) chips.push({ k: "disc", t: `-${disc}%`, bg: "#ef4444", fg: "#fff", bd: "transparent" });
+  else if (isOffer) chips.push({ k: "offer", t: "Oferta", bg: "rgba(239,68,68,.14)", fg: "#ef4444", bd: "transparent" });
+  if (isPromo) chips.push({ k: "promo", t: "Destacado", bg: G, fg: "#000", bd: "transparent" });
+  // Insignia de verificado EN TARJETAS: chip con contorno fino (no la insignia
+  // redonda sólida del avatar) — así se ve en feed, búsqueda y perfil de vendedor.
+  if (isVerified) chips.push({ k: "ver", t: "✓ Verificado", bg: "transparent", fg: G, bd: G });
   if (lowStock) chips.push({ k: "stock", t: `¡Últimas ${Number(stock)}!`, bg: "rgba(255,192,30,.12)", fg: G, bd: "transparent" });
-  if (soldOut) chips.push({ k: "soldout", t: "Agotado", bg: "rgba(120,120,120,.18)", fg: T2, bd: "transparent" });
 
   return (
     <div className="cd" onClick={onClick} style={{ background: S, borderRadius: 16, overflow: "hidden", border: `1px solid ${B}`, breakInside: "avoid", marginBottom: view === "muro" ? 12 : 0 }}>
       <div style={{ position: "relative", ...(view === "muro" ? {} : { aspectRatio: "1 / 1" }), background: "#161616", overflow: "hidden", borderRadius: "16px 16px 0 0" }}>
         <img src={img} alt={p.title}
-          style={{ width: "100%", ...(view === "muro" ? { height: "auto", display: "block" } : { height: "100%", objectFit: "cover" }), transition: "transform .3s", filter: soldOut ? "grayscale(.85) brightness(.62)" : "none" }}
+          style={{ width: "100%", ...(view === "muro" ? { height: "auto", display: "block" } : { height: "100%", objectFit: "cover" }), transition: "transform .3s" }}
           onError={e => { e.target.src = "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400"; }} />
-        {soldOut && (
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-            <span style={{ background: "rgba(0,0,0,.68)", color: "#fff", fontSize: 11 * ts, fontWeight: 800, letterSpacing: .3, padding: "5px 14px", borderRadius: 999, border: "1px solid rgba(255,255,255,.22)" }}>🚫 Agotado</span>
-          </div>
-        )}
         {flag && <div style={{ position: "absolute", bottom: 7, left: 7, fontSize: 14, filter: "drop-shadow(0 1px 2px rgba(0,0,0,.6))" }}>{flag}</div>}
         <button className="p" onClick={e => { e.stopPropagation(); onFav(p.id); }} style={{ position: "absolute", top: 6, right: 6, width: 27, height: 27, background: "rgba(0,0,0,.55)", backdropFilter: "blur(8px)", border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill={isFav ? G : "none"} stroke={isFav ? G : "#bbb"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
@@ -1201,13 +1198,10 @@ function PCard({ p, onClick, isFav, onFav, view = "grid", verified = false }) {
         <p style={{ margin: 0, fontSize: 11.5 * ts, fontWeight: 600, color: T1, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: view === "muro" ? undefined : `${2 * 1.35 * 11.5 * ts}px` }}>{p.title}</p>
         <div style={{ fontSize: 9.5 * ts, color: T2, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{metricsText}</div>
         {chips.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 * ts }}>
-            {chips.map(c => c.custom
-              ? <span key={c.k} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 8.5 * ts, fontWeight: 800, lineHeight: 1.4, padding: "1.5px 7px 1.5px 5px", borderRadius: 999, background: G, color: "#000", whiteSpace: "nowrap" }}>
-                  <VerifiedTick size={8} color="#000" />Verificado
-                </span>
-              : <span key={c.k} style={{ fontSize: 8.5 * ts, fontWeight: 800, lineHeight: 1.4, padding: "1.5px 6px", borderRadius: 999, background: c.bg, color: c.fg, border: c.bd === "transparent" ? "none" : `1px solid ${c.bd}`, whiteSpace: "nowrap" }}>{c.t}</span>
-            )}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 * ts }}>
+            {chips.map(c => (
+              <span key={c.k} style={{ fontSize: 8.5 * ts, fontWeight: 800, lineHeight: 1.4, padding: "1.5px 6px", borderRadius: 999, background: c.bg, color: c.fg, border: c.bd === "transparent" ? "none" : `1px solid ${c.bd}`, whiteSpace: "nowrap" }}>{c.t}</span>
+            ))}
           </div>
         )}
         <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", marginTop: 1 }}>
@@ -1911,7 +1905,9 @@ export function SellerProfile({ userId, currentUser, onBack, onChat, onProduct }
     (async () => {
       const [ud, prods, ts] = await Promise.all([
         getUserById(userId),
-        getProductsBySeller(userId),
+        // Vista PÚBLICA (cualquier visitante): nunca productos agotados — solo
+        // el propio dueño los ve, en su gestión de "En venta".
+        getProductsBySeller(userId, { publicView: true }),
         getUserTrustStats(userId).catch(() => null),
       ]);
       setProfile(ud); setProducts(prods); setTrust(ts); setLoading(false);

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getUserById, getUserName, getUserTrustStats, getVerifiedMap, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getUserById, getUserName, getVerifiedMap, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
 
 // ✓ real de vendedores en lote — se refresca cuando cambia el conjunto de
 // vendedores visible (evita 1 consulta por tarjeta). Fuente: profiles.is_verified.
@@ -1200,7 +1200,7 @@ function PCard({ p, onClick, isFav, onFav, view = "grid", verified = false }) {
         {chips.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4 * ts }}>
             {chips.map(c => (
-              <span key={c.k} style={{ fontSize: 8.5 * ts, fontWeight: 800, lineHeight: 1.4, padding: "1.5px 6px", borderRadius: 999, background: c.bg, color: c.fg, border: c.bd === "transparent" ? "none" : `1px solid ${c.bd}`, whiteSpace: "nowrap" }}>{c.t}</span>
+              <span key={c.k} style={{ fontSize: (c.k === "ver" ? 9.5 : 8.5) * ts, fontWeight: 800, lineHeight: 1.4, padding: c.k === "ver" ? "2px 7px" : "1.5px 6px", borderRadius: 999, background: c.bg, color: c.fg, border: c.bd === "transparent" ? "none" : `1px solid ${c.bd}`, whiteSpace: "nowrap" }}>{c.t}</span>
             ))}
           </div>
         )}
@@ -1551,7 +1551,14 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
   const { S, B, T1, T2, T3, isDark, ts } = useAt();
   const { cats } = useCatalog();
   const [sellerName,  setSellerName]  = useState(null);
-  const [trustStats,  setTrustStats]  = useState(null);
+  // Ventas del vendedor: MISMA fuente que el encabezado de su perfil
+  // (get_profile_header_stats), nunca un cálculo aparte que pueda
+  // desincronizarse. getUserTrustStats era un stub fijo ({score:85,reviews:12})
+  // que ni siquiera coincidía con los campos que se leían (verified_sales/
+  // success_rate) — por eso esta tarjeta SIEMPRE mostraba "0 ventas · 0% éxito"
+  // sin importar las ventas reales. El "% de éxito" no tiene ninguna función
+  // real detrás en este proyecto — se quitó en vez de inventar un número.
+  const [sellerStats, setSellerStats] = useState(null);
   const bc   = BC[p.badge] || {};
   const cat  = cats.find(c => c.id === p.cat);
   const disc = p.orig_price ? Math.round((1 - parseFloat(p.price) / parseFloat(p.orig_price)) * 100) : 0;
@@ -1572,7 +1579,7 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
   useEffect(() => {
     if (!p.seller_id) { setSellerName("Vendedor"); return; }
     getUserName(p.seller_id).then(setSellerName);
-    getUserTrustStats(p.seller_id).then(setTrustStats).catch(() => {});
+    getProfileHeaderStats(p.seller_id).then(setSellerStats).catch(() => {});
     // Track view
     if (user?.id) trackEvent(user.id, p.id, "view").catch(() => {});
   }, [p.seller_id]);
@@ -1701,10 +1708,9 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
                 ? <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Spin size={13} /><span style={{ fontSize: 11, color: "#3e3e3e" }}>Cargando...</span></div>
                 : <p style={{ fontSize: 12, fontWeight: 700 }}>{sellerName}</p>
               }
-              {trustStats && (
+              {sellerStats && (
                 <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                  <span style={{ fontSize: 8, color: "#22C55E" }}>✅ {trustStats.verified_sales || 0} ventas</span>
-                  <span style={{ fontSize: 10, color: "#484848" }}>⭐ {((trustStats.success_rate || 0)).toFixed(0)}% éxito</span>
+                  <span style={{ fontSize: 8, color: "#22C55E" }}>✅ {sellerStats.ventas || 0} ventas</span>
                 </div>
               )}
             </div>
@@ -1898,19 +1904,25 @@ export function SellerProfile({ userId, currentUser, onBack, onChat, onProduct }
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const [profile,  setProfile]  = useState(null);
   const [products, setProducts] = useState([]);
-  const [trust,    setTrust]    = useState(null);
+  // MISMA fuente que el encabezado del perfil (get_profile_header_stats) —
+  // antes esto venía de getUserTrustStats, un stub fijo ({score:85,reviews:12})
+  // que ni siquiera coincidía con los campos leídos (verified_sales/success_rate/
+  // trust_score), así que SIEMPRE mostraba 0 ventas y 0% de éxito sin importar
+  // la cuenta real. "Éxito"/"Trust" no tenían ninguna función real detrás — se
+  // quitaron en vez de inventar un número.
+  const [stats,    setStats]    = useState(null);
   const [loading,  setLoading]  = useState(true);
 
   useEffect(() => {
     (async () => {
-      const [ud, prods, ts] = await Promise.all([
+      const [ud, prods, st] = await Promise.all([
         getUserById(userId),
         // Vista PÚBLICA (cualquier visitante): nunca productos agotados — solo
         // el propio dueño los ve, en su gestión de "En venta".
         getProductsBySeller(userId, { publicView: true }),
-        getUserTrustStats(userId).catch(() => null),
+        getProfileHeaderStats(userId).catch(() => null),
       ]);
-      setProfile(ud); setProducts(prods); setTrust(ts); setLoading(false);
+      setProfile(ud); setProducts(prods); setStats(st); setLoading(false);
     })();
   }, [userId]);
 
@@ -1937,13 +1949,14 @@ export function SellerProfile({ userId, currentUser, onBack, onChat, onProduct }
           )}
         </div>
 
-        {/* Trust stats */}
-        {trust && (
+        {/* Estadísticas reales — misma fuente que el encabezado del perfil
+            (get_profile_header_stats), nada calculado aparte. */}
+        {stats && (
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 3)},1fr)`, gap: 8, marginBottom: 18 }}>
             {[
-              { label: "Ventas", value: trust.verified_sales || trust.completed_orders || 0, color: G },
-              { label: "Éxito", value: `${((trust.success_rate || 0)).toFixed(0)}%`, color: "#22C55E" },
-              { label: "Trust", value: trust.trust_score || 0, color: "#60A5FA" },
+              { label: "Ventas", value: stats.ventas || 0, color: G },
+              { label: "Compras", value: stats.compras || 0, color: "#22C55E" },
+              { label: "Envíos", value: stats.envios || 0, color: "#60A5FA" },
             ].map(s => (
               <div key={s.label} style={{ background: S, border: `1px solid ${s.color}18`, borderRadius: 12, padding: "10px", textAlign: "center" }}>
                 <p style={{ fontSize: 16, fontWeight: 900, color: s.color }}>{s.value}</p>

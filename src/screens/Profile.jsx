@@ -1532,8 +1532,8 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   }
   function cancelAll() { setPd({...profile}); setAd({...about}); setEditing(false); }
 
-  // Sin reseñas no hay promedio (evita NaN): avgRating queda null y se muestra "Nuevo".
-  const avgRating = reviews.length ? (reviews.reduce((a,r) => a + r.stars, 0) / reviews.length).toFixed(1) : null;
+  // Desglose por estrella (1-5): no existe como agregado en el backend, se
+  // calcula de la lista real de seller_reviews ya cargada (no de product reviews).
   const ratingDist = [5,4,3,2,1].map(s => ({
     stars:s,
     pct: reviews.length ? Math.round(reviews.filter(r => r.stars===s).length / reviews.length * 100) : 0,
@@ -1652,7 +1652,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                   "Perfil verificado", sin agregar alto extra. */}
               {(isVerified || profile.isVerified) && (
                 <div style={{ display:"inline-flex", alignItems:"center", gap:4, marginTop:7,
-                  fontSize:11, fontWeight:800, lineHeight:1.4, padding:"2px 9px",
+                  fontSize:12.5, fontWeight:800, lineHeight:1.4, padding:"3px 10px",
                   borderRadius:999, background:"transparent", color:G, border:`1px solid ${G}` }}>
                   ✓ Verificado
                 </div>
@@ -2051,13 +2051,16 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
               borderRadius:10, padding:"16px 18px", marginBottom:12 }}>
               <div style={{ display:"flex", gap:20, alignItems:"center" }}>
                 <div style={{ textAlign:"center", minWidth:60 }}>
+                  {/* Número/estrellas de arriba: EXCLUSIVAMENTE profiles.seller_rating
+                      / seller_reviews_count (mismo dato que el encabezado del perfil),
+                      nunca un promedio recalculado a mano en el frontend. */}
                   <div style={{ fontFamily:FP_FH, fontWeight:800, fontSize:40,
                     color:FP_C.textPrimary, lineHeight:1 }}>
-                    {avgRating}
+                    {sellerRatingInfo?.rating != null ? sellerRatingInfo.rating.toFixed(1) : "—"}
                   </div>
-                  <FP_StarRow count={Math.round(parseFloat(avgRating))} size={13}/>
+                  <FP_StarRow count={sellerRatingInfo ? Math.round(sellerRatingInfo.rating || 0) : 0} size={13}/>
                   <div style={{ fontSize:10, color:FP_C.textSecondary, marginTop:4 }}>
-                    {reviews.length} reseñas
+                    {fmtBig(sellerRatingInfo?.count || 0)} valoraciones
                   </div>
                 </div>
                 <div style={{ flex:1 }}>
@@ -2082,10 +2085,12 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                 (product_id): se hace desde la ficha del producto que compraste,
                 no desde el perfil general del vendedor. */}
 
-            {/* Reviews list */}
-            {reviews.length === 0 && (
+            {/* Reviews list — reseñas del VENDEDOR (seller_reviews), nunca de sus
+                productos. Con seller_reviews_count=0 real, siempre "Sin valoraciones
+                aún" — sin importar si el vendedor tiene reseñas de producto. */}
+            {(sellerRatingInfo?.count || 0) === 0 && (
               <p style={{ fontSize:12, color:FP_C.textMuted, textAlign:"center", padding:"18px 0" }}>
-                Todavía no hay reseñas para los productos de este vendedor.
+                Sin valoraciones aún.
               </p>
             )}
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>

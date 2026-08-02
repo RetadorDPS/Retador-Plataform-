@@ -29,7 +29,7 @@ import {
   getNotifications, markNotificationsRead, markNotificationsReadByKind, refreshSessionProfile, isSuspendedUser,
   ORDER_FLOW, SHIP_LABELS, MODALIDAD_LABELS,
   CONTACT_PATTERNS, maskContacts, CUBA_PROVINCES,
-  getUserTrustStats, trackEvent, blockUser, isBlocked, getSB, convKey,
+  trackEvent, blockUser, isBlocked, getSB, convKey,
   G, BG, S, B, RCtx, useR, useResponsive, BC,
   DARK_T, LIGHT_T, AppThCtx, useAt, PlatformCfgContext,
   DENSITY_MODES, DENSITY_TOKENS, DENSITY_STORAGE_KEY, DensityContext, DensityProvider, useDensity, densityCols, TEXT_STEPS, DEFAULT_BLOCKS,

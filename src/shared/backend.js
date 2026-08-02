@@ -275,18 +275,23 @@ export const submitProductReview = async (productId, userId, rating, comment) =>
     if (error) throw error;
   }
 };
-// Todas las reseñas REALES de los productos de un vendedor (para la pestaña
-// "Reseñas" de su perfil) — mismas reseñas que se ven en cada producto, solo
-// que agregadas por vendedor. Se escriben SIEMPRE desde el producto, nunca
-// desde aquí (evita reseñas sin un product_id real detrás).
+// Reseñas REALES del VENDEDOR (tabla seller_reviews) para la pestaña
+// "Valoraciones" de su perfil — NUNCA reseñas de producto (tabla `reviews`,
+// esas se muestran solo dentro de cada producto individual). ANTES esta
+// función leía por error de `reviews` filtrando por los productos del
+// vendedor, así que un vendedor con seller_reviews_count=0 real podía ver acá
+// reseñas de sus productos mezcladas como si fueran valoraciones suyas. El
+// número/estrellas de arriba (getSellerRatingInfo) ya venían bien de
+// profiles.seller_rating/seller_reviews_count; esto alinea la LISTA con esa
+// misma fuente. Esquema de seller_reviews asumido en espejo de `reviews`
+// (seller_id en vez de product_id) — si el nombre real de la tabla o de
+// alguna columna difiere, esto se degrada a lista vacía sin romper nada.
 export const getSellerReviews = async (sellerId) => {
   if (!sellerId) return [];
   try {
-    const { data: prods } = await supabase.from("products").select("id").eq("seller_id", sellerId);
-    const ids = (prods || []).map(p => p.id);
-    if (!ids.length) return [];
-    const { data, error } = await supabase.from("reviews").select("id, user_id, rating, comment, created_at").in("product_id", ids).order("created_at", { ascending: false });
-    if (error || !data) return [];
+    const { data, error } = await supabase.from("seller_reviews").select("id, user_id, rating, comment, created_at").eq("seller_id", sellerId).order("created_at", { ascending: false });
+    if (error) { console.error("getSellerReviews:", error.message); return []; }
+    if (!data || !data.length) return [];
     const uids = [...new Set(data.map(r => r.user_id))];
     let profMap = {};
     if (uids.length) {
@@ -297,7 +302,7 @@ export const getSellerReviews = async (sellerId) => {
       const p = profMap[r.user_id];
       return { id: r.id, rating: r.rating, comment: r.comment || "", createdAt: r.created_at, name: p?.full_name || "Usuario", avatar: p?.avatar_url || null };
     });
-  } catch (e) { return []; }
+  } catch (e) { console.error("getSellerReviews (excepción):", e?.message || e); return []; }
 };
 
 // ── Encabezado del perfil (calificación del vendedor + estadísticas reales) ──
@@ -1214,9 +1219,6 @@ export function maskContacts(text) {
 }
 
 export const CUBA_PROVINCES = ["Pinar del Río", "Artemisa", "La Habana", "Mayabeque", "Matanzas", "Cienfuegos", "Villa Clara", "Sancti Spíritus", "Ciego de Ávila", "Camagüey", "Las Tunas", "Holguín", "Granma", "Santiago de Cuba", "Guantánamo", "Isla de la Juventud"];
-
-// Trust functions
-export const getUserTrustStats = async (userId) => ({ score: 85, reviews: 12 });
 
 // Event functions
 export const trackEvent = async (userId, event, data) => {};

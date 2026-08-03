@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { getAvailableDeliveries, getCourierEarnings, getCourierDebt, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase, usePlatformCfg, uploadKyc, KycSelfieSample } from "../shared/index.js";
+import { getAvailableDeliveries, getCourierEarnings, getCourierDebt, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase, usePlatformCfg, uploadKyc, KycSelfieSample, PullIndicator, usePullToRefresh } from "../shared/index.js";
 
 // Botón "Recogí"/"Entregué": AISLADO en su propio componente memoizado, recibiendo
 // solo lo que necesita (id, status, onStage) por props. Así, si el árbol de
@@ -36,6 +36,15 @@ function ProfileChip({ id, fallback = "Usuario", role, onOpen, dark }) {
       </span>
     </button>
   );
+}
+
+// Nombre REAL (profiles.full_name) resuelto por id — nunca el nombre que el
+// comprador escribió a mano en el formulario de envío, ni un genérico tipo
+// "Vendedor"/"Comprador" tratado como si fuera el nombre de la persona.
+function RealName({ id, fallback }) {
+  const [name, setName] = useState(fallback);
+  useEffect(() => { let a = true; if (id) getUserById(id).then(p => { if (a && p?.name) setName(p.name); }).catch(() => {}); return () => { a = false; }; }, [id]);
+  return name;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -103,12 +112,25 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   }, []);
   useEffect(() => { reloadDebt(); }, [reloadDebt]);
 
+  // PULL-TO-REFRESH real (no navega): antes, deslizar hacia abajo en esta
+  // pantalla disparaba el gesto NATIVO del navegador, que recarga la página
+  // entera y manda de vuelta a la pantalla de inicio. Con el gesto propio
+  // solo se piden de nuevo los datos (pool + ganancias + deuda) sin navegar.
+  const scrollRef = useRef(null);
+  const reloadAll = useCallback(async () => { await Promise.all([reloadPool(), reloadEarnings(), reloadDebt()]); }, [reloadPool, reloadEarnings, reloadDebt]);
+  const ptr = usePullToRefresh(scrollRef, reloadAll);
+
   useEffect(() => {
-    const ch = supabase.channel("rt-courier-pool")
+    // Nombre ÚNICO por montaje: supabase.channel() reutiliza el canal si el
+    // nombre se repite (p.ej. al salir y volver a entrar a "Modo Mensajero" en
+    // la misma sesión) y al re-suscribir revienta en silencio — el pool parecía
+    // "parpadear" (se veía el toque de refresco) pero nunca llegaban los
+    // pedidos nuevos, porque el canal reciclado ya no entregaba eventos.
+    const ch = supabase.channel(`rt-courier-pool-${meId || "anon"}-${Date.now()}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => { reloadPool(); reloadEarnings(); reloadDebt(); })
       .subscribe();
     return () => { try { supabase.removeChannel(ch); } catch (e) {} };
-  }, [reloadPool, reloadEarnings, reloadDebt]);
+  }, [meId, reloadPool, reloadEarnings, reloadDebt]);
 
   // MIS entregas: solo donde yo soy el mensajero (courier_id real).
   const mine = (orders || []).filter(o => meId && (o.courierId === meId || o.courier_id === meId));
@@ -290,7 +312,7 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
                     <span style={{ fontSize: 16, flexShrink: 0 }}>{part.icon}</span>
                     <span style={{ minWidth: 0 }}>
                       <span style={{ display: "block", fontSize: 9.5, color: t3, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>{part.head}</span>
-                      <span style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: t1 }}>{part.name}</span>
+                      <span style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: t1 }}><RealName id={part.id} fallback={part.name} /></span>
                       <span style={{ display: "block", fontSize: 11, color: t2, marginTop: 1 }}>{detail}</span>
                     </span>
                   </button>
@@ -375,7 +397,8 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
         </Card>
       ));
 
-  return <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 4000, overflowY: "auto", WebkitOverflowScrolling: "touch", background: bg, paddingTop: "env(safe-area-inset-top, 0px)" }}>
+  return <div ref={scrollRef} {...ptr.handlers} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 4000, overflowY: "auto", overscrollBehaviorY: "contain", WebkitOverflowScrolling: "touch", background: bg, paddingTop: "env(safe-area-inset-top, 0px)" }}>
+    <PullIndicator pull={ptr.pull} refreshing={ptr.refreshing} />
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "16px 16px 44px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${bd}`, color: t2, borderRadius: 9, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>‹ Volver a RETADOR</button>

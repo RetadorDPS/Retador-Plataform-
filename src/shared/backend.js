@@ -43,7 +43,10 @@ export const getUserById = async (id) => {
 };
 export const getUserName = async (id) => {
   const p = await getUserById(id);
-  return p?.name || "Vendedor";
+  // null (nunca un genérico como "Vendedor"): quien llama decide su propio
+  // texto de respaldo si el perfil real no carga — así nunca se confunde un
+  // relleno con un nombre de verdad.
+  return p?.name || null;
 };
 export const updateUserName = async (id, name) => {
   try { await supabase.from("profiles").update({ full_name: name }).eq("id", id); _profileCache.delete(id); } catch (e) {}
@@ -305,6 +308,17 @@ export const getSellerReviews = async (sellerId) => {
       return { id: r.id, rating: r.rating, comment: r.comment || "", createdAt: r.created_at, name: p?.full_name || "Usuario", avatar: p?.avatar_url || null };
     });
   } catch (e) { console.error("getSellerReviews (excepción):", e?.message || e); return []; }
+};
+// Guarda una reseña REAL en seller_reviews — mismo mecanismo para vendedor Y
+// mensajero: la política ya acepta que `seller_id` apunte al seller_id o al
+// courier_id de un pedido completado, según a quién se está calificando.
+// Nunca se guarda solo en el dispositivo (localStorage): así el promedio y el
+// conteo que ve todo el mundo (profiles.seller_rating/seller_reviews_count)
+// son reales, no un dato que solo tú ves.
+export const submitSellerReview = async (targetId, userId, rating, comment) => {
+  if (!targetId || !userId) throw new Error("Sesión no válida");
+  const { error } = await supabase.from("seller_reviews").insert({ seller_id: targetId, user_id: userId, rating, comment: comment || "" });
+  if (error) throw error;
 };
 
 // ── Encabezado del perfil (calificación del vendedor + estadísticas reales) ──
@@ -714,7 +728,11 @@ export const createPackageDelivery = async (data) => {
   });
   if (error) throw error;
   const id = (orderId && typeof orderId === "object") ? (orderId.id ?? orderId[0]?.id) : orderId;
-  return { id, status: "confirmado", createdAt: Date.now() };
+  // Forma COMPLETA (igual que el otro creador de pedidos, más arriba): antes
+  // solo devolvía {id}, así que la pantalla de "Envío creado" — que necesita
+  // pintar título/precio/dirección al instante, sin esperar el próximo
+  // getUserOrders() — se veía vacía o con datos que no eran los del envío.
+  return { ...data, id, shipMode: "paquete", shipType: "paquete", amount: 0, sellerId: null, courierId: null, status: "confirmado", createdAt: Date.now() };
 };
 // Stock REAL disponible de un producto (descuenta lo comprometido en pedidos
 // vivos). Se consulta al ver el detalle y al abrir el diálogo de compra, para que

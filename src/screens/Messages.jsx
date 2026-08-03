@@ -753,9 +753,13 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     }, 60);
   }, []);
 
-  // Nombre real de la otra persona (nunca "Vendedor" genérico).
+  // Nombre real de la otra persona (profiles.full_name) — SIEMPRE se resuelve
+  // por id, sin importar qué nombre haya llegado por props (podía ser un texto
+  // escrito a mano en un formulario, o un genérico tipo "Vendedor"/"Comprador").
+  // Antes solo se buscaba si NO había llegado ningún nombre, así que un nombre
+  // erróneo pasado por props se quedaba pegado para siempre.
   useEffect(() => {
-    if (!otherName && chat.otherId) getUserName(chat.otherId).then(n => n && setOtherName(n)).catch(() => {});
+    if (chat.otherId) getUserName(chat.otherId).then(n => n && setOtherName(n)).catch(() => {});
   }, [chat.otherId]);
 
   // Estado de bloqueo REAL (mutuo): consulta best-effort al abrir el chat, para

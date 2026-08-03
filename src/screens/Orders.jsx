@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, useAt, useR, PullIndicator, usePullToRefresh } from "../shared/index.js";
+import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, submitSellerReview, useAt, useR, PullIndicator, usePullToRefresh } from "../shared/index.js";
 
 export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewProfile, flash, onSellerConfirm, onBuyerConfirm, onSellerPayment, onApproveFee }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
   const [rated, setRated] = useState(() => { try { return !!(JSON.parse(localStorage.getItem("retador_ratings") || "{}")[o?.id]); } catch (e) { return false; } });
   const [rate, setRate] = useState({ sys: 0, courier: 0, seller: 0 });
   const [rateMsg, setRateMsg] = useState({ sys: "", courier: "", seller: "" });
+  const [rating, setRating] = useState(false);
   if (!o) return null;
   const sl = SHIP_LABELS[o.shipType || o.shipMode] || SHIP_LABELS.local;
   const md = MODALIDAD_LABELS[o.modalidad] || MODALIDAD_LABELS.local;
@@ -21,12 +22,32 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   const viewerIsSeller = (!!user?.id && (o.seller_id === user.id || o.sellerId === user.id)) || (!!me && o.sellerName === me);
   const viewerLooksBuyer = (!!user?.id && (o.buyer_id === user.id || o.buyerId === user.id)) || (!!o.buyerName && o.buyerName === me) || o.feeApproval === "pending";
   const isCompleted = done || o.courierStage === "completado" || o.status === "completado" || o.status === "entregado" || (o.buyerConfirmed && o.sellerPaid);
-  const submitRatings = () => {
+  // Guarda cada reseña de PERSONA de verdad en seller_reviews (mismo mecanismo
+  // para vendedor y mensajero — el backend acepta seller_id o courier_id de un
+  // pedido completado). La calificación "RETADOR en general" (rate.sys) no
+  // apunta a ninguna persona, así que no tiene cabida en esa tabla; se guarda
+  // solo localmente, como antes, hasta que exista una fuente real para ella.
+  const submitRatings = async () => {
+    if (rating) return;
+    setRating(true);
+    const sellerId = o.sellerId || o.seller_id || null;
+    const courierId = o.courierId || o.courier_id || null;
+    try {
+      const jobs = [];
+      if (sellerId && rate.seller > 0) jobs.push(submitSellerReview(sellerId, user?.id, rate.seller, rateMsg.seller));
+      if (courierId && rate.courier > 0) jobs.push(submitSellerReview(courierId, user?.id, rate.courier, rateMsg.courier));
+      await Promise.all(jobs);
+    } catch (e) {
+      flash && flash("⚠️ No se pudo guardar tu calificación: " + (e?.message || "Intenta de nuevo"));
+      setRating(false);
+      return;
+    }
     try {
       const all = JSON.parse(localStorage.getItem("retador_ratings") || "{}");
       all[o.id] = { sys: rate.sys, sysMsg: rateMsg.sys, courier: rate.courier, courierMsg: rateMsg.courier, seller: rate.seller, sellerMsg: rateMsg.seller, courierName: o.courierName || "", sellerName: o.sellerName || "", at: Date.now() };
       localStorage.setItem("retador_ratings", JSON.stringify(all));
     } catch (e) {}
+    setRating(false);
     setRated(true);
     flash && flash("¡Gracias por tu calificación!");
   };
@@ -171,7 +192,8 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
             if (!o.buyerConfirmed && !o.sellerPaid) nudge = "Pedido confirmado. Coordinen la entrega por el chat: lugar, hora y pago.";
             else if (!o.buyerConfirmed) nudge = isSeller ? "Ya confirmaste tu pago. Falta que el comprador confirme que recibió el producto." : "El vendedor ya confirmó el pago. Confirma que recibiste el producto para cerrar.";
             else nudge = isSeller ? "El comprador ya confirmó que recibió. Confirma tu pago para cerrar." : "Ya confirmaste la recepción. Falta que el vendedor confirme el pago.";
-            actions.push(btn("💬 Abrir chat para coordinar", onChat, "ghost"));
+            // (El botón de chat flotante de abajo ya abre esta misma conversación —
+            // antes había uno duplicado aquí que hacía exactamente lo mismo.)
             if (viewerIsBuyer && !isSeller && !o.buyerConfirmed) actions.push(btn("Confirmar que recibí el producto", onBuyerConfirm));
             if (isSeller && !o.sellerPaid) actions.push(btn("Confirmar que recibí el pago", () => onSellerPayment(true)));
           } else if (delivered) {
@@ -235,14 +257,16 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
                 {rate.courier > 0 && <textarea value={rateMsg.courier} onChange={e => setRateMsg(m => ({ ...m, courier: e.target.value }))} placeholder="Cuéntale a otros cómo fue el servicio del mensajero: ¿rápido?, ¿buen trato?, ¿cuidó el producto?…" style={{ width: "100%", marginTop: 10, background: soft, border: `1px solid ${B}`, borderRadius: 10, padding: "9px 11px", fontSize: 12, color: T1, minHeight: 48, resize: "vertical", fontFamily: "inherit" }} />}
               </div>}
 
-              <div style={{ borderTop: `1px solid ${B}`, paddingTop: 12, marginBottom: 4 }}>
+              {/* Envío de paquete suelto: no hay vendedor real — esta sección no
+                  tiene a quién calificar, así que no se muestra en absoluto. */}
+              {(o.sellerId || o.seller_id) && <div style={{ borderTop: `1px solid ${B}`, paddingTop: 12, marginBottom: 4 }}>
                 <p style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>Vendedor · {o.sellerName || "—"}</p>
                 <p style={{ fontSize: 10.5, color: T3, marginBottom: 9 }}>¿Cómo fue el producto y la atención?</p>
                 {stars(rate.seller, n => setRate(r => ({ ...r, seller: n })))}
                 {rate.seller > 0 && <textarea value={rateMsg.seller} onChange={e => setRateMsg(m => ({ ...m, seller: e.target.value }))} placeholder="Cuéntale a otros cómo llegó el producto y el trato del vendedor: ¿llegó bien?, ¿era como lo describía?…" style={{ width: "100%", marginTop: 10, background: soft, border: `1px solid ${B}`, borderRadius: 10, padding: "9px 11px", fontSize: 12, color: T1, minHeight: 48, resize: "vertical", fontFamily: "inherit" }} />}
-              </div>
+              </div>}
 
-              <button type="button" disabled={!rate.sys && !rate.courier && !rate.seller} onClick={submitRatings} style={{ width: "100%", marginTop: 11, background: (rate.sys || rate.courier || rate.seller) ? G : soft, color: (rate.sys || rate.courier || rate.seller) ? "#000" : T3, border: "none", borderRadius: 13, padding: "14px", fontSize: 13.5, fontWeight: 800, cursor: (rate.sys || rate.courier || rate.seller) ? "pointer" : "default" }}>Enviar calificación</button>
+              <button type="button" disabled={rating || (!rate.sys && !rate.courier && !rate.seller)} onClick={submitRatings} style={{ width: "100%", marginTop: 11, background: (rate.sys || rate.courier || rate.seller) ? G : soft, color: (rate.sys || rate.courier || rate.seller) ? "#000" : T3, border: "none", borderRadius: 13, padding: "14px", fontSize: 13.5, fontWeight: 800, cursor: (rating || !(rate.sys || rate.courier || rate.seller)) ? "default" : "pointer", opacity: rating ? .7 : 1 }}>{rating ? "Enviando…" : "Enviar calificación"}</button>
             </div>)}
 
         {/* Chat con la otra parte */}
@@ -275,9 +299,15 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], lastSeen = 
   // mantiene mientras miras y desaparece la próxima vez, en vez de parpadear.
   const baselineRef = useRef({});
   useEffect(() => {
-    if (baselineRef.current[tab] === undefined) baselineRef.current[tab] = lastSeen[tab] || 0;
-    onSeen && onSeen(tab);   // al abrir/cambiar de pestaña, márcala vista (limpia su badge)
-  }, [tab]);
+    // Al ABRIR "Mis pedidos" se marcan vistas AMBAS pestañas de una vez (el
+    // badge del menú es la suma de las dos) — antes solo se marcaba la pestaña
+    // activa, así que el badge quedaba "pegado" si el usuario no llegaba a
+    // cambiar a la otra pestaña en esa visita.
+    if (baselineRef.current.compras === undefined) baselineRef.current.compras = lastSeen.compras || 0;
+    if (baselineRef.current.ventas === undefined) baselineRef.current.ventas = lastSeen.ventas || 0;
+    onSeen && onSeen("compras");
+    onSeen && onSeen("ventas");
+  }, []);
 
   const statusColors = { pendiente: "#FBBF24", pending: "#FBBF24", creada: "#FBBF24", confirmed: "#60A5FA", confirmado: "#60A5FA", shipped: "#A78BFA", delivered: "#22C55E", entregado: "#22C55E", cancelled: "#F87171", fallido: "#F87171" };
   const statusLabels = { pendiente: "Pendiente", pending: "Pendiente", creada: "Creado", confirmed: "Confirmado", confirmado: "Confirmado", shipped: "En camino", delivered: "Entregado", entregado: "Entregado", cancelled: "Cancelado", fallido: "Fallido" };

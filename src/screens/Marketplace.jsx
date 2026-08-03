@@ -1564,7 +1564,7 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
 
   useEffect(() => {
     if (!p.seller_id) { setSellerName("Vendedor"); return; }
-    getUserName(p.seller_id).then(setSellerName);
+    getUserName(p.seller_id).then(n => setSellerName(n || p.seller_name || "Vendedor"));
     getProfileHeaderStats(p.seller_id).then(setSellerStats).catch(() => {});
     // Track view
     if (user?.id) trackEvent(user.id, p.id, "view").catch(() => {});

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import IntlShippingApp from "./IntlShipping.jsx";
-import { LiveSlot, useAt, usePlatformCfg, createPackageDelivery, uploadImage } from "../shared/index.js";
+import { LiveSlot, useAt, usePlatformCfg, createPackageDelivery, uploadImage, systemRating } from "../shared/index.js";
 
 const DELIVERY_LOCAL_CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=Outfit:wght@300;400;500;600;700&display=swap');
@@ -216,7 +216,7 @@ const T = {
 };
 
 /* ── ROOT ───────────────────────────────────────────────────────── */
-export function LocalDelivery({ onBack, onNav, onChat, flash, user, onTrackOrder }) {
+export function LocalDelivery({ onBack, onNav, onChat, flash, user, onTrackOrder, onPackageCreated }) {
   const { isDark } = useAt();
   const [screen, setScreen] = useState('home');
   // El chat del seguimiento abre el chat REAL conectado (conversations/messages),
@@ -226,7 +226,7 @@ export function LocalDelivery({ onBack, onNav, onChat, flash, user, onTrackOrder
     <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column', background: isDark ? DL_DARK.bg : DL_LIGHT.bg, fontFamily:"'Outfit',sans-serif", color: isDark ? DL_DARK.text1 : DL_LIGHT.text1 }}>
       <style>{DELIVERY_LOCAL_CSS}</style>
       {screen==='home'     && <DLHomeScreen      key="home"     onNew={()=>setScreen('nuevo')} onRastrear={()=>setScreen('rastrear')} onMenuBack={onBack} onNav={onNav}/>}
-      {screen==='nuevo'    && <DLNuevoEnvioScreen key="nuevo"   onBack={()=>setScreen('home')} user={user} flash={flash} onTrackOrder={onTrackOrder}/>}
+      {screen==='nuevo'    && <DLNuevoEnvioScreen key="nuevo"   onBack={()=>setScreen('home')} user={user} flash={flash} onTrackOrder={onTrackOrder} onPackageCreated={onPackageCreated}/>}
       {screen==='rastrear' && <DLRastrearScreen   key="rastrear" onBack={()=>setScreen('home')} onChat={openConnectedChat}/>}
     </div>
   );
@@ -432,12 +432,19 @@ function DLActiveSection({ onRastrear }) {
 
 function DLStatsStrip() {
   const C = useC();
+  // "Servicio de entrega" refleja aquí la pregunta "¿Cómo estuvo el servicio en
+  // general?" que se responde al calificar un pedido (Mis pedidos → detalle →
+  // "RETADOR · Servicio de entregas"). Usa systemRating() — el mismo agregado
+  // real que ya se muestra en el menú de Envíos y en el panel de admin (ojo:
+  // hoy vive en localStorage, por dispositivo — no es todavía un promedio
+  // compartido entre todos los usuarios desde Supabase).
+  const sysR = systemRating();
   return (
     <div style={{ padding:'17px 14px 0' }}>
       <DLSectionTitle title="Rendimiento"/>
-      <div style={{ display:'flex', gap:7 }}>
-        {[{icon:<DLLightningIcon/>,v:'22 min',l:'Entrega promedio',s:'Últimas 72h',g:true},{icon:<DLShieldIcon/>,v:'98.4%',l:'Tasa de éxito',s:'Este mes',g:false},{icon:<DLBoxIcon/>,v:'1,240',l:'Entregas totales',s:'Historial',g:false}].map(({icon,v,l,s,g})=>(
-          <div key={l} style={{ flex:1, background:g?'rgba(196,152,46,0.065)':C.bg1, border:`1px solid ${g?C.goldBorder:C.border}`, borderRadius:17, padding:'13px 11px' }}>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:7 }}>
+        {[{icon:<DLLightningIcon/>,v:'22 min',l:'Entrega promedio',s:'Últimas 72h',g:true},{icon:<DLShieldIcon/>,v:'98.4%',l:'Tasa de éxito',s:'Este mes',g:false},{icon:<DLBoxIcon/>,v:'1,240',l:'Entregas totales',s:'Historial',g:false},{icon:'⭐',v:sysR.count?String(sysR.avg):'—',l:'Servicio de entrega',s:sysR.count?sysR.count+' calificaciones':'Calificas al completar un pedido',g:false}].map(({icon,v,l,s,g})=>(
+          <div key={l} style={{ flex:'1 1 calc(50% - 4px)', background:g?'rgba(196,152,46,0.065)':C.bg1, border:`1px solid ${g?C.goldBorder:C.border}`, borderRadius:17, padding:'13px 11px' }}>
             <div style={{ marginBottom:8, color:g?C.goldText:C.text2 }}>{icon}</div>
             <div style={{ ...T.heading, fontSize:17, letterSpacing:'-0.022em', lineHeight:1, color:g?C.goldText:C.text1, marginBottom:3.5 }}>{v}</div>
             <div style={{ ...T.medium, fontSize:10.8, color:C.text2, lineHeight:1.3, marginBottom:2.5 }}>{l}</div>
@@ -590,7 +597,7 @@ function DLHistoryRow({ e }) {
 }
 
 /* ── NUEVO ENVÍO ─────────────────────────────────────────────────── */
-function DLNuevoEnvioScreen({ onBack, user, flash, onTrackOrder }) {
+function DLNuevoEnvioScreen({ onBack, user, flash, onTrackOrder, onPackageCreated }) {
   const C = useC();
   const platformCfg = usePlatformCfg(); // tarifa local desde la config GLOBAL del backend
   const [form,setForm]=useState({pickAddr:'',pickRef:'',pickName:'',pickPhone:'',dropAddr:'',dropRef:'',dropName:'',dropPhone:'',article:''});
@@ -598,6 +605,7 @@ function DLNuevoEnvioScreen({ onBack, user, flash, onTrackOrder }) {
   const [submitted,setSubmitted]=useState(false);
   const [submitting,setSubmitting]=useState(false);
   const [createdId,setCreatedId]=useState(null);
+  const [createdOrder,setCreatedOrder]=useState(null);
   const [photo,setPhoto]=useState(null);
   const [uploadingPhoto,setUploadingPhoto]=useState(false);
   const [shakeTrg,setShakeTrg]=useState(false);
@@ -641,9 +649,10 @@ function DLNuevoEnvioScreen({ onBack, user, flash, onTrackOrder }) {
       };
       const res=await createPackageDelivery({
         title:form.article.trim(), image:photo||null,
-        shipPrice:localPrice, shipTo:form.dropAddr.trim(), delivery,
+        shipPrice:localPrice, shipTo:form.dropAddr.trim(), delivery, buyerId:user.id,
       });
       setCreatedId(res.id);
+      setCreatedOrder(res);
       setSubmitted(true);
     }catch(e){
       flash&&flash('⚠️ No se pudo crear el envío: '+(e?.message||'Intenta de nuevo'));
@@ -702,7 +711,7 @@ function DLNuevoEnvioScreen({ onBack, user, flash, onTrackOrder }) {
         </div>
         {summary&&<div className="ne-s5 ne-summary" style={{ padding:'10px 18px 0' }}><DLSummaryCard summary={summary}/></div>}
         <div className="ne-s5" style={{ padding:'11px 18px 0' }}><DLValidationStatus isValid={isValid} missing={missing}/></div>
-        <div className="ne-s6" style={{ padding:'9px 18px 0' }}><DLCTAButton enabled={isValid} submitting={submitting} submitted={submitted} onClick={submit} shakeTrg={shakeTrg} btnRef={btnRef} onTrack={createdId&&onTrackOrder?()=>onTrackOrder(createdId):null}/></div>
+        <div className="ne-s6" style={{ padding:'9px 18px 0' }}><DLCTAButton enabled={isValid} submitting={submitting} submitted={submitted} onClick={submit} shakeTrg={shakeTrg} btnRef={btnRef} onTrack={createdOrder&&onPackageCreated ? ()=>onPackageCreated(createdOrder) : (createdId&&onTrackOrder?()=>onTrackOrder(createdId):null)}/></div>
       </div>
     </div>
   );

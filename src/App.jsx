@@ -1166,6 +1166,38 @@ function AppShell({ sessionUser }) {
   };
   const requestChat = (sellerId, sellerName, context) => { if (suspended) { flash("⛔ Tu cuenta está suspendida"); return; } openChat(sellerId, sellerName, context); };
 
+  // ── CHAT DE UN PEDIDO — SISTEMA DE DOS MODALES ───────────────────────────────
+  // Antes el botón de chat de un pedido siempre apuntaba a "la otra parte según mi
+  // rol" con un nombre genérico ("Vendedor"/"Comprador") — y para un envío de
+  // paquete (sin vendedor) mandaba un id nulo → "usuario no identificado".
+  // Ahora: si YO soy vendedor o mensajero, hablo con el comprador (nunca conmigo
+  // mismo). Si YO soy el comprador: con vendedor Y mensajero asignados, pregunta
+  // con quién (hoja con el NOMBRE REAL de cada uno); un paquete suelto (sin
+  // vendedor) va DIRECTO al mensajero; sin mensajero todavía, solo al vendedor.
+  const [chatPicker, setChatPicker] = useState(null); // { sellerId, sellerName, courierId, courierName, context }
+  const openOrderChat = async (o) => {
+    const sellerId = o.seller_id || o.sellerId || null;
+    const courierId = o.courier_id || o.courierId || null;
+    const buyerId = o.buyer_id || o.buyerId || null;
+    const context = { type: "order", id: o.id, title: o.title || "Pedido", image: o.image || null };
+    const meIsSeller = !!sellerId && sellerId === user?.id;
+    const meIsCourier = !!courierId && courierId === user?.id;
+
+    if (meIsSeller || meIsCourier) {
+      const name = buyerId ? await getUserName(buyerId) : null;
+      requestChat(buyerId, name || "Comprador", context);
+      return;
+    }
+    if (sellerId && courierId) {
+      const [sName, cName] = await Promise.all([getUserName(sellerId), getUserName(courierId)]);
+      setChatPicker({ sellerId, sellerName: sName || "Vendedor", courierId, courierName: cName || "Mensajero", context });
+      return;
+    }
+    if (courierId) { const name = await getUserName(courierId); requestChat(courierId, name || "Mensajero", context); return; }
+    if (sellerId) { const name = await getUserName(sellerId); requestChat(sellerId, name || "Vendedor", context); return; }
+    flash("No se pudo abrir el chat: usuario no identificado");
+  };
+
   // Usuarios bloqueados (persistentes) — los usa Ajustes. El chat en sí ya va por
   // el backend (conversations/messages con realtime); no hay chat local.
   const [blockedUsers, setBlockedUsers] = useState(() => { try { return JSON.parse(localStorage.getItem("retador_blocked") || "[]"); } catch { return []; } });
@@ -1358,6 +1390,17 @@ function AppShell({ sessionUser }) {
       {chatOpen && selChat && (
         <div style={{ position: "fixed", inset: 0, zIndex: 5100, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
           <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => setChatOpen(false)} onConvId={setOpenConvId} flash={flash} onViewProfile={openPublicProfile} orders={mergedOrders} onOpenOrder={openOrderFromChat} onOpenProduct={openProductFromChat} />
+        </div>
+      )}
+      {/* Hoja "¿con quién quieres chatear?" — pedidos con vendedor Y mensajero a la vez. */}
+      {chatPicker && (
+        <div onClick={() => setChatPicker(null)} style={{ position: "fixed", inset: 0, zIndex: 5150, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "flex-end" }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, margin: "0 auto", background: effectiveTheme === "dark" ? "#141417" : "#fff", borderRadius: "20px 20px 0 0", padding: "18px 16px calc(18px + env(safe-area-inset-bottom, 0px))" }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: effectiveTheme === "dark" ? "#f0f0f2" : "#0f172a", marginBottom: 12, textAlign: "center" }}>¿Con quién quieres chatear?</div>
+            <button onClick={() => { requestChat(chatPicker.sellerId, chatPicker.sellerName, chatPicker.context); setChatPicker(null); }} style={{ width: "100%", textAlign: "left", background: "transparent", border: `1px solid ${effectiveTheme === "dark" ? "rgba(255,255,255,.1)" : "rgba(0,0,0,.1)"}`, borderRadius: 13, padding: "13px 15px", marginBottom: 8, cursor: "pointer", fontSize: 13.5, fontWeight: 700, color: effectiveTheme === "dark" ? "#f0f0f2" : "#0f172a" }}>💬 Chatear con {chatPicker.sellerName}</button>
+            <button onClick={() => { requestChat(chatPicker.courierId, chatPicker.courierName, chatPicker.context); setChatPicker(null); }} style={{ width: "100%", textAlign: "left", background: "transparent", border: `1px solid ${effectiveTheme === "dark" ? "rgba(255,255,255,.1)" : "rgba(0,0,0,.1)"}`, borderRadius: 13, padding: "13px 15px", marginBottom: 8, cursor: "pointer", fontSize: 13.5, fontWeight: 700, color: effectiveTheme === "dark" ? "#f0f0f2" : "#0f172a" }}>🛵 Chatear con {chatPicker.courierName}</button>
+            <button onClick={() => setChatPicker(null)} style={{ width: "100%", background: "transparent", border: "none", color: "#888", fontSize: 12.5, fontWeight: 700, padding: "8px", cursor: "pointer" }}>Cancelar</button>
+          </div>
         </div>
       )}
       {showWallet && (() => {
@@ -1650,7 +1693,7 @@ function AppShell({ sessionUser }) {
 
           {tab === "envios" && <>
             {eScr === "menu"  && <EnviosMenu onLocal={() => setEScr("local")} onIntl={() => setEScr("intl")} user={user} requireAuth={requireAuth} />}
-            {eScr === "local" && <SectionGate enabled={sections.deliveryLocal} dark={isDarkTheme} onClose={() => setEScr("menu")}><LocalDelivery onBack={() => setEScr("menu")} flash={flash} cfg={adminCfg} user={user} onNav={navTo} onChat={openMessages} onTrackOrder={openOrderById} /></SectionGate>}
+            {eScr === "local" && <SectionGate enabled={sections.deliveryLocal} dark={isDarkTheme} onClose={() => setEScr("menu")}><LocalDelivery onBack={() => setEScr("menu")} flash={flash} cfg={adminCfg} user={user} onNav={navTo} onChat={openMessages} onTrackOrder={openOrderById} onPackageCreated={(order) => { const eo = addOrder(order); if (eo) openOrderById(eo.id); }} /></SectionGate>}
             {eScr === "intl"  && <SectionGate enabled={sections.intlShipping} dark={isDarkTheme} onClose={() => setEScr("menu")}><IntlShipping  onBack={() => setEScr("menu")} flash={flash} cfg={cfg} onNav={navTo} /></SectionGate>}
           </>}
 
@@ -1689,7 +1732,7 @@ function AppShell({ sessionUser }) {
               blockedUsers={blockedUsers} onToggleBlock={toggleBlock}
               onOpenWallet={() => setShowWallet(true)} orders={orders.filter(o => (o.buyerId ? o.buyerId === user?.id : true))} />}
             {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { setSelOrderId(o.id); setPScr("order-detail"); }} onRefresh={loadOrders} />}
-            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => { const meSeller = (o.seller_id || o.sellerId) === user?.id; requestChat(meSeller ? (o.buyer_id || o.buyerId) : (o.seller_id || o.sellerId), meSeller ? (o.buyerName || "Comprador") : (o.sellerName || "Vendedor"), { type: "order", id: o.id, title: o.title || "Pedido", image: o.image || null }); }} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
+            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => openOrderChat(o)} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
             {/* Panel lateral del Perfil (☰): todo el menú que antes estaba apilado */}
             <ProfileMenuDrawer open={profileMenuOpen} onClose={() => setProfileMenuOpen(false)} user={user} isOwner={hasPanel}
               onMessages={openMessages} onOrders={() => setPScr("orders")} onWallet={() => setShowWallet(true)}

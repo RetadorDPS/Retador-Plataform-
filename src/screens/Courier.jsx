@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { getAvailableDeliveries, getCourierEarnings, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase, usePlatformCfg, uploadKyc, KycSelfieSample } from "../shared/index.js";
+import { getAvailableDeliveries, getCourierEarnings, getCourierDebt, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase, usePlatformCfg, uploadKyc, KycSelfieSample } from "../shared/index.js";
 
 // Botón "Recogí"/"Entregué": AISLADO en su propio componente memoizado, recibiendo
 // solo lo que necesita (id, status, onStage) por props. Así, si el árbol de
@@ -93,12 +93,22 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   }, []);
   useEffect(() => { reloadEarnings(); }, [reloadEarnings]);
 
+  // DEUDA real (courier_debt): comisión de entrega (commDeliveryPct) que se
+  // registra sola en el mismo ledger de los vendedores al completarse cada
+  // entrega. Nunca calculada aquí — solo mostrada tal cual llega del backend.
+  const [debt, setDebt] = useState(null);
+  const reloadDebt = useCallback(async () => {
+    const d = await getCourierDebt();
+    setDebt(d);
+  }, []);
+  useEffect(() => { reloadDebt(); }, [reloadDebt]);
+
   useEffect(() => {
     const ch = supabase.channel("rt-courier-pool")
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => { reloadPool(); reloadEarnings(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => { reloadPool(); reloadEarnings(); reloadDebt(); })
       .subscribe();
     return () => { try { supabase.removeChannel(ch); } catch (e) {} };
-  }, [reloadPool, reloadEarnings]);
+  }, [reloadPool, reloadEarnings, reloadDebt]);
 
   // MIS entregas: solo donde yo soy el mensajero (courier_id real).
   const mine = (orders || []).filter(o => meId && (o.courierId === meId || o.courier_id === meId));
@@ -393,6 +403,24 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
           <div><b style={{ fontSize: 16 }}>{earnView === "hoy" ? (earnings?.hoyEntregas || 0) : (earnings?.totalEntregas || 0)}</b> <span style={{ opacity: .8 }}>{earnView === "hoy" ? "entregas hoy" : "entregas en total"}</span></div>
           <div><b style={{ fontSize: 16 }}>{earnings?.enCurso || 0}</b> <span style={{ opacity: .8 }}>en curso</span></div>
           <div><b style={{ fontSize: 16 }}>{pool.length}</b> <span style={{ opacity: .8 }}>disponibles</span></div>
+        </div>
+      </div>
+
+      {/* DEUDA real (courier_debt): comisión de entrega que se acumula sola en el
+          mismo ledger que los vendedores. Se muestra SIEMPRE, incluso en cero, para
+          que el mensajero sepa que el sistema lo lleva — nunca se oculta la tarjeta. */}
+      <div style={{ background: "#0c0c0d", border: "1px solid #FFC01E33", borderRadius: 16, padding: "15px 17px", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 11, background: "#FFC01E1a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🧾</div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 10, color: "#FFC01E", fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em" }}>Debes a RETADOR</div>
+            <div style={{ fontSize: 21, fontWeight: 800, color: "#fff", marginTop: 2 }}>
+              {debt && debt.debe > 0 ? money(debt.debe) : "Sin deuda pendiente"}
+            </div>
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: "#9aa0aa", marginTop: 10, lineHeight: 1.4 }}>
+          {debt?.pctComision > 0 ? `${debt.pctComision}% de comisión por cada entrega` : "Comisión de entrega por cada pedido completado"}
         </div>
       </div>
 

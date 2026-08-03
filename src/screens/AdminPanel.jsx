@@ -2251,7 +2251,9 @@ function Economia({toast, data={}, ro}){
     getProfilesByIds(ids).then(m => setPNames(prev => ({ ...prev, ...m }))).catch(() => {});
   }, [promoted, ledger]);
   const nameOf = uid => pNames[uid]?.full_name || null;
-  // DEUDAS por vendedor: SOLO del LEDGER real del backend (seller_commission_ledger).
+  // DEUDAS por vendedor Y mensajero: SOLO del LEDGER real del backend
+  // (seller_commission_ledger). Los cargos de mensajero llegan solos al
+  // completarse cada entrega, con kind='courier' — mismo ledger, etiqueta distinta.
   // Si el ledger no es legible (sin permiso) → lista vacía, nunca un estimado local.
   const debts = useMemo(() => {
     if (!Array.isArray(ledger)) return [];   // cargando o sin acceso → nada calculado
@@ -2261,10 +2263,12 @@ function Economia({toast, data={}, ro}){
       if (e.paid === true) return;
       const amt = Number(e.amount_owed) || 0; if (amt <= 0) return;
       const kind = String(e.kind || '').toLowerCase();
-      if (!m[uid]) m[uid] = { uid, comm: 0, promo: 0 };
-      if (kind === 'promotion') m[uid].promo += amt; else m[uid].comm += amt;
+      if (!m[uid]) m[uid] = { uid, comm: 0, promo: 0, courier: 0 };
+      if (kind === 'promotion') m[uid].promo += amt;
+      else if (kind === 'courier') m[uid].courier += amt;
+      else m[uid].comm += amt;
     });
-    return Object.values(m).map(d => ({ ...d, total: d.comm + d.promo })).filter(d => d.total > 0).sort((a, b) => b.total - a.total);
+    return Object.values(m).map(d => ({ ...d, total: d.comm + d.promo + d.courier })).filter(d => d.total > 0).sort((a, b) => b.total - a.total);
   }, [ledger]);
   const promoCharges = (Array.isArray(ledger) ? ledger : []).filter(e => String(e.kind || '').toLowerCase() === 'promotion').slice(0, 20);
   const unpromote = async (p) => {
@@ -2285,6 +2289,7 @@ function Economia({toast, data={}, ro}){
     const name = nameOf(d.uid) || 'vendedor';
     const parts = [];
     if (d.comm > 0) parts.push(`${Math.round(d.comm)} por comisiones`);
+    if (d.courier > 0) parts.push(`${Math.round(d.courier)} por comisión de entrega`);
     if (d.promo > 0) parts.push(`${Math.round(d.promo)} por promociones`);
     return `Hola ${name} 👋. Tienes una deuda pendiente de ${Math.round(d.total)} CUP con RETADOR (${parts.join(' y ')}). ¡Gracias!`;
   };
@@ -2547,13 +2552,13 @@ function Economia({toast, data={}, ro}){
         <div style={{fontSize:10,color:'var(--tx3)',marginTop:8}}>Cifras del backend (fuente única), iguales para todo el equipo.</div>
       </div>
       <div className="card cp">
-        <div className="ch"><span className="ct">Deudas por vendedor</span><span className={`bdg ${debts.length?'by':'bx'}`}>{debts.length}</span></div>
-        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 8px'}}>Comisiones y promociones sin saldar. Toca el nombre para ver su ficha; "Cobrar" abre el chat con el mensaje listo.</div>
+        <div className="ch"><span className="ct">Deudas pendientes</span><span className={`bdg ${debts.length?'by':'bx'}`}>{debts.length}</span></div>
+        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 8px'}}>Comisión de venta, comisión de entrega y promociones sin saldar (vendedores y mensajeros). Toca el nombre para ver su ficha; "Cobrar" abre el chat con el mensaje listo.</div>
         {debts.length===0
-          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>Nadie debe nada por ahora. Cada venta o destacado sumará aquí.</div>
+          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>Nadie debe nada por ahora. Cada venta, entrega o destacado sumará aquí.</div>
           : debts.slice(0,12).map(d=>{
-            const name = nameOf(d.uid) || 'Vendedor';
-            const parts = [d.comm>0?`${fmt(d.comm)} comisiones`:null, d.promo>0?`${fmt(d.promo)} promociones`:null].filter(Boolean).join(' · ');
+            const name = nameOf(d.uid) || (d.courier>0 && d.comm===0 && d.promo===0 ? 'Mensajero' : 'Vendedor');
+            const parts = [d.comm>0?`${fmt(d.comm)} comisión de venta`:null, d.courier>0?`${fmt(d.courier)} comisión de entrega`:null, d.promo>0?`${fmt(d.promo)} promociones`:null].filter(Boolean).join(' · ');
             return <div key={d.uid} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
               <div onClick={()=>data.onViewProfile&&data.onViewProfile(d.uid)} style={{display:'flex',alignItems:'center',gap:8,flex:1,minWidth:0,cursor:'pointer'}}>
                 <Avatar url={avatarUrlOf(pNames[d.uid]?.avatar_url)} name={name} size={34} />

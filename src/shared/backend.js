@@ -1204,6 +1204,24 @@ export const getCourierEarnings = async () => {
     };
   } catch (e) { console.error("courier_earnings (excepción):", e?.message || e); return empty; }
 };
+// Deuda REAL del mensajero (courier_debt): comisión de entrega (commDeliveryPct)
+// acumulada por cada entrega completada, lo ya pagado y el % vigente — ÚNICA
+// fuente para la tarjeta de deuda. Va al mismo ledger que usan los vendedores
+// (seller_commission_ledger, kind='courier').
+export const getCourierDebt = async () => {
+  const empty = { debe: 0, pagadoTotal: 0, pctComision: 0 };
+  try {
+    const { data, error } = await supabase.rpc("courier_debt");
+    if (error) { console.error("courier_debt:", error.message); return empty; }
+    if (!data) return empty;
+    const row = Array.isArray(data) ? (data[0] || {}) : data;
+    return {
+      debe: Number(row.debe) || 0,
+      pagadoTotal: Number(row.pagado_total) || 0,
+      pctComision: Number(row.pct_comision) || 0,
+    };
+  } catch (e) { console.error("courier_debt (excepción):", e?.message || e); return empty; }
+};
 
 // Plantillas de estados del pedido según la forma de entrega elegida.
 // Cada pedido recorre uno de estos flujos; el envío "cuelga" del pedido y hereda sus datos.

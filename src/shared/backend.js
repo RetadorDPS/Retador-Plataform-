@@ -1184,6 +1184,26 @@ export const getAvailableDeliveries = async () => {
 export const updateOrderStatus = async (orderId, status) => {
   try { await supabase.from("orders").update({ status }).eq("id", orderId); } catch (e) { console.error("updateOrderStatus:", e?.message || e); }
 };
+// Ganancias REALES del mensajero (courier_earnings): hoy y total acumulado,
+// más entregas en curso — ÚNICA fuente para la tarjeta de ganancias. Nunca se
+// suma a mano desde los pedidos ya cargados en el frontend (esos no
+// garantizan estar completos ni acotados a "hoy").
+export const getCourierEarnings = async () => {
+  const empty = { hoyMonto: 0, hoyEntregas: 0, totalMonto: 0, totalEntregas: 0, enCurso: 0 };
+  try {
+    const { data, error } = await supabase.rpc("courier_earnings");
+    if (error) { console.error("courier_earnings:", error.message); return empty; }
+    if (!data) return empty;
+    const row = Array.isArray(data) ? (data[0] || {}) : data;
+    return {
+      hoyMonto: Number(row.hoy_monto) || 0,
+      hoyEntregas: Number(row.hoy_entregas) || 0,
+      totalMonto: Number(row.total_monto) || 0,
+      totalEntregas: Number(row.total_entregas) || 0,
+      enCurso: Number(row.en_curso) || 0,
+    };
+  } catch (e) { console.error("courier_earnings (excepción):", e?.message || e); return empty; }
+};
 
 // Plantillas de estados del pedido según la forma de entrega elegida.
 // Cada pedido recorre uno de estos flujos; el envío "cuelga" del pedido y hereda sus datos.

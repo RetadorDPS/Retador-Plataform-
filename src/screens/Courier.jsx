@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { getAvailableDeliveries, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase, usePlatformCfg, uploadKyc, KycSelfieSample } from "../shared/index.js";
+import { getAvailableDeliveries, getCourierEarnings, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase, usePlatformCfg, uploadKyc, KycSelfieSample } from "../shared/index.js";
 
 // Botón "Recogí"/"Entregué": AISLADO en su propio componente memoizado, recibiendo
 // solo lo que necesita (id, status, onStage) por props. Así, si el árbol de
@@ -80,12 +80,25 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
     })));
   }, []);
   useEffect(() => { reloadPool(); }, [reloadPool]);
+
+  // GANANCIAS reales (courier_earnings): hoy por defecto, con opción de ver el
+  // TOTAL acumulado — todo desde la RPC, nunca sumado a mano de los pedidos
+  // ya cargados en el frontend (esos no garantizan estar completos ni
+  // acotados a "hoy").
+  const [earnings, setEarnings] = useState(null);
+  const [earnView, setEarnView] = useState("hoy"); // "hoy" | "total"
+  const reloadEarnings = useCallback(async () => {
+    const e = await getCourierEarnings();
+    setEarnings(e);
+  }, []);
+  useEffect(() => { reloadEarnings(); }, [reloadEarnings]);
+
   useEffect(() => {
     const ch = supabase.channel("rt-courier-pool")
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => reloadPool())
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => { reloadPool(); reloadEarnings(); })
       .subscribe();
     return () => { try { supabase.removeChannel(ch); } catch (e) {} };
-  }, [reloadPool]);
+  }, [reloadPool, reloadEarnings]);
 
   // MIS entregas: solo donde yo soy el mensajero (courier_id real).
   const mine = (orders || []).filter(o => meId && (o.courierId === meId || o.courier_id === meId));
@@ -100,7 +113,6 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   const surgePct = o => { if (!surgeCfg.on || o.courierId || o.courier_id) return 0; const mins = (Date.now() - (o.createdAt || 0)) / 60000; const steps = Math.floor(mins / surgeCfg.every); return Math.min(surgeCfg.cap, steps * surgeCfg.step); };
   const feeOf = o => { const b = baseFeeOf(o); return Math.round(b * (1 + surgePct(o) / 100)); };
   const isCash = o => (o.payMethod || o.payment_method || "efectivo").toString().toLowerCase().includes("efect") || !(o.payMethod || o.payment_method);
-  const earnedTotal = done.reduce((s, o) => s + feeOf(o), 0);
   const dropOf = o => o.delivery?.address || o.ship_to || o.shipTo || "";
   const dropNameOf = o => o.delivery?.name || o.buyerName || "Comprador";
   const dropPhoneOf = o => o.delivery?.phone || "";
@@ -364,11 +376,22 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
       </div>
 
       <div style={{ background: `linear-gradient(135deg,#4F46E5,#7C3AED)`, borderRadius: 18, padding: "18px 18px 20px", marginBottom: 16, color: "#fff" }}>
-        <div style={{ fontSize: 13, opacity: .85 }}>Hola, {(record?.nombre || meName || "").split(" ")[0]} 👋</div>
-        <div style={{ fontSize: 12, opacity: .75, marginTop: 2 }}>Ganado en entregas completadas</div>
-        <div style={{ fontSize: 30, fontWeight: 800, marginTop: 2 }}>{money(earnedTotal)}</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 13, opacity: .85 }}>Hola, {(record?.nombre || meName || "").split(" ")[0]} 👋</div>
+          {/* Hoy por defecto, con la opción de ver el TOTAL acumulado — ambos
+              vienen de courier_earnings, nunca sumados a mano de los pedidos
+              cargados en el frontend. */}
+          <div style={{ display: "flex", background: "rgba(255,255,255,.14)", borderRadius: 100, padding: 2 }}>
+            {[["hoy", "Hoy"], ["total", "Total"]].map(([k, lb]) => (
+              <button key={k} onClick={() => setEarnView(k)} style={{ border: "none", borderRadius: 100, padding: "4px 11px", fontSize: 10.5, fontWeight: 700, cursor: "pointer", background: earnView === k ? "#fff" : "transparent", color: earnView === k ? "#4F46E5" : "#fff" }}>{lb}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ fontSize: 12, opacity: .75, marginTop: 8 }}>{earnView === "hoy" ? "Ganado hoy" : "Ganado en total"}</div>
+        <div style={{ fontSize: 30, fontWeight: 800, marginTop: 2 }}>{money(earnView === "hoy" ? (earnings?.hoyMonto || 0) : (earnings?.totalMonto || 0))}</div>
         <div style={{ display: "flex", gap: 18, marginTop: 10, fontSize: 12 }}>
-          <div><b style={{ fontSize: 16 }}>{done.length}</b> <span style={{ opacity: .8 }}>completadas</span></div>
+          <div><b style={{ fontSize: 16 }}>{earnView === "hoy" ? (earnings?.hoyEntregas || 0) : (earnings?.totalEntregas || 0)}</b> <span style={{ opacity: .8 }}>{earnView === "hoy" ? "entregas hoy" : "entregas en total"}</span></div>
+          <div><b style={{ fontSize: 16 }}>{earnings?.enCurso || 0}</b> <span style={{ opacity: .8 }}>en curso</span></div>
           <div><b style={{ fontSize: 16 }}>{pool.length}</b> <span style={{ opacity: .8 }}>disponibles</span></div>
         </div>
       </div>

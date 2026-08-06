@@ -805,6 +805,19 @@ export const getUserOrders = async (userId) => {
     .or(`buyer_id.eq.${userId},seller_id.eq.${userId},courier_id.eq.${userId}`)
     .order("created_at", { ascending: false });
   if (error) { console.error("getUserOrders:", error.message); return []; }
+  // NOMBRES REALES de las tres partes, de profiles.full_name, en UNA sola consulta.
+  // Antes el nombre del comprador se sacaba de delivery.name — un campo de texto
+  // libre del formulario de entrega — así que lo que el usuario escribiera ahí
+  // ("fff", "Eng") pasaba a ser su nombre en todo el pedido, para el vendedor y
+  // para el mensajero. El texto libre ya solo sirve como apodo/complemento.
+  const ids = [...new Set((data || []).flatMap(o => [o.buyer_id, o.seller_id, o.courier_id]).filter(Boolean))];
+  let names = {};
+  if (ids.length) {
+    try {
+      const { data: profs } = await supabase.from("profiles").select("id, full_name").in("id", ids);
+      (profs || []).forEach(p => { if (p?.id) names[p.id] = p.full_name || null; });
+    } catch (e) { /* sin nombres: se cae a las columnas del propio pedido */ }
+  }
   return (data || []).map(o => {
     const shipMode = o.ship_mode || "local";
     const flow = ORDER_FLOW[shipMode] || ORDER_FLOW.local;
@@ -831,9 +844,14 @@ export const getUserOrders = async (userId) => {
       payMethod: o.payment_method ?? null,
       heldAmount: o.held_amount ?? null,
       walletPaid: o.wallet_paid ?? null,
-      buyerName: o.delivery?.name || o.buyer_name || null,
-      sellerName: o.seller_name || null,
-      courierName: o.courier_name || null,
+      // SIEMPRE el nombre real del perfil; el del formulario ya no lo suplanta.
+      buyerName: (o.buyer_id && names[o.buyer_id]) || o.buyer_name || null,
+      sellerName: (o.seller_id && names[o.seller_id]) || o.seller_name || null,
+      courierName: (o.courier_id && names[o.courier_id]) || o.courier_name || null,
+      // Apodo/referencia opcional que el comprador eligió para la coordinación,
+      // y el nombre de contacto del punto de entrega (que puede ser otra persona).
+      deliveryNick: o.delivery?.nick || null,
+      deliveryContactName: o.delivery?.name || null,
       buyerConfirmed: o.buyer_confirmed, sellerPaid: o.seller_paid,
       sellerConfirmed: o.status !== "creada",
       courierStage: o.courier_stage, commissionPct: o.commission_pct,

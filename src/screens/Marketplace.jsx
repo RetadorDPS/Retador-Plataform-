@@ -311,12 +311,18 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   // Datos de entrega — vienen precargados con lo que ya sabemos; el usuario completa el resto.
   const savedAddrs = getSavedAddresses();
   const mainAddr = savedAddrs.find(a => a.main) || savedAddrs[0];
-  const [del, setDel] = useState({ name: user?.name || "", phone: user?.phone || "", addr: mainAddr?.address || "", ref: getSavedInstructions() || "", prov: "La Habana", city: "" });
+  const [del, setDel] = useState({ name: user?.name || "", phone: user?.phone || "", addr: mainAddr?.address || "", ref: getSavedInstructions() || "", prov: "La Habana", city: "", nick: "" });
   const setD = (k, v) => setDel(d => ({ ...d, [k]: v }));
   const pickSaved = (a) => setDel(d => ({ ...d, addr: a.address }));
+  // El nombre del COMPRADOR sale siempre de su perfil real (profiles.full_name),
+  // nunca de un campo libre: si se escribe a mano, cualquier cosa ("fff") acaba
+  // siendo el nombre visible del pedido para el vendedor y el mensajero.
+  // En envíos internacionales el nombre SÍ se escribe, porque ahí es el
+  // DESTINATARIO (otra persona), no quien compra.
+  const realName = user?.name || "";
 
   const needData = shipMode === "local" || shipMode === "intl";
-  const dataValid = shipMode === "local" ? (del.name && del.phone && del.addr)
+  const dataValid = shipMode === "local" ? (realName && del.phone && del.addr)
     : shipMode === "intl" ? (del.name && del.phone && del.prov && del.city && del.addr)
     : true;
 
@@ -326,7 +332,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
       const modalidad = shipMode === "intl" ? "cargo" : "local"; // exterior(cargo) vs local; el dueño afina conectado/cargo después
       let delivery;
       if (shipMode === "persona") delivery = { mode: "persona" };
-      else if (shipMode === "local") delivery = { mode: "local", name: del.name, phone: del.phone, address: del.addr, ref: del.ref, pickup: product.seller_name || "Vendedor", pickupAddress: product.pickupAddress || product.sellerAddress || product.location || "", pickupPhone: product.pickupPhone || product.sellerPhone || product.seller_phone || "" };
+      else if (shipMode === "local") delivery = { mode: "local", name: realName, nick: del.nick.trim() || undefined, phone: del.phone, address: del.addr, ref: del.ref, pickup: product.seller_name || "Vendedor", pickupAddress: product.pickupAddress || product.sellerAddress || product.location || "", pickupPhone: product.pickupPhone || product.sellerPhone || product.seller_phone || "" };
       else delivery = { mode: "intl", recipient: { name: del.name, phone: del.phone, province: del.prov, city: del.city, address: del.addr }, origin: product.origin || "Exterior", transport: product.shippingType || "standard" };
       const shipPrice = shipMode === "intl" ? parseFloat(product.shippingPrice || 0) : shipMode === "local" ? liveLocalBase : 0;
       const shipTo = shipMode === "intl" ? "empresa de envíos" : shipMode === "local" ? "mensajero" : null;
@@ -472,10 +478,25 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 11, marginBottom: 18 }}>
-            <div>
-              <label style={lbl}>{shipMode === "intl" ? "Nombre del destinatario *" : "Tu nombre *"}</label>
-              <input style={inp} value={del.name} onChange={e => setD("name", e.target.value)} placeholder="Nombre y apellidos" />
-            </div>
+            {shipMode === "intl" ? (
+              <div>
+                <label style={lbl}>Nombre del destinatario *</label>
+                <input style={inp} value={del.name} onChange={e => setD("name", e.target.value)} placeholder="Nombre y apellidos" />
+              </div>
+            ) : (<>
+              <div>
+                <label style={lbl}>Tu nombre</label>
+                <div style={{ ...inp, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, opacity: .85 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{realName || "—"}</span>
+                  <span style={{ fontSize: 9.5, color: T3, fontWeight: 700, flexShrink: 0 }}>DE TU PERFIL</span>
+                </div>
+              </div>
+              <div>
+                <label style={lbl}>Apodo o referencia (opcional)</label>
+                <input style={inp} value={del.nick} maxLength={40} onChange={e => setD("nick", e.target.value)} placeholder="Ej: Dani" />
+                <p style={{ fontSize: 10, color: T3, marginTop: 4 }}>¿Cómo prefieres que te llamen al coordinar la entrega?</p>
+              </div>
+            </>)}
             <div>
               <label style={lbl}>Teléfono *</label>
               <input style={inp} value={del.phone} onChange={e => setD("phone", e.target.value)} placeholder="Ej: +53 5 234 5678" />

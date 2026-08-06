@@ -600,7 +600,7 @@ function DLHistoryRow({ e }) {
 function DLNuevoEnvioScreen({ onBack, user, flash, onTrackOrder, onPackageCreated }) {
   const C = useC();
   const platformCfg = usePlatformCfg(); // tarifa local desde la config GLOBAL del backend
-  const [form,setForm]=useState({pickAddr:'',pickRef:'',pickName:'',pickPhone:'',dropAddr:'',dropRef:'',dropName:'',dropPhone:'',article:''});
+  const [form,setForm]=useState({pickAddr:'',pickRef:'',pickName:'',pickPhone:'',dropAddr:'',dropRef:'',dropName:'',dropPhone:'',article:'',nick:''});
   const [touched,setTouched]=useState({});
   const [submitted,setSubmitted]=useState(false);
   const [submitting,setSubmitting]=useState(false);
@@ -645,6 +645,7 @@ function DLNuevoEnvioScreen({ onBack, user, flash, onTrackOrder, onPackageCreate
         mode:'local',
         address:form.dropAddr.trim(), name:form.dropName.trim()||undefined, phone:form.dropPhone.trim(),
         ref:form.dropRef.trim()||undefined,
+        nick:form.nick.trim()||undefined,
         pickup:form.pickName.trim()||'Punto de recogida', pickupAddress:form.pickAddr.trim(), pickupPhone:form.pickPhone.trim(),
       };
       const res=await createPackageDelivery({
@@ -675,8 +676,14 @@ function DLNuevoEnvioScreen({ onBack, user, flash, onTrackOrder, onPackageCreate
             <DLFieldAddress placeholder="Dirección de recogida" value={form.pickAddr} onChange={v=>upd('pickAddr',v)} onBlur={()=>blr('pickAddr')} error={err('pickAddr')}/>
             <DLFieldRef hint="Casa verde frente al parque" value={form.pickRef} onChange={v=>upd('pickRef',v)}/>
             <div style={{ display:'flex', gap:7, marginTop:7 }}>
-              <div style={{ flex:1 }}><DLFieldSmall placeholder="Nombre (opcional)" value={form.pickName} onChange={v=>upd('pickName',v)}/></div>
+              <div style={{ flex:1 }}><DLFieldSmall placeholder="Nombre de contacto (opcional)" value={form.pickName} onChange={v=>upd('pickName',v)}/></div>
               <div style={{ flex:1 }}><DLFieldSmall placeholder="Teléfono *" type="tel" value={form.pickPhone} onChange={v=>upd('pickPhone',v)} onBlur={()=>blr('pickPhone')} error={err('pickPhone')}/></div>
+            </div>
+            {/* Tu nombre en el envío sale de tu perfil (profiles.full_name), no de
+                un campo libre. Esto es solo cómo prefieres que te llamen. */}
+            <div style={{ marginTop:7 }}>
+              <DLFieldSmall placeholder="Apodo o referencia (opcional)" value={form.nick} onChange={v=>upd('nick',v)}/>
+              <div style={{ ...T.body, fontSize:10, color:C.text3, marginTop:4 }}>¿Cómo prefieres que te llamen al coordinar la entrega?</div>
             </div>
           </DLSectionCard>
         </div>

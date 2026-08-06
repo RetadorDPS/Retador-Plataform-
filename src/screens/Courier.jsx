@@ -1,20 +1,61 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
 import { getAvailableDeliveries, getCourierEarnings, getCourierDebt, getUserById, getProductById, getMyCourierApplication, submitCourierApplication, supabase, usePlatformCfg, uploadKyc, KycSelfieSample, PullIndicator, usePullToRefresh } from "../shared/index.js";
 
-// Botón "Recogí"/"Entregué": AISLADO en su propio componente memoizado, recibiendo
-// solo lo que necesita (id, status, onStage) por props. Así, si el árbol de
-// CourierDashboard se vuelve a renderizar por algo ajeno (p.ej. el pool de
-// entregas refrescándose en vivo) mientras el usuario lo está tocando, React
-// no reconstruye este botón — evita que dos toques nativos (mousedown/mouseup)
-// caigan sobre versiones distintas del elemento.
+// Botón "Recogí"/"Entregué" — el botón MÁS crítico de la app, y el que ya ha
+// fallado dos veces por la misma causa: un re-render del árbol ocurrido ENTRE el
+// pointerdown y el pointerup de un toque real impide que el navegador sintetice
+// el evento "click", así que el dedo cae justo encima y aun así no pasa nada
+// (la pantalla "parpadea" y el estado no avanza).
+//
+// Blindaje en tres capas, para que no vuelva a pasar por una tercera causa nueva:
+//   1. Se dispara en onPointerUp, NO en onClick. pointerup llega al elemento aunque
+//      haya habido re-renders por medio — es inmune a esta clase de bug.
+//   2. memo() + props estables: los refrescos de ganancias/deuda/realtime del
+//      resto de la pantalla no llegan a re-renderizar este botón.
+//   3. Guarda anti-doble-disparo: si un navegador emite pointerup Y click, el
+//      segundo se ignora (misma entrega + misma etapa).
 const CourierStageButton = memo(function CourierStageButton({ orderId, status, onStage, mutedColor }) {
-  if (status === "asignado") {
-    return <button onClick={() => onStage(orderId, "recogido")} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: "#6366F1", color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>📦 Recogí el pedido</button>;
+  const firedRef = useRef("");
+  const [pressed, setPressed] = useState(false);
+
+  const stage = status === "asignado" ? "recogido" : status === "en_ruta" ? "entregado" : null;
+
+  const fire = (e) => {
+    // Solo el botón principal / el dedo: ignora clic derecho y similares.
+    if (e && e.button != null && e.button !== 0) return;
+    const key = `${orderId}:${stage}`;
+    if (firedRef.current === key) return;   // ya disparado por el otro evento
+    firedRef.current = key;
+    setPressed(false);
+    onStage(orderId, stage);
+  };
+
+  if (!stage) {
+    return <div style={{ textAlign: "center", color: mutedColor, fontSize: 12.5, fontWeight: 700, padding: "10px" }}>Estado: {status}</div>;
   }
-  if (status === "en_ruta") {
-    return <button onClick={() => onStage(orderId, "entregado")} style={{ width: "100%", height: 52, borderRadius: 14, border: "none", background: "#22C55E", color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>✅ Entregué</button>;
-  }
-  return <div style={{ textAlign: "center", color: mutedColor, fontSize: 12.5, fontWeight: 700, padding: "10px" }}>Estado: {status}</div>;
+
+  const isPickup = stage === "recogido";
+  return (
+    <button
+      onPointerUp={fire}
+      onClick={fire}                                  /* respaldo: la guarda evita el doble disparo */
+      onPointerDown={() => setPressed(true)}
+      onPointerLeave={() => setPressed(false)}
+      onPointerCancel={() => setPressed(false)}
+      style={{
+        width: "100%", height: 52, borderRadius: 14, border: "none",
+        background: isPickup ? "#6366F1" : "#22C55E",
+        color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer",
+        // Señal táctil clara al presionar: se hunde un poco y baja algo de
+        // opacidad. No cambia el color ni el comportamiento.
+        transform: pressed ? "scale(0.97)" : "scale(1)",
+        opacity: pressed ? 0.88 : 1,
+        transition: "transform .09s ease, opacity .09s ease",
+        touchAction: "manipulation",                  /* sin retardo de 300 ms ni doble-tap-zoom */
+        WebkitTapHighlightColor: "transparent",
+      }}
+    >{isPickup ? "📦 Recogí el pedido" : "✅ Entregué"}</button>
+  );
 });
 
 // Chip de PERFIL PÚBLICO: foto + nombre reales (tabla profiles). Al tocarlo abre
@@ -146,7 +187,13 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   const feeOf = o => { const b = baseFeeOf(o); return Math.round(b * (1 + surgePct(o) / 100)); };
   const isCash = o => (o.payMethod || o.payment_method || "efectivo").toString().toLowerCase().includes("efect") || !(o.payMethod || o.payment_method);
   const dropOf = o => o.delivery?.address || o.ship_to || o.shipTo || "";
-  const dropNameOf = o => o.delivery?.name || o.buyerName || "Comprador";
+  // Nombre REAL de quien recibe (profiles.full_name, ya resuelto en getUserOrders),
+  // con el apodo elegido como complemento discreto — nunca el texto libre solo.
+  const dropNameOf = o => {
+    const real = o.buyerName || o.delivery?.name || "Comprador";
+    const nick = o.deliveryNick || o.delivery?.nick;
+    return nick ? `${real} (${nick})` : real;
+  };
   const dropPhoneOf = o => o.delivery?.phone || "";
   const refOf = o => o.delivery?.ref || o.delivery?.note || "";
   const fmtDate = t => t ? new Date(t).toLocaleDateString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
@@ -427,23 +474,20 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
           <div><b style={{ fontSize: 16 }}>{earnings?.enCurso || 0}</b> <span style={{ opacity: .8 }}>en curso</span></div>
           <div><b style={{ fontSize: 16 }}>{pool.length}</b> <span style={{ opacity: .8 }}>disponibles</span></div>
         </div>
-      </div>
 
-      {/* DEUDA real (courier_debt): comisión de entrega que se acumula sola en el
-          mismo ledger que los vendedores. Se muestra SIEMPRE, incluso en cero, para
-          que el mensajero sepa que el sistema lo lleva — nunca se oculta la tarjeta. */}
-      <div style={{ background: "#0c0c0d", border: "1px solid #FFC01E33", borderRadius: 16, padding: "15px 17px", marginBottom: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 38, height: 38, borderRadius: 11, background: "#FFC01E1a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🧾</div>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 10, color: "#FFC01E", fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em" }}>Debes a RETADOR</div>
-            <div style={{ fontSize: 21, fontWeight: 800, color: "#fff", marginTop: 2 }}>
-              {debt && debt.debe > 0 ? money(debt.debe) : "Sin deuda pendiente"}
-            </div>
-          </div>
-        </div>
-        <div style={{ fontSize: 11, color: "#9aa0aa", marginTop: 10, lineHeight: 1.4 }}>
-          {debt?.pctComision > 0 ? `${debt.pctComision}% de comisión por cada entrega` : "Comisión de entrega por cada pedido completado"}
+        {/* COMISIÓN (courier_debt) — integrada en el MISMO panel de ganancias, como
+            una línea discreta, no como una tarjeta aparte que grite. Es un dato de
+            servicio ("cuánto le corresponde a la plataforma de lo que ya ganaste"),
+            no un cobro: por eso el tono neutro y el mismo lenguaje visual del panel.
+            Se muestra siempre, también en cero, para que el mensajero sepa que la
+            cuenta se lleva sola y no le va a caer una sorpresa. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,.16)" }}>
+          <span style={{ fontSize: 13, opacity: .9, flexShrink: 0 }}>🧾</span>
+          <span style={{ fontSize: 11.5, lineHeight: 1.45, opacity: .9 }}>
+            {debt && debt.debe > 0
+              ? <>Comisión por uso de la plataforma: <b style={{ fontWeight: 800 }}>{money(debt.debe)}</b>{debt.pctComision > 0 ? <span style={{ opacity: .8 }}> · {debt.pctComision}% por entrega</span> : null}</>
+              : <>Sin comisión pendiente{debt?.pctComision > 0 ? <span style={{ opacity: .8 }}> · {debt.pctComision}% por entrega</span> : null}</>}
+          </span>
         </div>
       </div>
 

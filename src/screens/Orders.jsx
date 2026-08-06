@@ -77,7 +77,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
               const link = { color: G, fontWeight: 700, cursor: "pointer", textDecoration: "underline" };
               return <>
                 {o.sellerName && <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>Vendedor: {sellerId && onViewProfile ? <span onClick={() => onViewProfile(sellerId)} style={link}>{o.sellerName}</span> : o.sellerName}</p>}
-                {viewerIsSeller && (o.buyerName || buyerId) && <p style={{ fontSize: 10, color: T2, marginTop: 2 }}>Comprador: {buyerId && onViewProfile ? <span onClick={() => onViewProfile(buyerId)} style={link}>{o.buyerName || "Ver perfil"}</span> : (o.buyerName || "—")}</p>}
+                {viewerIsSeller && (o.buyerName || buyerId) && <p style={{ fontSize: 10, color: T2, marginTop: 2 }}>Comprador: {buyerId && onViewProfile ? <span onClick={() => onViewProfile(buyerId)} style={link}>{o.buyerName || "Ver perfil"}</span> : (o.buyerName || "—")}{o.deliveryNick ? <span style={{ color: T3 }}> ({o.deliveryNick})</span> : null}</p>}
               </>;
             })()}
           </div>
@@ -100,7 +100,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
           <div style={{ background: card, border: `1px solid ${B}`, borderRadius: 13, padding: "12px 13px", marginBottom: 14 }}>
             <p style={{ fontSize: 9, color: T3, fontWeight: 700, marginBottom: 7, letterSpacing: .3 }}>{o.delivery.mode === "intl" ? "DESTINATARIO" : "ENTREGA"}</p>
             {o.delivery.mode === "local" ? <>
-              <p style={{ fontSize: 12, fontWeight: 700, color: T1 }}>{o.delivery.name} · {o.delivery.phone}</p>
+              <p style={{ fontSize: 12, fontWeight: 700, color: T1 }}>{o.delivery.name}{o.delivery.nick ? <span style={{ color: T3, fontWeight: 600 }}> ({o.delivery.nick})</span> : null} · {o.delivery.phone}</p>
               <p style={{ fontSize: 11, color: T2, marginTop: 2 }}>{o.delivery.address}{o.delivery.ref ? ` (${o.delivery.ref})` : ""}</p>
               <p style={{ fontSize: 10, color: T3, marginTop: 3 }}>Recogida: {o.delivery.pickup}</p>
             </> : <>
@@ -279,7 +279,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   );
 }
 
-export function OrdersScreen({ user, me, onBack, flash, orders = [], lastSeen = {}, onSeen, onOpen, onRefresh = null }) {
+export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {}, onOpen, onRefresh = null }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const [tab, setTab] = useState("compras");   // "compras" | "ventas"
@@ -290,24 +290,12 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], lastSeen = 
   const roleOf = (o) => o.role || (((o.buyerId ?? o.buyer_id) === user?.id) ? "compra" : "venta");
   const compras = orders.filter(o => roleOf(o) === "compra");
   const ventas  = orders.filter(o => roleOf(o) === "venta");
-  const countNew = (list, ts) => list.filter(o => (o.createdAt || 0) > (ts || 0)).length;
-  const comprasNew = countNew(compras, lastSeen.compras);
-  const ventasNew  = countNew(ventas, lastSeen.ventas);
-
-  // "Base" = cuándo se vio por última vez cada pestaña, capturada al abrirla ESTA
-  // sesión (antes de marcarla vista). Con ella el "NUEVO" de las tarjetas se
-  // mantiene mientras miras y desaparece la próxima vez, en vez de parpadear.
-  const baselineRef = useRef({});
-  useEffect(() => {
-    // Al ABRIR "Mis pedidos" se marcan vistas AMBAS pestañas de una vez (el
-    // badge del menú es la suma de las dos) — antes solo se marcaba la pestaña
-    // activa, así que el badge quedaba "pegado" si el usuario no llegaba a
-    // cambiar a la otra pestaña en esa visita.
-    if (baselineRef.current.compras === undefined) baselineRef.current.compras = lastSeen.compras || 0;
-    if (baselineRef.current.ventas === undefined) baselineRef.current.ventas = lastSeen.ventas || 0;
-    onSeen && onSeen("compras");
-    onSeen && onSeen("ventas");
-  }, []);
+  // "Sin ver" = pedidos que el usuario todavía no ha ABIERTO (por id). Entrar a
+  // esta pantalla ya no marca nada como visto: el aviso sigue ahí, señalando
+  // exactamente cuál es el pedido nuevo, hasta que se abra.
+  const isNew = (o) => !!o?.id && !seenIds[o.id];
+  const comprasNew = compras.filter(isNew).length;
+  const ventasNew  = ventas.filter(isNew).length;
 
   const statusColors = { pendiente: "#FBBF24", pending: "#FBBF24", creada: "#FBBF24", confirmed: "#60A5FA", confirmado: "#60A5FA", shipped: "#A78BFA", delivered: "#22C55E", entregado: "#22C55E", cancelled: "#F87171", fallido: "#F87171" };
   const statusLabels = { pendiente: "Pendiente", pending: "Pendiente", creada: "Creado", confirmed: "Confirmado", confirmado: "Confirmado", shipped: "En camino", delivered: "Entregado", entregado: "Entregado", cancelled: "Cancelado", fallido: "Fallido" };
@@ -320,13 +308,15 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], lastSeen = 
     return "#60A5FA";
   };
 
-  const isNew = (o) => (o.createdAt || 0) > (baselineRef.current[tab] ?? (lastSeen[tab] || 0));
   const renderCard = (o) => {
     const sc = stepColor(o);
     const sl = SHIP_LABELS[o.shipType || o.shipMode] || SHIP_LABELS.local;
     const md = MODALIDAD_LABELS[o.modalidad] || null;
     return (
-      <div key={o.id} onClick={() => onOpen?.(o)} className={onOpen ? "cd" : ""} style={{ position: "relative", background: S, border: `1px solid ${isNew(o) ? G + "66" : B}`, borderRadius: 14, padding: "14px", marginBottom: 10, cursor: onOpen ? "pointer" : "default" }}>
+      <div key={o.id} onClick={() => onOpen?.(o)} className={onOpen ? "cd" : ""} style={{ position: "relative", background: isNew(o) ? (isDark ? G + "0d" : G + "0f") : S, border: `1px solid ${isNew(o) ? G + "77" : B}`, borderRadius: 14, padding: "14px", marginBottom: 10, cursor: onOpen ? "pointer" : "default" }}>
+        {/* Sin abrir todavía: puntito dorado, borde y fondo sutil — para localizar
+            de un vistazo CUÁL es el pedido nuevo dentro de la lista. */}
+        {isNew(o) && <span style={{ position: "absolute", top: 10, right: 10, width: 9, height: 9, borderRadius: "50%", background: G, boxShadow: `0 0 0 3px ${G}33` }} />}
         <div style={{ display: "flex", gap: 12 }}>
           <div style={{ width: 52, height: 52, borderRadius: 12, background: "#1a1a1a", overflow: "hidden", flexShrink: 0 }}>
             {o.image && <img src={o.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}

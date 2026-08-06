@@ -1100,21 +1100,61 @@ function AppShell({ sessionUser }) {
   const roleOf = (o) => (((o.buyerId ?? o.buyer_id) === user?.id) ? "compra" : "venta");
   const mergedOrders = orders;
 
-  // Marcas de "visto" por pestaña (para los avisos de nuevo).
-  const [ordersSeen, setOrdersSeen] = useState(() => { try { return JSON.parse(localStorage.getItem("retador_orders_seen") || "{}"); } catch { return {}; } });
-  useEffect(() => { try { localStorage.setItem("retador_orders_seen", JSON.stringify(ordersSeen)); } catch (e) {} }, [ordersSeen]);
-  const markOrdersSeen = (tabKey) => setOrdersSeen(prev => ({ ...prev, [tabKey]: Date.now() }));
-  const comprasUnseen = mergedOrders.filter(o => roleOf(o) === "compra" && (o.createdAt || 0) > (ordersSeen.compras || 0)).length;
-  const ventasUnseen  = mergedOrders.filter(o => roleOf(o) === "venta"  && (o.createdAt || 0) > (ordersSeen.ventas  || 0)).length;
-  const ordersUnseen  = comprasUnseen + ventasUnseen;
-
-  // Notifica cada VENTA nueva (más reciente que lastSeenVentas) una sola vez,
-  // usando el sistema de avisos local ya existente (pushNotif).
-  const notifiedSalesRef = useRef(new Set());
+  // Pedidos ya VISTOS, guardados POR ID y por usuario. Antes se guardaba una
+  // marca de tiempo por pestaña, así que con solo entrar a "Mis pedidos" se daba
+  // por visto TODO — el aviso desaparecía sin que el usuario llegara a ver de qué
+  // pedido se trataba. Ahora un pedido solo cuenta como visto cuando se ABRE.
+  const seenIdsKey = user?.id ? `retador_orders_seen_ids_${user.id}` : null;
+  const [seenOrderIds, setSeenOrderIds] = useState({});
+  const seededSeenRef = useRef(false);
   useEffect(() => {
-    const seenV = ordersSeen.ventas || 0;
+    seededSeenRef.current = false;
+    if (!seenIdsKey) { setSeenOrderIds({}); return; }
+    try { setSeenOrderIds(JSON.parse(localStorage.getItem(seenIdsKey) || "{}")); } catch (e) { setSeenOrderIds({}); }
+  }, [seenIdsKey]);
+  // Primer arranque de este usuario: damos por vistos los pedidos que YA existían,
+  // para no estrenar la función con un badge enorme de pedidos viejos. A partir de
+  // ahí, cada pedido nuevo se avisa hasta que se abra.
+  useEffect(() => {
+    if (!seenIdsKey || seededSeenRef.current || !mergedOrders.length) return;
+    seededSeenRef.current = true;
+    if (localStorage.getItem(seenIdsKey) != null) return;   // ya hay historial: respetarlo
+    const all = {};
+    mergedOrders.forEach(o => { if (o?.id) all[o.id] = 1; });
+    setSeenOrderIds(all);
+    try { localStorage.setItem(seenIdsKey, JSON.stringify(all)); } catch (e) {}
+  }, [seenIdsKey, mergedOrders]);
+  const markOrderSeen = useCallback((orderId) => {
+    if (!orderId || !seenIdsKey) return;
+    setSeenOrderIds(prev => {
+      if (prev[orderId]) return prev;
+      const next = { ...prev, [orderId]: 1 };
+      try { localStorage.setItem(seenIdsKey, JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+  }, [seenIdsKey]);
+  const ordersUnseen = mergedOrders.filter(o => o?.id && !seenOrderIds[o.id]).length;
+  // Abrir el detalle de un pedido lo marca como visto, venga de donde venga (la
+  // lista, un chat, un aviso push, o recién creado). Un solo sitio en vez de
+  // recordarlo en cada punto de entrada.
+  useEffect(() => {
+    if (pScr === "order-detail" && selOrderId) markOrderSeen(selOrderId);
+  }, [pScr, selOrderId, markOrderSeen]);
+
+  // Notifica cada VENTA nueva una sola vez, usando el sistema de avisos local ya
+  // existente (pushNotif). El PRIMER barrido solo toma nota de lo que ya había
+  // (sin avisar): así al abrir la app no llega una ráfaga de ventas viejas.
+  const notifiedSalesRef = useRef(new Set());
+  const salesBaselineRef = useRef(false);
+  useEffect(() => {
+    if (!mergedOrders.length) return;
+    if (!salesBaselineRef.current) {
+      mergedOrders.forEach(o => { if (o?.id) notifiedSalesRef.current.add(o.id); });
+      salesBaselineRef.current = true;
+      return;
+    }
     mergedOrders.forEach(o => {
-      if (roleOf(o) !== "venta" || (o.createdAt || 0) <= seenV) return;
+      if (roleOf(o) !== "venta") return;
       if (notifiedSalesRef.current.has(o.id)) return;
       notifiedSalesRef.current.add(o.id);
       if (notifs.some(n => n.orderId === o.id && (n.text || "").includes("Nueva venta"))) return; // ya avisado antes
@@ -1731,8 +1771,8 @@ function AppShell({ sessionUser }) {
               accountPassword={accountPassword} onSetPassword={setAccountPassword}
               blockedUsers={blockedUsers} onToggleBlock={toggleBlock}
               onOpenWallet={() => setShowWallet(true)} orders={orders.filter(o => (o.buyerId ? o.buyerId === user?.id : true))} />}
-            {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { setSelOrderId(o.id); setPScr("order-detail"); }} onRefresh={loadOrders} />}
-            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => openOrderChat(o)} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} lastSeen={ordersSeen} onSeen={markOrdersSeen} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
+            {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} seenIds={seenOrderIds} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { markOrderSeen(o.id); setSelOrderId(o.id); setPScr("order-detail"); }} onRefresh={loadOrders} />}
+            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => openOrderChat(o)} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} seenIds={seenOrderIds} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { markOrderSeen(x.id); setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
             {/* Panel lateral del Perfil (☰): todo el menú que antes estaba apilado */}
             <ProfileMenuDrawer open={profileMenuOpen} onClose={() => setProfileMenuOpen(false)} user={user} isOwner={hasPanel}
               onMessages={openMessages} onOrders={() => setPScr("orders")} onWallet={() => setShowWallet(true)}

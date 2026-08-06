@@ -9,6 +9,17 @@ body,
   margin: 0;
 }
 
+/* El gesto NATIVO de "tirar para refrescar" del navegador recarga la página
+   entera y devuelve al usuario a la pantalla de bienvenida, perdiendo dónde
+   estaba. La app tiene su propio gesto (usePullToRefresh), que recarga solo los
+   datos. Se bloquea aquí en la raíz porque un contenedor interno solo corta el
+   encadenamiento cuando de verdad puede desplazarse: con contenido corto, el
+   gesto se propagaba igual al documento y recargaba. */
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
 /* Fondo base oscuro (pantalla de inicio) para evitar destellos antes de que
    cargue el JS. La app repinta html/body con el tono del tema activo. */
 html,

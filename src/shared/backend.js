@@ -291,33 +291,61 @@ export const submitProductReview = async (productId, userId, rating, comment) =>
 // misma fuente. Esquema de seller_reviews asumido en espejo de `reviews`
 // (seller_id en vez de product_id) — si el nombre real de la tabla o de
 // alguna columna difiere, esto se degrada a lista vacía sin romper nada.
+//
+// ⚠️ COLUMNAS REALES de seller_reviews (NO son las de `reviews`):
+//     id, seller_id, reviewer_id, rating, comment, created_at, updated_at
+//   · seller_id   = a QUIÉN se califica (vendedor o mensajero)
+//   · reviewer_id = QUIÉN escribe la calificación (auth.uid())
+// La tabla `reviews` (de PRODUCTO) sí usa user_id. Son tablas distintas y se
+// confundieron: por eso el guardado fallaba con
+// "Could not find the 'user_id' column of 'seller_reviews'".
 export const getSellerReviews = async (sellerId) => {
   if (!sellerId) return [];
   try {
-    const { data, error } = await supabase.from("seller_reviews").select("id, user_id, rating, comment, created_at").eq("seller_id", sellerId).order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("seller_reviews").select("id, reviewer_id, rating, comment, created_at, updated_at").eq("seller_id", sellerId).order("created_at", { ascending: false });
     if (error) { console.error("getSellerReviews:", error.message); return []; }
     if (!data || !data.length) return [];
-    const uids = [...new Set(data.map(r => r.user_id))];
+    const uids = [...new Set(data.map(r => r.reviewer_id))].filter(Boolean);
     let profMap = {};
     if (uids.length) {
       const { data: profs } = await supabase.from("profiles").select("id, full_name, avatar_url").in("id", uids);
       (profs || []).forEach(p => { profMap[p.id] = p; });
     }
     return data.map(r => {
-      const p = profMap[r.user_id];
-      return { id: r.id, rating: r.rating, comment: r.comment || "", createdAt: r.created_at, name: p?.full_name || "Usuario", avatar: p?.avatar_url || null };
+      const p = profMap[r.reviewer_id];
+      return { id: r.id, reviewerId: r.reviewer_id, rating: r.rating, comment: r.comment || "", createdAt: r.created_at, updatedAt: r.updated_at, name: p?.full_name || "Usuario", avatar: p?.avatar_url || null };
     });
   } catch (e) { console.error("getSellerReviews (excepción):", e?.message || e); return []; }
 };
-// Guarda una reseña REAL en seller_reviews — mismo mecanismo para vendedor Y
-// mensajero: la política ya acepta que `seller_id` apunte al seller_id o al
-// courier_id de un pedido completado, según a quién se está calificando.
+// Mi valoración sobre esa persona (si ya dejé una). La tabla impone
+// unique(seller_id, reviewer_id): una sola por persona, editable.
+export const getMySellerReview = async (sellerId, reviewerId) => {
+  if (!sellerId || !reviewerId) return null;
+  try {
+    const { data, error } = await supabase.from("seller_reviews")
+      .select("id, rating, comment, created_at, updated_at")
+      .eq("seller_id", sellerId).eq("reviewer_id", reviewerId).maybeSingle();
+    if (error) { console.error("getMySellerReview:", error.message); return null; }
+    return data ? { id: data.id, rating: data.rating, comment: data.comment || "", createdAt: data.created_at, updatedAt: data.updated_at } : null;
+  } catch (e) { console.error("getMySellerReview (excepción):", e?.message || e); return null; }
+};
+// Guarda una valoración REAL en seller_reviews — mismo mecanismo para vendedor,
+// mensajero y valoración desde el perfil. UPSERT sobre (seller_id, reviewer_id):
+// si ya existe la mía, la ACTUALIZA en vez de fallar por el índice único.
 // Nunca se guarda solo en el dispositivo (localStorage): así el promedio y el
 // conteo que ve todo el mundo (profiles.seller_rating/seller_reviews_count)
 // son reales, no un dato que solo tú ves.
-export const submitSellerReview = async (targetId, userId, rating, comment) => {
-  if (!targetId || !userId) throw new Error("Sesión no válida");
-  const { error } = await supabase.from("seller_reviews").insert({ seller_id: targetId, user_id: userId, rating, comment: comment || "" });
+export const submitSellerReview = async (targetId, reviewerId, rating, comment) => {
+  if (!targetId || !reviewerId) throw new Error("Sesión no válida");
+  if (targetId === reviewerId) throw new Error("No puedes valorarte a ti mismo");
+  const { error } = await supabase.from("seller_reviews")
+    .upsert({ seller_id: targetId, reviewer_id: reviewerId, rating, comment: comment || "" }, { onConflict: "seller_id,reviewer_id" });
+  if (error) throw error;
+};
+// Borra MI valoración sobre esa persona (el RLS ya limita a la propia).
+export const deleteSellerReview = async (targetId, reviewerId) => {
+  if (!targetId || !reviewerId) throw new Error("Sesión no válida");
+  const { error } = await supabase.from("seller_reviews").delete().eq("seller_id", targetId).eq("reviewer_id", reviewerId);
   if (error) throw error;
 };
 

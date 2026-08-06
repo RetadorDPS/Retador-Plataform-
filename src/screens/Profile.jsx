@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -1077,9 +1077,11 @@ function FP_SettingsScreen({ onClose }) {
         <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)",
           background:FP_C.surfaceTop, color:FP_C.positive,
           border:`1px solid ${FP_C.positiveDim}`,
-          borderRadius:8, padding:"9px 16px", fontSize:12, fontWeight:600,
+          borderRadius:10, padding:"11px 16px", fontSize:12, fontWeight:600,
           fontFamily:FP_FH, zIndex:700, boxShadow:"0 8px 24px rgba(0,0,0,0.6)",
-          display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap",
+          display:"flex", alignItems:"flex-start", gap:8,
+          whiteSpace:"pre-wrap", overflowWrap:"anywhere", wordBreak:"break-word", lineHeight:1.45,
+          maxWidth:"min(92vw, 420px)",
           letterSpacing:"0.2px" }}>
           <FP_Icon d={FP_Icons.check} size={14} color={FP_C.positive}/>
           {toast}
@@ -1444,19 +1446,68 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
 
   // Reseñas REALES de todos los productos de este vendedor (tabla reviews),
   // nombre y avatar reales (profiles.full_name/avatar_url) — nunca inventados.
+  const toastTmrRef = useRef(null);
   const [reviews, setReviews] = useState([]);
+  const [reviewsNonce, setReviewsNonce] = useState(0);   // sube al guardar/borrar mi valoración
   useEffect(() => {
     if (!aboutTargetId) { setReviews([]); return; }
     let alive = true;
     getSellerReviews(aboutTargetId).then(list => {
       if (!alive) return;
       setReviews(list.map(r => ({
-        id: r.id, user: r.name, avatar: r.avatar, stars: r.rating, text: r.comment,
+        id: r.id, reviewerId: r.reviewerId, user: r.name, avatar: r.avatar, stars: r.rating, text: r.comment,
         date: new Date(r.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short" }),
       })));
     }).catch(() => {});
     return () => { alive = false; };
-  }, [aboutTargetId]);
+  }, [aboutTargetId, reviewsNonce]);
+
+  // ── MI VALORACIÓN sobre esta persona ────────────────────────────────────────
+  // Una sola por persona: la tabla lo impone con unique(seller_id, reviewer_id).
+  // Si ya existe, se precarga para EDITARLA o BORRARLA, nunca para crear otra.
+  const canReview = !isOwner && !!user?.id && !!aboutTargetId && user.id !== aboutTargetId;
+  const [myReview, setMyReview] = useState(null);      // null = no tengo / aún cargando
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [revStars, setRevStars] = useState(0);
+  const [revText, setRevText] = useState("");
+  const [revBusy, setRevBusy] = useState(false);
+  useEffect(() => {
+    if (!canReview) { setMyReview(null); return; }
+    let alive = true;
+    getMySellerReview(aboutTargetId, user.id).then(r => { if (alive) setMyReview(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, [canReview, aboutTargetId, user?.id, reviewsNonce]);
+  const openReview = () => {
+    setRevStars(myReview?.rating || 0);
+    setRevText(myReview?.comment || "");
+    setReviewOpen(true);
+  };
+  const saveReview = async () => {
+    if (revBusy || !revStars) return;
+    setRevBusy(true);
+    try {
+      await submitSellerReview(aboutTargetId, user.id, revStars, revText.trim());
+      setReviewOpen(false);
+      setReviewsNonce(n => n + 1);   // recarga lista, mi reseña y el promedio
+      toast_(myReview ? "Valoración actualizada" : "¡Gracias por tu valoración!");
+    } catch (e) {
+      toast_("⚠️ No se pudo guardar tu valoración: " + (e?.message || "Intenta de nuevo"));
+    }
+    setRevBusy(false);
+  };
+  const removeReview = async () => {
+    if (revBusy) return;
+    setRevBusy(true);
+    try {
+      await deleteSellerReview(aboutTargetId, user.id);
+      setReviewOpen(false);
+      setReviewsNonce(n => n + 1);
+      toast_("Valoración eliminada");
+    } catch (e) {
+      toast_("⚠️ No se pudo eliminar: " + (e?.message || "Intenta de nuevo"));
+    }
+    setRevBusy(false);
+  };
 
   // Encabezado: calificación real del vendedor (profiles.seller_rating/
   // seller_reviews_count) + estadísticas reales (get_profile_header_stats).
@@ -1468,9 +1519,16 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     getSellerRatingInfo(aboutTargetId).then(r => { if (alive) setSellerRatingInfo(r); }).catch(() => {});
     getProfileHeaderStats(aboutTargetId).then(s => { if (alive) setHeaderStats(s); }).catch(() => {});
     return () => { alive = false; };
-  }, [aboutTargetId]);
+  }, [aboutTargetId, reviewsNonce]);
 
-  function toast_(msg, isError = false) { setToast({ msg, isError }); setTimeout(() => setToast(null), isError ? 4000 : 2500); }
+  function toast_(msg, isError = false) {
+    // Igual que el aviso global: un error largo necesita tiempo para leerse.
+    const txt = String(msg ?? "");
+    const ms = isError ? Math.min(14000, Math.max(4000, txt.length * 85)) : 2500;
+    setToast({ msg, isError });
+    clearTimeout(toastTmrRef.current);
+    toastTmrRef.current = setTimeout(() => setToast(null), ms);
+  }
   // Editor unificado: UN solo botón "Guardar" persiste datos básicos (perfil) y
   // "Acerca de" a la vez, en UNA sola llamada real: save_profile_all (RPC).
   // ANTES esto eran dos UPDATE directos a `profiles` — sujetos a RLS, y con un
@@ -1555,6 +1613,60 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
       {showPicker   && <FP_AvatarPicker current={pd.avatar} name={pd.name} userId={user?.id} onSelect={a=>{ setPd(d=>({...d,avatar:a})); setShowPicker(false); }} onClose={() => setShowPicker(false)}/>}
       {showPro      && isOwner && <FP_ProModal onClose={() => setShowPro(false)} onSeePlans={() => { setShowPro(false); setShowPlans(true); }}/>}
       {showSettings && isOwner && <FP_SettingsScreen onClose={() => setShowSettings(false)}/>}
+      {/* Valoración desde el perfil: crear, EDITAR o BORRAR la mía (una sola). */}
+      {reviewOpen && canReview && (
+        <div onClick={() => !revBusy && setReviewOpen(false)}
+          style={{ position:"fixed", inset:0, zIndex:900, background:"rgba(0,0,0,.6)",
+            display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width:"100%", maxWidth:440, background:FP_C.surfaceTop,
+              borderTop:`1px solid ${FP_C.border}`, borderRadius:"18px 18px 0 0",
+              padding:"20px 18px calc(20px + env(safe-area-inset-bottom, 0px))", fontFamily:FP_FH }}>
+            <div style={{ fontSize:15, fontWeight:800, color:FP_C.textPrimary, marginBottom:3 }}>
+              {myReview ? "Editar tu valoración" : `Valorar a ${profile.name}`}
+            </div>
+            <div style={{ fontSize:11.5, color:FP_C.textMuted, marginBottom:14, lineHeight:1.5 }}>
+              Solo puedes dejar una valoración por persona. Puedes cambiarla cuando quieras.
+            </div>
+
+            <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+              {[1,2,3,4,5].map(n => (
+                <button key={n} type="button" onClick={() => setRevStars(n)}
+                  style={{ background:"none", border:"none", cursor:"pointer", fontSize:32,
+                    lineHeight:1, padding:0, color: n <= revStars ? FP_C.accent : FP_C.border }}>★</button>
+              ))}
+            </div>
+
+            <textarea value={revText} onChange={e => setRevText(e.target.value)} maxLength={500}
+              placeholder="Cuenta tu experiencia con esta persona (opcional)…"
+              style={{ width:"100%", background:FP_C.surface, border:`1px solid ${FP_C.border}`,
+                borderRadius:10, padding:"11px 13px", fontSize:13, color:FP_C.textPrimary,
+                minHeight:88, resize:"vertical", fontFamily:"inherit", boxSizing:"border-box", marginBottom:14 }}/>
+
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={() => setReviewOpen(false)} disabled={revBusy}
+                style={{ flex:1, background:"transparent", border:`1px solid ${FP_C.border}`,
+                  color:FP_C.textSecondary, borderRadius:11, padding:"13px", fontSize:13,
+                  fontWeight:700, cursor:"pointer" }}>Cancelar</button>
+              <button onClick={saveReview} disabled={revBusy || !revStars}
+                style={{ flex:2, background: revStars ? FP_C.accent : FP_C.border, border:"none",
+                  color: revStars ? "#000" : FP_C.textMuted, borderRadius:11, padding:"13px",
+                  fontSize:13, fontWeight:800, cursor: revStars && !revBusy ? "pointer" : "default",
+                  opacity: revBusy ? .7 : 1 }}>
+                {revBusy ? "Guardando…" : myReview ? "Guardar cambios" : "Publicar valoración"}
+              </button>
+            </div>
+            {myReview && (
+              <button onClick={removeReview} disabled={revBusy}
+                style={{ width:"100%", background:"transparent", border:"none", color:FP_C.danger,
+                  fontSize:12, fontWeight:700, padding:"12px 0 0", cursor:"pointer" }}>
+                Eliminar mi valoración
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {showReport && !isOwner && <FP_ReportModal targetName={profile.name} onClose={() => setShowReport(false)} onSubmit={(payload) => { onReport?.(payload); setShowReport(false); toast_("Reporte enviado. Gracias por avisar."); }} C={FP_C}/>}
       {showVerify && isOwner && <FP_VerifyModal user={user} isVerified={isVerified} onClose={() => setShowVerify(false)} onSubmit={() => onVerify?.()} C={FP_C} flash={toast_}/>}
       {showPlans && isOwner && <FP_PlansModal user={user} plans={plans} current={currentPlan} onClose={() => setShowPlans(false)} C={FP_C} flash={toast_}/>}
@@ -1564,14 +1676,15 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
         <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)",
           background:FP_C.surfaceTop, color: toast.isError ? FP_C.danger : FP_C.positive,
           border:`1px solid ${toast.isError ? FP_C.danger + "55" : FP_C.positiveDim}`,
-          borderRadius:8, padding:"9px 16px", fontSize:12, fontWeight:600,
+          borderRadius:10, padding:"11px 16px", fontSize:12, fontWeight:600,
           fontFamily:FP_FH, zIndex:700, boxShadow:"0 8px 24px rgba(0,0,0,0.6)",
-          display:"flex", alignItems:"center", gap:8, maxWidth:"88vw",
+          display:"flex", alignItems:"flex-start", gap:8,
+          maxWidth:"min(92vw, 420px)", maxHeight:"60vh", overflowY:"auto",
           letterSpacing:"0.2px" }}>
           {toast.isError
             ? <FP_Icon d={FP_Icons.x} size={14} color={FP_C.danger}/>
             : <FP_Icon d={FP_Icons.check} size={14} color={FP_C.positive}/>}
-          <span style={{ whiteSpace: toast.isError ? "normal" : "nowrap" }}>{toast.msg}</span>
+          <span style={{ whiteSpace:"pre-wrap", overflowWrap:"anywhere", wordBreak:"break-word", lineHeight:1.45, minWidth:0 }}>{toast.msg}</span>
         </div>
       )}
 
@@ -2091,26 +2204,49 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
             {/* Reviews list — reseñas del VENDEDOR (seller_reviews), nunca de sus
                 productos. Con seller_reviews_count=0 real, siempre "Sin valoraciones
                 aún" — sin importar si el vendedor tiene reseñas de producto. */}
-            {(sellerRatingInfo?.count || 0) === 0 && (
+            {/* Valorar a ESTA persona: una sola por usuario (unique seller_id +
+                reviewer_id). Si ya dejé la mía, el botón la EDITA, no crea otra.
+                Nunca aparece en el perfil propio. */}
+            {canReview && (
+              <button onClick={openReview}
+                style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+                  background: myReview ? "transparent" : FP_C.accent,
+                  color: myReview ? FP_C.accent : "#000",
+                  border:`1px solid ${FP_C.accent}`, borderRadius:10, padding:"12px",
+                  fontSize:13, fontWeight:700, cursor:"pointer", marginBottom:12, fontFamily:FP_FH }}>
+                {myReview ? "✏️ Editar mi valoración" : "⭐ Dejar una valoración"}
+              </button>
+            )}
+
+            {(sellerRatingInfo?.count || 0) === 0 && !myReview && (
               <p style={{ fontSize:12, color:FP_C.textMuted, textAlign:"center", padding:"18px 0" }}>
                 Sin valoraciones aún.
               </p>
             )}
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-              {reviews.map(r => (
-                <div key={r.id} style={{ background:FP_C.surface,
-                  border:`1px solid ${FP_C.border}`, borderRadius:10, padding:"14px 16px" }}>
+              {[...reviews].sort((x, y) => (y.reviewerId === user?.id ? 1 : 0) - (x.reviewerId === user?.id ? 1 : 0)).map(r => {
+                const mia = !!user?.id && r.reviewerId === user.id;
+                return (
+                <div key={r.id} style={{ background: mia ? FP_C.accent + "0f" : FP_C.surface,
+                  border:`1px solid ${mia ? FP_C.accent + "66" : FP_C.border}`, borderRadius:10, padding:"14px 16px" }}>
                   <div style={{ display:"flex", alignItems:"center",
                     justifyContent:"space-between", marginBottom:8 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                       <Avatar name={r.user} url={r.avatar} size={34}/>
                       <div>
                         <div style={{ fontSize:13, fontWeight:600,
-                          color:FP_C.textPrimary, fontFamily:FP_FH }}>{r.user}</div>
+                          color:FP_C.textPrimary, fontFamily:FP_FH, display:"flex", alignItems:"center", gap:7, flexWrap:"wrap" }}>
+                          {r.user}
+                          {/* La propia se reconoce de un vistazo, por vieja que sea. */}
+                          {mia && <span style={{ fontSize:9.5, fontWeight:800, color:"#000", background:FP_C.accent, borderRadius:5, padding:"2px 6px", letterSpacing:".02em" }}>TU VALORACIÓN</span>}
+                        </div>
                         <FP_StarRow count={r.stars} size={11}/>
                       </div>
                     </div>
-                    <span style={{ fontSize:10, color:FP_C.textMuted }}>{r.date}</span>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                      <span style={{ fontSize:10, color:FP_C.textMuted }}>{r.date}</span>
+                      {mia && <button onClick={openReview} style={{ background:"transparent", border:"none", color:FP_C.accent, fontSize:11, fontWeight:700, cursor:"pointer", padding:0 }}>Editar</button>}
+                    </div>
                   </div>
                   {r.text && (
                     <div style={{ fontSize:13, color:FP_C.textSecondary, lineHeight:1.6 }}>
@@ -2118,7 +2254,8 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </>
         )}

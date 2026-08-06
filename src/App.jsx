@@ -213,6 +213,7 @@ function AppShell({ sessionUser }) {
   // se actualiza EN VIVO por realtime (perfil/notificación kind='account').
   const [suspended, setSuspended] = useState(!!sessionUser?.suspended);
   const [toast,     setToast]     = useState(null);
+  const flashTmrRef = useRef(null);
   const [unread,    setUnread]    = useState(0); // contador de no leídos (real)
   // (el contador real de notificaciones es unreadNotif, calculado más abajo)
 
@@ -631,7 +632,15 @@ function AppShell({ sessionUser }) {
   // (Los banners de la tienda ya no viven aquí: son bloques de adminCfg.blocks,
   //  editados en el Editor Visual y renderizados por MarketBanners.)
 
-  const flash = (msg, dur = 3200) => { setToast(msg); setTimeout(() => setToast(null), dur); };
+  const flash = (msg, dur = null) => {
+    // El tiempo en pantalla crece con el largo del mensaje: un error de varias
+    // líneas no se puede leer en los 3,2 s de un aviso corto.
+    const txt = String(msg ?? "");
+    const ms = dur != null ? dur : Math.min(14000, Math.max(3200, txt.length * 85));
+    setToast(msg);
+    clearTimeout(flashTmrRef.current);
+    flashTmrRef.current = setTimeout(() => setToast(null), ms);
+  };
   // 2) GUARDAR desde el panel (solo admin): aplica el cambio en caliente y persiste
   //    el objeto COMPLETO en el backend vía RPC (con debounce, no en cada tecla).
   //    El localStorage sigue siendo caché; el guardado REAL es la RPC.
@@ -1393,7 +1402,7 @@ function AppShell({ sessionUser }) {
 
       {/* Toast */}
       {toast && (
-        <div style={{ position: "fixed", bottom: rsp.isDesktop ? 30 : 90, left: "50%", transform: "translateX(-50%)", background: effectiveTheme === "dark" ? "#191919" : "#ffffff", color: effectiveTheme === "dark" ? "#fff" : "#161616", border: `1px solid ${effectiveTheme === "dark" ? B : "rgba(0,0,0,.08)"}`, borderRadius: 50, padding: "10px 20px", fontSize: 11, fontWeight: 600, zIndex: 800, whiteSpace: "nowrap", boxShadow: effectiveTheme === "dark" ? "0 8px 28px rgba(0,0,0,.9)" : "0 8px 28px rgba(0,0,0,.18)", animation: "tst .26s ease both", maxWidth: "90vw" }}>
+        <div style={{ position: "fixed", bottom: rsp.isDesktop ? 30 : 90, left: "50%", transform: "translateX(-50%)", background: effectiveTheme === "dark" ? "#191919" : "#ffffff", color: effectiveTheme === "dark" ? "#fff" : "#161616", border: `1px solid ${effectiveTheme === "dark" ? B : "rgba(0,0,0,.08)"}`, borderRadius: 16, padding: "12px 18px", fontSize: 12, fontWeight: 600, zIndex: 800, whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word", lineHeight: 1.45, textAlign: "center", boxShadow: effectiveTheme === "dark" ? "0 8px 28px rgba(0,0,0,.9)" : "0 8px 28px rgba(0,0,0,.18)", animation: "tst .26s ease both", width: "max-content", maxWidth: "min(92vw, 420px)", maxHeight: "60vh", overflowY: "auto" }}>
           {toast}
         </div>
       )}

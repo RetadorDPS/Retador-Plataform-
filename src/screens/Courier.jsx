@@ -161,6 +161,42 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   const reloadAll = useCallback(async () => { await Promise.all([reloadPool(), reloadEarnings(), reloadDebt()]); }, [reloadPool, reloadEarnings, reloadDebt]);
   const ptr = usePullToRefresh(scrollRef, reloadAll);
 
+  // ── CONGELAR REFRESCOS MIENTRAS HAY UN DEDO APOYADO ─────────────────────────
+  // Un refresco (realtime, polling) que llegue justo entre la pulsación y el
+  // soltado de un toque re-renderiza el árbol y puede impedir que el navegador
+  // sintetice el "click" — la causa exacta por la que el botón "Entregué" ha
+  // fallado dos veces. Mientras el dedo está apoyado, los refrescos se APLAZAN
+  // y se aplican en cuanto se levanta: nada se pierde, solo se retrasa un
+  // instante. (El botón además ya no depende del "click": usa onPointerUp.)
+  const touchingRef = useRef(false);
+  const pendingRefreshRef = useRef(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const down = () => { touchingRef.current = true; };
+    const up = () => {
+      if (!touchingRef.current) return;
+      touchingRef.current = false;
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        // En un tick aparte, para no re-renderizar dentro del propio despacho
+        // del evento que acaba de activar el botón.
+        setTimeout(() => { reloadAll(); }, 0);
+      }
+    };
+    el.addEventListener("pointerdown", down, { passive: true });
+    // En window y en fase de burbuja: React despacha su onPointerUp en su raíz
+    // (dentro de window), así que el botón se dispara ANTES de que soltemos la
+    // guarda. El orden importa.
+    window.addEventListener("pointerup", up, { passive: true });
+    window.addEventListener("pointercancel", up, { passive: true });
+    return () => {
+      el.removeEventListener("pointerdown", down);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [reloadAll]);
+
   useEffect(() => {
     // Nombre ÚNICO por montaje: supabase.channel() reutiliza el canal si el
     // nombre se repite (p.ej. al salir y volver a entrar a "Modo Mensajero" en
@@ -168,7 +204,13 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
     // "parpadear" (se veía el toque de refresco) pero nunca llegaban los
     // pedidos nuevos, porque el canal reciclado ya no entregaba eventos.
     const ch = supabase.channel(`rt-courier-pool-${meId || "anon"}-${Date.now()}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => { reloadPool(); reloadEarnings(); reloadDebt(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => {
+        // Con un dedo apoyado NO se toca el estado: se anota y se aplica al
+        // levantar (ver la guarda de arriba). Evita el re-render a mitad de un
+        // toque que ya rompió este botón dos veces.
+        if (touchingRef.current) { pendingRefreshRef.current = true; return; }
+        reloadPool(); reloadEarnings(); reloadDebt();
+      })
       .subscribe();
     return () => { try { supabase.removeChannel(ch); } catch (e) {} };
   }, [meId, reloadPool, reloadEarnings, reloadDebt]);
@@ -198,7 +240,19 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   const refOf = o => o.delivery?.ref || o.delivery?.note || "";
   const fmtDate = t => t ? new Date(t).toLocaleDateString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
-  const Card = ({ children, style }) => <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 16, padding: 15, ...style }}>{children}</div>;
+  // ⚠️ IDENTIDAD ESTABLE, NO NEGOCIABLE. Definir este componente como una función
+  // suelta dentro del cuerpo (const Card = ...) crea una función NUEVA en cada
+  // render: React compara los tipos por referencia, ve un tipo distinto y
+  // DESMONTA Y VUELVE A MONTAR todo el subárbol de cada <Card>. Eso destruía el
+  // botón "Entregué" en cada refresco (ganancias, deuda, pool, realtime), anulaba
+  // por completo su memo(), y hacía que el mousedown cayera en un nodo que ya no
+  // existía al llegar el mouseup — el "parpadeo" real que reportó el dueño y la
+  // causa de fondo de que el botón no respondiera. Con useMemo la identidad solo
+  // cambia si cambia el tema, así que el subárbol se conserva entre renders.
+  const Card = useMemo(
+    () => ({ children, style }) => <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 16, padding: 15, ...style }}>{children}</div>,
+    [card, bd]
+  );
   const row = (icon, label, val, sub) => (
     <div style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "7px 0" }}>
       <div style={{ width: 28, height: 28, borderRadius: 8, background: AC + "1a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 }}>{icon}</div>

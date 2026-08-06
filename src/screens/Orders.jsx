@@ -344,7 +344,11 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
     );
   };
 
-  const TabBtn = ({ id, label, nuevos }) => {
+  // Identidad ESTABLE (useMemo): definido como función suelta en el cuerpo, React
+  // veía un tipo nuevo en cada render y desmontaba/volvía a montar estos botones,
+  // de modo que un toque podía caer entre el nodo viejo y el nuevo y perderse.
+  // Mismo fallo que rompía el botón "Entregué" del mensajero.
+  const TabBtn = useMemo(() => ({ id, label, nuevos, tab, setTab }) => {
     const on = tab === id;
     return (
       <button onClick={() => setTab(id)} className="p" style={{ flex: 1, position: "relative", background: "transparent", border: "none", borderBottom: `2px solid ${on ? G : "transparent"}`, padding: "12px 4px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
@@ -352,7 +356,7 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
         {nuevos > 0 && <span style={{ minWidth: 17, height: 17, borderRadius: 999, background: "#EF4444", color: "#fff", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{nuevos > 99 ? "99+" : nuevos}</span>}
       </button>
     );
-  };
+  }, [G, T1, T2]);
 
   const list = tab === "compras" ? compras : ventas;
   const empty = tab === "compras"
@@ -368,8 +372,8 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
           <p style={{ fontSize: 14, fontWeight: 800, color: T1 }}>Pedidos</p>
         </div>
         <div style={{ display: "flex", padding: "0 10px" }}>
-          <TabBtn id="compras" label="Compras" nuevos={comprasNew} />
-          <TabBtn id="ventas"  label="Ventas"  nuevos={ventasNew} />
+          <TabBtn id="compras" label="Compras" nuevos={comprasNew} tab={tab} setTab={setTab} />
+          <TabBtn id="ventas"  label="Ventas"  nuevos={ventasNew} tab={tab} setTab={setTab} />
         </div>
       </div>
 

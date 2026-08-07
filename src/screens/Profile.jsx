@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, canReviewPerson } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -1465,18 +1465,29 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   // ── MI VALORACIÓN sobre esta persona ────────────────────────────────────────
   // Una sola por persona: la tabla lo impone con unique(seller_id, reviewer_id).
   // Si ya existe, se precarga para EDITARLA o BORRARLA, nunca para crear otra.
-  const canReview = !isOwner && !!user?.id && !!aboutTargetId && user.id !== aboutTargetId;
+  // Solo se puede CREAR una valoración de alguien con quien ya se completó un
+  // pedido (lo impone la política de INSERT en la base). Editar la propia sí se
+  // permite siempre, así que el botón también aparece si ya dejé la mía.
+  const esOtroUsuario = !isOwner && !!user?.id && !!aboutTargetId && user.id !== aboutTargetId;
+  const [puedeCrear, setPuedeCrear] = useState(false);
+  useEffect(() => {
+    if (!esOtroUsuario) { setPuedeCrear(false); return; }
+    let alive = true;
+    canReviewPerson(aboutTargetId, user.id).then(v => { if (alive) setPuedeCrear(!!v); }).catch(() => {});
+    return () => { alive = false; };
+  }, [esOtroUsuario, aboutTargetId, user?.id, reviewsNonce]);
+  const canReview = esOtroUsuario && (puedeCrear || !!myReview);
   const [myReview, setMyReview] = useState(null);      // null = no tengo / aún cargando
   const [reviewOpen, setReviewOpen] = useState(false);
   const [revStars, setRevStars] = useState(0);
   const [revText, setRevText] = useState("");
   const [revBusy, setRevBusy] = useState(false);
   useEffect(() => {
-    if (!canReview) { setMyReview(null); return; }
+    if (!esOtroUsuario) { setMyReview(null); return; }
     let alive = true;
     getMySellerReview(aboutTargetId, user.id).then(r => { if (alive) setMyReview(r); }).catch(() => {});
     return () => { alive = false; };
-  }, [canReview, aboutTargetId, user?.id, reviewsNonce]);
+  }, [esOtroUsuario, aboutTargetId, user?.id, reviewsNonce]);
   const openReview = () => {
     setRevStars(myReview?.rating || 0);
     setRevText(myReview?.comment || "");

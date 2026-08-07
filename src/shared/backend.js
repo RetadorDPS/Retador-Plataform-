@@ -342,6 +342,26 @@ export const submitSellerReview = async (targetId, reviewerId, rating, comment) 
     .upsert({ seller_id: targetId, reviewer_id: reviewerId, rating, comment: comment || "" }, { onConflict: "seller_id,reviewer_id" });
   if (error) throw error;
 };
+// ¿Puedo CREAR una valoración sobre esta persona? La política de INSERT de
+// seller_reviews solo la permite si existe un pedido MÍO ya completado con ella
+// (como vendedora o como mensajera) — verificado contra la base:
+//   auth.uid() = reviewer_id AND EXISTS (SELECT 1 FROM orders o
+//     WHERE (o.seller_id = ... OR o.courier_id = ...) AND o.buyer_id = auth.uid()
+//       AND o.status IN ('completado','entregado'))
+// Sin esta comprobación, el botón aparecería para cualquiera y al pulsarlo
+// fallaría con un error de permisos incomprensible para el usuario.
+export const canReviewPerson = async (targetId, userId) => {
+  if (!targetId || !userId || targetId === userId) return false;
+  try {
+    const { data, error } = await supabase.from("orders").select("id")
+      .or(`seller_id.eq.${targetId},courier_id.eq.${targetId}`)
+      .eq("buyer_id", userId)
+      .in("status", ["completado", "entregado"])
+      .limit(1);
+    if (error) { console.error("canReviewPerson:", error.message); return false; }
+    return !!(data && data.length);
+  } catch (e) { console.error("canReviewPerson (excepción):", e?.message || e); return false; }
+};
 // Borra MI valoración sobre esa persona (el RLS ya limita a la propia).
 export const deleteSellerReview = async (targetId, reviewerId) => {
   if (!targetId || !reviewerId) throw new Error("Sesión no válida");
@@ -1252,10 +1272,15 @@ export const updateOrderStatus = async (orderId, status) => {
 // más entregas en curso — ÚNICA fuente para la tarjeta de ganancias. Nunca se
 // suma a mano desde los pedidos ya cargados en el frontend (esos no
 // garantizan estar completos ni acotados a "hoy").
-export const getCourierEarnings = async () => {
+export const getCourierEarnings = async (userId) => {
   const empty = { hoyMonto: 0, hoyEntregas: 0, totalMonto: 0, totalEntregas: 0, enCurso: 0 };
+  if (!userId) return empty;
   try {
-    const { data, error } = await supabase.rpc("courier_earnings");
+    // ⚠️ La función EXIGE p_user_id (no existe una versión sin argumentos).
+    // Llamarla sin él hacía que PostgREST no la encontrara, el catch devolvía
+    // ceros en silencio, y las ganancias salían en 0 pese a haber entregas
+    // reales. Verificado contra la base: courier_earnings(p_user_id uuid).
+    const { data, error } = await supabase.rpc("courier_earnings", { p_user_id: userId });
     if (error) { console.error("courier_earnings:", error.message); return empty; }
     if (!data) return empty;
     const row = Array.isArray(data) ? (data[0] || {}) : data;
@@ -1272,10 +1297,12 @@ export const getCourierEarnings = async () => {
 // acumulada por cada entrega completada, lo ya pagado y el % vigente — ÚNICA
 // fuente para la tarjeta de deuda. Va al mismo ledger que usan los vendedores
 // (seller_commission_ledger, kind='courier').
-export const getCourierDebt = async () => {
+export const getCourierDebt = async (userId) => {
   const empty = { debe: 0, pagadoTotal: 0, pctComision: 0 };
+  if (!userId) return empty;
   try {
-    const { data, error } = await supabase.rpc("courier_debt");
+    // Misma firma que courier_earnings: courier_debt(p_user_id uuid).
+    const { data, error } = await supabase.rpc("courier_debt", { p_user_id: userId });
     if (error) { console.error("courier_debt:", error.message); return empty; }
     if (!data) return empty;
     const row = Array.isArray(data) ? (data[0] || {}) : data;

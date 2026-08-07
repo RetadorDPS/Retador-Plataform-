@@ -138,9 +138,9 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   const [earnings, setEarnings] = useState(null);
   const [earnView, setEarnView] = useState("hoy"); // "hoy" | "total"
   const reloadEarnings = useCallback(async () => {
-    const e = await getCourierEarnings();
+    const e = await getCourierEarnings(meId);
     setEarnings(e);
-  }, []);
+  }, [meId]);
   useEffect(() => { reloadEarnings(); }, [reloadEarnings]);
 
   // DEUDA real (courier_debt): comisión de entrega (commDeliveryPct) que se
@@ -148,9 +148,9 @@ function CourierDashboard({ meName, meId, orders, localBase, onAccept, onStage, 
   // entrega. Nunca calculada aquí — solo mostrada tal cual llega del backend.
   const [debt, setDebt] = useState(null);
   const reloadDebt = useCallback(async () => {
-    const d = await getCourierDebt();
+    const d = await getCourierDebt(meId);
     setDebt(d);
-  }, []);
+  }, [meId]);
   useEffect(() => { reloadDebt(); }, [reloadDebt]);
 
   // PULL-TO-REFRESH real (no navega): antes, deslizar hacia abajo en esta

@@ -1469,15 +1469,20 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   // pedido (lo impone la política de INSERT en la base). Editar la propia sí se
   // permite siempre, así que el botón también aparece si ya dejé la mía.
   const esOtroUsuario = !isOwner && !!user?.id && !!aboutTargetId && user.id !== aboutTargetId;
+  // ⚠️ ORDEN IMPORTANTE: estos dos estados se DECLARAN antes de calcular
+  // canReview. Tenerlos después hacía que canReview leyera myReview antes de su
+  // declaración (zona muerta temporal de `const`) y lanzara
+  // "Cannot access 'myReview' before initialization" DURANTE el render, lo que
+  // desmontaba el árbol y dejaba el perfil EN BLANCO.
+  const [myReview, setMyReview] = useState(null);      // null = no tengo / aún cargando
   const [puedeCrear, setPuedeCrear] = useState(false);
   useEffect(() => {
     if (!esOtroUsuario) { setPuedeCrear(false); return; }
     let alive = true;
-    canReviewPerson(aboutTargetId, user.id).then(v => { if (alive) setPuedeCrear(!!v); }).catch(() => {});
+    canReviewPerson(aboutTargetId, user.id).then(v => { if (alive) setPuedeCrear(!!v); }).catch(() => { setPuedeCrear(false); });
     return () => { alive = false; };
   }, [esOtroUsuario, aboutTargetId, user?.id, reviewsNonce]);
   const canReview = esOtroUsuario && (puedeCrear || !!myReview);
-  const [myReview, setMyReview] = useState(null);      // null = no tengo / aún cargando
   const [reviewOpen, setReviewOpen] = useState(false);
   const [revStars, setRevStars] = useState(0);
   const [revText, setRevText] = useState("");
@@ -1485,7 +1490,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   useEffect(() => {
     if (!esOtroUsuario) { setMyReview(null); return; }
     let alive = true;
-    getMySellerReview(aboutTargetId, user.id).then(r => { if (alive) setMyReview(r); }).catch(() => {});
+    getMySellerReview(aboutTargetId, user.id).then(r => { if (alive) setMyReview(r); }).catch(() => { if (alive) setMyReview(null); });
     return () => { alive = false; };
   }, [esOtroUsuario, aboutTargetId, user?.id, reviewsNonce]);
   const openReview = () => {

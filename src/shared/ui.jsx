@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Component, useEffect, useState } from "react";
 import { G, useAt } from "./theme.jsx";
 import { getUserById } from "./backend.js";
 
@@ -237,3 +237,37 @@ export const Logo = ({ size = 21, sub = null }) => {
   </div>
   );
 };
+
+
+// ── BARRERA DE ERROR ────────────────────────────────────────────────────────
+// Sin esto, CUALQUIER excepción durante el render desmonta el árbol entero y
+// deja una PANTALLA EN BLANCO, sin pista de qué pasó. Envolviendo una pantalla,
+// el fallo queda acotado: se ve un aviso legible con el error real (y un botón
+// para reintentar) en vez de una pantalla vacía.
+export class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("ErrorBoundary:", error, info?.componentStack); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    const msg = this.state.error?.message || String(this.state.error);
+    return (
+      <div style={{ padding: "28px 20px", textAlign: "center", fontFamily: "inherit" }}>
+        <div style={{ fontSize: 30, marginBottom: 10 }}>⚠️</div>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#f0f0f0", marginBottom: 6 }}>
+          {this.props.title || "No se pudo mostrar esta pantalla"}
+        </div>
+        <div style={{ fontSize: 11.5, color: "#9aa0aa", lineHeight: 1.5, whiteSpace: "pre-wrap",
+          overflowWrap: "anywhere", wordBreak: "break-word", maxWidth: 420, margin: "0 auto 14px" }}>{msg}</div>
+        <button onClick={() => this.setState({ error: null })}
+          style={{ background: G, color: "#000", border: "none", borderRadius: 11, padding: "11px 20px",
+            fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Reintentar</button>
+        {this.props.onClose && (
+          <button onClick={this.props.onClose}
+            style={{ display: "block", margin: "10px auto 0", background: "transparent", border: "none",
+              color: "#9aa0aa", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Volver</button>
+        )}
+      </div>
+    );
+  }
+}

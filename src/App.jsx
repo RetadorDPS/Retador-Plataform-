@@ -36,8 +36,7 @@ import {
   CATS, SUBCATS, CatalogContext, CatalogProvider, useCatalog, CatIcon,
   useCSS, Ic, Spin, Logo,
   getPageLayout, liveSlot, LiveBlock, LiveSlot,
-  useScrollDir, consumeBack, pushBackHandler, shouldIgnorePop,
-} from "./shared/index.js";
+  useScrollDir, consumeBack, pushBackHandler, shouldIgnorePop, ErrorBoundary } from "./shared/index.js";
 import WalletApp from "./screens/Wallet.jsx";
 import ProductToolsApp from "./screens/ProductTools.jsx";
 import { LocalDelivery, IntlShipping } from "./screens/Delivery.jsx";
@@ -1566,6 +1565,9 @@ function AppShell({ sessionUser }) {
       })()}
       {viewProfileId && (
         <div style={{ position: "fixed", inset: 0, zIndex: 5200, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+          {/* Una excepción en el perfil ya no puede dejar la pantalla EN BLANCO:
+              queda acotada aquí, con el error visible y opción de volver. */}
+          <ErrorBoundary title="No se pudo mostrar este perfil" onClose={() => setViewProfileId(null)}>
           <FreeProfileScreen
             onBack={() => setViewProfileId(null)}
             user={user}
@@ -1579,6 +1581,7 @@ function AppShell({ sessionUser }) {
             userProducts={products.filter(p => p.seller_id === viewProfileId)}
             onProduct={p => setViewProdOverlay(p)}
           />
+          </ErrorBoundary>
         </div>
       )}
       {/* Producto como CAPA (desde perfil público / modo mensajero): encima de todo,

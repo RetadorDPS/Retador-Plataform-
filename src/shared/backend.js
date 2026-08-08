@@ -317,55 +317,56 @@ export const getSellerReviews = async (sellerId) => {
     });
   } catch (e) { console.error("getSellerReviews (excepción):", e?.message || e); return []; }
 };
-// Mi valoración sobre esa persona (si ya dejé una). La tabla impone
-// unique(seller_id, reviewer_id): una sola por persona, editable.
+// Mi valoración LIBRE sobre esa persona (order_id IS NULL) — la que se deja
+// desde su perfil, sin pedido de por medio. Una sola por persona (índice único
+// parcial), editable. Las valoraciones POR PEDIDO (order_id != null, ver
+// submitOrderReview) son otra cosa: se suman, no reemplazan esta.
 export const getMySellerReview = async (sellerId, reviewerId) => {
   if (!sellerId || !reviewerId) return null;
   try {
     const { data, error } = await supabase.from("seller_reviews")
       .select("id, rating, comment, created_at, updated_at")
-      .eq("seller_id", sellerId).eq("reviewer_id", reviewerId).maybeSingle();
+      .eq("seller_id", sellerId).eq("reviewer_id", reviewerId).is("order_id", null).maybeSingle();
     if (error) { console.error("getMySellerReview:", error.message); return null; }
     return data ? { id: data.id, rating: data.rating, comment: data.comment || "", createdAt: data.created_at, updatedAt: data.updated_at } : null;
   } catch (e) { console.error("getMySellerReview (excepción):", e?.message || e); return null; }
 };
-// Guarda una valoración REAL en seller_reviews — mismo mecanismo para vendedor,
-// mensajero y valoración desde el perfil. UPSERT sobre (seller_id, reviewer_id):
-// si ya existe la mía, la ACTUALIZA en vez de fallar por el índice único.
-// Nunca se guarda solo en el dispositivo (localStorage): así el promedio y el
-// conteo que ve todo el mundo (profiles.seller_rating/seller_reviews_count)
-// son reales, no un dato que solo tú ves.
+// Guarda la valoración LIBRE (order_id: null explícito) — la del perfil, sin
+// pedido de por medio. Nunca exige un pedido completado (la política de INSERT
+// ya no lo pide cuando order_id es null). Una sola por persona: si ya existe,
+// se ACTUALIZA por id (no se usa upsert por columnas porque el índice único que
+// la protege es PARCIAL — solo cubre las filas con order_id is null — y
+// PostgREST no puede apuntar un onConflict a un índice parcial).
 export const submitSellerReview = async (targetId, reviewerId, rating, comment) => {
   if (!targetId || !reviewerId) throw new Error("Sesión no válida");
   if (targetId === reviewerId) throw new Error("No puedes valorarte a ti mismo");
-  const { error } = await supabase.from("seller_reviews")
-    .upsert({ seller_id: targetId, reviewer_id: reviewerId, rating, comment: comment || "" }, { onConflict: "seller_id,reviewer_id" });
+  const existing = await getMySellerReview(targetId, reviewerId);
+  if (existing) {
+    const { error } = await supabase.from("seller_reviews").update({ rating, comment: comment || "" }).eq("id", existing.id);
+    if (error) throw error;
+  } else {
+    const { error } = await supabase.from("seller_reviews").insert({ seller_id: targetId, reviewer_id: reviewerId, order_id: null, rating, comment: comment || "" });
+    if (error) throw error;
+  }
+};
+// Valoración POR PEDIDO (order_id: el pedido real ya completado) — la que se
+// deja tras entregar/comprar. SIEMPRE un INSERT nuevo, nunca upsert: cada
+// pedido completado con esa persona genera su propia fila, se suman todas al
+// promedio/contador del perfil. La política de INSERT exige que sea mi pedido,
+// completado, y con esa misma persona (como vendedor o como mensajero); el
+// índice único (seller_id, reviewer_id, order_id) impide calificar el mismo
+// pedido dos veces — si ocurriera, el error real de la base sube tal cual.
+export const submitOrderReview = async (targetId, reviewerId, orderId, rating, comment) => {
+  if (!targetId || !reviewerId || !orderId) throw new Error("Sesión no válida");
+  if (targetId === reviewerId) throw new Error("No puedes valorarte a ti mismo");
+  const { error } = await supabase.from("seller_reviews").insert({ seller_id: targetId, reviewer_id: reviewerId, order_id: orderId, rating, comment: comment || "" });
   if (error) throw error;
 };
-// ¿Puedo CREAR una valoración sobre esta persona? La política de INSERT de
-// seller_reviews solo la permite si existe un pedido MÍO ya completado con ella
-// (como vendedora o como mensajera) — verificado contra la base:
-//   auth.uid() = reviewer_id AND EXISTS (SELECT 1 FROM orders o
-//     WHERE (o.seller_id = ... OR o.courier_id = ...) AND o.buyer_id = auth.uid()
-//       AND o.status IN ('completado','entregado'))
-// Sin esta comprobación, el botón aparecería para cualquiera y al pulsarlo
-// fallaría con un error de permisos incomprensible para el usuario.
-export const canReviewPerson = async (targetId, userId) => {
-  if (!targetId || !userId || targetId === userId) return false;
-  try {
-    const { data, error } = await supabase.from("orders").select("id")
-      .or(`seller_id.eq.${targetId},courier_id.eq.${targetId}`)
-      .eq("buyer_id", userId)
-      .in("status", ["completado", "entregado"])
-      .limit(1);
-    if (error) { console.error("canReviewPerson:", error.message); return false; }
-    return !!(data && data.length);
-  } catch (e) { console.error("canReviewPerson (excepción):", e?.message || e); return false; }
-};
-// Borra MI valoración sobre esa persona (el RLS ya limita a la propia).
+// Borra MI valoración LIBRE sobre esa persona (el RLS ya limita a la propia y
+// a order_id is null — las de pedido son un registro permanente de esa entrega).
 export const deleteSellerReview = async (targetId, reviewerId) => {
   if (!targetId || !reviewerId) throw new Error("Sesión no válida");
-  const { error } = await supabase.from("seller_reviews").delete().eq("seller_id", targetId).eq("reviewer_id", reviewerId);
+  const { error } = await supabase.from("seller_reviews").delete().eq("seller_id", targetId).eq("reviewer_id", reviewerId).is("order_id", null);
   if (error) throw error;
 };
 

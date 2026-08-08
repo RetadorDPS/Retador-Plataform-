@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, submitSellerReview, useAt, useR, PullIndicator, usePullToRefresh } from "../shared/index.js";
+import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, submitOrderReview, useAt, useR, PullIndicator, usePullToRefresh } from "../shared/index.js";
 
 export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewProfile, flash, onSellerConfirm, onBuyerConfirm, onSellerPayment, onApproveFee }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
@@ -22,9 +22,11 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   const viewerIsSeller = (!!user?.id && (o.seller_id === user.id || o.sellerId === user.id)) || (!!me && o.sellerName === me);
   const viewerLooksBuyer = (!!user?.id && (o.buyer_id === user.id || o.buyerId === user.id)) || (!!o.buyerName && o.buyerName === me) || o.feeApproval === "pending";
   const isCompleted = done || o.courierStage === "completado" || o.status === "completado" || o.status === "entregado" || (o.buyerConfirmed && o.sellerPaid);
-  // Guarda cada reseña de PERSONA de verdad en seller_reviews (mismo mecanismo
-  // para vendedor y mensajero — el backend acepta seller_id o courier_id de un
-  // pedido completado). La calificación "RETADOR en general" (rate.sys) no
+  // Guarda cada reseña de PERSONA de verdad en seller_reviews, ligada a ESTE
+  // pedido (order_id = o.id) — SIEMPRE un INSERT nuevo, nunca upsert: cada
+  // pedido completado genera su propia fila y se suma al promedio/contador,
+  // no reemplaza ninguna calificación anterior (ni la libre del perfil ni la
+  // de otro pedido). La calificación "RETADOR en general" (rate.sys) no
   // apunta a ninguna persona, así que no tiene cabida en esa tabla; se guarda
   // solo localmente, como antes, hasta que exista una fuente real para ella.
   const submitRatings = async () => {
@@ -34,8 +36,8 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
     const courierId = o.courierId || o.courier_id || null;
     try {
       const jobs = [];
-      if (sellerId && rate.seller > 0) jobs.push(submitSellerReview(sellerId, user?.id, rate.seller, rateMsg.seller));
-      if (courierId && rate.courier > 0) jobs.push(submitSellerReview(courierId, user?.id, rate.courier, rateMsg.courier));
+      if (sellerId && rate.seller > 0) jobs.push(submitOrderReview(sellerId, user?.id, o.id, rate.seller, rateMsg.seller));
+      if (courierId && rate.courier > 0) jobs.push(submitOrderReview(courierId, user?.id, o.id, rate.courier, rateMsg.courier));
       await Promise.all(jobs);
     } catch (e) {
       flash && flash("⚠️ No se pudo guardar tu calificación: " + (e?.message || "Intenta de nuevo"));

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, canReviewPerson } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -1462,27 +1462,18 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
     return () => { alive = false; };
   }, [aboutTargetId, reviewsNonce]);
 
-  // ── MI VALORACIÓN sobre esta persona ────────────────────────────────────────
-  // Una sola por persona: la tabla lo impone con unique(seller_id, reviewer_id).
-  // Si ya existe, se precarga para EDITARLA o BORRARLA, nunca para crear otra.
-  // Solo se puede CREAR una valoración de alguien con quien ya se completó un
-  // pedido (lo impone la política de INSERT en la base). Editar la propia sí se
-  // permite siempre, así que el botón también aparece si ya dejé la mía.
+  // ── MI VALORACIÓN LIBRE sobre esta persona (order_id null) ──────────────────
+  // Se puede dejar SIEMPRE, sin necesidad de un pedido completado — el botón
+  // "Dejar una valoración" no lleva condición. Es distinta de las valoraciones
+  // POR PEDIDO (una por cada entrega completada, ver submitOrderReview en
+  // Orders.jsx): esta es libre, una sola por persona, editable/borrable.
   const esOtroUsuario = !isOwner && !!user?.id && !!aboutTargetId && user.id !== aboutTargetId;
-  // ⚠️ ORDEN IMPORTANTE: estos dos estados se DECLARAN antes de calcular
-  // canReview. Tenerlos después hacía que canReview leyera myReview antes de su
-  // declaración (zona muerta temporal de `const`) y lanzara
-  // "Cannot access 'myReview' before initialization" DURANTE el render, lo que
-  // desmontaba el árbol y dejaba el perfil EN BLANCO.
+  const canReview = esOtroUsuario;
+  // ⚠️ myReview se declara ANTES de cualquier uso — declararlo después de un
+  // punto que ya lo referencia causa "Cannot access 'myReview' before
+  // initialization" durante el render (zona muerta temporal de `const`), lo
+  // que desmonta el árbol y deja el perfil EN BLANCO (ya pasó una vez).
   const [myReview, setMyReview] = useState(null);      // null = no tengo / aún cargando
-  const [puedeCrear, setPuedeCrear] = useState(false);
-  useEffect(() => {
-    if (!esOtroUsuario) { setPuedeCrear(false); return; }
-    let alive = true;
-    canReviewPerson(aboutTargetId, user.id).then(v => { if (alive) setPuedeCrear(!!v); }).catch(() => { setPuedeCrear(false); });
-    return () => { alive = false; };
-  }, [esOtroUsuario, aboutTargetId, user?.id, reviewsNonce]);
-  const canReview = esOtroUsuario && (puedeCrear || !!myReview);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [revStars, setRevStars] = useState(0);
   const [revText, setRevText] = useState("");
@@ -2240,8 +2231,11 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
               </p>
             )}
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-              {[...reviews].sort((x, y) => (y.reviewerId === user?.id ? 1 : 0) - (x.reviewerId === user?.id ? 1 : 0)).map(r => {
-                const mia = !!user?.id && r.reviewerId === user.id;
+              {/* Solo la reseña LIBRE (myReview) se destaca/fija arriba como "TU
+                  VALORACIÓN" — las de pedido son mías también, pero se muestran
+                  como cualquier otra, sin destacar ni indicar a qué pedido pertenecen. */}
+              {[...reviews].sort((x, y) => (y.id === myReview?.id ? 1 : 0) - (x.id === myReview?.id ? 1 : 0)).map(r => {
+                const mia = !!myReview && r.id === myReview.id;
                 return (
                 <div key={r.id} style={{ background: mia ? FP_C.accent + "0f" : FP_C.surface,
                   border:`1px solid ${mia ? FP_C.accent + "66" : FP_C.border}`, borderRadius:10, padding:"14px 16px" }}>

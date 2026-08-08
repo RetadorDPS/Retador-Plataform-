@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -1432,6 +1432,19 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   // antes no había ninguna columna para esto, por eso nunca persistía. Se trae
   // tanto para el dueño (su propia info) como para quien visita OTRO perfil.
   const aboutTargetId = isOwner ? user?.id : sellerId;
+  // Compartir perfil: SIEMPRE el enlace de la Edge Function share-preview (no
+  // la URL directa) — trae la foto/nombre/bio reales para la vista previa en
+  // redes, y manda a quien lo abre directo a este perfil adentro de la app.
+  const doShareProfile = async () => {
+    if (!aboutTargetId) return;
+    const link = shareLink("profile", aboutTargetId);
+    const txt = `${profile.name} — en RETADOR`;
+    try {
+      if (navigator.share) { await navigator.share({ title: profile.name, text: txt, url: link }); return; }
+      if (navigator.clipboard) { await navigator.clipboard.writeText(link); toast_("🔗 Enlace copiado"); return; }
+      toast_("Compartir no disponible en este dispositivo");
+    } catch (e) { /* el usuario canceló o no se permitió */ }
+  };
   useEffect(() => {
     if (!aboutTargetId) return;
     let alive = true;
@@ -1724,6 +1737,13 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
               <span style={{ fontSize:12, fontWeight:800, color:FP_C.textPrimary, fontFamily:FP_FH }}>{fmtBig(headerStats.seguidores)}</span>
               <span style={{ fontSize:7.5, color:FP_C.textMuted, letterSpacing:"0.3px" }}>SEGUIDORES</span>
             </div>
+            <button onClick={doShareProfile} aria-label="Compartir perfil" style={{
+              background:"none", border:`1px solid ${FP_C.border}`,
+              borderRadius:6, width:32, height:32, cursor:"pointer",
+              display:"flex", alignItems:"center", justifyContent:"center",
+            }}>
+              <Ic n="share" c={FP_C.textSecondary} s={15} />
+            </button>
             <button onClick={() => setShowSettings(true)} style={{
               background:"none", border:`1px solid ${FP_C.border}`,
               borderRadius:6, width:32, height:32, cursor:"pointer",
@@ -1743,8 +1763,14 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
           </div>
         ) : (
           /* Seguir vuelve a su posición original, en pareja con Mensaje, más
-             abajo cerca del nombre/avatar — aquí solo queda el espaciador. */
-          <div style={{ width:80 }}/>
+             abajo cerca del nombre/avatar — aquí solo queda el botón de compartir. */
+          <button onClick={doShareProfile} aria-label="Compartir perfil" style={{
+            background:"none", border:`1px solid ${FP_C.border}`,
+            borderRadius:6, width:32, height:32, cursor:"pointer",
+            display:"flex", alignItems:"center", justifyContent:"center",
+          }}>
+            <Ic n="share" c={FP_C.textSecondary} s={15} />
+          </button>
         )}
       </div>
 

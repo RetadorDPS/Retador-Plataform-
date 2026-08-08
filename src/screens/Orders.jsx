@@ -281,10 +281,17 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   );
 }
 
+const ORDERS_ARCHIVE_MS = 30 * 24 * 60 * 60 * 1000; // 30 días
+const ORDERS_DONE_STATUSES = ["completado", "entregado", "delivered"];
+
 export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {}, onOpen, onRefresh = null }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const [tab, setTab] = useState("compras");   // "compras" | "ventas"
+  // Presentación solamente — no toca la base: los pedidos ya completados/
+  // entregados de hace más de 30 días se agrupan bajo "Pedidos anteriores"
+  // (colapsado); los activos o recientes siempre quedan arriba, sin agrupar.
+  const [showHistory, setShowHistory] = useState(false);
   const listRef = useRef(null);
   const ptr = usePullToRefresh(listRef, onRefresh, { disabled: !onRefresh });
 
@@ -365,6 +372,14 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
     ? { icon: "🛍️", title: "Aún no has comprado nada.", sub: "Cuando compres, tus pedidos aparecerán aquí." }
     : { icon: "🏷️", title: "Aún no te han comprado nada.", sub: "Publica productos para empezar a vender." };
 
+  const isArchivable = (o) => {
+    if (!ORDERS_DONE_STATUSES.includes(o.status)) return false;
+    const at = new Date(o.createdAt || o.created_at || 0).getTime();
+    return Date.now() - at > ORDERS_ARCHIVE_MS;
+  };
+  const activos   = list.filter(o => !isArchivable(o));
+  const historial = list.filter(isArchivable);
+
   return (
     <div ref={listRef} {...ptr.handlers} style={{ flex: 1, overflowY: "auto", overscrollBehaviorY: "contain" }}>
       <PullIndicator pull={ptr.pull} refreshing={ptr.refreshing} />
@@ -386,7 +401,16 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
             <p style={{ fontSize: 11.5, color: T3, lineHeight: 1.5 }}>{empty.sub}</p>
           </div>
         : <div style={{ padding: "14px 18px 90px" }}>
-            {list.map(o => renderCard(o))}
+            {activos.map(o => renderCard(o))}
+            {historial.length > 0 && (
+              <div style={{ marginTop: activos.length ? 6 : 0 }}>
+                <button onClick={() => setShowHistory(v => !v)} className="p" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "none", border: "none", padding: "10px 2px", cursor: "pointer", color: T2, fontSize: 11.5, fontWeight: 800, letterSpacing: .3 }}>
+                  <span>PEDIDOS ANTERIORES ({historial.length})</span>
+                  <span style={{ transform: showHistory ? "rotate(180deg)" : "none", transition: "transform .2s" }}>⌄</span>
+                </button>
+                {showHistory && historial.map(o => renderCard(o))}
+              </div>
+            )}
           </div>
       }
     </div>

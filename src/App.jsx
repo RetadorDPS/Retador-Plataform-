@@ -776,17 +776,24 @@ function AppShell({ sessionUser }) {
   // Aviso PUSH de un mensaje tocado FUERA de la app: si abrió una ventana nueva, el
   // service worker deja "?openConv=<id>" en la URL (ver sw.js); la leemos una vez y
   // limpiamos la URL para que no se repita al recargar.
+  // "?openProduct=<id>" / "?openProfile=<id>": mismo mecanismo, para los enlaces que
+  // arma la Edge Function share-preview (compartir producto/perfil) — ES LA app real
+  // NO usa HashRouter (no hay rutas tipo /#/producto/:id en ningún lado), así que el
+  // deep link tiene que ser un query param leído aquí, igual que openConv/openOrder.
   useEffect(() => {
     if (!user?.id) return;
-    let convId = null, orderId = null;
+    let convId = null, orderId = null, productId = null, profileId = null;
     try {
       const q = new URLSearchParams(window.location.search);
       convId = q.get("openConv"); orderId = q.get("openOrder");
+      productId = q.get("openProduct"); profileId = q.get("openProfile");
     } catch (e) {}
-    if (!convId && !orderId) return;
+    if (!convId && !orderId && !productId && !profileId) return;
     try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
     if (convId) openConversationById(convId, true);
     else if (orderId) openOrderById(orderId);
+    else if (productId) openProductFromChat(productId);
+    else if (profileId) openPublicProfile(profileId);
   }, [user?.id]);
   // Aviso PUSH tocado con la app YA abierta: el service worker enfoca esta ventana y
   // le manda un postMessage (sin recargar la SPA) con el destino a abrir.

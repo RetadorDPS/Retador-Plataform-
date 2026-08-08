@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getUserName, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getUserName, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -221,15 +221,43 @@ export function CatModal({ onClose, onSelect, active }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // NOTIFICACIONES PANEL
 // ═════════════════════════════════════════════════════════════════════════════
+// Una tarjeta de notificación (extraído para no repetir el JSX entre las
+// recientes y las agrupadas bajo "Anteriores").
+function NotifRow({ n, onTap, isDark, T1, T2, T3, B, G }) {
+  const QUEUE_LABEL = { verif: "Ver solicitud de verificación", plans: "Ver solicitud de plan", delivery: "Ver solicitud de mensajero" };
+  return (
+    <div onClick={() => onTap(n)} className="cd" style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "13px 14px", marginBottom: 9, borderRadius: 15, background: n.read ? (isDark ? "#141414" : "#f7f8fa") : (isDark ? "#1a1709" : "#FFFBEC"), border: `1px solid ${n.read ? B : G + "55"}`, cursor: (n.orderId || n.conversationId || n.queuePage) ? "pointer" : "default" }}>
+      <div style={{ width: 36, height: 36, borderRadius: "50%", background: n.read ? (isDark ? "#222" : "#eceef1") : G + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>🔔</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontSize: 13, color: T1, lineHeight: 1.45, fontWeight: n.read ? 500 : 700 }}>{n.text}</p>
+        <p style={{ fontSize: 10.5, color: T3, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+          <span>{new Date(n.at).toLocaleDateString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+          {n.orderId && <span style={{ color: G, fontWeight: 700 }}>· Ver pedido ›</span>}
+          {n.conversationId && <span style={{ color: G, fontWeight: 700 }}>· Ver conversación ›</span>}
+          {n.queuePage && <span style={{ color: G, fontWeight: 700 }}>· {QUEUE_LABEL[n.queuePage] || "Ver solicitud"} ›</span>}
+        </p>
+      </div>
+      {!n.read && <div style={{ width: 9, height: 9, borderRadius: "50%", background: G, flexShrink: 0, marginTop: 5 }} />}
+    </div>
+  );
+}
+
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
 export function NotifPanel({ onClose, notifs = [], onRead, onOpenOrder, onOpenConversation, onOpenQueue }) {
   const { S, B, CARD, T1, T2, T3, isDark } = useAt();
-  const QUEUE_LABEL = { verif: "Ver solicitud de verificación", plans: "Ver solicitud de plan", delivery: "Ver solicitud de mensajero" };
+  const [showOld, setShowOld] = useState(false);
   const tap = n => {
     onRead && onRead(n.id);
     if (n.orderId && onOpenOrder) onOpenOrder(n.orderId);
     else if (n.conversationId && onOpenConversation) { onOpenConversation(n.conversationId); onClose && onClose(); }
     else if (n.queuePage && onOpenQueue) { onOpenQueue(n.queuePage); onClose && onClose(); }
   };
+  // Presentación solamente — no toca la base: las de más de 30 días se agrupan
+  // bajo "Anteriores" (colapsado), para no mezclarlas con las recientes.
+  const now = Date.now();
+  const recientes = notifs.filter(n => now - new Date(n.at).getTime() <= THIRTY_DAYS_MS);
+  const anteriores = notifs.filter(n => now - new Date(n.at).getTime() > THIRTY_DAYS_MS);
   return (
     <div className="fi" style={{ position: "fixed", inset: 0, zIndex: 4400 }} onClick={onClose}>
       <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.76)", backdropFilter: "blur(14px)" }} />
@@ -241,21 +269,18 @@ export function NotifPanel({ onClose, notifs = [], onRead, onOpenOrder, onOpenCo
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 32px" }}>
           {notifs.length === 0 ? <div style={{ textAlign: "center", padding: "40px 0", color: T3 }}><div style={{ fontSize: 40, marginBottom: 10, opacity: .7 }}>🔔</div><p style={{ fontSize: 13 }}>Sin notificaciones por ahora</p></div>
-          : notifs.map(n => (
-            <div key={n.id} onClick={() => tap(n)} className="cd" style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "13px 14px", marginBottom: 9, borderRadius: 15, background: n.read ? (isDark ? "#141414" : "#f7f8fa") : (isDark ? "#1a1709" : "#FFFBEC"), border: `1px solid ${n.read ? B : G + "55"}`, cursor: (n.orderId || n.conversationId || n.queuePage) ? "pointer" : "default" }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", background: n.read ? (isDark ? "#222" : "#eceef1") : G + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>🔔</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: 13, color: T1, lineHeight: 1.45, fontWeight: n.read ? 500 : 700 }}>{n.text}</p>
-                <p style={{ fontSize: 10.5, color: T3, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                  <span>{new Date(n.at).toLocaleDateString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-                  {n.orderId && <span style={{ color: G, fontWeight: 700 }}>· Ver pedido ›</span>}
-                  {n.conversationId && <span style={{ color: G, fontWeight: 700 }}>· Ver conversación ›</span>}
-                  {n.queuePage && <span style={{ color: G, fontWeight: 700 }}>· {QUEUE_LABEL[n.queuePage] || "Ver solicitud"} ›</span>}
-                </p>
-              </div>
-              {!n.read && <div style={{ width: 9, height: 9, borderRadius: "50%", background: G, flexShrink: 0, marginTop: 5 }} />}
-            </div>
-          ))}
+          : <>
+              {recientes.map(n => <NotifRow key={n.id} n={n} onTap={tap} isDark={isDark} T1={T1} T2={T2} T3={T3} B={B} G={G} />)}
+              {anteriores.length > 0 && (
+                <div style={{ marginTop: recientes.length ? 6 : 0 }}>
+                  <button onClick={() => setShowOld(v => !v)} className="p" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "none", border: "none", padding: "10px 2px", cursor: "pointer", color: T2, fontSize: 11.5, fontWeight: 800, letterSpacing: .3 }}>
+                    <span>ANTERIORES ({anteriores.length})</span>
+                    <span style={{ transform: showOld ? "rotate(180deg)" : "none", transition: "transform .2s" }}>⌄</span>
+                  </button>
+                  {showOld && anteriores.map(n => <NotifRow key={n.id} n={n} onTap={tap} isDark={isDark} T1={T1} T2={T2} T3={T3} B={B} G={G} />)}
+                </div>
+              )}
+            </>}
         </div>
       </div>
     </div>
@@ -1055,7 +1080,7 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
           </div>
 
           {/* Botón Notificaciones */}
-          <button onClick={onNotif} className="p" style={{ position: "relative", width: 29, height: 29, background: isDark ? "#0d0d0d" : CARD, border: `1px solid ${isDark ? "#B8860B66" : "#D4A82066"}`, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <button onClick={onNotif} aria-label="Notificaciones" className="p" style={{ position: "relative", width: 29, height: 29, background: isDark ? "#0d0d0d" : CARD, border: `1px solid ${isDark ? "#B8860B66" : "#D4A82066"}`, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4A820" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
             </svg>
@@ -1499,12 +1524,62 @@ function ImageCarousel({ images = [], index = 0, setIndex, onOpen }) {
   );
 }
 
+// Descarga real del archivo (trae los bytes de Storage y fuerza el guardado —
+// un <a href download> normal con una URL de otro origen solo la ABRE, no la
+// descarga). "Compartir" intenta mandar el archivo real (navigator.share con
+// files, si el navegador lo soporta) y si no, comparte el enlace de la foto.
+async function downloadRemoteImage(url, filename, flash) {
+  try {
+    const res = await fetch(url, { mode: "cors" });
+    if (!res.ok) throw new Error("No se pudo descargar la imagen");
+    const blob = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objUrl; a.download = filename || "retador.jpg";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
+    flash && flash("⬇️ Foto descargada");
+  } catch (e) { flash && flash("⚠️ No se pudo descargar: " + (e?.message || "intenta de nuevo")); }
+}
+async function shareRemoteImage(url, title, flash) {
+  try {
+    const res = await fetch(url, { mode: "cors" });
+    const blob = await res.blob();
+    const file = new File([blob], "retador.jpg", { type: blob.type || "image/jpeg" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: title || "RETADOR" });
+      return;
+    }
+  } catch (e) { /* sin soporte de archivos o el usuario canceló: cae al enlace */ }
+  try {
+    if (navigator.share) { await navigator.share({ title: title || "RETADOR", url }); return; }
+    if (navigator.clipboard) { await navigator.clipboard.writeText(url); flash && flash("🔗 Enlace copiado"); return; }
+    flash && flash("Compartir no disponible en este dispositivo");
+  } catch (e) { /* el usuario canceló */ }
+}
+
+// Menú "⋮" de la foto en pantalla completa: Descargar / Compartir.
+function PhotoMenu({ onDownload, onShare, onClose }) {
+  const item = { width: "100%", textAlign: "left", background: "none", border: "none", color: "#fff", fontSize: 14, fontWeight: 700, padding: "13px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 9100, background: "rgba(0,0,0,.5)" }}>
+      <div onClick={e => e.stopPropagation()} style={{ position: "absolute", top: "calc(env(safe-area-inset-top, 0px) / var(--img-s, 1) + 58px)", right: 14, background: "rgba(28,28,30,.96)", WebkitBackdropFilter: "blur(14px)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.14)", borderRadius: 14, overflow: "hidden", minWidth: 180 }}>
+        <button style={item} onClick={() => { onClose(); onDownload(); }}><span style={{ fontSize: 16 }}>⬇️</span> Descargar</button>
+        <div style={{ height: 1, background: "rgba(255,255,255,.1)" }} />
+        <button style={item} onClick={() => { onClose(); onShare(); }}><span style={{ fontSize: 16 }}>📤</span> Compartir</button>
+      </div>
+    </div>
+  );
+}
+
 // Visor a pantalla completa (solo producto): fondo negro, solo las imágenes.
 // Deslizar entre fotos, doble toque para acercar y PELLIZCAR (dos dedos) para
-// zoom; con zoom se puede arrastrar para mover. Botón atrás normalito arriba.
-function ProductImageViewer({ images = [], index = 0, setIndex, onClose }) {
+// zoom; con zoom se puede arrastrar para mover. Botón atrás normalito arriba,
+// y el menú "⋮" (arriba a la derecha) para descargar/compartir ESA foto.
+function ProductImageViewer({ images = [], index = 0, setIndex, onClose, title, flash }) {
   const list = (images && images.length) ? images : [null];
   const n = list.length;
+  const [menuOpen, setMenuOpen] = useState(false);
   const [z, setZ] = useState({ scale: 1, tx: 0, ty: 0 });
   const g = useRef({ mode: null, x0: 0, y0: 0, dx: 0, moved: false, startDist: 1, startScale: 1, startTx: 0, startTy: 0, lastTap: 0 });
   const reset = () => setZ({ scale: 1, tx: 0, ty: 0 });
@@ -1555,6 +1630,16 @@ function ProductImageViewer({ images = [], index = 0, setIndex, onClose }) {
       <button onClick={onClose} aria-label="Cerrar" style={{ position: "absolute", top: "calc(env(safe-area-inset-top, 0px) / var(--img-s, 1) + 12px)", left: 14, width: 42, height: 42, borderRadius: 12, background: "rgba(20,20,22,.62)", WebkitBackdropFilter: "blur(14px)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.25)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2, cursor: "pointer" }}>
         <Ic n="back" c="#fff" s={20} />
       </button>
+      <button onClick={() => setMenuOpen(true)} aria-label="Más opciones" style={{ position: "absolute", top: "calc(env(safe-area-inset-top, 0px) / var(--img-s, 1) + 12px)", right: 14, width: 42, height: 42, borderRadius: 12, background: "rgba(20,20,22,.62)", WebkitBackdropFilter: "blur(14px)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.25)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2, cursor: "pointer", fontSize: 20, fontWeight: 900, lineHeight: 1 }}>
+        ⋮
+      </button>
+      {menuOpen && (
+        <PhotoMenu
+          onClose={() => setMenuOpen(false)}
+          onDownload={() => downloadRemoteImage(list[index] || CAROUSEL_FALLBACK, `retador-${(title || "foto").replace(/[^a-z0-9]+/gi, "-").slice(0, 40)}-${index + 1}.jpg`, flash)}
+          onShare={() => shareRemoteImage(list[index] || CAROUSEL_FALLBACK, title, flash)}
+        />
+      )}
       {n > 1 && (
         <div style={{ position: "absolute", bottom: "calc(env(safe-area-inset-bottom, 0px) / var(--img-s, 1) + 18px)", left: 0, right: 0, display: "flex", justifyContent: "center", gap: 6, pointerEvents: "none" }}>
           {list.map((_, idx) => (
@@ -1668,7 +1753,7 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
         </div>
       )}
 
-      {viewerOpen && <ProductImageViewer images={imgs} index={imgIdx} setIndex={setImgIdx} onClose={() => setViewerOpen(false)} />}
+      {viewerOpen && <ProductImageViewer images={imgs} index={imgIdx} setIndex={setImgIdx} onClose={() => setViewerOpen(false)} title={p.title} flash={flash} />}
 
       <div style={{ padding: "16px 18px 10px" }}>
         {!isService && cat && (
@@ -1823,10 +1908,15 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
           </button>
         )}
         <button className={`btn ${isDark ? "btn-dark" : "btn-light"}`} onClick={async () => {
+          // El enlace es el de la Edge Function share-preview (no la URL directa de
+          // la app): así WhatsApp/Facebook/Twitter muestran la foto/título/precio
+          // reales del producto en la vista previa, y de paso manda a quien lo abre
+          // directo a esta ficha adentro de la app.
+          const link = shareLink("product", p.id);
           const txt = `${p.title} — en RETADOR`;
           try {
-            if (navigator.share) { await navigator.share({ title: p.title, text: txt }); return; }
-            if (navigator.clipboard) { await navigator.clipboard.writeText(txt); flash("📋 Copiado para compartir"); return; }
+            if (navigator.share) { await navigator.share({ title: p.title, text: txt, url: link }); return; }
+            if (navigator.clipboard) { await navigator.clipboard.writeText(link); flash("🔗 Enlace copiado"); return; }
             flash("Compartir no disponible en este dispositivo");
           } catch (e) { /* el usuario canceló o no se permitió */ }
         }} title="Compartir producto" style={{ width: 50, height: 50, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>

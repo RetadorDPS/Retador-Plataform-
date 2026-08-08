@@ -1,5 +1,14 @@
 import { supabase } from "./supabase.js";
 
+// ── Enlace para COMPARTIR (producto/servicio o perfil) ───────────────────────
+// SIEMPRE el de la Edge Function share-preview, nunca la URL directa de la
+// app: esa páginita trae las etiquetas Open Graph reales (foto/título/precio
+// o foto/nombre/bio) para que WhatsApp/Facebook/Twitter muestren la vista
+// previa de verdad, y de paso redirige a quien lo abre directo adentro de la
+// app (App.jsx lee "?openProduct="/"?openProfile=" al arrancar).
+const SHARE_FN_URL = "https://qsxtjuhueqdxoduyroli.supabase.co/functions/v1/share-preview";
+export const shareLink = (type, id) => `${SHARE_FN_URL}?type=${type}&id=${encodeURIComponent(id)}`;
+
 // ═════════════════════════════════════════════════════════════════════════════
 // MOCK BACKEND FUNCTIONS - Datos de demostración
 // ═════════════════════════════════════════════════════════════════════════════

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getUserById, getUserName, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getUserName, money, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -1249,6 +1249,10 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
   const [shipPrice, setShipPrice] = useState(product.shippingPrice ?? product.ship_price ?? "");
   const [location, setLocation] = useState(product.location || "");
   const isService = product.kind === "service";   // el kind NO se puede cambiar al editar
+  // Categoría de servicio: propia (config.serviceCats), texto libre guardado en
+  // `subcat` — nunca en `cat` (esa tiene FK a categories, categorías de producto).
+  const serviceCats = (Array.isArray(pCfg.serviceCats) && pCfg.serviceCats.length) ? pCfg.serviceCats : DEFAULT_SERVICE_CATS;
+  const [svcCat, setSvcCat] = useState(product.subcat || "");
   // GRUPO 1 — cantidad disponible, descuentos por cantidad, moneda y métodos de
   // pago (solo productos).
   const [stock, setStock] = useState(product.stock ?? "");
@@ -1264,11 +1268,13 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
     if (!isService && !(Number(stock) > 0)) { flash && flash("⚠️ Indica la cantidad disponible (mínimo 1)"); return; }
     if (!isService && !shipModes.local && !shipModes.persona && !shipModes.intl) { flash && flash("⚠️ Marca al menos una forma de entrega"); return; }
     if (!isService && shipModes.intl && !Number(shipPrice)) { flash && flash("⚠️ Define el precio del envío internacional"); return; }
+    if (isService && !svcCat) { flash && flash("⚠️ Elige una categoría de servicio"); return; }
     const parts = catLabel.split("/").map(s => s.trim());
     const found = cats.find(c => (c.name || "").toLowerCase() === (parts[0] || "").toLowerCase());
     onSave({
       title: title.trim(), price: Number(price) || 0, description: desc,
-      cat: found ? found.id : product.cat, subcat: parts[1] || undefined,
+      cat: isService ? null : (found ? found.id : product.cat),
+      subcat: isService ? svcCat : (parts[1] || undefined),
       image: imgs[0] || product.image, images: imgs,
       location,
       ...(isService ? {} : {
@@ -1332,11 +1338,18 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
             <input type="number" min="1" step="1" value={stock} onChange={e => setStock(e.target.value)} style={{ ...inp, marginBottom: 13 }} />
           </>
         )}
-        <label style={lbl}>Categoría</label>
-        <select value={catLabel} onChange={e => setCatLabel(e.target.value)} style={{ ...inp, marginBottom: 13 }}>
-          <option value="">Selecciona…</option>
-          {options.map(o => <option key={o} value={o}>{o}</option>)}
-        </select>
+        <label style={lbl}>{isService ? "Categoría del servicio" : "Categoría"}</label>
+        {isService ? (
+          <select value={svcCat} onChange={e => setSvcCat(e.target.value)} style={{ ...inp, marginBottom: 13 }}>
+            <option value="">Selecciona…</option>
+            {serviceCats.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        ) : (
+          <select value={catLabel} onChange={e => setCatLabel(e.target.value)} style={{ ...inp, marginBottom: 13 }}>
+            <option value="">Selecciona…</option>
+            {options.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        )}
         <label style={lbl}>Descripción</label>
         <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4} style={{ ...inp, resize: "none", marginBottom: 18 }} />
 
@@ -1566,6 +1579,9 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
   // sin importar las ventas reales. El "% de éxito" no tiene ninguna función
   // real detrás en este proyecto — se quitó en vez de inventar un número.
   const [sellerStats, setSellerStats] = useState(null);
+  // Valoración real del vendedor/prestador (profiles.seller_rating/seller_reviews_count)
+  // — misma fuente que el encabezado de su perfil, se muestra también en la ficha.
+  const [sellerRating, setSellerRating] = useState(null);
   const bc   = BC[p.badge] || {};
   const cat  = cats.find(c => c.id === p.cat);
   const disc = p.orig_price ? Math.round((1 - parseFloat(p.price) / parseFloat(p.orig_price)) * 100) : 0;
@@ -1587,6 +1603,7 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
     if (!p.seller_id) { setSellerName("Vendedor"); return; }
     getUserName(p.seller_id).then(n => setSellerName(n || p.seller_name || "Vendedor"));
     getProfileHeaderStats(p.seller_id).then(setSellerStats).catch(() => {});
+    getSellerRatingInfo(p.seller_id).then(setSellerRating).catch(() => {});
     // Track view
     if (user?.id) trackEvent(user.id, p.id, "view").catch(() => {});
   }, [p.seller_id]);
@@ -1654,19 +1671,37 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
       {viewerOpen && <ProductImageViewer images={imgs} index={imgIdx} setIndex={setImgIdx} onClose={() => setViewerOpen(false)} />}
 
       <div style={{ padding: "16px 18px 10px" }}>
-        {cat && (
+        {!isService && cat && (
           <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: cat.color + "10", border: `1px solid ${cat.color}25`, borderRadius: 100, padding: "4px 11px", fontSize: 9, fontWeight: 700, color: cat.color, marginBottom: 10 }}>
             <CatIcon id={cat.id} color={cat.color} size={11} /> {cat.name}
           </div>
         )}
+        {isService && p.subcat && (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#2DD4BF15", border: "1px solid #2DD4BF35", borderRadius: 100, padding: "4px 11px", fontSize: 9, fontWeight: 700, color: "#2DD4BF", marginBottom: 10 }}>
+            🛠️ {p.subcat}
+          </div>
+        )}
         <h1 style={{ fontSize: 19 * ts, fontWeight: 800, lineHeight: 1.2, marginBottom: 10, color: T1 }}>{p.title}</h1>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <span style={{ fontSize: 21 * ts, fontWeight: 900, color: G }}>{money(p.price, p.currency)}</span>
-          {p.orig_price && <>
-            <span style={{ fontSize: 13 * ts, color: T2, textDecoration: "line-through" }}>{(CURRENCIES[p.currency || "USD"] || CURRENCIES.USD).symbol}{parseFloat(p.orig_price).toLocaleString("es-ES")}</span>
-            <span style={{ background: "#16A34A1a", borderRadius: 100, padding: "3px 9px", fontSize: 10 * ts, fontWeight: 700, color: "#22C55E" }}>-{disc}%</span>
-          </>}
+          {isService ? (
+            Number(p.price) > 0
+              ? <span style={{ fontSize: 21 * ts, fontWeight: 900, color: G }}><span style={{ fontSize: 11 * ts, color: T2, fontWeight: 700 }}>Desde </span>{money(p.price, p.currency)}</span>
+              : <span style={{ fontSize: 15 * ts, fontWeight: 800, color: T2 }}>💬 Precio a consultar</span>
+          ) : (
+            <>
+              <span style={{ fontSize: 21 * ts, fontWeight: 900, color: G }}>{money(p.price, p.currency)}</span>
+              {p.orig_price && <>
+                <span style={{ fontSize: 13 * ts, color: T2, textDecoration: "line-through" }}>{(CURRENCIES[p.currency || "USD"] || CURRENCIES.USD).symbol}{parseFloat(p.orig_price).toLocaleString("es-ES")}</span>
+                <span style={{ background: "#16A34A1a", borderRadius: 100, padding: "3px 9px", fontSize: 10 * ts, fontWeight: 700, color: "#22C55E" }}>-{disc}%</span>
+              </>}
+            </>
+          )}
         </div>
+
+        {/* Zona donde se ofrece el servicio (solo servicios) */}
+        {isService && p.location && (
+          <p style={{ fontSize: 11 * ts, color: T2, fontWeight: 600, marginBottom: 14, display: "flex", alignItems: "center", gap: 5 }}>📍 {p.location}</p>
+        )}
 
         {/* Stock real disponible (solo productos) */}
         {!isService && availStock != null && (
@@ -1716,8 +1751,10 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
                 : <p style={{ fontSize: 12, fontWeight: 700 }}>{sellerName}</p>
               }
               {sellerStats && (
-                <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
                   <span style={{ fontSize: 8, color: "#22C55E" }}>✅ {sellerStats.ventas || 0} ventas</span>
+                  {p.seller_verified && <span style={{ fontSize: 8, color: G, fontWeight: 700 }}>✓ Verificado</span>}
+                  {sellerRating?.rating != null && <span style={{ fontSize: 8, color: T2 }}>⭐ {sellerRating.rating.toFixed(1)}{sellerRating.count ? ` (${sellerRating.count})` : ""}</span>}
                 </div>
               )}
             </div>
@@ -1727,22 +1764,24 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
           </div>
         </div>
 
-        {/* Formas de entrega que ofrece el vendedor (definidas al publicar) */}
-        <div style={{ marginBottom: 16 }}>
-          <p style={{ fontSize: 9, fontWeight: 700, color: T2, marginBottom: 7, letterSpacing: .3 }}>FORMAS DE ENTREGA</p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-            {(() => {
-              const sm = p.shipModes || { local: true };
-              const META = { local: ["🛵", "Delivery local"], intl: ["✈️", "Envío internacional"], persona: ["🤝", "Entrega en persona"] };
-              const avail = ["local", "intl", "persona"].filter(k => sm[k]);
-              return avail.length ? avail.map(k => (
-                <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: `${G}10`, border: `1px solid ${G}28`, borderRadius: 50, padding: "6px 11px", fontSize: 10, fontWeight: 700, color: G }}>
-                  <span style={{ fontSize: 12 }}>{META[k][0]}</span>{META[k][1]}
-                </span>
-              )) : <span style={{ fontSize: 10, color: T2 }}>El vendedor coordinará la entrega contigo.</span>;
-            })()}
+        {/* Formas de entrega que ofrece el vendedor (definidas al publicar) — no aplica a servicios */}
+        {!isService && (
+          <div style={{ marginBottom: 16 }}>
+            <p style={{ fontSize: 9, fontWeight: 700, color: T2, marginBottom: 7, letterSpacing: .3 }}>FORMAS DE ENTREGA</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {(() => {
+                const sm = p.shipModes || { local: true };
+                const META = { local: ["🛵", "Delivery local"], intl: ["✈️", "Envío internacional"], persona: ["🤝", "Entrega en persona"] };
+                const avail = ["local", "intl", "persona"].filter(k => sm[k]);
+                return avail.length ? avail.map(k => (
+                  <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: `${G}10`, border: `1px solid ${G}28`, borderRadius: 50, padding: "6px 11px", fontSize: 10, fontWeight: 700, color: G }}>
+                    <span style={{ fontSize: 12 }}>{META[k][0]}</span>{META[k][1]}
+                  </span>
+                )) : <span style={{ fontSize: 10, color: T2 }}>El vendedor coordinará la entrega contigo.</span>;
+              })()}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Reseñas reales del producto (tabla reviews) — nombre y avatar SIEMPRE
             reales (profiles.full_name/avatar_url); rating/reviews_count del
@@ -1752,7 +1791,18 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
 
       {/* Acciones */}
       <div style={{ padding: "0 18px 32px", display: "flex", gap: 8 }}>
-        {soldOut ? (
+        {isService ? (
+          <button className="btn btn-gold" onClick={() => requireAuth(() => {
+            if (p.seller_id) {
+              // Abre el chat CON CONTEXTO del servicio (misma franja "estás consultando sobre esto").
+              onChat(p.seller_id, sellerName || p.seller_name || "Vendedor", { type: "service", id: p.id, title: p.title || "", image: p.image || null, price: p.price ?? null, currency: p.currency || "USD" });
+              trackEvent(user?.id, p.id, "chat").catch(() => {});
+            } else flash("ℹ️ No disponible");
+          })}
+            style={{ flex: 1, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            📞 Contactar
+          </button>
+        ) : soldOut ? (
           <div style={{ flex: 1, textAlign: "center", padding: "15px", borderRadius: 50, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>🚫 Agotado</div>
         ) : (
           <button className="btn btn-gold" onClick={() => requireAuth(() => onBuy(p))}
@@ -1760,16 +1810,18 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
             Comprar ahora
           </button>
         )}
-        <button className={`btn ${isDark ? "btn-dark" : "btn-light"}`} onClick={() => requireAuth(() => {
-          if (p.seller_id) {
-            // Abre el chat CON CONTEXTO del producto (franja "estás consultando sobre esto").
-            onChat(p.seller_id, sellerName || p.seller_name || "Vendedor", { type: "product", id: p.id, title: p.title || "", image: p.image || null, price: p.price ?? null, currency: p.currency || "USD" });
-            trackEvent(user?.id, p.id, "chat").catch(() => {});
-          } else flash("ℹ️ Vendedor no disponible");
-        })} title="Chatear con el vendedor"
-          style={{ width: 50, height: 50, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-          <Ic n="msg" c={T2} s={19} />
-        </button>
+        {!isService && (
+          <button className={`btn ${isDark ? "btn-dark" : "btn-light"}`} onClick={() => requireAuth(() => {
+            if (p.seller_id) {
+              // Abre el chat CON CONTEXTO del producto (franja "estás consultando sobre esto").
+              onChat(p.seller_id, sellerName || p.seller_name || "Vendedor", { type: "product", id: p.id, title: p.title || "", image: p.image || null, price: p.price ?? null, currency: p.currency || "USD" });
+              trackEvent(user?.id, p.id, "chat").catch(() => {});
+            } else flash("ℹ️ Vendedor no disponible");
+          })} title="Chatear con el vendedor"
+            style={{ width: 50, height: 50, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+            <Ic n="msg" c={T2} s={19} />
+          </button>
+        )}
         <button className={`btn ${isDark ? "btn-dark" : "btn-light"}`} onClick={async () => {
           const txt = `${p.title} — en RETADOR`;
           try {
@@ -2479,8 +2531,8 @@ function PublishServiceForm({ onClose, onBack, onPublish, user, flash }) {
 
 // Punto de entrada externo (sin cambios en la firma): decide cuál de los dos
 // flujos separados montar. App.jsx sigue montando <PubSheet .../> igual que antes.
-export function PubSheet({ onClose, onPublish, user, flash }) {
-  const [kind, setKind] = useState("");
+export function PubSheet({ onClose, onPublish, user, flash, initialKind = "" }) {
+  const [kind, setKind] = useState(initialKind);
   if (kind === "product") return <PublishProductForm onClose={onClose} onBack={() => setKind("")} onPublish={onPublish} user={user} flash={flash} />;
   if (kind === "service") return <PublishServiceForm onClose={onClose} onBack={() => setKind("")} onPublish={onPublish} user={user} flash={flash} />;
   return <PubChooser onClose={onClose} onPick={setKind} />;
@@ -2490,12 +2542,12 @@ export function PubSheet({ onClose, onPublish, user, flash }) {
 // SERVICIOS — mundo aparte (kind='service'): tarjeta simple + "Contactar".
 // Sin comprar, sin flujo de pedido, sin comisión. Se monetiza distinto (después).
 // ═════════════════════════════════════════════════════════════════════════════
-function ServiceCard({ s, onContact }) {
+function ServiceCard({ s, onContact, onOpen }) {
   const { S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const img = s.img || s.image || (s.images && s.images[0]) || null;
   const price = Number(s.price) || 0;
   return (
-    <div style={{ background: isDark ? "#0d0d0d" : CARD, border: `1px solid ${B}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div onClick={() => onOpen && onOpen(s)} style={{ background: isDark ? "#0d0d0d" : CARD, border: `1px solid ${B}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", cursor: onOpen ? "pointer" : "default" }}>
       <div style={{ position: "relative", aspectRatio: "16 / 10", background: "#161616", overflow: "hidden" }}>
         {img
           ? <img src={img} alt={s.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => { e.target.style.display = "none"; }} />
@@ -2509,14 +2561,14 @@ function ServiceCard({ s, onContact }) {
           {price > 0
             ? <span style={{ fontSize: 13 * ts, fontWeight: 900, color: G }}><span style={{ fontSize: 9 * ts, color: T3, fontWeight: 600 }}>desde </span>{money(price, s.currency)}</span>
             : <span style={{ fontSize: 10 * ts, color: T3 }}>Precio a consultar</span>}
-          <button className="p" onClick={() => onContact(s)} style={{ background: G, color: "#000", border: "none", borderRadius: 999, padding: "7px 12px", fontSize: 10.5 * ts, fontWeight: 800, whiteSpace: "nowrap", flexShrink: 0 }}>💬 Contactar</button>
+          <button className="p" onClick={(e) => { e.stopPropagation(); onContact(s); }} style={{ background: G, color: "#000", border: "none", borderRadius: 999, padding: "7px 12px", fontSize: 10.5 * ts, fontWeight: 800, whiteSpace: "nowrap", flexShrink: 0 }}>💬 Contactar</button>
         </div>
       </div>
     </div>
   );
 }
 
-export function ServicesScreen({ services = [], loading = false, onBack, onContact, onPublish }) {
+export function ServicesScreen({ services = [], loading = false, onBack, onContact, onOpen, onPublish }) {
   const { BG, S, B, T1, T2, T3, isDark } = useAt();
   const { cols } = useR();
   const ncols = Math.max(cols, 2);
@@ -2540,7 +2592,7 @@ export function ServicesScreen({ services = [], loading = false, onBack, onConta
                 <p style={{ fontSize: 11, marginTop: 4 }}>¿Ofreces un servicio? Publícalo y aparecerá aquí.</p>
               </div>
             : <div style={{ display: "grid", gridTemplateColumns: `repeat(${ncols}, 1fr)`, gap: 12 }}>
-                {services.map(s => <ServiceCard key={s.id} s={s} onContact={onContact} />)}
+                {services.map(s => <ServiceCard key={s.id} s={s} onContact={onContact} onOpen={onOpen} />)}
               </div>}
       </div>
     </div>

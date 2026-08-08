@@ -676,8 +676,13 @@ function AppShell({ sessionUser }) {
       price: Number(d.price) || 0,
       orig_price: (!isService && (d.orig_price ?? d.orig)) ? Number(d.orig_price ?? d.orig) : null,
       currency: d.currency || "USD",
-      cat: d.cat || null,
-      subcat: d.subcat || null,
+      // products.cat tiene FK a categories(id) (categorías de PRODUCTO, ids fijos
+      // como "hogar"). Las categorías de SERVICIO (config.serviceCats) son texto
+      // libre y NO existen en esa tabla — guardarlas en `cat` rompe el insert por
+      // violación de llave foránea. Para servicios van en `subcat` (texto libre,
+      // sin restricción) y `cat` queda null.
+      cat: isService ? null : (d.cat || null),
+      subcat: isService ? (d.cat || null) : (d.subcat || null),
       images: Array.isArray(d.images) ? d.images : [],
       badge: isService ? null : (d.badge || null),
       // Un servicio no tiene formas de entrega/envío, stock, ni métodos de pago.
@@ -1424,7 +1429,7 @@ function AppShell({ sessionUser }) {
 
       {/* Overlays */}
       {showCats   && <CatModal onClose={() => setShowCats(false)} onSelect={cat => { setActiveCat(cat); setShowCats(false); }} active={activeCat} />}
-      {pubOpen    && <PubSheet onClose={() => setPubOpen(false)} onPublish={async d => { setPubOpen(false); await handlePublish(d); }} user={user} flash={flash} />}
+      {pubOpen    && <PubSheet onClose={() => setPubOpen(false)} onPublish={async d => { setPubOpen(false); await handlePublish(d); }} user={user} flash={flash} initialKind={pubOpen === "service" ? "service" : ""} />}
       {showNotif  && <NotifPanel onClose={() => { markNotifRead(null); setShowNotif(false); }} notifs={myNotifs} onRead={markNotifRead} onOpenOrder={(oid) => { setShowNotif(false); markNotifRead(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }} onOpenConversation={(cid) => { setShowNotif(false); markNotifRead(null); openConversationById(cid); }}
         onOpenQueue={(page) => {
           // Si no tiene ningún acceso al panel, no intenta navegar ahí (el panel
@@ -1691,7 +1696,8 @@ function AppShell({ sessionUser }) {
                 loading={loading}
                 onBack={() => setMScr("home")}
                 onContact={(s) => requestChat(s.seller_id, s.seller_name, { type: "service", id: s.id, title: s.title, image: s.image || s.img })}
-                onPublish={() => setPubOpen(true)}
+                onOpen={(s) => { setSelProd(s); setProdBackTo("services"); setMScr("product"); }}
+                onPublish={() => setPubOpen("service")}
               />
             )}
             {mScr === "product" && selProd && (
@@ -1699,6 +1705,7 @@ function AppShell({ sessionUser }) {
                 product={selProd} onBack={() => {
                   if (prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); }
                   else if (prodBackTo === "sellerProfile") { setProdBackTo(null); setMScr("sellerProfile"); }
+                  else if (prodBackTo === "services") { setProdBackTo(null); setMScr("services"); }
                   else setMScr("home");
                 }}
                 onDelivery={() => { setTab("envios"); setEScr("local"); }}

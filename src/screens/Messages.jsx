@@ -139,10 +139,11 @@ function OrderChatCard({ meta, orders = [], onOpenOrder, B, T1, T3, soft }) {
 // agotado, se reduce a una versión chica sin precio ni acción — el mensaje y el
 // historial NUNCA se pierden, solo se opaca la tarjeta.
 function RefChatCard({ meta, onOpen, orders = [], B, T1, T3, soft }) {
-  const price = meta.price != null && meta.price !== "" ? money(Number(meta.price) || 0, meta.currency || "USD") : null;
+  const price = Number(meta.price) > 0 ? money(Number(meta.price) || 0, meta.currency || "USD") : null;
   const isAdminReq = meta.type === "admin_request";
   const isOrder = meta.type === "order";
   const isProduct = meta.type === "product";
+  const isService = meta.type === "service";
 
   const oid = isOrder ? (meta.order_id || meta.id) : null;
   const liveOrder = oid ? orders.find(o => o.id === oid) : null;
@@ -159,25 +160,27 @@ function RefChatCard({ meta, onOpen, orders = [], B, T1, T3, soft }) {
   const statusLabel = status ? ((flow.find(s => s.key === status) || {}).label || status) : null;
   const statusIcon = status ? (ORDER_STATUS_ICON[status] || "📦") : null;
 
-  const [avail, setAvail] = useState(isProduct ? "checking" : "ok"); // checking | ok | gone
+  const isListing = isProduct || isService; // ambos viven en `products` (kind='product'|'service')
+  const [avail, setAvail] = useState(isListing ? "checking" : "ok"); // checking | ok | gone
   useEffect(() => {
-    if (!isProduct || !meta.id) { setAvail("ok"); return; }
+    if (!isListing || !meta.id) { setAvail("ok"); return; }
     let a = true;
     getProductById(meta.id).then(p => {
       if (!a) return;
-      const unavailable = !p || (p.status && p.status !== "active") || (p.stock != null && Number(p.stock) <= 0);
+      // Un servicio no tiene stock: solo se apaga si dejó de estar activo.
+      const unavailable = !p || (p.status && p.status !== "active") || (!isService && p.stock != null && Number(p.stock) <= 0);
       setAvail(unavailable ? "gone" : "ok");
     }).catch(() => { if (a) setAvail("ok"); });
     return () => { a = false; };
-  }, [isProduct, meta.id]);
+  }, [isListing, isService, meta.id]);
 
-  if (isProduct && avail === "gone") {
+  if (isListing && avail === "gone") {
     return (
       <div className="p" style={{ display: "flex", alignItems: "center", gap: 9, background: soft, border: `1px solid ${B}`, borderRadius: 12, padding: "7px 10px", marginBottom: 7, opacity: .55, maxWidth: 240, cursor: "default" }}>
         {meta.image
           ? <img src={meta.image} alt="" style={{ width: 34, height: 34, borderRadius: 8, objectFit: "cover", flexShrink: 0, filter: "grayscale(1)" }} />
           : <div style={{ width: 34, height: 34, borderRadius: 8, background: "#8884", flexShrink: 0 }} />}
-        <p style={{ fontSize: 11, color: T3, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta.title || "Producto"} · ya no disponible</p>
+        <p style={{ fontSize: 11, color: T3, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta.title || (isService ? "Servicio" : "Producto")} · ya no disponible</p>
       </div>
     );
   }
@@ -186,13 +189,13 @@ function RefChatCard({ meta, onOpen, orders = [], B, T1, T3, soft }) {
     <div onClick={onOpen} className="p" style={{ display: "flex", alignItems: "center", gap: 12, background: soft, border: `1px solid ${B}`, borderRadius: 15, padding: "11px 13px", marginBottom: 7, cursor: onOpen ? "pointer" : "default", minWidth: 230, maxWidth: 300 }}>
       {meta.image
         ? <img src={meta.image} alt="" style={{ width: 68, height: 68, borderRadius: 12, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />
-        : <div style={{ width: 68, height: 68, borderRadius: 12, background: "#8884", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0 }}>{isOrder ? "📦" : isAdminReq ? "🪪" : "🛍️"}</div>}
+        : <div style={{ width: 68, height: 68, borderRadius: 12, background: "#8884", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0 }}>{isOrder ? "📦" : isAdminReq ? "🪪" : isService ? "🛠️" : "🛍️"}</div>}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: 13.5, fontWeight: 800, color: T1, lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{meta.title || (isOrder ? "Pedido" : "Producto")}</p>
+        <p style={{ fontSize: 13.5, fontWeight: 800, color: T1, lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{meta.title || (isOrder ? "Pedido" : isService ? "Servicio" : "Producto")}</p>
         {isAdminReq
           ? <p style={{ fontSize: 11.5, color: T3, marginTop: 4, fontWeight: 700 }}>{meta.subtitle || "Coordinando por chat"}</p>
           : <p style={{ fontSize: 11.5, color: T3, marginTop: 4, fontWeight: 700 }}>
-              {price ? <span style={{ color: "#22C55E" }}>{price}</span> : (isOrder ? "Pedido" : "Producto")}
+              {price ? <span style={{ color: "#22C55E" }}>{isService ? "Desde " : ""}{price}</span> : (isOrder ? "Pedido" : isService ? "💬 Precio a consultar" : "Producto")}
               {!isOrder && <span style={{ fontWeight: 600 }}> · Ver detalle ›</span>}
             </p>}
         {isOrder && statusLabel && (
@@ -625,7 +628,7 @@ function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, 
   if (meta?.type === "order" && !(m.text || "").trim()) {
     return <div id={`msg-${m.id}`}><OrderChatCard meta={meta} orders={orders} onOpenOrder={onOpenOrder} B={B} T1={T1} T3={T3} soft={soft} /></div>;
   }
-  const openRef = (meta && (meta.type === "order" || meta.type === "product")) ? () => {
+  const openRef = (meta && (meta.type === "order" || meta.type === "product" || meta.type === "service")) ? () => {
     if (meta.type === "order") onOpenOrder && onOpenOrder(meta.order_id || meta.id);
     else onOpenProduct && onOpenProduct(meta.id);
   } : null;
@@ -657,7 +660,7 @@ function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, 
         )}
         <div {...gesture.handlers} style={{ touchAction: "pan-y", maxWidth: "100%", background: bubbleBg, border: mine ? "none" : `1px solid ${B}`, borderRadius: mine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "10px 13px", transform: gesture.dx ? `translateX(${gesture.dx}px)` : "none", transition: gesture.dragging ? "none" : "transform .25s cubic-bezier(.34,1.56,.64,1), outline .3s, box-shadow .3s", outline: isHighlighted ? `2px solid ${G}` : "none", outlineOffset: 2, boxShadow: isHighlighted ? `0 0 0 5px ${G}22` : "none" }}>
           {isReply && <ReplyStrip meta={meta} mine={mine} isDark={isDark} onJump={() => onJumpTo(meta.reply_to)} />}
-          {meta && (meta.type === "product" || meta.type === "order" || meta.type === "admin_request") && <RefChatCard meta={meta} onOpen={openRef} orders={orders} B={mine ? "#00000022" : B} T1={mine ? "#000" : T1} T3={mine ? "#00000088" : T3} soft={mine ? "#ffffff55" : soft} />}
+          {meta && (meta.type === "product" || meta.type === "service" || meta.type === "order" || meta.type === "admin_request") && <RefChatCard meta={meta} onOpen={openRef} orders={orders} B={mine ? "#00000022" : B} T1={mine ? "#000" : T1} T3={mine ? "#00000088" : T3} soft={mine ? "#ffffff55" : soft} />}
           {isVoice
             ? <VoiceMessage meta={meta} mine={mine} isDark={isDark} T1={bubbleText} T3={T3} accentBg={mine ? "#00000022" : `${G}33`} autoPlay={autoPlayVoice} onEnded={onVoiceEnded} />
             : <p style={{ fontSize: 12, color: bubbleText, lineHeight: 1.5, wordBreak: "break-word", ...noNativeSelect }}>{m.text}</p>}
@@ -981,6 +984,7 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     const meta = m.meta && typeof m.meta === "object" ? m.meta : null;
     if (meta?.type === "voice") return "🎤 Mensaje de voz";
     if (meta?.type === "product" || meta?.type === "order") return (meta.title ? "🛍️ " + meta.title : (m.text || "").slice(0, 50));
+    if (meta?.type === "service") return (meta.title ? "🛠️ " + meta.title : (m.text || "").slice(0, 50));
     return (m.text || "").slice(0, 50);
   };
   // Mensajes seleccionados, en el ORDEN en que están en el chat (no en el que se
@@ -1059,7 +1063,7 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
         <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 14px", borderTop: `1px solid ${B}`, background: S, flexShrink: 0 }}>
           {ctx.image && <img src={ctx.image} alt="" style={{ width: 34, height: 34, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: 11.5, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ctx.type === "order" ? "📦 " : "🛍️ "}{ctx.title || ""}{ctx.price != null && ctx.price !== "" ? <span style={{ color: "#22C55E", fontWeight: 800 }}> · {money(Number(ctx.price) || 0, ctx.currency || "USD")}</span> : null}</p>
+            <p style={{ fontSize: 11.5, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ctx.type === "order" ? "📦 " : ctx.type === "service" ? "🛠️ " : "🛍️ "}{ctx.title || ""}{Number(ctx.price) > 0 ? <span style={{ color: "#22C55E", fontWeight: 800 }}> · {money(Number(ctx.price) || 0, ctx.currency || "USD")}</span> : null}</p>
             <p style={{ fontSize: 9.5, color: T3, marginTop: 1 }}>Estás consultando sobre esto</p>
           </div>
           <button onClick={() => setCtx(null)} style={{ background: "none", border: "none", color: T3, fontSize: 17, cursor: "pointer", lineHeight: 1, padding: 4 }}>×</button>

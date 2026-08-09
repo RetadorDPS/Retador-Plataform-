@@ -134,10 +134,32 @@ export default function App() {
   const [platformStats, setPlatformStats] = useState(null);
   useEffect(() => { getPlatformStats().then(s => setPlatformStats(s)).catch(() => {}); }, []);
 
+  // ── ENLACE COMPARTIDO ("?openProduct="/"?openProfile=") ─────────────────────
+  // Quien toca un enlace compartido (share-preview) MUCHAS veces NO tiene
+  // cuenta todavía — viene de Facebook/Instagram viendo el producto por
+  // primera vez. Antes esto solo se leía DENTRO de AppShell (requiere sesión
+  // real), así que sin cuenta el enlace no llevaba a ningún lado: se veía la
+  // bienvenida genérica y ahí se quedaba. Ahora se detecta aquí, ANTES de
+  // exigir sesión, para poder mostrar el producto/perfil en modo invitado.
+  const [deepLink, setDeepLink] = useState(() => {
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const pid = q.get("openProduct"); const prid = q.get("openProfile");
+      if (pid) return { type: "product", id: pid };
+      if (prid) return { type: "profile", id: prid };
+    } catch (e) {}
+    return null;
+  });
+
   // PANTALLA PRINCIPAL: SIEMPRE se muestra la bienvenida al abrir. Con sesión, el
   // botón entra al marketplace (no vuelve a mostrarse hasta reabrir / re-loguear).
   const [entered, setEntered] = useState(false);
   useEffect(() => { if (!sessionUser) setEntered(false); }, [sessionUser]);
+  // Si YA hay sesión (p.ej. el propio dueño probando el enlace) y viene de un
+  // enlace compartido, nos saltamos el toque manual de "Entrar a RETADOR" —
+  // AppShell ya sabe abrir directo el producto/perfil (App.jsx lee
+  // "?openProduct="/"?openProfile=" al montar).
+  useEffect(() => { if (sessionUser && deepLink) setEntered(true); }, [sessionUser, deepLink]);
   // Config editable de la bienvenida (subtítulo, texto del botón, color de acento),
   // en config.home. Se carga aquí (fuera de AppShell) y se mantiene EN VIVO con el
   // realtime de platform_config, para que un cambio del editor se vea al instante
@@ -190,13 +212,93 @@ export default function App() {
                 ? (entered
                     ? <AppShell sessionUser={sessionUser} />
                     : <RetadorInicio onEnter={() => setEntered(true)} subtitle={homeCfg.subtitle} enterLabel={homeCfg.enterLabel} stats={platformStats} dark={welcomeDark} />)
-                : <RetadorInicio onGoogle={signInWithGoogle} subtitle={homeCfg.subtitle} stats={platformStats} dark={welcomeDark} />}
+                : (deepLink
+                    ? <GuestDeepLinkPreview deepLink={deepLink} onChangeDeepLink={setDeepLink} onExit={() => setDeepLink(null)} />
+                    : <RetadorInicio onGoogle={signInWithGoogle} subtitle={homeCfg.subtitle} stats={platformStats} dark={welcomeDark} />)}
             </CatalogProvider>
           </DensityProvider>
         )}
       {/* Cartel de instalación PWA propio — montado siempre, decide solo si se muestra */}
       <InstallPrompt />
     </>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// VISTA DE INVITADO — producto/perfil abierto desde un enlace compartido SIN
+// sesión iniciada. Es el caso real de marketing (Facebook/Instagram): alguien
+// que nunca ha usado RETADOR toca el enlace y tiene que poder ver la foto, el
+// precio, la descripción y toda la tienda del vendedor — sin que le pidan
+// cuenta solo para MIRAR. Comprar/chatear/valorar sí piden iniciar sesión
+// (Google), igual que en toda la app.
+// Reutiliza ProductDetail/FreeProfileScreen tal cual (los contextos de tema/
+// densidad/config que usan ya tienen valores por defecto sensatos sin
+// Provider, así que funcionan aquí afuera de AppShell sin problema).
+function GuestDeepLinkPreview({ deepLink, onChangeDeepLink, onExit }) {
+  const [product, setProduct] = useState(undefined);   // undefined=cargando, null=no existe
+  const [profile, setProfile] = useState(undefined);
+  const [sellerProducts, setSellerProducts] = useState([]);
+  const [toast, setToast] = useState(null);
+  const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
+  const requireAuth = () => { signInWithGoogle(); return false; };
+
+  useEffect(() => {
+    let alive = true;
+    if (deepLink.type === "product") {
+      setProduct(undefined);
+      getProductById(deepLink.id).then(p => { if (alive) setProduct(p || null); }).catch(() => { if (alive) setProduct(null); });
+    } else {
+      setProfile(undefined);
+      getUserById(deepLink.id).then(u => { if (alive) setProfile(u || null); }).catch(() => { if (alive) setProfile(null); });
+      getProductsBySeller(deepLink.id, { publicView: true }).then(list => { if (alive) setSellerProducts(list); }).catch(() => {});
+    }
+    return () => { alive = false; };
+  }, [deepLink.type, deepLink.id]);
+
+  const signInBar = (
+    <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 70, background: "rgba(8,8,8,.94)", backdropFilter: "blur(14px)", borderTop: "1px solid #222", padding: "11px 16px calc(11px + env(safe-area-inset-bottom,0px))", display: "flex", alignItems: "center", gap: 10 }}>
+      <span style={{ flex: 1, fontSize: 11.5, color: "#ccc", fontWeight: 600, lineHeight: 1.35 }}>🔑 Inicia sesión para comprar, chatear o valorar</span>
+      <button onClick={() => signInWithGoogle()} style={{ background: "#FFC01E", color: "#000", border: "none", borderRadius: 999, padding: "9px 16px", fontSize: 12, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Entrar con Google</button>
+    </div>
+  );
+  const toastEl = toast && (
+    <div style={{ position: "fixed", left: "50%", bottom: 74, transform: "translateX(-50%)", zIndex: 80, background: "rgba(28,28,30,.96)", color: "#fff", padding: "10px 16px", borderRadius: 12, fontSize: 12.5, fontWeight: 600, maxWidth: "88vw", textAlign: "center" }}>{toast}</div>
+  );
+  const notFound = (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "#080808", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, padding: 24, textAlign: "center" }}>
+      <div style={{ fontSize: 44 }}>🔍</div>
+      <p style={{ color: "#fff", fontSize: 15, fontWeight: 700 }}>Esto ya no está disponible</p>
+      <button onClick={onExit} style={{ background: "#FFC01E", color: "#000", border: "none", borderRadius: 999, padding: "12px 22px", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Ver RETADOR</button>
+    </div>
+  );
+
+  if (deepLink.type === "product") {
+    if (product === undefined) return <PantallaCargando />;
+    if (product === null) return notFound;
+    return (
+      <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "#080808", display: "flex", flexDirection: "column" }}>
+        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", paddingBottom: 56 }}>
+          <ProductDetail product={product} onBack={onExit}
+            onDelivery={() => {}} onChat={() => {}} onViewProfile={(id) => onChangeDeepLink({ type: "profile", id })}
+            onBuy={() => {}} onFav={() => {}} isFav={false} flash={flash} requireAuth={requireAuth}
+            user={null} canChat={false} onDelete={null} onEdit={null} />
+        </div>
+        {signInBar}{toastEl}
+      </div>
+    );
+  }
+
+  if (profile === undefined) return <PantallaCargando />;
+  if (profile === null) return notFound;
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "#080808", display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", paddingBottom: 56 }}>
+        <FreeProfileScreen onBack={onExit} user={null} sellerId={deepLink.id} initialProfile={{}}
+          onProfileUpdate={() => {}} isOwner={false} onChat={requireAuth} isVerified={!!profile.verified}
+          onReport={() => {}} userProducts={sellerProducts} onProduct={(p) => onChangeDeepLink({ type: "product", id: p.id })} />
+      </div>
+      {signInBar}{toastEl}
+    </div>
   );
 }
 

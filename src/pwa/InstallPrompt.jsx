@@ -13,6 +13,30 @@ function isIOS() {
   return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
 }
 
+// ── Marca persistente de "ya se instaló en ESTE navegador" ──────────────────
+// isStandalone() SOLO es true mientras la app corre desde el ícono instalado
+// — si luego se abre la MISMA app en una pestaña normal del navegador (no
+// desde el ícono), isStandalone() vuelve a dar false y, sin esta marca, el
+// cartel de "Instalar" reaparecía aunque ya estuviera instalada. Se guarda en
+// cuanto detectamos standalone=true (o justo al confirmarse la instalación
+// con nuestro propio botón) y desde ahí el cartel nunca vuelve a ofrecerse
+// EN ESE NAVEGADOR.
+// ⚠️ LÍMITE REAL (no se puede evitar del todo): esta marca vive en el
+// localStorage de ESE navegador/perfil. Si la app se instaló desde Chrome
+// pero luego se abre desde el navegador interno de WhatsApp/Facebook/Instagram
+// (o cualquier otro navegador), es un contexto de almacenamiento COMPLETAMENTE
+// separado que no tiene forma de saber que ya existe una instalación en otro
+// lado — ahí el cartel puede volver a aparecer. No es un descuido: es cómo
+// funciona el almacenamiento web, ningún sitio puede leer el localStorage de
+// otro navegador.
+const INSTALLED_FLAG_KEY = "retador_pwa_installed_confirmed";
+function markInstalledIfStandalone() {
+  try { if (isStandalone()) localStorage.setItem(INSTALLED_FLAG_KEY, "1"); } catch (e) {}
+}
+function wasInstalledBefore() {
+  try { return localStorage.getItem(INSTALLED_FLAG_KEY) === "1"; } catch (e) { return false; }
+}
+
 const GOLD = "#F5B301";
 const ICON = (import.meta.env.BASE_URL || "/") + "icons/icon-192.png";
 
@@ -23,17 +47,21 @@ export default function InstallPrompt() {
   const [ios, setIos] = useState(false);
 
   useEffect(() => {
-    if (isStandalone()) return; // ya instalada → nunca molestar
+    markInstalledIfStandalone(); // corre instalada AHORA → guarda la marca para el futuro
+    if (isStandalone() || wasInstalledBefore()) return; // ya instalada (ahora o antes, en este navegador) → nunca molestar
 
     // Si el evento llega tarde y ya cerramos, no reaparece hasta la próxima carga.
     const off = onPromptChange((e) => {
-      if (!e) setVisible(false); // appinstalled
+      if (!e) { // appinstalled: se acaba de instalar de verdad — marca ya mismo, sin esperar al próximo arranque
+        setVisible(false);
+        try { localStorage.setItem(INSTALLED_FLAG_KEY, "1"); } catch (err) {}
+      }
     });
 
     const iosDevice = isIOS() && !isStandalone();
     // Esperamos unos segundos tras cargar para no ser agresivos.
     const t = setTimeout(() => {
-      if (isStandalone()) return;
+      if (isStandalone() || wasInstalledBefore()) return;
       if (getDeferredPrompt()) setVisible(true);        // Android/Chrome/Edge…
       else if (iosDevice) { setIos(true); setVisible(true); } // iOS: instrucciones
       // Si el navegador no soporta instalación (ni iOS) → no se muestra nada.

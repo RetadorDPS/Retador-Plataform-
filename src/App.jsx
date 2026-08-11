@@ -160,6 +160,12 @@ export default function App() {
   // AppShell ya sabe abrir directo el producto/perfil (App.jsx lee
   // "?openProduct="/"?openProfile=" al montar).
   useEffect(() => { if (sessionUser && deepLink) setEntered(true); }, [sessionUser, deepLink]);
+  // Sin sesión, viendo un producto/perfil en modo invitado: si toca "Iniciar
+  // sesión", NO se dispara Google directo desde ahí — se muestra la MISMA
+  // bienvenida de siempre (stats reales, botón "Entrar a RETADOR"), un solo
+  // punto de entrada a toda la app. deepLink se conserva (no se limpia) para
+  // que, si inicia sesión de verdad, caiga derecho de vuelta al producto.
+  const [guestWantsAuth, setGuestWantsAuth] = useState(false);
   // Config editable de la bienvenida (subtítulo, texto del botón, color de acento),
   // en config.home. Se carga aquí (fuera de AppShell) y se mantiene EN VIVO con el
   // realtime de platform_config, para que un cambio del editor se vea al instante
@@ -212,8 +218,8 @@ export default function App() {
                 ? (entered
                     ? <AppShell sessionUser={sessionUser} />
                     : <RetadorInicio onEnter={() => setEntered(true)} subtitle={homeCfg.subtitle} enterLabel={homeCfg.enterLabel} stats={platformStats} dark={welcomeDark} />)
-                : (deepLink
-                    ? <GuestDeepLinkPreview deepLink={deepLink} onChangeDeepLink={setDeepLink} onExit={() => setDeepLink(null)} />
+                : (deepLink && !guestWantsAuth
+                    ? <GuestDeepLinkPreview deepLink={deepLink} onChangeDeepLink={setDeepLink} onExit={() => setDeepLink(null)} onRequestAuth={() => setGuestWantsAuth(true)} />
                     : <RetadorInicio onGoogle={signInWithGoogle} subtitle={homeCfg.subtitle} stats={platformStats} dark={welcomeDark} />)}
             </CatalogProvider>
           </DensityProvider>
@@ -234,13 +240,16 @@ export default function App() {
 // Reutiliza ProductDetail/FreeProfileScreen tal cual (los contextos de tema/
 // densidad/config que usan ya tienen valores por defecto sensatos sin
 // Provider, así que funcionan aquí afuera de AppShell sin problema).
-function GuestDeepLinkPreview({ deepLink, onChangeDeepLink, onExit }) {
+function GuestDeepLinkPreview({ deepLink, onChangeDeepLink, onExit, onRequestAuth }) {
   const [product, setProduct] = useState(undefined);   // undefined=cargando, null=no existe
   const [profile, setProfile] = useState(undefined);
   const [sellerProducts, setSellerProducts] = useState([]);
   const [toast, setToast] = useState(null);
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
-  const requireAuth = () => { signInWithGoogle(); return false; };
+  // NO dispara Google directo desde acá — manda a la MISMA bienvenida de
+  // siempre (App.jsx conserva deepLink, así que si de verdad inicia sesión
+  // cae derecho de vuelta a este producto/perfil). Un solo punto de entrada.
+  const requireAuth = () => { onRequestAuth(); return false; };
 
   useEffect(() => {
     let alive = true;
@@ -258,7 +267,7 @@ function GuestDeepLinkPreview({ deepLink, onChangeDeepLink, onExit }) {
   const signInBar = (
     <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 70, background: "rgba(8,8,8,.94)", backdropFilter: "blur(14px)", borderTop: "1px solid #222", padding: "11px 16px calc(11px + env(safe-area-inset-bottom,0px))", display: "flex", alignItems: "center", gap: 10 }}>
       <span style={{ flex: 1, fontSize: 11.5, color: "#ccc", fontWeight: 600, lineHeight: 1.35 }}>🔑 Inicia sesión para comprar, chatear o valorar</span>
-      <button onClick={() => signInWithGoogle()} style={{ background: "#FFC01E", color: "#000", border: "none", borderRadius: 999, padding: "9px 16px", fontSize: 12, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Entrar con Google</button>
+      <button onClick={onRequestAuth} style={{ background: "#FFC01E", color: "#000", border: "none", borderRadius: 999, padding: "9px 16px", fontSize: 12, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Iniciar sesión</button>
     </div>
   );
   const toastEl = toast && (

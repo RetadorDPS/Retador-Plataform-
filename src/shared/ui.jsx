@@ -14,6 +14,14 @@ export function useCSS() {
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;overflow:hidden;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}
 *{letter-spacing:-0.012em}
+/* Sin menú nativo del navegador al mantener presionado (copiar/buscar/guardar
+   imagen…) en TODA la app — antes solo estaba en el chat. Selección de texto
+   también desactivada por defecto, EXCEPCIÓN OBLIGATORIA: campos donde el
+   usuario escribe o necesita copiar/pegar (inputs, textareas, contenteditable)
+   y cualquier texto marcado a mano con .selectable (direcciones, números de
+   pedido) siguen permitiendo selección y copiado normales. */
+html,body,#root{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+input,textarea,select,[contenteditable="true"],.selectable{-webkit-user-select:text!important;user-select:text!important;-webkit-touch-callout:default!important}
 ::-webkit-scrollbar{width:0;height:0}
 input,textarea,select,button{font-family:'Barlow',sans-serif}
 input,textarea{font-size:16px!important}
@@ -73,6 +81,18 @@ select option{background:#161616;color:#fff}
 .pls{animation:pls 2s ease-in-out infinite}
 `;
     document.head.appendChild(s);
+  }, []);
+  // Menú contextual (clic derecho / mantener presionado) apagado en TODA la
+  // app — antes solo el chat lo hacía por su cuenta. Misma excepción que el
+  // CSS de arriba: campos de formulario y .selectable lo dejan pasar normal.
+  useEffect(() => {
+    const onCtx = (e) => {
+      const t = e.target;
+      if (t.closest && t.closest('input,textarea,select,[contenteditable="true"],.selectable')) return;
+      e.preventDefault();
+    };
+    document.addEventListener("contextmenu", onCtx);
+    return () => document.removeEventListener("contextmenu", onCtx);
   }, []);
 }
 

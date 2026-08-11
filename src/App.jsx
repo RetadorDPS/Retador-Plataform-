@@ -29,7 +29,7 @@ import {
   getNotifications, markNotificationsRead, markNotificationsReadByKind, refreshSessionProfile, isSuspendedUser,
   ORDER_FLOW, SHIP_LABELS, MODALIDAD_LABELS,
   CONTACT_PATTERNS, maskContacts, CUBA_PROVINCES,
-  trackEvent, blockUser, isBlocked, getSB, convKey,
+  trackEvent, blockUser, isBlocked, getBlockedUsers, getSB, convKey,
   G, BG, S, B, RCtx, useR, useResponsive, BC,
   DARK_T, LIGHT_T, AppThCtx, useAt, PlatformCfgContext,
   DENSITY_MODES, DENSITY_TOKENS, DENSITY_STORAGE_KEY, DensityContext, DensityProvider, useDensity, densityCols, TEXT_STEPS, DEFAULT_BLOCKS,
@@ -396,6 +396,10 @@ function AppShell({ sessionUser }) {
   // Overlays
   const [showCats,   setShowCats]   = useState(false);
   const [pubOpen,    setPubOpen]    = useState(false);
+  // Categoría precargada al publicar desde el atajo "Publicar en [categoría]"
+  // de Búsqueda — se limpia al cerrar el formulario para no arrastrarla a la
+  // próxima publicación normal (+ Publicar).
+  const [pubPrefillCat, setPubPrefillCat] = useState(null);
   const [showNotif,  setShowNotif]  = useState(false);
   const [chatOpen,   setChatOpen]   = useState(false);
   // Conversación EN PANTALLA ahora mismo (la resuelve ChatScreen vía onConvId). Sirve
@@ -1369,11 +1373,22 @@ function AppShell({ sessionUser }) {
     flash("No se pudo abrir el chat: usuario no identificado");
   };
 
-  // Usuarios bloqueados (persistentes) — los usa Ajustes. El chat en sí ya va por
-  // el backend (conversations/messages con realtime); no hay chat local.
-  const [blockedUsers, setBlockedUsers] = useState(() => { try { return JSON.parse(localStorage.getItem("retador_blocked") || "[]"); } catch { return []; } });
-  useEffect(() => { try { localStorage.setItem("retador_blocked", JSON.stringify(blockedUsers)); } catch {} }, [blockedUsers]);
-  const toggleBlock = (key, name) => setBlockedUsers(prev => prev.some(b => b.key === String(key)) ? prev.filter(b => b.key !== String(key)) : [...prev, { key: String(key), name: name || "Usuario" }]);
+  // Usuarios bloqueados REALES (blocked_users + toggle_block RPC) — los usa
+  // Ajustes → Privacidad. ANTES esta lista vivía solo en localStorage, sin
+  // relación con el bloqueo real que usa el chat: bloquear desde el chat no
+  // aparecía aquí, y "desbloquear" aquí no tocaba el bloqueo real (seguía
+  // activo en la base, el chat seguía rechazando los mensajes). Ahora ambas
+  // pantallas leen y escriben la MISMA fuente de verdad (blocked_users).
+  const [blockedUsers, setBlockedUsers] = useState([]);
+  const reloadBlockedUsers = useCallback(() => {
+    if (!user?.id) { setBlockedUsers([]); return; }
+    getBlockedUsers(user.id).then(setBlockedUsers).catch(() => {});
+  }, [user?.id]);
+  useEffect(() => { reloadBlockedUsers(); }, [reloadBlockedUsers]);
+  const toggleBlock = async (key) => {
+    try { await blockUser(key); reloadBlockedUsers(); }
+    catch (e) { flash("❌ No se pudo actualizar el bloqueo"); }
+  };
 
   // Favorito REAL: toggle_favorite en el backend. Actualiza el corazón al instante
   // (optimista) y luego reconcilia con la verdad del backend; si falla, revierte.
@@ -1547,7 +1562,7 @@ function AppShell({ sessionUser }) {
 
       {/* Overlays */}
       {showCats   && <CatModal onClose={() => setShowCats(false)} onSelect={cat => { setActiveCat(cat); setShowCats(false); }} active={activeCat} />}
-      {pubOpen    && <PubSheet onClose={() => setPubOpen(false)} onPublish={async d => { setPubOpen(false); await handlePublish(d); }} user={user} flash={flash} initialKind={pubOpen === "service" ? "service" : ""} />}
+      {pubOpen    && <PubSheet onClose={() => { setPubOpen(false); setPubPrefillCat(null); }} onPublish={async d => { setPubOpen(false); setPubPrefillCat(null); await handlePublish(d); }} user={user} flash={flash} initialKind={pubOpen === "service" ? "service" : (pubPrefillCat ? "product" : "")} initialCat={pubPrefillCat} />}
       {showNotif  && <NotifPanel onClose={() => { markNotifRead(null); setShowNotif(false); }} notifs={myNotifs} onRead={markNotifRead} onOpenOrder={(oid) => { setShowNotif(false); markNotifRead(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }} onOpenConversation={(cid) => { setShowNotif(false); markNotifRead(null); openConversationById(cid); }}
         onOpenQueue={(page) => {
           // Si no tiene ningún acceso al panel, no intenta navegar ahí (el panel
@@ -1864,6 +1879,7 @@ function AppShell({ sessionUser }) {
                 favorites={favorites}
                 onFav={toggleFav}
                 onNav={navTo}
+                onPublishInCat={(catId) => { setPubPrefillCat(catId); setPubOpen("product"); }}
               />
             </SectionGate>
           )}

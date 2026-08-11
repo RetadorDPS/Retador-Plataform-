@@ -292,6 +292,18 @@ export const getMyProductReview = async (productId, userId) => {
     return { id: data.id, rating: data.rating, comment: data.comment || "" };
   } catch (e) { return null; }
 };
+// ¿Tiene el usuario un pedido ENTREGADO de este producto exacto? La política
+// real de reseñas de producto lo exige — sin esto, el formulario se ofrecía
+// siempre y solo fallaba (con un error confuso) al publicar sin cumplirla.
+export const hasCompletedOrderForProduct = async (userId, productId) => {
+  if (!userId || !productId) return false;
+  try {
+    const { data, error } = await supabase.from("orders").select("id")
+      .eq("buyer_id", userId).eq("product_id", productId).eq("status", "entregado").limit(1);
+    if (error) return false;
+    return (data || []).length > 0;
+  } catch (e) { return false; }
+};
 export const submitProductReview = async (productId, userId, rating, comment) => {
   if (!productId || !userId) throw new Error("Sesión no válida");
   const existing = await getMyProductReview(productId, userId);
@@ -1436,6 +1448,23 @@ export const isBlockedPair = async (userId, otherId) => {
 export const isBlockSendError = (e) => {
   const msg = (e?.message || "") + " " + (e?.details || "");
   return e?.code === "42501" || /row-level security|permission denied|blocked/i.test(msg);
+};
+// Lista REAL de a quién bloqueé (blocked_users, fila donde YO soy blocker_id) —
+// usada por Ajustes → Privacidad. ANTES esa pantalla mostraba una lista aparte
+// guardada solo en localStorage, sin relación con blocked_users/toggle_block:
+// bloquear desde el chat no aparecía ahí, y "desbloquear" ahí no tocaba el
+// bloqueo real (quedaba activo en la base). Ahora ambas pantallas leen y
+// escriben la MISMA fuente de verdad.
+export const getBlockedUsers = async (userId) => {
+  if (!userId) return [];
+  try {
+    const { data, error } = await supabase.from("blocked_users").select("blocked_id").eq("blocker_id", userId);
+    if (error || !data?.length) return [];
+    const ids = [...new Set(data.map(r => r.blocked_id))];
+    const { data: profs } = await supabase.from("profiles").select("id, full_name").in("id", ids);
+    const names = {}; (profs || []).forEach(p => { names[p.id] = p.full_name || "Usuario"; });
+    return ids.map(id => ({ key: String(id), name: names[id] || "Usuario" }));
+  } catch (e) { return []; }
 };
 
 // Alias — mantiene el nombre que ya usaban otras pantallas.

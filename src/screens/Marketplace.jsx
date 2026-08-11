@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getUserName, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getUserName, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -577,7 +577,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // ADVANCED SEARCH
 // ═════════════════════════════════════════════════════════════════════════════
-export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, view = "grid" }) {
+export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, view = "grid", onPublishInCat }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const { tokens: dt, mode: dMode } = useDensity();
@@ -732,11 +732,22 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
                 Sin resultados exactos para "{catSuggestion.term}" — mostrando la categoría <b>{catSuggestion.name}</b>
               </div>
             )}
-            <div style={{ marginBottom: 10 }}>
-              <h2 style={{ fontSize: 13 * ts, fontWeight: 800, marginBottom: 2, color: T1 }}>
-                {selectedSubcat ? selectedSubcat : effectiveCatObj ? effectiveCatObj.name : "Todos los productos"}
-              </h2>
-              <p style={{ color: T2, fontSize: 9 * ts }}>{filtered.length} resultados</p>
+            <div style={{ marginBottom: 10, display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8 }}>
+              <div>
+                <h2 style={{ fontSize: 13 * ts, fontWeight: 800, marginBottom: 2, color: T1 }}>
+                  {selectedSubcat ? selectedSubcat : effectiveCatObj ? effectiveCatObj.name : "Todos los productos"}
+                </h2>
+                <p style={{ color: T2, fontSize: 9 * ts }}>{filtered.length} resultados</p>
+              </div>
+              {/* Atajo discreto: publicar directo en esta categoría (mismo formulario
+                  de siempre, solo con la categoría ya elegida) — no compite con la
+                  navegación principal, no aparece si no hay categoría elegida. */}
+              {selectedCat && cat && onPublishInCat && (
+                <button onClick={() => onPublishInCat(cat.id)} className="p"
+                  style={{ flexShrink: 0, background: "none", border: `1px solid ${cat.color}40`, color: cat.color, borderRadius: 999, padding: "6px 11px", fontSize: 9.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+                  📢 Publicar en {cat.name}
+                </button>
+              )}
             </div>
             {filtered.length === 0 ? (
               <div style={{ textAlign: "center", padding: "50px 20px", color: T2 }}>
@@ -1651,6 +1662,44 @@ function ProductImageViewer({ images = [], index = 0, setIndex, onClose, title, 
   );
 }
 
+// ── Equivalente de precio en las OTRAS monedas que el vendedor acepta ────────
+// Solo con tasas REALES (config.fx del backend, misma fuente que la tirita de
+// Perfil) — si no hay tasa para alguna moneda, esa conversión simplemente no
+// se muestra (nunca un valor inventado o de ejemplo).
+function fxToCup(amount, cur, fx) {
+  if (cur === "CUP") return amount;
+  if (cur === "USD") return fx.usdToCup ? amount * fx.usdToCup : null;
+  if (cur === "EUR") return fx.eurToCup ? amount * fx.eurToCup : null;
+  return null;
+}
+function fxFromCup(cup, cur, fx) {
+  if (cur === "CUP") return cup;
+  if (cur === "USD") return fx.usdToCup ? cup / fx.usdToCup : null;
+  if (cur === "EUR") return fx.eurToCup ? cup / fx.eurToCup : null;
+  return null;
+}
+function CurrencyEquivalents({ product }) {
+  const { T2 } = useAt();
+  const cfg = usePlatformCfg();
+  const fx = cfg.fx || {};
+  const accepted = Array.isArray(product.acceptedCurrencies) ? product.acceptedCurrencies : [];
+  if (accepted.length < 2 || !(Number(product.price) > 0)) return null;
+  const baseCur = product.currency || DEFAULT_CURRENCY;
+  const baseCup = fxToCup(Number(product.price), baseCur, fx);
+  if (baseCup == null) return null;
+  const items = accepted.filter(c => c !== baseCur).map(c => {
+    const v = fxFromCup(baseCup, c, fx);
+    return v == null ? null : { code: c, value: v };
+  }).filter(Boolean);
+  if (!items.length) return null;
+  const fmt = (n) => n.toLocaleString("es-ES", { maximumFractionDigits: n >= 100 ? 0 : 2 });
+  return (
+    <p style={{ fontSize: 10.5, color: T2, fontWeight: 600, marginBottom: 6 }}>
+      {items.map((it, i) => <span key={it.code}>{i > 0 && " · "}≈ {fmt(it.value)} {it.code}</span>)}
+    </p>
+  );
+}
+
 export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewProfile, onBuy, onFav, isFav, flash, requireAuth, user, canChat, onDelete, onEdit }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { S, B, T1, T2, T3, isDark, ts } = useAt();
@@ -1704,6 +1753,8 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
     return () => { alive = false; };
   }, [p.id, isService]);
   const soldOut = !isService && availStock != null && availStock <= 0;
+  // Es mi propio producto/servicio: no tiene sentido comprármelo a mí mismo.
+  const isOwnProduct = !!(user?.id && p.seller_id && String(user.id) === String(p.seller_id));
 
   return (
     <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", position: "relative" }}>
@@ -1782,6 +1833,7 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
             </>
           )}
         </div>
+        {!isService && <CurrencyEquivalents product={p} />}
 
         {/* Zona donde se ofrece el servicio (solo servicios) */}
         {isService && p.location && (
@@ -1887,6 +1939,8 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
             style={{ flex: 1, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
             📞 Contactar
           </button>
+        ) : isOwnProduct ? (
+          <div style={{ flex: 1, textAlign: "center", padding: "15px", borderRadius: 50, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>📦 Es tu producto</div>
         ) : soldOut ? (
           <div style={{ flex: 1, textAlign: "center", padding: "15px", borderRadius: 50, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>🚫 Agotado</div>
         ) : (
@@ -1947,6 +2001,10 @@ function ProductReviews({ product, user, flash, requireAuth }) {
   const [stars, setStars] = useState(0);
   const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
+  // La política real exige un pedido ENTREGADO de este producto exacto para
+  // poder reseñarlo. Sin esta consulta el botón se ofrecía siempre y fallaba
+  // recién al publicar, con un error confuso para quien nunca lo compró.
+  const [eligible, setEligible] = useState(false);
 
   const reload = useCallback(() => {
     if (!product?.id) return;
@@ -1956,13 +2014,14 @@ function ProductReviews({ product, user, flash, requireAuth }) {
   useEffect(() => { reload(); }, [reload]);
 
   useEffect(() => {
-    if (!product?.id || !user?.id) { setMine(null); return; }
+    if (!product?.id || !user?.id) { setMine(null); setEligible(false); return; }
     let alive = true;
     getMyProductReview(product.id, user.id).then(r => {
       if (!alive) return;
       setMine(r);
       if (r) { setStars(r.rating); setComment(r.comment || ""); }
     }).catch(() => {});
+    hasCompletedOrderForProduct(user.id, product.id).then(ok => { if (alive) setEligible(ok); }).catch(() => {});
     return () => { alive = false; };
   }, [product?.id, user?.id]);
 
@@ -1997,7 +2056,7 @@ function ProductReviews({ product, user, flash, requireAuth }) {
         <p style={{ fontSize: 9, fontWeight: 700, color: T2, letterSpacing: .3 }}>
           RESEÑAS {reviews.length > 0 ? `(${reviews.length})` : ""}
         </p>
-        {!showForm && (
+        {!showForm && (mine || eligible) && (
           <button onClick={openForm} className="p" style={{ background: "none", border: `1px solid ${B}`, borderRadius: 50, padding: "5px 11px", fontSize: 10, fontWeight: 700, color: T2, cursor: "pointer" }}>
             {mine ? "Editar mi reseña" : "Escribir reseña"}
           </button>
@@ -2193,7 +2252,7 @@ function PubChooser({ onClose, onPick }) {
 
 // FLUJO PRODUCTO — completo: stock obligatorio, descuentos por cantidad,
 // moneda, monedas que acepta el vendedor (multi-select, opcional) y entrega.
-function PublishProductForm({ onClose, onBack, onPublish, user, flash }) {
+function PublishProductForm({ onClose, onBack, onPublish, user, flash, initialCat = null }) {
   const { cols } = useR();
   const { cats, subcats } = useCatalog();
   const { CARD, B, T1, T2, T3, isDark } = useAt();
@@ -2201,8 +2260,15 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash }) {
   const promoOn = platformCfg.promoActive === true;
   const promoCost = Number(platformCfg.promoCost) || 0;
   const [promoAsk, setPromoAsk] = useState(false);
+  // El <select> de categoría combina cat+subcat en un solo value ("id|subcat")
+  // porque cada opción real es una subcategoría — si se precarga solo la
+  // categoría (sin subcat), ese value no calza con ninguna <option> y el
+  // selector se ve "sin elegir" aunque form.cat sí tenga el dato. Por eso, si
+  // la categoría precargada tiene subcategorías, se toma la primera como
+  // punto de partida (el vendedor la puede cambiar igual).
+  const initialSubcat = initialCat && (subcats[initialCat] || []).length ? subcats[initialCat][0] : "";
   const [form, setForm] = useState({
-    title: "", price: "", currency: "USD", orig: "", cat: "", subcat: "", desc: "",
+    title: "", price: "", currency: "USD", orig: "", cat: initialCat || "", subcat: initialSubcat, desc: "",
     images: [], badge: "", stock: "",
     bulkDiscounts: [], // [{min,pct}]
     acceptedCurrencies: [], // monedas en las que el vendedor acepta cobrar (selección múltiple, opcional)
@@ -2626,9 +2692,9 @@ function PublishServiceForm({ onClose, onBack, onPublish, user, flash }) {
 
 // Punto de entrada externo (sin cambios en la firma): decide cuál de los dos
 // flujos separados montar. App.jsx sigue montando <PubSheet .../> igual que antes.
-export function PubSheet({ onClose, onPublish, user, flash, initialKind = "" }) {
+export function PubSheet({ onClose, onPublish, user, flash, initialKind = "", initialCat = null }) {
   const [kind, setKind] = useState(initialKind);
-  if (kind === "product") return <PublishProductForm onClose={onClose} onBack={() => setKind("")} onPublish={onPublish} user={user} flash={flash} />;
+  if (kind === "product") return <PublishProductForm onClose={onClose} onBack={() => setKind("")} onPublish={onPublish} user={user} flash={flash} initialCat={initialCat} />;
   if (kind === "service") return <PublishServiceForm onClose={onClose} onBack={() => setKind("")} onPublish={onPublish} user={user} flash={flash} />;
   return <PubChooser onClose={onClose} onPick={setKind} />;
 }

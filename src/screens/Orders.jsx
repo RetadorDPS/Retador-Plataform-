@@ -69,7 +69,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
             {o.image && <img src={o.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: 10, color: T3, marginBottom: 2 }}>Pedido #{String(o.id).slice(-8).toUpperCase()}</p>
+            <p className="selectable" style={{ fontSize: 10, color: T3, marginBottom: 2 }}>Pedido #{String(o.id).slice(-8).toUpperCase()}</p>
             <p style={{ fontSize: 13, fontWeight: 800, color: T1 }}>{o.title}{o.qty > 1 ? ` ×${o.qty}` : ""}</p>
             {/* Paquete suelto: no hay costo de producto (amount=0 siempre) — el
                 precio real es el propio envío. */}
@@ -102,12 +102,12 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
           <div style={{ background: card, border: `1px solid ${B}`, borderRadius: 13, padding: "12px 13px", marginBottom: 14 }}>
             <p style={{ fontSize: 9, color: T3, fontWeight: 700, marginBottom: 7, letterSpacing: .3 }}>{o.delivery.mode === "intl" ? "DESTINATARIO" : "ENTREGA"}</p>
             {o.delivery.mode === "local" ? <>
-              <p style={{ fontSize: 12, fontWeight: 700, color: T1 }}>{o.delivery.name}{o.delivery.nick ? <span style={{ color: T3, fontWeight: 600 }}> ({o.delivery.nick})</span> : null} · {o.delivery.phone}</p>
-              <p style={{ fontSize: 11, color: T2, marginTop: 2 }}>{o.delivery.address}{o.delivery.ref ? ` (${o.delivery.ref})` : ""}</p>
+              <p className="selectable" style={{ fontSize: 12, fontWeight: 700, color: T1 }}>{o.delivery.name}{o.delivery.nick ? <span style={{ color: T3, fontWeight: 600 }}> ({o.delivery.nick})</span> : null} · {o.delivery.phone}</p>
+              <p className="selectable" style={{ fontSize: 11, color: T2, marginTop: 2 }}>{o.delivery.address}{o.delivery.ref ? ` (${o.delivery.ref})` : ""}</p>
               <p style={{ fontSize: 10, color: T3, marginTop: 3 }}>Recogida: {o.delivery.pickup}</p>
             </> : <>
-              <p style={{ fontSize: 12, fontWeight: 700, color: T1 }}>{o.delivery.recipient?.name} · {o.delivery.recipient?.phone}</p>
-              <p style={{ fontSize: 11, color: T2, marginTop: 2 }}>{o.delivery.recipient?.address}</p>
+              <p className="selectable" style={{ fontSize: 12, fontWeight: 700, color: T1 }}>{o.delivery.recipient?.name} · {o.delivery.recipient?.phone}</p>
+              <p className="selectable" style={{ fontSize: 11, color: T2, marginTop: 2 }}>{o.delivery.recipient?.address}</p>
               <p style={{ fontSize: 10, color: T3, marginTop: 3 }}>{o.delivery.recipient?.city}, {o.delivery.recipient?.province}</p>
             </>}
           </div>
@@ -332,7 +332,7 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-              <p style={{ fontSize: 11, color: "#888" }}>Pedido #{String(o.id).slice(-8).toUpperCase()}{isNew(o) ? <span style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 800, color: "#fff", background: G, borderRadius: 5, padding: "1px 5px", verticalAlign: "middle" }}>NUEVO</span> : null}</p>
+              <p className="selectable" style={{ fontSize: 11, color: "#888" }}>Pedido #{String(o.id).slice(-8).toUpperCase()}{isNew(o) ? <span style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 800, color: "#fff", background: G, borderRadius: 5, padding: "1px 5px", verticalAlign: "middle" }}>NUEVO</span> : null}</p>
               <div style={{ background: sc + "20", border: `1px solid ${sc}35`, borderRadius: 100, padding: "3px 10px", flexShrink: 0 }}>
                 <span style={{ fontSize: 10, fontWeight: 700, color: sc }}>{stepLabel(o)}</span>
               </div>

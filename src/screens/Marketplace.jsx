@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getUserName, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getUserName, money, shareLink, shareWithPhoto, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, matchCategory } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -1907,18 +1907,19 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
             <Ic n="msg" c={T2} s={19} />
           </button>
         )}
-        <button className={`btn ${isDark ? "btn-dark" : "btn-light"}`} onClick={async () => {
-          // El enlace es el de la Edge Function share-preview (no la URL directa de
-          // la app): así WhatsApp/Facebook/Twitter muestran la foto/título/precio
-          // reales del producto en la vista previa, y de paso manda a quien lo abre
-          // directo a esta ficha adentro de la app.
-          const link = shareLink("product", p.id);
-          const txt = `${p.title} — en RETADOR`;
-          try {
-            if (navigator.share) { await navigator.share({ title: p.title, text: txt, url: link }); return; }
-            if (navigator.clipboard) { await navigator.clipboard.writeText(link); flash("🔗 Enlace copiado"); return; }
-            flash("Compartir no disponible en este dispositivo");
-          } catch (e) { /* el usuario canceló o no se permitió */ }
+        <button className={`btn ${isDark ? "btn-dark" : "btn-light"}`} onClick={() => {
+          // El enlace es el de la página estática nueva (github.io/.../share/…),
+          // NUNCA Supabase: es la que trae la foto/título/precio reales en la vista
+          // previa de WhatsApp/Facebook/Twitter y manda a quien la abre directo a
+          // esta ficha adentro de la app. Se adjunta también la foto real como
+          // archivo cuando el navegador lo soporta (shareWithPhoto).
+          shareWithPhoto({
+            imageUrl: imgs[0] || null,
+            title: p.title,
+            text: `${p.title} — en RETADOR`,
+            link: shareLink("product", p.id),
+            flash,
+          });
         }} title="Compartir producto" style={{ width: 50, height: 50, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Ic n="share" c={T2} s={17} />
         </button>

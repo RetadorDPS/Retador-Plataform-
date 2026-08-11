@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2 } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink, shareWithPhoto } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -1432,18 +1432,19 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
   // antes no había ninguna columna para esto, por eso nunca persistía. Se trae
   // tanto para el dueño (su propia info) como para quien visita OTRO perfil.
   const aboutTargetId = isOwner ? user?.id : sellerId;
-  // Compartir perfil: SIEMPRE el enlace de la Edge Function share-preview (no
-  // la URL directa) — trae la foto/nombre/bio reales para la vista previa en
-  // redes, y manda a quien lo abre directo a este perfil adentro de la app.
-  const doShareProfile = async () => {
+  // Compartir perfil: SIEMPRE el enlace de la página estática nueva (no
+  // Supabase) — trae la foto/nombre/bio reales para la vista previa en redes,
+  // y manda a quien lo abre directo a este perfil adentro de la app. Adjunta
+  // también la foto real de avatar como archivo cuando el navegador lo soporta.
+  const doShareProfile = () => {
     if (!aboutTargetId) return;
-    const link = shareLink("profile", aboutTargetId);
-    const txt = `${profile.name} — en RETADOR`;
-    try {
-      if (navigator.share) { await navigator.share({ title: profile.name, text: txt, url: link }); return; }
-      if (navigator.clipboard) { await navigator.clipboard.writeText(link); toast_("🔗 Enlace copiado"); return; }
-      toast_("Compartir no disponible en este dispositivo");
-    } catch (e) { /* el usuario canceló o no se permitió */ }
+    shareWithPhoto({
+      imageUrl: avatarUrlOf(profile.avatar),
+      title: profile.name,
+      text: `${profile.name} — en RETADOR`,
+      link: shareLink("profile", aboutTargetId),
+      flash: toast_,
+    });
   };
   useEffect(() => {
     if (!aboutTargetId) return;

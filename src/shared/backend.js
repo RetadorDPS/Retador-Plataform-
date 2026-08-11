@@ -14,6 +14,40 @@ import { supabase } from "./supabase.js";
 const APP_BASE_URL = "https://retadordps.github.io/Retador-Plataform-";
 export const shareLink = (type, id) => `${APP_BASE_URL}/share/${type === "profile" ? "perfil" : "producto"}/${encodeURIComponent(id)}.html`;
 
+// Compartir PRODUCTO/PERFIL: adjunta la FOTO REAL como archivo (no solo el
+// enlace) cuando el navegador lo soporta — para que al compartir a una
+// Historia de Instagram/Facebook aparezca la imagen de verdad, no un enlace
+// pelado. Trae la foto (fetch + blob), la convierte en File y la manda junto
+// con el enlace de la página estática (título/texto/url). Si el navegador no
+// soporta compartir archivos, cae al comportamiento de solo enlace; si
+// tampoco soporta compartir, copia el enlace al portapapeles. Nunca falla ni
+// se queda sin hacer nada — y si el usuario CANCELA la hoja de compartir
+// (AbortError), no insiste con un segundo intento.
+export async function shareWithPhoto({ imageUrl, title, text, link, flash }) {
+  try {
+    if (imageUrl && navigator.canShare) {
+      const res = await fetch(imageUrl, { mode: "cors" });
+      if (res.ok) {
+        const blob = await res.blob();
+        const ext = (blob.type && blob.type.split("/")[1]) || "jpg";
+        const file = new File([blob], `retador.${ext}`, { type: blob.type || "image/jpeg" });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title, text, url: link });
+          return;
+        }
+      }
+    }
+  } catch (e) {
+    if (e?.name === "AbortError") return; // canceló la hoja de compartir: no insistir
+    // cualquier otro fallo (sin soporte, la foto no se pudo traer, etc.) → plan B abajo
+  }
+  try {
+    if (navigator.share) { await navigator.share({ title, text, url: link }); return; }
+    if (navigator.clipboard) { await navigator.clipboard.writeText(link); flash && flash("🔗 Enlace copiado"); return; }
+    flash && flash("Compartir no disponible en este dispositivo");
+  } catch (e) { /* el usuario canceló */ }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // MOCK BACKEND FUNCTIONS - Datos de demostración
 // ═════════════════════════════════════════════════════════════════════════════

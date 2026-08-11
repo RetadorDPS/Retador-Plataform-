@@ -1,13 +1,18 @@
 import { supabase } from "./supabase.js";
 
 // ── Enlace para COMPARTIR (producto/servicio o perfil) ───────────────────────
-// SIEMPRE el de la Edge Function share-preview, nunca la URL directa de la
-// app: esa páginita trae las etiquetas Open Graph reales (foto/título/precio
-// o foto/nombre/bio) para que WhatsApp/Facebook/Twitter muestren la vista
-// previa de verdad, y de paso redirige a quien lo abre directo adentro de la
-// app (App.jsx lee "?openProduct="/"?openProfile=" al arrancar).
-const SHARE_FN_URL = "https://qsxtjuhueqdxoduyroli.supabase.co/functions/v1/share-preview";
-export const shareLink = (type, id) => `${SHARE_FN_URL}?type=${type}&id=${encodeURIComponent(id)}`;
+// Página ESTÁTICA generada en cada build (scripts/generate-share-pages.mjs),
+// servida por GitHub Pages — NUNCA la Edge Function de Supabase. Confirmado
+// con una petición HTTP real (vía pg_net) que Supabase reescribe CUALQUIER
+// respuesta text/html a text/plain, tanto en Edge Functions como en Storage:
+// no hay forma de servir ahí una página que un navegador renderice. GitHub
+// Pages sí sirve .html real, sin restricciones — por eso el enlace apunta
+// directo ahí. Esa páginita trae las etiquetas Open Graph reales (foto/
+// título/precio o foto/nombre/bio) para que WhatsApp/Facebook/Twitter
+// muestren la vista previa de verdad, y redirige a quien la abre directo
+// adentro de la app (App.jsx lee "?openProduct="/"?openProfile=" al arrancar).
+const APP_BASE_URL = "https://retadordps.github.io/Retador-Plataform-";
+export const shareLink = (type, id) => `${APP_BASE_URL}/share/${type === "profile" ? "perfil" : "producto"}/${encodeURIComponent(id)}.html`;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // MOCK BACKEND FUNCTIONS - Datos de demostración

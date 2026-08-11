@@ -1,6 +1,9 @@
 node_modules
 dist
 dist-ssr
+# Páginas de vista previa para compartir (Open Graph) — se regeneran en cada
+# build (scripts/generate-share-pages.mjs), nunca se versionan a mano.
+public/share
 *.local
 .DS_Store
 .vite

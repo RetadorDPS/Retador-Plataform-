@@ -717,9 +717,16 @@ function AppShell({ sessionUser }) {
       ? (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")
       : x;
     const before = effOf(appTheme);
+    const after = effOf(t);
     setAppTheme(t);
     try { localStorage.setItem("retador_theme", t); } catch {}
-    if (effOf(t) !== before) {
+    // Repinta las barras YA MISMO, en el mismo instante del toque — no espera
+    // al próximo render (el efecto de abajo, atado a appTk.BG, solo corre DESPUÉS
+    // de que React confirme el nuevo render; ese frame de por medio era la
+    // ventana real donde un redimensionado del sistema podía tomar el color
+    // viejo). Sincrónico e inmediato, sin transición.
+    setThemeColor(after === "dark" ? DARK_T.BG : LIGHT_T.BG);
+    if (after !== before) {
       setThemeNotice(true);
       clearTimeout(themeNoticeTimer.current);
       themeNoticeTimer.current = setTimeout(() => setThemeNotice(false), 8000);

@@ -26,6 +26,31 @@
     <meta name="apple-mobile-web-app-title" content="RETADOR" />
   </head>
   <body>
+    <!-- Repintado del tema ANTES del primer frame visible, sin esperar a que
+         cargue ni corra React: script SÍNCRONO (bloquea el parseo hasta
+         terminar — nada de #root se pinta antes de que esto corra) que lee
+         la preferencia real guardada (retador_theme) y fija html/body.style.
+         backgroundColor + el meta theme-color YA. El CSS de index.css
+         (prefers-color-scheme) cubre el instante ANTES incluso de que este
+         script corra (o si falla); este script es el ajuste fino para
+         cuando el usuario eligió un tema DISTINTO al del sistema. Sin esto,
+         el primer repintado real dependía de un useEffect de React que solo
+         corre DESPUÉS de montar — ese frame de por medio era la ventana real
+         donde un redimensionado del sistema (p. ej. al armar la vista de
+         apps recientes) podía "fotografiar" el color viejo. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("retador_theme") || "auto";
+          var sysDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var dark = t === "auto" ? !!sysDark : t === "dark";
+          var color = dark ? "#080808" : "#FFFFFF";
+          document.documentElement.style.backgroundColor = color;
+          document.body.style.backgroundColor = color;
+          document.querySelector('meta[name="theme-color"]').setAttribute("content", color);
+        } catch (e) {}
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

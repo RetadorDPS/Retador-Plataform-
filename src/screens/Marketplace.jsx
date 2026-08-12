@@ -321,24 +321,43 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   useEffect(() => { if (availStock != null) setQty(q => Math.max(1, Math.min(q, availStock))); }, [availStock]);
   // Campo de texto para escribir la cantidad directamente (en vez de solo tocar
   // "+" repetido). Estado de texto aparte del número real: así se puede borrar y
-  // escribir sin que cada tecla reformatee el campo. Se confirma (y se topa al
-  // stock real, con aviso) al salir del campo o al presionar Enter.
+  // escribir sin que cada tecla reformatee el campo.
+  // OJO — bug real ya visto DOS veces: validar solo al salir del campo (blur)
+  // deja una ventana real donde la persona escribe "100", NO toca nada más, y
+  // mira una pantalla que se ve perfectamente normal (campo en 100, sin aviso,
+  // "Continuar" habilitado) — recién al tocar Continuar aparecía el rechazo del
+  // backend. Por eso la validación es EN VIVO, letra por letra (onChange), no
+  // en el blur: apenas el número escrito supera el stock, se avisa, se pone en
+  // rojo un instante y se topa al máximo real, todo en el mismo instante.
   const [qtyText, setQtyText] = useState(String(qty));
+  const [qtyOver, setQtyOver] = useState(false); // true = acaba de toparse (borde rojo momentáneo)
+  const qtyOverTimer = useRef(null);
   useEffect(() => { setQtyText(String(qty)); }, [qty]);
-  const commitQtyText = () => {
-    // OJO: si el número resuelto es igual al qty actual (p.ej. ya estaba en el
-    // tope y se escribe algo mayor), React no vuelve a disparar el efecto de
-    // arriba (qty no "cambia" de verdad) y el campo se quedaba mostrando el
-    // número inválido que se tecleó aunque el pedido ya calculara bien con el
-    // tope real — por eso qtyText se fija siempre a mano aquí, nunca solo vía
-    // el efecto.
-    const n = parseInt(qtyText, 10);
-    if (!Number.isFinite(n) || n < 1) { setQty(1); setQtyText("1"); return; }
+  useEffect(() => () => clearTimeout(qtyOverTimer.current), []);
+  const flashQtyOver = () => {
+    setQtyOver(true);
+    clearTimeout(qtyOverTimer.current);
+    qtyOverTimer.current = setTimeout(() => setQtyOver(false), 1600);
+  };
+  const handleQtyInput = (raw) => {
+    const digits = raw.replace(/[^0-9]/g, "");
+    if (digits === "") { setQtyText(""); return; } // permite borrar todo para reescribir
+    const n = parseInt(digits, 10);
     if (availStock != null && n > availStock) {
       flash(`⚠️ Solo quedan ${availStock} disponibles`);
+      flashQtyOver();
       setQty(availStock);
       setQtyText(String(availStock));
-    } else { setQty(n); setQtyText(String(n)); }
+    } else {
+      setQtyText(digits);
+      setQty(Math.max(1, n)); // el total se actualiza en vivo con lo que ya es válido
+    }
+  };
+  // Red de seguridad al salir del campo: solo cubre vacío/0 (el tope por arriba
+  // ya se resuelve en vivo en cada tecla, nunca llega inválido hasta acá).
+  const commitQtyText = () => {
+    const n = parseInt(qtyText, 10);
+    if (!Number.isFinite(n) || n < 1) { setQty(1); setQtyText("1"); }
   };
   // Descuento por cantidad (SOLO vista previa — el total real lo calcula el backend).
   const discPct = bulkDiscountPctFor(qty, product.bulkDiscounts);
@@ -401,7 +420,16 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   const soft = isDark ? "#111" : "#F5F6F7";
   const inp = { width: "100%", background: isDark ? "#0a0a0a" : "#fff", border: `1px solid ${B}`, borderRadius: 10, padding: "11px 13px", fontSize: 12.5, color: T1, outline: "none", fontFamily: "inherit", boxSizing: "border-box" };
   const lbl = { fontSize: 10, fontWeight: 700, color: T2, marginBottom: 5, display: "block" };
-  const primaryAction = () => { if (availModes.length === 0) return; if (availStock != null && availStock <= 0) { flash("⚠️ Este producto está agotado"); return; } if (needData) setStep("datos"); else handle(); };
+  // Red de seguridad adicional: aunque el campo ya topa la cantidad en vivo
+  // mientras se escribe, "Continuar" también rechaza avanzar si por lo que sea
+  // qty quedara por encima del stock real.
+  const qtyValid = availStock == null || qty <= availStock;
+  const primaryAction = () => {
+    if (availModes.length === 0) return;
+    if (availStock != null && availStock <= 0) { flash("⚠️ Este producto está agotado"); return; }
+    if (!qtyValid) { flash(`⚠️ Solo quedan ${availStock} disponibles`); return; }
+    if (needData) setStep("datos"); else handle();
+  };
 
   return (
     <div className="fi" style={{ position: "fixed", inset: 0, zIndex: 500 }} onClick={onClose}>
@@ -426,21 +454,23 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
             </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: soft, border: `1px solid ${B}`, borderRadius: 13, padding: "12px 14px", marginBottom: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: soft, border: `1px solid ${qtyOver ? "#ef4444" : B}`, borderRadius: 13, padding: "12px 14px", marginBottom: qtyOver ? 4 : 6, transition: "border-color .2s" }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: T1 }}>Cantidad</span>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <button className="p" onClick={() => setQty(q => Math.max(1, q - 1))} style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${B}`, background: "none", color: T1, fontSize: 18, fontWeight: 700, lineHeight: 1 }}>−</button>
               <input type="text" inputMode="numeric" pattern="[0-9]*" value={qtyText}
-                onChange={e => setQtyText(e.target.value.replace(/[^0-9]/g, ""))}
+                onChange={e => handleQtyInput(e.target.value)}
                 onBlur={commitQtyText}
                 onKeyDown={e => { if (e.key === "Enter") { commitQtyText(); e.currentTarget.blur(); } }}
-                style={{ fontSize: 15, fontWeight: 800, color: T1, width: 34, textAlign: "center", background: "none", border: "none", outline: "none", padding: 0, fontFamily: "inherit" }} />
+                style={{ fontSize: 15, fontWeight: 800, color: qtyOver ? "#ef4444" : T1, width: 34, textAlign: "center", background: "none", border: "none", outline: "none", padding: 0, fontFamily: "inherit", transition: "color .2s" }} />
               <button className="p" disabled={availStock != null && qty >= availStock}
                 onClick={() => setQty(q => availStock != null ? Math.min(availStock, q + 1) : q + 1)}
                 style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${B}`, background: "none", color: (availStock != null && qty >= availStock) ? T3 : T1, fontSize: 18, fontWeight: 700, lineHeight: 1, cursor: (availStock != null && qty >= availStock) ? "not-allowed" : "pointer" }}>+</button>
             </div>
           </div>
-          {availStock != null && (
+          {qtyOver ? (
+            <p style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginBottom: 12 }}>⚠️ Solo quedan {availStock} disponibles</p>
+          ) : availStock != null && (
             <p style={{ fontSize: 10, color: availStock <= 5 ? G : T3, fontWeight: availStock <= 5 ? 700 : 500, marginBottom: 12 }}>
               {availStock <= 0 ? "⚠️ Sin stock disponible ahora mismo" : availStock <= 5 ? `¡Últimas ${availStock} disponibles!` : `${availStock} disponibles`}
             </p>
@@ -511,7 +541,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
             <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>{needData ? "En el siguiente paso completas los datos de entrega; el resto ya viene precargado." : "Coordinarás el encuentro con el vendedor por el chat al crear el pedido."}</p>
           </div>
 
-          <button className="p" onClick={primaryAction} disabled={availModes.length === 0} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: availModes.length === 0 ? .5 : 1 }}>
+          <button className="p" onClick={primaryAction} disabled={availModes.length === 0 || !qtyValid} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (availModes.length === 0 || !qtyValid) ? .5 : 1 }}>
             {needData ? "Continuar →" : `Crear pedido · ${money(total, cur)}`}
           </button>
         </> : <>

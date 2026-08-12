@@ -6,6 +6,7 @@ html,
 body,
 #root {
   height: 100%;
+  height: 100dvh; /* alto real del dispositivo (incluye la zona bajo notch/status bar con viewport-fit=cover); 100% cae a esto en navegadores sin soporte de dvh */
   margin: 0;
 }
 
@@ -20,9 +21,21 @@ body {
   overscroll-behavior-y: none;
 }
 
-/* Fondo base oscuro (pantalla de inicio) para evitar destellos antes de que
-   cargue el JS. La app repinta html/body con el tono del tema activo. */
+/* Fondo base para evitar destellos antes de que cargue el JS — YA respeta el
+   tema real del sistema (antes era #080808 fijo siempre: en un teléfono con
+   preferencia de tema CLARO, ese primer pintado (y cualquier instante en que
+   el JS todavía no corrió) mostraba oscuro contra lo que después se pinta
+   claro — una franja/instante mal pintado, justo lo que una captura de
+   "apps recientes" puede llegar a congelar). La app igual repinta html/body
+   en vivo con el tono exacto del tema activo (pwa/themeColor.js) en cuanto
+   React monta; esto es solo el mejor valor por defecto ANTES de eso. */
 html,
 body {
   background-color: #080808;
+}
+@media (prefers-color-scheme: light) {
+  html,
+  body {
+    background-color: #ffffff;
+  }
 }

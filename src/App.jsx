@@ -194,11 +194,6 @@ export default function App() {
     return () => { alive = false; sub?.subscription?.unsubscribe?.(); };
   }, []);
 
-  // Pantalla de inicio y de carga son SIEMPRE oscuras: cuando no hay sesión,
-  // las barras del sistema se ponen del mismo tono (#080808). Al entrar, AppShell
-  // toma el control y las sincroniza con el tema elegido (claro/oscuro).
-  useEffect(() => { if (!sessionUser) setThemeColor("#080808"); }, [sessionUser]);
-
   // La bienvenida SIGUE el mismo tema que el resto de la app (retador_theme, con
   // "auto" resuelto por el sistema) — nunca un tema fijo.
   let welcomeDark = true;
@@ -207,10 +202,21 @@ export default function App() {
     const prefersDark = typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
     welcomeDark = savedTheme === "auto" ? !!prefersDark : savedTheme === "dark";
   } catch (e) {}
+
+  // BUG REAL encontrado y corregido: esto forzaba las barras del sistema a
+  // "#080808" fijo mientras no hay sesión (bienvenida/carga), SIN IMPORTAR que
+  // la bienvenida de verdad se pinte clara cuando welcomeDark es false — así,
+  // con el sistema en tema claro, la barra de estado/inferior quedaban oscuras
+  // contra una pantalla clara: exactamente la franja sin cubrir/mal pintada que
+  // se reportó (visible sobre todo en la captura de "apps recientes", que
+  // congela el último frame real). Ahora las barras siguen SIEMPRE el mismo
+  // tono que la pantalla que de verdad se está pintando, también antes de
+  // iniciar sesión.
+  useEffect(() => { if (!sessionUser) setThemeColor(welcomeDark ? "#080808" : "#FFFFFF"); }, [sessionUser, welcomeDark]);
   return (
     <>
       {sessionUser === undefined
-        ? <PantallaCargando />
+        ? <PantallaCargando dark={welcomeDark} />
         : (
           <DensityProvider defaultMode="pequena">
             <CatalogProvider>

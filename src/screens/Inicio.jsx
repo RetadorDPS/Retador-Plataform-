@@ -64,7 +64,7 @@ export function RetadorInicio({ onGoogle, onEnter = null, subtitle = "", enterLa
     brandGrad: "linear-gradient(90deg,#3a2a00 0%,#7a5c00 34%," + gold + " 58%,#B36B00 100%)",
   };
   return (
-    <div style={{ minHeight: "100vh", width: "100%", background: p.bg, display: "flex", justifyContent: "center", WebkitFontSmoothing: "antialiased" }}>
+    <div style={{ minHeight: "100dvh", width: "100%", background: p.bg, display: "flex", justifyContent: "center", WebkitFontSmoothing: "antialiased" }}>
       <style>{`
         @keyframes retShine { 0%{background-position:200% 0} 22%{background-position:-80% 0} 100%{background-position:-80% 0} }
         @keyframes retGlow { 0%,100%{opacity:.5;transform:scale(1)} 50%{opacity:.8;transform:scale(1.06)} }
@@ -74,7 +74,7 @@ export function RetadorInicio({ onGoogle, onEnter = null, subtitle = "", enterLa
       <div style={{ position: "relative", width: "100%", maxWidth: 430, background: p.bg, overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", backgroundImage: `linear-gradient(${p.grid} 1px, transparent 1px), linear-gradient(90deg, ${p.grid} 1px, transparent 1px)`, backgroundSize: "58px 58px" }} />
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: `radial-gradient(120% 80% at 50% 0%, transparent 55%, ${p.bg} 100%)` }} />
-        <div style={{ position: "relative", zIndex: 10, padding: "26px 24px 34px", minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+        <div style={{ position: "relative", zIndex: 10, padding: "26px 24px 34px", minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ color: p.brand, fontSize: 14, letterSpacing: "0.18em", fontWeight: 800, fontStyle: "italic", fontFamily: INICIO_DISPLAY }}>RETADOR</span>
             <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: p.t45, fontFamily: "ui-monospace, Menlo, monospace" }}>
@@ -140,10 +140,13 @@ export function RetadorInicio({ onGoogle, onEnter = null, subtitle = "", enterLa
   );
 }
 
-// Pantalla breve mientras se comprueba si hay sesión guardada.
-export function PantallaCargando() {
+// Pantalla breve mientras se comprueba si hay sesión guardada. dark=true por
+// defecto (mismo comportamiento de siempre en los usos dentro de un contexto
+// ya oscuro); el arranque real de la app (antes de saber si hay sesión) pasa
+// el tono real del sistema para que nunca desentone contra las barras.
+export function PantallaCargando({ dark = true }) {
   return (
-    <div style={{ minHeight: "100vh", background: "#080808", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ height: "100dvh", minHeight: "100vh", width: "100vw", background: dark ? "#080808" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <Loader2 size={30} style={{ color: INICIO_GOLD, animation: "spin 1s linear infinite" }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>

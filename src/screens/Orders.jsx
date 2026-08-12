@@ -245,12 +245,15 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
               <p style={{ fontSize: 14, fontWeight: 900, color: T1, marginBottom: 3 }}>Califica tu experiencia</p>
               <p style={{ fontSize: 11, color: T3, marginBottom: 14 }}>Tu opinión ayuda a otros a confiar en el servicio. No es obligatorio.</p>
 
-              <div style={{ background: `${G}10`, border: `1px solid ${G}30`, borderRadius: 13, padding: "13px", marginBottom: 11 }}>
+              {/* Solo tiene sentido cuando hubo un mensajero REAL de por medio (local/
+                  paquete) — un pedido en persona (sin courier_id) no usó ningún
+                  servicio de entrega de RETADOR, así que esta pregunta no aplica. */}
+              {(o.courierId || o.courier_id) && <div style={{ background: `${G}10`, border: `1px solid ${G}30`, borderRadius: 13, padding: "13px", marginBottom: 11 }}>
                 <p style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>🛵 RETADOR · Servicio de entregas</p>
                 <p style={{ fontSize: 10.5, color: T3, marginBottom: 9 }}>¿Cómo estuvo el servicio en general?</p>
                 {stars(rate.sys, n => setRate(r => ({ ...r, sys: n })))}
                 {rate.sys > 0 && <textarea value={rateMsg.sys} onChange={e => setRateMsg(m => ({ ...m, sys: e.target.value }))} placeholder="Cuéntale a otros cómo fue el servicio de entrega en general (opcional)…" style={{ width: "100%", marginTop: 10, background: soft, border: `1px solid ${B}`, borderRadius: 10, padding: "9px 11px", fontSize: 12, color: T1, minHeight: 48, resize: "vertical", fontFamily: "inherit" }} />}
-              </div>
+              </div>}
 
               {(o.courierId || o.courier_id) && <div style={{ borderTop: `1px solid ${B}`, paddingTop: 12, marginBottom: 11 }}>
                 <p style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>Tu mensajero{o.courierName ? ` · ${o.courierName}` : ""}</p>

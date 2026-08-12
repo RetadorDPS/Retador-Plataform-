@@ -738,6 +738,26 @@ function AppShell({ sessionUser }) {
   // oscuro) cambia appTk.BG y este efecto vuelve a pintar la meta theme-color al
   // instante, para que NUNCA se note un corte entre las barras y el fondo.
   useEffect(() => { setThemeColor(appTk.BG); }, [appTk.BG]);
+  // Repintado de refuerzo en los momentos REALES donde Android redimensiona o
+  // recompone la ventana — resize (incluido el que dispara al armar la vista de
+  // "apps recientes"), visibilitychange (al pasar a segundo plano) y
+  // orientationchange — para que, si algo llegó a quedar desincronizado, se
+  // corrija en el instante exacto del evento del sistema, no en el próximo
+  // render de React. Usa appTkRef para no tener que reinstalar los listeners
+  // en cada cambio de tema.
+  const appTkBgRef = useRef(appTk.BG);
+  appTkBgRef.current = appTk.BG;
+  useEffect(() => {
+    const repaint = () => setThemeColor(appTkBgRef.current);
+    window.addEventListener("resize", repaint);
+    document.addEventListener("visibilitychange", repaint);
+    window.addEventListener("orientationchange", repaint);
+    return () => {
+      window.removeEventListener("resize", repaint);
+      document.removeEventListener("visibilitychange", repaint);
+      window.removeEventListener("orientationchange", repaint);
+    };
+  }, []);
   const changeTextScale = (s) => {
     setAppTextScale(s);
     try { localStorage.setItem("retador_txt_scale", String(s)); } catch {}
@@ -1349,6 +1369,11 @@ function AppShell({ sessionUser }) {
       return { ...x, courierStage: "completado", sellerPaid: true, stepIdx: idx >= 0 ? Math.max(x.stepIdx || 0, idx) : (x.stepIdx || 0), status: "entregado", history: [...(x.history || []), { key: "pago_ok", label: "Vendedor confirmó el pago", at: Date.now() }] };
     }));
     loadOrders();
+    // FALTABA: el comprador nunca se enteraba cuando el vendedor confirmaba el
+    // pago — en pedidos en persona (sin mensajero) esta es a menudo la acción
+    // que CIERRA el pedido de verdad, y antes solo se avisaba al mensajero
+    // (que en 'persona' ni siquiera existe).
+    if (o) pushNotif(o.buyer_id || o.buyerId || o.buyerName, ok ? "El vendedor confirmó el pago. Tu pedido quedó cerrado ✅" : "El vendedor reportó que no recibió el pago.", orderId);
     if (o && o.courierName) pushNotif(o.courierName, ok ? "El vendedor confirmó el pago. Entrega cerrada ✅" : "El vendedor reportó que no hubo pago. Devuelve el producto.", orderId);
     flash(ok ? "✅ Pago confirmado — entrega cerrada" : "⚠️ Marcado como sin pago");
   };
@@ -1892,7 +1917,15 @@ function AppShell({ sessionUser }) {
                 favorites={favorites}
                 onFav={toggleFav}
                 onNav={navTo}
-                onPublishInCat={(catId) => { setPubPrefillCat(catId); setPubOpen("product"); }}
+                onPublishInCat={(catId) => {
+                  // La categoría "Servicios" (id fijo del catálogo de PRODUCTOS) no
+                  // tiene relación con las categorías de servicios (config.serviceCats,
+                  // texto libre, taxonomía totalmente aparte) — abrir ahí el formulario
+                  // de PRODUCTO era el bug real: "publica en categoría" desde Servicios
+                  // debe abrir el formulario de SERVICIO, no el de producto.
+                  if (catId === "servicios") { setPubOpen("service"); return; }
+                  setPubPrefillCat(catId); setPubOpen("product");
+                }}
               />
             </SectionGate>
           )}

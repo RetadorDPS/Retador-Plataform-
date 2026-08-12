@@ -1734,7 +1734,7 @@ function fxFromCup(cup, cur, fx) {
   return null;
 }
 function CurrencyEquivalents({ product }) {
-  const { T2 } = useAt();
+  const { T1, isDark } = useAt();
   const cfg = usePlatformCfg();
   const fx = cfg.fx || {};
   const accepted = Array.isArray(product.acceptedCurrencies) ? product.acceptedCurrencies : [];
@@ -1748,10 +1748,15 @@ function CurrencyEquivalents({ product }) {
   }).filter(Boolean);
   if (!items.length) return null;
   const fmt = (n) => n.toLocaleString("es-ES", { maximumFractionDigits: n >= 100 ? 0 : 2 });
+  // Más contraste que antes (T2 sobre el fondo de la tarjeta costaba leerlo):
+  // texto en T1 (color principal, no el apagado) + una píldora de fondo propia
+  // para separarlo visualmente, en vez de flotar suelto sobre el fondo.
   return (
-    <p style={{ fontSize: 10.5, color: T2, fontWeight: 600, marginBottom: 6 }}>
-      {items.map((it, i) => <span key={it.code}>{i > 0 && " · "}≈ {fmt(it.value)} {it.code}</span>)}
-    </p>
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: isDark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.05)", borderRadius: 100, padding: "4px 10px", marginBottom: 8 }}>
+      <p style={{ fontSize: 11, color: T1, fontWeight: 700 }}>
+        {items.map((it, i) => <span key={it.code}>{i > 0 && " · "}≈ {fmt(it.value)} {it.code}</span>)}
+      </p>
+    </div>
   );
 }
 

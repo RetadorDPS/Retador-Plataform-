@@ -913,7 +913,15 @@ export const getUserOrders = async (userId) => {
     const shipMode = o.ship_mode || "local";
     const flow = ORDER_FLOW[shipMode] || ORDER_FLOW.local;
     let stepIdx = flow.findIndex(s => s.key === o.status);
-    if (stepIdx < 0) stepIdx = 0;
+    // BUG REAL encontrado y corregido: confirm_order (cuando ambas partes
+    // confirman) deja el pedido en status="completado" — un estado que NINGÚN
+    // flow declarado incluye como key literal (todos terminan en "entregado").
+    // Sin este caso especial, un pedido YA completado se veía en pantalla como
+    // recién creado (stepIdx caía a 0, círculo amarillo, "Pedido creado"),
+    // aunque el resto de la pantalla (nudge, calificación) ya lo mostrara
+    // como cerrado — justo la inconsistencia "no se ve bien en tiempo real".
+    // "completado" es SIEMPRE el último paso real, sea cual sea el envío.
+    if (stepIdx < 0) stepIdx = (o.status === "completado") ? flow.length - 1 : 0;
     const createdAt = o.created_at ? new Date(o.created_at).getTime() : Date.now();
     const role = o.buyer_id === userId ? "compra" : (o.seller_id === userId ? "venta" : "entrega");
     return {

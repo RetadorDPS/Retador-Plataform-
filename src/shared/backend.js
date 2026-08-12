@@ -821,9 +821,16 @@ export const createPackageDelivery = async (data) => {
 // Stock REAL disponible de un producto (descuenta lo comprometido en pedidos
 // vivos). Se consulta al ver el detalle y al abrir el diálogo de compra, para que
 // el selector de cantidad nunca permita pedir más de lo que de verdad hay.
+// CAUSA RAÍZ del límite de cantidad roto: el parámetro real de la función en
+// el backend es p_product_id (confirmado con pg_get_functiondef), pero aquí se
+// mandaba product_id — PostgREST no encuentra ninguna función con ese nombre
+// de parámetro y responde error 42883 SIEMPRE. Ese error se atrapaba y
+// devolvía null en silencio, así que availStock quedaba null para siempre en
+// pantalla y el botón "+"/el tope nunca se activaban (nunca era un problema
+// del botón: la consulta nunca llegaba a tener un número real).
 export const getAvailableStock = async (productId) => {
   if (!productId) return null;
-  const { data, error } = await supabase.rpc("available_stock", { product_id: productId });
+  const { data, error } = await supabase.rpc("available_stock", { p_product_id: productId });
   if (error) { console.error("available_stock:", error.message); return null; }
   return (data == null) ? null : Number(data);
 };

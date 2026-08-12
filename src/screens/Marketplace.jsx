@@ -319,6 +319,27 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
     return () => { alive = false; };
   }, [product?.id]);
   useEffect(() => { if (availStock != null) setQty(q => Math.max(1, Math.min(q, availStock))); }, [availStock]);
+  // Campo de texto para escribir la cantidad directamente (en vez de solo tocar
+  // "+" repetido). Estado de texto aparte del número real: así se puede borrar y
+  // escribir sin que cada tecla reformatee el campo. Se confirma (y se topa al
+  // stock real, con aviso) al salir del campo o al presionar Enter.
+  const [qtyText, setQtyText] = useState(String(qty));
+  useEffect(() => { setQtyText(String(qty)); }, [qty]);
+  const commitQtyText = () => {
+    // OJO: si el número resuelto es igual al qty actual (p.ej. ya estaba en el
+    // tope y se escribe algo mayor), React no vuelve a disparar el efecto de
+    // arriba (qty no "cambia" de verdad) y el campo se quedaba mostrando el
+    // número inválido que se tecleó aunque el pedido ya calculara bien con el
+    // tope real — por eso qtyText se fija siempre a mano aquí, nunca solo vía
+    // el efecto.
+    const n = parseInt(qtyText, 10);
+    if (!Number.isFinite(n) || n < 1) { setQty(1); setQtyText("1"); return; }
+    if (availStock != null && n > availStock) {
+      flash(`⚠️ Solo quedan ${availStock} disponibles`);
+      setQty(availStock);
+      setQtyText(String(availStock));
+    } else { setQty(n); setQtyText(String(n)); }
+  };
   // Descuento por cantidad (SOLO vista previa — el total real lo calcula el backend).
   const discPct = bulkDiscountPctFor(qty, product.bulkDiscounts);
   const unitPriceWithDisc = discPct > 0 ? price * (1 - discPct / 100) : price;
@@ -409,7 +430,11 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
             <span style={{ fontSize: 12, fontWeight: 700, color: T1 }}>Cantidad</span>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <button className="p" onClick={() => setQty(q => Math.max(1, q - 1))} style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${B}`, background: "none", color: T1, fontSize: 18, fontWeight: 700, lineHeight: 1 }}>−</button>
-              <span style={{ fontSize: 15, fontWeight: 800, color: T1, minWidth: 18, textAlign: "center" }}>{qty}</span>
+              <input type="text" inputMode="numeric" pattern="[0-9]*" value={qtyText}
+                onChange={e => setQtyText(e.target.value.replace(/[^0-9]/g, ""))}
+                onBlur={commitQtyText}
+                onKeyDown={e => { if (e.key === "Enter") { commitQtyText(); e.currentTarget.blur(); } }}
+                style={{ fontSize: 15, fontWeight: 800, color: T1, width: 34, textAlign: "center", background: "none", border: "none", outline: "none", padding: 0, fontFamily: "inherit" }} />
               <button className="p" disabled={availStock != null && qty >= availStock}
                 onClick={() => setQty(q => availStock != null ? Math.min(availStock, q + 1) : q + 1)}
                 style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${B}`, background: "none", color: (availStock != null && qty >= availStock) ? T3 : T1, fontSize: 18, fontWeight: 700, lineHeight: 1, cursor: (availStock != null && qty >= availStock) ? "not-allowed" : "pointer" }}>+</button>

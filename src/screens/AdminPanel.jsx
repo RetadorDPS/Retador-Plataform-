@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -2859,7 +2859,170 @@ function TeamScreen({ toast, meId }){
   </div>;
 }
 
+// ── 📜 AUDITORÍA DEL EQUIPO — get_audit_log(p_actor_id, p_action, p_since, p_limit) ──
+// Traducción de las acciones reales que el backend registra (public.audit_log, vía
+// log_action) a texto legible. Lista sacada del código real (todas las llamadas a
+// log_action del proyecto) — no es una lista inventada. Si alguna acción nueva no
+// está aquí, se muestra su nombre crudo como respaldo (nunca se oculta la fila).
+const AUDIT_ACTION_LABELS = {
+  create_order: 'Creó un pedido',
+  create_package_delivery: 'Creó un envío de paquete',
+  confirm_order: 'Confirmó un pedido',
+  order_advance: 'Avanzó el estado de un pedido',
+  courier_accept: 'Aceptó una entrega',
+  courier_stage: 'Avanzó una entrega',
+  buyer_fee_response: 'Respondió una tarifa propuesta',
+  confirm_payment: 'Confirmó un pago',
+  pay_order_wallet: 'Pagó un pedido con billetera',
+  release_funds: 'Liberó fondos retenidos',
+  wallet_transfer: 'Transfirió dinero por billetera',
+  topup_request: 'Solicitó una recarga',
+  topup_review: 'Revisó una solicitud de recarga',
+  place_bid: 'Hizo una puja',
+  close_auction: 'Cerró una subasta',
+  confirm_auction_payment: 'Confirmó el pago de una subasta',
+  auction_default: 'Registró el incumplimiento de una subasta',
+  auction_strike: 'Aplicó una amonestación de subasta',
+  promote_product: 'Destacó un producto',
+  admin_set_promoted: 'Cambió el destacado de un producto',
+  admin_moderate_product: 'Moderó un producto',
+  review_courier_application: 'Revisó una solicitud de mensajero',
+  courier_review: 'Revisó a un mensajero',
+  review_plan: 'Revisó una solicitud de plan',
+  set_plan: 'Cambió el plan de un usuario',
+  review_verification: 'Revisó una verificación de identidad',
+  admin_set_verified: 'Cambió la verificación de un perfil',
+  admin_set_role: 'Cambió el rol de un usuario',
+  admin_set_suspended: 'Suspendió o reactivó una cuenta',
+  admin_grant_staff: 'Otorgó permisos de staff',
+  admin_revoke_staff: 'Retiró permisos de staff',
+  set_team_member: 'Actualizó un miembro del equipo',
+  resolve_report: 'Resolvió un reporte',
+  set_rate: 'Actualizó una tasa de cambio',
+  settle_commission: 'Saldó una deuda de comisión',
+  admin_mark_commission_paid: 'Marcó una comisión como pagada',
+};
+const AUDIT_TARGET_LABELS = { order:'Pedido', product:'Producto', profile:'Perfil', user:'Usuario', auction:'Subasta', courier:'Mensajero', exchange:'Tasa', wallet:'Billetera' };
+const AUDIT_DETAIL_KEYS = { approved:'Aprobado', received:'Recibido', reason:'Motivo', rate:'Tasa', role:'Rol', decision:'Decisión', amount:'Monto', neto:'Neto', comision:'Comisión', pct:'Porcentaje', strikes:'Amonestaciones', winner:'Ganador', defaulter:'Incumplió', total:'Total', from:'Desde', to:'Hasta', stage:'Etapa', auto:'Automático', cerrado:'Cerrado', cost:'Costo', qty:'Cantidad', product:'Producto', who:'Quién', fee:'Tarifa', base:'Base', approved_at:'Fecha de aprobación' };
+function describeAuditAction(action) { return AUDIT_ACTION_LABELS[action] || action; }
+function describeAuditTarget(type, id) {
+  const label = AUDIT_TARGET_LABELS[type] || (type || 'Elemento');
+  if (!id) return label;
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  return isUuid ? `${label} #${id.slice(-8).toUpperCase()}` : `${label} ${id}`;
+}
+const AUDIT_DETAIL_VALUES = { buyer:'Comprador', seller:'Vendedor', pending:'Pendiente', approved:'Aprobado', rejected:'Rechazado' };
+function formatAuditDetailValue(v) {
+  if (v === true) return 'Sí';
+  if (v === false) return 'No';
+  if (v === null || v === undefined || v === '') return '—';
+  return AUDIT_DETAIL_VALUES[v] || String(v);
+}
+
+function TeamAuditScreen({ onBack }) {
+  const DATE_RANGES = [['hoy','Hoy'], ['7d','Últimos 7 días'], ['30d','Últimos 30 días'], ['todo','Todo']];
+  const [dateFilter, setDateFilter] = useState('7d');
+  const [actorFilter, setActorFilter] = useState('');
+  const [logs, setLogs] = useState(undefined); // undefined=cargando
+  const [actorOptions, setActorOptions] = useState([]);
+  const [expanded, setExpanded] = useState(null);
+
+  const sinceFor = (k) => {
+    if (k === 'todo') return null;
+    const d = new Date();
+    if (k === 'hoy') d.setHours(0, 0, 0, 0);
+    else if (k === '7d') d.setDate(d.getDate() - 7);
+    else if (k === '30d') d.setDate(d.getDate() - 30);
+    return d.toISOString();
+  };
+
+  // Opciones del selector de miembro: SIEMPRE sin filtrar por miembro (solo por
+  // fecha) — así la lista de nombres nunca se vacía al elegir uno.
+  useEffect(() => {
+    let alive = true;
+    getAuditLog({ since: sinceFor(dateFilter), limit: 500 }).then(rows => {
+      if (!alive) return;
+      const seen = new Map();
+      rows.forEach(r => { if (r.actor_id && !seen.has(r.actor_id)) seen.set(r.actor_id, r.actor_name); });
+      setActorOptions([...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'es')));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [dateFilter]);
+
+  // Lista real — se vuelve a pedir al backend cada vez que cambia CUALQUIER filtro.
+  useEffect(() => {
+    let alive = true;
+    setLogs(undefined);
+    getAuditLog({ actorId: actorFilter || null, since: sinceFor(dateFilter), limit: 200 })
+      .then(rows => { if (alive) setLogs(rows); })
+      .catch(() => { if (alive) setLogs([]); });
+    return () => { alive = false; };
+  }, [actorFilter, dateFilter]);
+
+  const when = ts => ts ? new Date(ts).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }) + ' · ' + new Date(ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '—';
+
+  return <>
+    <button className="btn btg sm" onClick={onBack} style={{ marginBottom: 10 }}>← Volver a Sistema</button>
+    <div className="stit">📜 Auditoría del equipo</div>
+    <div className="ssub">Registro real de cada acción del equipo en el panel — quién, qué y cuándo.</div>
+
+    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', margin: '14px 0 10px' }}>
+      <select value={actorFilter} onChange={e => setActorFilter(e.target.value)}
+        style={{ background: 'var(--bg2)', border: '1px solid var(--bd2)', borderRadius: 8, padding: '8px 11px', color: 'var(--tx)', fontSize: 12, fontWeight: 600, outline: 'none', cursor: 'pointer' }}>
+        <option value="">Todo el equipo</option>
+        {actorOptions.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+      </select>
+    </div>
+    <div className="tabs" style={{ maxWidth: 560, overflowX: 'auto', marginBottom: 14 }}>
+      {DATE_RANGES.map(([k, l]) => <div key={k} className={`tab ${dateFilter === k ? 'on' : ''}`} onClick={() => setDateFilter(k)}>{l}</div>)}
+    </div>
+
+    <div className="card cp">
+      {logs === undefined
+        ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '26px 6px' }}>Cargando…</div>
+        : logs.length === 0
+          ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '26px 6px' }}>Sin acciones registradas en este rango.</div>
+          : logs.map(l => {
+            const hasDetail = l.detail && typeof l.detail === 'object' && Object.keys(l.detail).length > 0;
+            const isOpen = expanded === l.id;
+            return (
+              <div key={l.id} style={{ borderBottom: '1px solid rgba(128,128,128,.1)' }}>
+                <div onClick={() => hasDetail && setExpanded(isOpen ? null : l.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', cursor: hasDetail ? 'pointer' : 'default' }}>
+                  <span style={{ fontSize: 14, flexShrink: 0 }}>🧾</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)' }}>{describeAuditAction(l.action)}</div>
+                    <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <span style={{ color: 'var(--ac)', fontWeight: 700 }}>{l.actor_name || 'Sistema'}</span> · {describeAuditTarget(l.target_type, l.target_id)}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div style={{ fontSize: 10, color: 'var(--tx3)' }}>{when(l.created_at)}</div>
+                    {hasDetail && <div style={{ fontSize: 9.5, color: 'var(--ac)', fontWeight: 700, marginTop: 2 }}>{isOpen ? 'Ocultar ▲' : 'Detalle ▼'}</div>}
+                  </div>
+                </div>
+                {isOpen && hasDetail && (
+                  <div style={{ background: 'var(--bg2)', border: '1px solid var(--bd2)', borderRadius: 10, padding: '10px 12px', marginBottom: 12 }}>
+                    {Object.entries(l.detail).map(([k, v]) => (
+                      <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 11, padding: '3px 0' }}>
+                        <span style={{ color: 'var(--tx3)', fontWeight: 600 }}>{AUDIT_DETAIL_KEYS[k] || k}</span>
+                        <span style={{ color: 'var(--tx)', fontWeight: 600, textAlign: 'right' }}>{formatAuditDetailValue(v)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+    </div>
+  </>;
+}
+
 function Sistema({toast, data={}}){
+  // "📜 Auditoría del equipo" vive DENTRO de Sistema (no es una sección propia del
+  // menú) — solo se llega aquí si ya se tiene acceso a Sistema (can('system','view')),
+  // así que no hace falta una comprobación de permiso aparte para mostrar la tarjeta.
+  const [view, setView] = useState('main');
+  if (view === 'audit') return <TeamAuditScreen onBack={() => setView('main')} />;
   const hhmm = ts=>{ const d=new Date(ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
   const dmy = ts=>new Date(ts).toLocaleDateString('es-ES',{day:'2-digit',month:'short'});
   const num = v => (v==null||v===''||Number.isNaN(Number(v))) ? '—' : Number(v).toLocaleString('es-ES');
@@ -2908,6 +3071,17 @@ function Sistema({toast, data={}}){
       {l:'Usuarios',v:usersCount,c:'var(--ac2)'},
       {l:'Eventos (registro)',v:eventsCount,c:'var(--yw)'}
     ].map(m=><div className="mc" key={m.l}><div className="ml">{m.l}</div><div className="mv" style={{color:m.c}}>{m.v}</div></div>)}</div>
+
+    {/* 📜 AUDITORÍA DEL EQUIPO: pantalla propia, con filtros por persona y fecha —
+        distinta de "Actividad" de abajo (esa es un vistazo rápido sin filtros). */}
+    <div className="card cp mb16" onClick={() => setView('audit')} style={{cursor:'pointer',display:'flex',alignItems:'center',gap:10}}>
+      <span style={{fontSize:15}}>📜</span>
+      <div style={{flex:1,minWidth:0}}>
+        <span className="ct">Auditoría del equipo</span>
+        <div style={{fontSize:10.5,color:'var(--tx3)',marginTop:2}}>Quién hizo qué y cuándo, con filtros por persona y por fecha.</div>
+      </div>
+      <span style={{fontSize:12,color:'var(--tx3)',flexShrink:0}}>Ver →</span>
+    </div>
 
     {/* 📜 ACTIVIDAD (consolidada): plegada por defecto, con contador de nuevas */}
     <div className="card cp mb16">

@@ -1173,6 +1173,16 @@ export const adminListLogs = async (limit = 30) => {
   }
   return null;
 };
+// get_audit_log(p_actor_id, p_action, p_since, p_limit) → fila por fila del registro
+// real de auditoría, con el nombre real de quien hizo cada acción (nunca un UUID
+// crudo). Todos los filtros son opcionales; null = sin ese filtro.
+export const getAuditLog = async ({ actorId = null, action = null, since = null, limit = 200 } = {}) => {
+  const { data, error } = await supabase.rpc("get_audit_log", {
+    p_actor_id: actorId, p_action: action, p_since: since, p_limit: limit,
+  });
+  if (error) { console.error("getAuditLog:", error.message); return []; }
+  return data || [];
+};
 
 // ── FASE 5 — DASHBOARD del panel: métricas REALES del ecosistema ─────────────
 // admin_dashboard_stats() → jsonb con todos los números reales. Solo admin.

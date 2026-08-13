@@ -901,7 +901,10 @@ function AppShell({ sessionUser }) {
   };
   const openProductFromChat = (productId) => {
     if (!productId) return;
-    const go = (p) => { setChatOpen(false); setSelProd(p); setTab("market"); setMScr("product"); };
+    // prodBackTo="chat": la flechita propia del producto ("‹", distinta del botón
+    // físico atrás — ese ya funciona bien con su propio historial) no sabía que
+    // este producto se abrió desde un chat y caía siempre al inicio.
+    const go = (p) => { setChatOpen(false); setSelProd(p); setProdBackTo("chat"); setTab("market"); setMScr("product"); };
     const local = products.find(x => x.id === productId);
     if (local) go(local);
     else getProductById(productId).then(p => { if (p) go(p); else flash("Ese producto ya no está disponible"); }).catch(() => {});
@@ -980,10 +983,6 @@ function AppShell({ sessionUser }) {
   const [planRequests, setPlanRequests] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_planreq') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('retador_planreq', JSON.stringify(planRequests)); } catch {} }, [planRequests]);
   const addPlanRequest = (req) => setPlanRequests(prev => [{ id: 'plq_' + Date.now(), state: 'pending', at: Date.now(), ...req }, ...prev]);
-  // Solicitudes de promoción (destacar subasta / acceso VIP) que el dueño aprueba y cobra manual
-  const [promoRequests, setPromoRequests] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_promoreq') || '[]'); } catch { return []; } });
-  useEffect(() => { try { localStorage.setItem('retador_promoreq', JSON.stringify(promoRequests)); } catch {} }, [promoRequests]);
-  const addPromoRequest = (req) => setPromoRequests(prev => [{ id: 'prm_' + Date.now(), state: 'pending', at: Date.now(), ...req }, ...prev]);
   const [selOrderId, setSelOrderId] = useState(null);
 
   // ── Botón ATRÁS del teléfono: retrocede UN paso dentro de la app en vez de
@@ -1811,7 +1810,6 @@ function AppShell({ sessionUser }) {
         onDisputeAction: (id, action) => setOrders(prev => prev.map(o => o.id === id ? { ...o, status: action === 'resolve' ? 'confirmado' : action === 'freeze' ? 'congelado' : action === 'escalate' ? 'escalado' : o.status, disputeState: action } : o)),
         reports, onReportAction: (id, action) => setReports(prev => prev.map(r => r.id === id ? { ...r, state: action } : r)),
         planRequests, onPlanAction: (id, action) => { setPlanRequests(prev => prev.map(r => { if (r.id === id) { if (action === 'approved') setUserPlans(p => ({ ...p, [r.userName]: r.plan })); return { ...r, state: action }; } return r; })); },
-        promoRequests, onPromoAction: (id, action) => setPromoRequests(prev => prev.map(r => r.id === id ? { ...r, state: action } : r)),
         teamMembers, onSaveTeam: setTeamMembers,
         // Solicitudes REALES de mensajero: aprobar/rechazar vía la función oficial
         // review_courier_application (al aprobar pone role='courier' Y is_verified=true,
@@ -1877,6 +1875,7 @@ function AppShell({ sessionUser }) {
                   if (prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); }
                   else if (prodBackTo === "sellerProfile") { setProdBackTo(null); setMScr("sellerProfile"); }
                   else if (prodBackTo === "services") { setProdBackTo(null); setMScr("services"); }
+                  else if (prodBackTo === "chat") { setProdBackTo(null); setMScr("home"); setChatOpen(true); }
                   else setMScr("home");
                 }}
                 onDelivery={() => { setTab("envios"); setEScr("local"); }}
@@ -1939,7 +1938,7 @@ function AppShell({ sessionUser }) {
           {tab === "subastas" && (
             <SectionGate enabled={sections.auctions} dark={isDarkTheme}>
               <AuctionScheduleGate schedule={adminCfg.auctionSchedule} dark={isDarkTheme}>
-                <SubastasScreen forceCreate={subOpenCreate} onForceCreateDone={() => setSubOpenCreate(false)} onNav={navTo} onPromote={addPromoRequest} sellerName={profileData?.name || user?.name || "Usuario"} />
+                <SubastasScreen forceCreate={subOpenCreate} onForceCreateDone={() => setSubOpenCreate(false)} onNav={navTo} sellerName={profileData?.name || user?.name || "Usuario"} />
               </AuctionScheduleGate>
             </SectionGate>
           )}

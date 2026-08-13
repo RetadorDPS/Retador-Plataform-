@@ -307,6 +307,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [qty, setQty] = useState(1);
   const [step, setStep] = useState("resumen");
+  const [howItWorks, setHowItWorks] = useState(false); // "¿Cómo funciona tu compra?" — guía breve para quien compra por primera vez
   const cur = product.currency || DEFAULT_CURRENCY;
   const price = parseFloat(product.price || 0);
   // Stock REAL disponible ahora mismo (descuenta lo comprometido en pedidos vivos):
@@ -438,7 +439,12 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
         <div style={{ width: 34, height: 4, background: isDark ? "#222" : "#ddd", borderRadius: 2, margin: "12px auto 16px" }} />
 
         {step === "resumen" ? <>
-          <p style={{ fontSize: 15, fontWeight: 800, color: T1, marginBottom: 16 }}>Crear pedido</p>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <p style={{ fontSize: 15, fontWeight: 800, color: T1 }}>Crear pedido</p>
+            <button className="p" onClick={() => setHowItWorks(true)} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: G, textDecoration: "underline" }}>¿Cómo funciona tu compra?</span>
+            </button>
+          </div>
 
           <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
             <div style={{ width: 54, height: 54, borderRadius: 14, background: "#1a1a1a", overflow: "hidden", flexShrink: 0 }}>
@@ -625,6 +631,47 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
           </button>
         </>}
       </div>
+      {howItWorks && <HowItWorksSheet onClose={() => setHowItWorks(false)} />}
+    </div>
+  );
+}
+
+// "¿Cómo funciona tu compra?" — guía breve de 3 pasos para quien compra por
+// primera vez por internet. Se abre desde "Crear pedido", encima del propio
+// modal de compra (mayor z-index), y no interrumpe nada del flujo: se cierra
+// y el comprador sigue exactamente donde estaba.
+function HowItWorksSheet({ onClose }) {
+  const { S, B, T1, T2, T3, isDark } = useAt();
+  const card = isDark ? "#0d0d0d" : S;
+  const soft = isDark ? "#141414" : "#F5F6F7";
+  const pasos = [
+    { n: "1", t: "Creas el pedido", d: "Eliges cantidad y cómo lo recibes (mensajero, envío o en persona). No se te cobra nada todavía." },
+    { n: "2", t: "Coordinas y pagas", d: "Hablas con el vendedor por el chat de RETADOR para acordar el pago y los detalles de la entrega." },
+    { n: "3", t: "Recibes tu producto", d: "Confirmas en la app que todo llegó bien. Así queda el pedido cerrado para las dos partes." },
+  ];
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 600 }} onClick={onClose}>
+      <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.6)", backdropFilter: "blur(10px)" }} />
+      <div onClick={e => e.stopPropagation()} style={{ position: "absolute", bottom: 0, left: 0, right: 0, maxHeight: "85vh", overflowY: "auto", background: card, borderRadius: "22px 22px 0 0", padding: "0 18px 32px", border: `1px solid ${B}`, borderBottom: "none" }}>
+        <div style={{ width: 34, height: 4, background: isDark ? "#222" : "#ddd", borderRadius: 2, margin: "12px auto 18px" }} />
+        <p style={{ fontSize: 16, fontWeight: 900, color: T1, marginBottom: 4 }}>¿Cómo funciona tu compra?</p>
+        <p style={{ fontSize: 11.5, color: T2, lineHeight: 1.5, marginBottom: 18 }}>Comprar en RETADOR es simple. Así son los 3 pasos, de principio a fin:</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
+          {pasos.map(p => (
+            <div key={p.n} style={{ display: "flex", gap: 12, alignItems: "flex-start", background: soft, border: `1px solid ${B}`, borderRadius: 14, padding: "13px 14px" }}>
+              <div style={{ width: 26, height: 26, borderRadius: "50%", background: G, color: "#000", fontSize: 12, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{p.n}</div>
+              <div>
+                <p style={{ fontSize: 12.5, fontWeight: 800, color: T1, marginBottom: 3 }}>{p.t}</p>
+                <p style={{ fontSize: 11, color: T2, lineHeight: 1.5 }}>{p.d}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 12, padding: "11px 13px", marginBottom: 18 }}>
+          <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>🔒 RETADOR nunca guarda tu dinero: el pago se coordina directo con el vendedor, y todo el pedido queda registrado para que ambas partes tengan respaldo.</p>
+        </div>
+        <button className="p" onClick={onClose} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "14px", fontSize: 13, fontWeight: 800 }}>Entendido</button>
+      </div>
     </div>
   );
 }
@@ -640,6 +687,7 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
   const [selectedSubcat, setSelectedSubcat] = useState(null);
   const [searchText, setSearchText] = useState("");
   const [quickFilter, setQuickFilter] = useState("TODOS");
+  const [onlyVerified, setOnlyVerified] = useState(false); // filtro "solo verificados" — interruptor aparte, no excluyente con los demás
   const feedAds = useFeedAds("busqueda"); // anuncios intercalados cada N productos
 
   const { cats, subcats: allSubs } = useCatalog();
@@ -666,7 +714,8 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
   let filtered = products.filter(p => {
     const matchCat = (!effectiveCat || p.cat === effectiveCat) && (!selectedSubcat || p.subcat === selectedSubcat);
     const matchSearch = catSuggestion ? true : (!searchText || p.title.toLowerCase().includes(searchText.toLowerCase()) || p.description?.toLowerCase().includes(searchText.toLowerCase()));
-    return matchCat && matchSearch && matchQuick(p);
+    const matchVerified = !onlyVerified || !!p.seller_verified;
+    return matchCat && matchSearch && matchQuick(p) && matchVerified;
   });
   if (quickFilter === "NUEVO")            filtered = [...filtered].sort((a, b) => _created(b) - _created(a));
   else if (quickFilter === "MAS_VENDIDO") filtered = [...filtered].sort((a, b) => _sold(b) - _sold(a));
@@ -775,6 +824,11 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
                 {f.label}
               </button>
             ))}
+            {/* Interruptor aparte (no excluyente): solo vendedores con ✓ verificado */}
+            <button onClick={() => setOnlyVerified(v => !v)} className={`chip ${isDark ? "" : "chip-light"}`}
+              style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 4, background: onlyVerified ? G : isDark ? "#111" : S, color: onlyVerified ? "#000" : T2, border: `1px solid ${onlyVerified ? G : B}`, borderRadius: 999, padding: "6px 12px", fontSize: 9.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+              <Ic n="check" c={onlyVerified ? "#000" : T2} s={11} /> Verificados
+            </button>
           </div>
 
           {/* Tramo: anuncios entre los filtros y los resultados */}

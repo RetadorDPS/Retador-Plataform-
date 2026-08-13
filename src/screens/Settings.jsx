@@ -1083,7 +1083,7 @@ function CFG_StorageScreen({ settings, upd, nav, flash }) {
   const tk = CFG_useTk();
   const CATS = {
     conversaciones: ["retador_chatmsgs", "retador_chatpeople", "retador_delconvs", "retador_blocked"],
-    contenido: ["retador_products", "retador_orders", "retador_auctions", "retador_reports", "retador_verifs", "retador_promoreq", "retador_planreq", "retador_payments", "retador_cats", "retador_subcats"],
+    contenido: ["retador_products", "retador_orders", "retador_auctions", "retador_reports", "retador_verifs", "retador_planreq", "retador_payments", "retador_cats", "retador_subcats"],
     billetera: ["retador_wallet", "retador_wallet_banks", "retador_wallet_sec", "retador_wallet_tx"],
     ajustes: ["retador_settings", "retador_admincfg", "retador_theme", "retador_txt_scale", "retador_favs", "retador_verified", "retador_userplans", "retador_editor"],
   };

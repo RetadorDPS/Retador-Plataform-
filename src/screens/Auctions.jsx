@@ -1188,7 +1188,7 @@ function CreateAuction({ onClose, onPublish, isVerifiedSeller = true }) {
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
-export function SubastasScreen({ forceCreate = false, onForceCreateDone, onNav, onPromote, sellerName = "Usuario" }) {
+export function SubastasScreen({ forceCreate = false, onForceCreateDone, onNav, sellerName = "Usuario" }) {
   const { BG, T1, isDark } = useAt();
   const [filter,     setFilter]   = useState("Todas");
   const [selected,   setSelected] = useState(null);
@@ -1304,15 +1304,6 @@ export function SubastasScreen({ forceCreate = false, onForceCreateDone, onNav, 
         onPublish={(newAuction) => {
           const au = { ...newAuction, id: newAuction.id || ("au_" + Date.now()) };
           setAuctions((prev) => [au, ...prev]);
-          // Si pidió Destacada o VIP, genera solicitud de promoción para que el dueño apruebe y cobre
-          if (onPromote && (au.featured || au.vip)) {
-            onPromote({
-              auctionId: au.id, auctionTitle: au.title, sellerName,
-              kind: au.featured ? "featured" : "vip",
-              amount: au.featured ? (Number(au.promoFee) || 0) : (Number(au.accessFee) || 0),
-              note: au.featured ? "Destacar subasta" : "Subasta VIP (cuota de acceso)",
-            });
-          }
           setCreating(false);
         }}
         isVerifiedSeller={true}

@@ -269,7 +269,7 @@ function DLHomeScreen({ onNew, onRastrear, onMenuBack, onNav }) {
         <LiveSlot page="delivery_local" from={null} to="dl_hero" onNav={onNav} pad="10px 14px 0" />
         <div className="dl-s1"><DLHeroSection/></div>
         <LiveSlot page="delivery_local" from="dl_hero" to="dl_cta" onNav={onNav} pad="10px 14px 0" />
-        <div className="dl-s2"><DLCTASection onNew={onNew}/></div>
+        <div className="dl-s2"><DLCTASection onNew={onNew} svcOn={svcOn}/></div>
         <LiveSlot page="delivery_local" from="dl_cta" to="dl_act" onNav={onNav} pad="10px 14px 0" />
         <div className="dl-s3"><DLActiveSection onRastrear={onRastrear}/></div>
         <LiveSlot page="delivery_local" from="dl_act" to="dl_stats" onNav={onNav} pad="10px 14px 0" />
@@ -347,8 +347,26 @@ function DLHeroSection() {
   );
 }
 
-function DLCTASection({ onNew }) {
+function DLCTASection({ onNew, svcOn }) {
   const C = useC();
+  // Antes: el botón dorado "Crear Nuevo Envío" quedaba SIEMPRE clickeable,
+  // aunque el servicio estuviera apagado por el admin — el único aviso era el
+  // "NO OPERATIVO" chiquito arriba, fácil de pasar por alto. Con el servicio
+  // apagado, este mismo espacio ahora es un cartel (no solo texto plano) que
+  // reemplaza el botón y explica por qué no se puede pedir ahora mismo.
+  if (!svcOn) return (
+    <div style={{ padding:'11px 14px 0' }}>
+      <div style={{ width:'100%', borderRadius:18, padding:'16px 15px', background:C.bg1, border:`1px solid ${C.goldBorder}`, display:'flex', alignItems:'center', gap:12 }}>
+        <div style={{ width:36, height:36, background:C.goldDim, borderRadius:11, border:`1px solid ${C.goldBorder}`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.gold} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+        </div>
+        <div style={{ textAlign:'left' }}>
+          <div style={{ ...T.heading, fontSize:13.5, color:C.goldText, letterSpacing:'-0.012em', marginBottom:2 }}>Servicio no disponible</div>
+          <div style={{ ...T.body, fontSize:10.9, color:C.text2 }}>El delivery local está pausado por ahora. Vuelve a intentarlo más tarde.</div>
+        </div>
+      </div>
+    </div>
+  );
   return (
     <div style={{ padding:'11px 14px 0' }}>
       <button onClick={onNew} className="dl-cta-btn dl-tap" style={{ width:'100%', border:'none', borderRadius:18, padding:'13px 15px', background:'linear-gradient(135deg,#E5A912 0%,#FFC01E 50%,#E5A912 100%)', display:'flex', alignItems:'center', justifyContent:'space-between', cursor:'pointer', boxShadow:'0 7px 24px rgba(196,152,46,0.25),0 2px 7px rgba(196,152,46,0.13)', animation:'dl-glow-pulse 3.5s ease-in-out infinite' }}>

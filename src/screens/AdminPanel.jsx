@@ -2423,21 +2423,13 @@ function Economia({toast, data={}, ro}){
       ].map(m=><div className="mc" key={m.l}><div className="ml">{m.l}</div><div className="mv" style={{fontSize:20,color:m.c}}>{m.v}</div><div style={{fontSize:11,color:'var(--tx3)',marginTop:4}}>{m.d}</div></div>)}
     </div>
 
-    {/* ── SOLICITUDES DE PROMOCIÓN ── */}
-    {(() => { const promoReqs = data.promoRequests || []; const pend=promoReqs.filter(r=>r.state==='pending'); return (
-      <div className="card cp mb16">
-        <div className="ch"><span className="ct">⭐ Solicitudes de promoción</span><span className={`bdg ${pend.length?'by':'bx'}`}>{pend.length} pendientes</span></div>
-        <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 12px'}}>Solicitudes de SUBASTAS (destacar/VIP): apruebas al recibir el pago. Los PRODUCTOS ya no piden permiso: se destacan directo con ⭐ y el cargo va a la deuda del vendedor.</div>
-        {pend.length===0
-          ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'18px 6px'}}>Sin solicitudes pendientes.</div>
-          : pend.map(r=><div key={r.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid rgba(128,128,128,.12)'}}>
-              <span className={`bdg ${r.kind==='vip'?'bp':'by'}`} style={{fontSize:9}}>{r.kind==='vip'?'VIP':'DESTACAR'}</span>
-              <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:600,color:'var(--tx)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.auctionTitle||'Subasta'}</div><div style={{fontSize:10,color:'var(--tx3)'}}>{r.sellerName} · cobra {fmt(r.amount||0)}</div></div>
-              {!ro && <button className="btn bts sm" onClick={()=>{ data.onPromoAction&&data.onPromoAction(r.id,'rejected'); toast('Solicitud rechazada'); }}>Rechazar</button>}
-              {!ro && <button className="btn btp sm" onClick={()=>{ data.onPromoAction&&data.onPromoAction(r.id,'approved'); toast('Aprobada · cobro registrado'); }}>Aprobar</button>}
-            </div>)}
-      </div>
-    ); })()}
+    {/* La cola "Solicitudes de promoción" que vivía aquí era enteramente local
+        (localStorage, ligada a subastas que a su vez son datos de muestra, no
+        reales) — nunca hubo nada real que aprobar, porque promote_product ya
+        es autoservicio instantáneo (el vendedor destaca y se le cobra al
+        momento, sin aprobación de nadie). Se quita: la sección real de abajo,
+        "⭐ Promociones y Destacados", ya muestra con datos reales qué está
+        destacado y su cargo en el libro mayor (seller_commission_ledger). */}
 
     {/* ── TARIFAS EDITABLES ── */}
     <div className="card cp mb16">

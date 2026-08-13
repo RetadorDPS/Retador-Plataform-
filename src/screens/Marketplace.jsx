@@ -668,7 +668,7 @@ function HowItWorksSheet({ onClose }) {
           ))}
         </div>
         <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 12, padding: "11px 13px", marginBottom: 18 }}>
-          <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>🔒 RETADOR nunca guarda tu dinero: el pago se coordina directo con el vendedor, y todo el pedido queda registrado para que ambas partes tengan respaldo.</p>
+          <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>🛡️ En RETADOR velamos por ti. Coordina tu compra con confianza — aquí todo queda registrado, para que nunca te quedes sin respaldo.</p>
         </div>
         <button className="p" onClick={onClose} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "14px", fontSize: 13, fontWeight: 800 }}>Entendido</button>
       </div>

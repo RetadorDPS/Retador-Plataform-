@@ -1279,6 +1279,21 @@ export const adminReviewPlan = async (requestId, approve) => {
   return data;
 };
 
+// ── LÍMITE REAL de productos por plan (tabla plans, la que lee de verdad el
+// trigger enforce_product_limit al publicar) — NO confundir con cfg.plans
+// (platform_config), que es solo texto/precio de marketing para la pantalla
+// de planes del comprador.
+export const adminListPlanLimits = async () => {
+  const { data, error } = await supabase.from("plans").select("id, name, max_products").order("id");
+  if (error) { console.error("adminListPlanLimits:", error.message); return []; }
+  return data || [];
+};
+export const adminUpdatePlanLimit = async (planId, maxProducts) => {
+  const { data, error } = await supabase.rpc("admin_update_plan", { p_plan_id: planId, p_max_products: maxProducts });
+  if (error) { console.error("adminUpdatePlanLimit:", error.message); throw error; }
+  return data;
+};
+
 // ── REGISTRO DE MENSAJEROS (courier_applications) ────────────────────────────
 // Cada usuario inserta/ve SU solicitud (RLS); el admin las ve todas y las revisa
 // con la función oficial review_courier_application (al aprobar pone role=courier).

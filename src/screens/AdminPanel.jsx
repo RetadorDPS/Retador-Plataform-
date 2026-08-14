@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -2224,6 +2224,36 @@ function Economia({toast, data={}, ro}){
   const [pl, setPl] = useState(()=> (cfg.plans||[]).map(p=>({...p})));
   const setPlan=(i,k,v)=>setPl(arr=>arr.map((p,j)=>j===i?{...p,[k]:v}:p));
   const savePlans=()=>{ if (ro) { toast('Solo lectura — sin permiso para modificar'); return; } data.onCfg && data.onCfg({ plans: pl.map(p=>({...p, price:Number(p.price)||0, promoPrice:Number(p.promoPrice)||0})) }); toast('Planes guardados'); };
+
+  // ── Límite REAL de productos por plan (tabla plans, la que hace cumplir de
+  // verdad el candado enforce_product_limit al publicar) — es un dato aparte
+  // de cfg.plans de arriba (que es solo el texto/precio de marketing).
+  const LIMIT_ORDER=[{id:'gratis',label:'Gratis'},{id:'pro',label:'Pro'},{id:'premium',label:'Premium'}];
+  const [limits, setLimits] = useState(null);      // filas reales de la tabla plans
+  const [limDraft, setLimDraft] = useState({});    // borrador { gratis:'10', pro:'50', premium:'500' }
+  const [savingLim, setSavingLim] = useState(false);
+  const loadLimits = useCallback(()=>{
+    adminListPlanLimits().then(rows=>{
+      setLimits(rows);
+      const d={}; rows.forEach(r=>{ d[r.id]=String(r.max_products); }); setLimDraft(d);
+    }).catch(()=>setLimits([]));
+  },[]);
+  useEffect(()=>{ loadLimits(); },[loadLimits]);
+  const setLim=(id,v)=>setLimDraft(d=>({...d,[id]:v}));
+  const saveLimits=async ()=>{
+    if (ro) { toast('Solo lectura — sin permiso para modificar'); return; }
+    setSavingLim(true);
+    try {
+      for (const p of LIMIT_ORDER) {
+        const n = parseInt(limDraft[p.id], 10);
+        if (Number.isNaN(n) || n < -1) throw new Error(`Límite inválido para ${p.label} (usa -1 para ilimitado)`);
+        await adminUpdatePlanLimit(p.id, n);
+      }
+      toast('Límite de productos guardado');
+      loadLimits();
+    } catch (e) { toast('⚠️ ' + (e?.message || 'No se pudo guardar')); }
+    setSavingLim(false);
+  };
   // En solo lectura (nivel "view") TODOS los campos van deshabilitados: no se puede escribir.
   const numInput=(k,suf,pre)=>(<div style={{display:'flex',alignItems:'center',gap:6,background:'var(--bg2)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px',opacity:ro?.6:1}}>
     {pre&&<span style={{fontSize:12,color:'var(--tx3)',flexShrink:0}}>{pre}</span>}
@@ -2531,6 +2561,27 @@ function Economia({toast, data={}, ro}){
       </div>)}
       {!ro && <div style={{display:'flex',justifyContent:'flex-end',marginTop:4}}>
         <button className="btn btp" onClick={savePlans} style={{fontWeight:800,padding:'9px 22px'}}>Guardar planes</button>
+      </div>}
+    </div>
+
+    {/* ── LÍMITE REAL DE PRODUCTOS POR PLAN ── */}
+    <div className="card cp mb16">
+      <div className="ch" style={{marginBottom:6}}><span className="ct">📦 Límite de productos por plan</span><span className="bdg bb">candado real</span></div>
+      <div style={{fontSize:11,color:'var(--tx3)',marginBottom:14}}>Cuántos productos activos puede tener publicados un vendedor en cada plan. Esto es lo que de verdad bloquea al publicar (no solo texto informativo).</div>
+      {limits===null
+        ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'16px 6px'}}>Cargando…</div>
+        : LIMIT_ORDER.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+            <div style={{flex:1,fontSize:13,fontWeight:700,color:'var(--tx)'}}>{p.label}</div>
+            <div style={{display:'flex',alignItems:'center',gap:6,background:'var(--bg2)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px',opacity:ro?.6:1}}>
+              <input type="number" value={limDraft[p.id] ?? ''} disabled={ro} readOnly={ro}
+                onChange={e=>setLim(p.id,e.target.value)}
+                style={{width:64,background:'none',border:'none',color:'var(--tx)',fontSize:13,fontWeight:700,outline:'none',fontFamily:'var(--mo)',cursor:ro?'not-allowed':'text'}}/>
+              <span style={{fontSize:11,color:'var(--tx3)',whiteSpace:'nowrap'}}>productos</span>
+            </div>
+          </div>)}
+      <div style={{fontSize:10,color:'var(--tx3)',marginTop:8}}>-1 significa ilimitado.</div>
+      {!ro && <div style={{display:'flex',justifyContent:'flex-end',marginTop:12}}>
+        <button className="btn btp" disabled={savingLim||limits===null} onClick={saveLimits} style={{fontWeight:800,padding:'9px 22px'}}>{savingLim?'Guardando…':'Guardar límites'}</button>
       </div>}
     </div>
 

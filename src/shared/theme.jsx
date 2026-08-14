@@ -14,7 +14,7 @@ export const B  = "#1a1a1a";   // bordes
 // hay caché disponible (dev / primer arranque), cae a APP_VERSION_FALLBACK.
 // Al desplegar se sube el CACHE del SW y este número se refleja SOLO aquí, en ambos
 // sitios a la vez.
-export const APP_VERSION_FALLBACK = "133";
+export const APP_VERSION_FALLBACK = "134";
 export async function getDeployVersion() {
   try {
     if (typeof caches !== "undefined" && caches.keys) {

@@ -2902,6 +2902,22 @@ const AUDIT_ACTION_LABELS = {
   settle_commission: 'Saldó una deuda de comisión',
   admin_mark_commission_paid: 'Marcó una comisión como pagada',
 };
+// "Auditoría del equipo" es SOLO para lo que hace el equipo administrativo (staff
+// con permiso), no un registro general de actividad de la plataforma — un pedido
+// creado por un comprador, una puja o un mensajero avanzando su entrega NO
+// pertenecen aquí. Clasificación verificada revisando el código real de cada
+// función que llama a log_action (qué exige antes: is_admin() / can('...') =
+// administrativa; nada de eso, la hace el propio usuario dueño de la acción =
+// normal). Las automáticas del sistema (auction_default/auction_strike/
+// close_auction, que se disparan solas al vencer un plazo, sin que nadie del
+// equipo decida nada) tampoco cuentan como "administrativas".
+const AUDIT_ADMIN_ACTIONS = new Set([
+  'admin_grant_staff', 'admin_revoke_staff', 'admin_set_role', 'admin_set_verified',
+  'admin_set_suspended', 'admin_set_promoted', 'admin_mark_commission_paid',
+  'admin_moderate_product', 'courier_review', 'review_courier_application',
+  'review_verification', 'review_plan', 'set_plan', 'resolve_report', 'topup_review',
+  'set_rate', 'set_team_member', 'settle_commission',
+]);
 const AUDIT_TARGET_LABELS = { order:'Pedido', product:'Producto', profile:'Perfil', user:'Usuario', auction:'Subasta', courier:'Mensajero', exchange:'Tasa', wallet:'Billetera' };
 const AUDIT_DETAIL_KEYS = { approved:'Aprobado', received:'Recibido', reason:'Motivo', rate:'Tasa', role:'Rol', decision:'Decisión', amount:'Monto', neto:'Neto', comision:'Comisión', pct:'Porcentaje', strikes:'Amonestaciones', winner:'Ganador', defaulter:'Incumplió', total:'Total', from:'Desde', to:'Hasta', stage:'Etapa', auto:'Automático', cerrado:'Cerrado', cost:'Costo', qty:'Cantidad', product:'Producto', who:'Quién', fee:'Tarifa', base:'Base', approved_at:'Fecha de aprobación' };
 function describeAuditAction(action) { return AUDIT_ACTION_LABELS[action] || action; }
@@ -2936,14 +2952,21 @@ function TeamAuditScreen({ onBack }) {
     return d.toISOString();
   };
 
+  // get_audit_log no filtra por una LISTA de acciones (solo por una sola, p_action) —
+  // el filtro de "solo administrativas" se aplica aquí, sobre las filas reales que
+  // devuelve el backend, antes de mostrarlas o de armar el selector de miembro.
+  const onlyAdmin = rows => rows.filter(r => AUDIT_ADMIN_ACTIONS.has(r.action));
+
   // Opciones del selector de miembro: SIEMPRE sin filtrar por miembro (solo por
-  // fecha) — así la lista de nombres nunca se vacía al elegir uno.
+  // fecha) — así la lista de nombres nunca se vacía al elegir uno. Se arma SOLO
+  // con quienes tienen acciones administrativas reales (si alguien del equipo
+  // también compró algo como usuario normal, eso no lo mete en esta lista).
   useEffect(() => {
     let alive = true;
     getAuditLog({ since: sinceFor(dateFilter), limit: 500 }).then(rows => {
       if (!alive) return;
       const seen = new Map();
-      rows.forEach(r => { if (r.actor_id && !seen.has(r.actor_id)) seen.set(r.actor_id, r.actor_name); });
+      onlyAdmin(rows).forEach(r => { if (r.actor_id && !seen.has(r.actor_id)) seen.set(r.actor_id, r.actor_name); });
       setActorOptions([...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'es')));
     }).catch(() => {});
     return () => { alive = false; };
@@ -2953,8 +2976,8 @@ function TeamAuditScreen({ onBack }) {
   useEffect(() => {
     let alive = true;
     setLogs(undefined);
-    getAuditLog({ actorId: actorFilter || null, since: sinceFor(dateFilter), limit: 200 })
-      .then(rows => { if (alive) setLogs(rows); })
+    getAuditLog({ actorId: actorFilter || null, since: sinceFor(dateFilter), limit: 500 })
+      .then(rows => { if (alive) setLogs(onlyAdmin(rows)); })
       .catch(() => { if (alive) setLogs([]); });
     return () => { alive = false; };
   }, [actorFilter, dateFilter]);
@@ -2964,7 +2987,7 @@ function TeamAuditScreen({ onBack }) {
   return <>
     <button className="btn btg sm" onClick={onBack} style={{ marginBottom: 10 }}>← Volver a Sistema</button>
     <div className="stit">📜 Auditoría del equipo</div>
-    <div className="ssub">Registro real de cada acción del equipo en el panel — quién, qué y cuándo.</div>
+    <div className="ssub">Solo acciones administrativas de tu equipo (aprobaciones, moderación, permisos…) — quién, qué y cuándo. No incluye la actividad normal de los usuarios del marketplace.</div>
 
     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', margin: '14px 0 10px' }}>
       <select value={actorFilter} onChange={e => setActorFilter(e.target.value)}
@@ -3021,8 +3044,16 @@ function Sistema({toast, data={}}){
   // "📜 Auditoría del equipo" vive DENTRO de Sistema (no es una sección propia del
   // menú) — solo se llega aquí si ya se tiene acceso a Sistema (can('system','view')),
   // así que no hace falta una comprobación de permiso aparte para mostrar la tarjeta.
+  // BUG REAL (pantalla en blanco, reproducido): el "return" condicional estaba
+  // ANTES de los demás hooks de este componente (useState/useEffect/useMemo de
+  // más abajo) — React exige que TODOS los hooks se llamen siempre, en el mismo
+  // orden, en cada render. Al pasar de view="main" a view="audit", el segundo
+  // render saltaba directo al "return" y dejaba de llamar los hooks de abajo:
+  // React lo detecta y tira "Rendered fewer hooks than expected", sin capa que
+  // lo atrape → pantalla completamente en blanco. El "if" ahora va DESPUÉS de
+  // declarar todos los hooks (ver más abajo, justo antes del JSX final):
+  // decide qué se DEVUELVE, nunca cuáles hooks se llaman.
   const [view, setView] = useState('main');
-  if (view === 'audit') return <TeamAuditScreen onBack={() => setView('main')} />;
   const hhmm = ts=>{ const d=new Date(ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
   const dmy = ts=>new Date(ts).toLocaleDateString('es-ES',{day:'2-digit',month:'short'});
   const num = v => (v==null||v===''||Number.isNaN(Number(v))) ? '—' : Number(v).toLocaleString('es-ES');
@@ -3062,6 +3093,7 @@ function Sistema({toast, data={}}){
     {name:'GPS / Rastreo de envíos', state:'off', note:'Sin integrar'},
     {name:'Notificaciones push', state:'off', note:'Sin integrar'},
   ];
+  if (view === 'audit') return <TeamAuditScreen onBack={() => setView('main')} />;
   return <>
     <div className="stit">Sistema</div>
     <div className="ssub">Actividad real de la plataforma e integraciones</div>

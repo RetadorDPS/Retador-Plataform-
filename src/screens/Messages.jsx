@@ -208,23 +208,59 @@ function RefChatCard({ meta, onOpen, orders = [], B, T1, T3, soft }) {
   );
 }
 
+// ── Panel FIJO de producto/servicio (estilo Alibaba) ─────────────────────────
+// Pegado justo arriba del campo de escribir cuando el chat está ligado a un
+// producto/servicio — no una tarjeta más dentro de los mensajes. Acciones REALES
+// de RETADOR únicamente: "Ver ficha completa" (detalle real) e "Iniciar pedido"
+// (mismo flujo de compra de siempre) para productos. Los servicios no tienen
+// flujo de "pedido" propio y el chat YA ES el contacto, así que no se duplica
+// ningún botón de contactar aquí — solo Ver ficha y cerrar.
+function ChatProductPanel({ item, onClose, onOpenDetail, onStartOrder, S, B, T1, T3, isDark }) {
+  const isService = item.type === "service";
+  const price = Number(item.price) > 0 ? money(Number(item.price) || 0, item.currency || "USD") : null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 14px", borderTop: `1px solid ${B}`, background: S, flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {item.image
+          ? <img src={item.image} alt="" style={{ width: 44, height: 44, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />
+          : <div style={{ width: 44, height: 44, borderRadius: 10, background: "#8884", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{isService ? "🛠️" : "🛍️"}</div>}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: 12.5, fontWeight: 800, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title || (isService ? "Servicio" : "Producto")}</p>
+          <p style={{ fontSize: 11.5, fontWeight: 700, marginTop: 2 }}>
+            {price ? <span style={{ color: "#22C55E" }}>{isService ? "Desde " : ""}{price}</span> : <span style={{ color: T3 }}>💬 Precio a consultar</span>}
+          </p>
+        </div>
+        <button onClick={onClose} title="Ocultar" style={{ background: "none", border: "none", color: T3, fontSize: 18, cursor: "pointer", lineHeight: 1, padding: 4, flexShrink: 0 }}>✕</button>
+      </div>
+      <div style={{ display: "flex", gap: 7 }}>
+        <button onClick={onOpenDetail} className="p" style={{ flex: 1, background: "none", border: `1px solid ${B}`, borderRadius: 50, padding: "8px 10px", fontSize: 11, fontWeight: 700, color: T1, cursor: "pointer" }}>Ver ficha completa</button>
+        {!isService && <button onClick={onStartOrder} className="p" style={{ flex: 1, background: G, border: "none", borderRadius: 50, padding: "8px 10px", fontSize: 11, fontWeight: 800, color: "#000", cursor: "pointer" }}>Iniciar pedido</button>}
+      </div>
+    </div>
+  );
+}
+
 // Solo un audio puede sonar a la vez en TODO el chat: guarda el elemento
 // <audio> activo. Al empezar otro, el que sonaba se PAUSA (nunca se reinicia
 // — pause() nunca toca currentTime, así que queda listo para retomar donde iba).
 let _activeVoiceAudio = null;
 
-// ── Reproductor de nota de voz ───────────────────────────────────────────────
+// ── Reproductor de nota de voz — con avance real (scrubbing) ────────────────
 function VoiceMessage({ meta, mine, isDark, T1, T3, accentBg, autoPlay, onEnded }) {
   const [url, setUrl] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [cur, setCur] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [rate, setRate] = useState(1);
   const audioRef = useRef(null);
+  const trackRef = useRef(null);
   useEffect(() => { let a = true; voiceNoteSignedUrl(meta.audio_path).then(u => { if (a) setUrl(u); }).catch(() => {}); return () => { a = false; }; }, [meta.audio_path]);
   // Reproducción en cadena: si el mensaje anterior (un audio) acaba de terminar
   // y este es el siguiente, arranca solo en cuanto la URL esté lista.
   useEffect(() => {
     if (autoPlay && url && audioRef.current) audioRef.current.play().catch(() => {});
   }, [autoPlay, url]);
+  useEffect(() => { if (audioRef.current) audioRef.current.playbackRate = rate; }, [rate, url]);
   const total = Number(meta.duration) || 0;
   const fmt = (s) => { const m = Math.floor(s / 60), r = Math.floor(s % 60); return `${m}:${String(r).padStart(2, "0")}`; };
   const toggle = () => {
@@ -232,7 +268,29 @@ function VoiceMessage({ meta, mine, isDark, T1, T3, accentBg, autoPlay, onEnded 
     if (!el) return;
     if (playing) { el.pause(); } else { el.play().catch(() => {}); }
   };
+  // Salta al punto real tocado/arrastrado — mueve el currentTime del <audio> de
+  // verdad (nunca solo la barra visual), así el punto arrastrable SIEMPRE
+  // refleja dónde vas a seguir escuchando.
+  const seekToClientX = (clientX) => {
+    const track = trackRef.current, audio = audioRef.current;
+    if (!track || !audio || !total) return;
+    const r = track.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    const t = frac * total;
+    audio.currentTime = t;
+    setCur(t);
+  };
+  const onTrackDown = (e) => {
+    if (!total) return;
+    setDragging(true);
+    seekToClientX(e.clientX);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+  };
+  const onTrackMove = (e) => { if (dragging) seekToClientX(e.clientX); };
+  const endDrag = () => setDragging(false);
   const trackBg = mine ? "#00000022" : (isDark ? "#ffffff22" : "#00000018");
+  const pct = total ? Math.min(100, (cur / total) * 100) : 0;
+  const dot = mine ? "#000" : G;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 190, padding: "3px 2px" }}>
       {url && <audio ref={audioRef} src={url} preload="none"
@@ -243,15 +301,27 @@ function VoiceMessage({ meta, mine, isDark, T1, T3, accentBg, autoPlay, onEnded 
         }}
         onPause={() => setPlaying(false)}
         onEnded={() => { setPlaying(false); setCur(0); if (_activeVoiceAudio === audioRef.current) _activeVoiceAudio = null; onEnded?.(); }}
-        onTimeUpdate={e => setCur(e.target.currentTime)} />}
+        onTimeUpdate={e => { if (!dragging) setCur(e.target.currentTime); }} />}
       <button onClick={toggle} disabled={!url} className="p" style={{ width: 34, height: 34, borderRadius: "50%", background: accentBg, border: "none", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: url ? "pointer" : "default" }}>
         <span style={{ fontSize: 14, color: mine ? "#000" : "#fff" }}>{playing ? "⏸" : "▶️"}</span>
       </button>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ height: 3, borderRadius: 2, background: trackBg, overflow: "hidden" }}>
-          <div style={{ height: "100%", width: `${total ? Math.min(100, (cur / total) * 100) : 0}%`, background: mine ? "#000" : G, transition: "width .1s linear" }} />
+        <div ref={trackRef} onPointerDown={onTrackDown} onPointerMove={onTrackMove} onPointerUp={endDrag} onPointerCancel={endDrag}
+          style={{ position: "relative", height: 15, display: "flex", alignItems: "center", cursor: total ? "pointer" : "default", touchAction: "none" }}>
+          <div style={{ position: "absolute", left: 0, right: 0, height: 3, borderRadius: 2, background: trackBg, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${pct}%`, background: dot, transition: dragging ? "none" : "width .1s linear" }} />
+          </div>
+          {total > 0 && <div style={{ position: "absolute", left: `${pct}%`, top: "50%", width: 11, height: 11, borderRadius: "50%", background: dot, transform: `translate(-50%,-50%) scale(${dragging ? 1.3 : 1})`, boxShadow: "0 1px 3px rgba(0,0,0,.4)", transition: dragging ? "none" : "left .1s linear, transform .1s" }} />}
         </div>
-        <p style={{ fontSize: 9.5, color: mine ? "#00000088" : (T3 || "rgba(255,255,255,.6)"), marginTop: 3 }}>🎤 {fmt(playing || cur ? cur : total)}</p>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 3 }}>
+          <p style={{ fontSize: 9.5, color: mine ? "#00000088" : (T3 || "rgba(255,255,255,.6)") }}>🎤 {fmt(playing || dragging || cur ? cur : total)}</p>
+          {total > 0 && (
+            <button onClick={() => setRate(r => (r === 1 ? 1.5 : r === 1.5 ? 2 : 1))} className="p"
+              style={{ background: mine ? "#00000022" : (isDark ? "#ffffff22" : "#00000018"), border: "none", borderRadius: 20, padding: "1px 6px", fontSize: 9, fontWeight: 800, color: mine ? "#000" : T1, cursor: "pointer" }}>
+              {rate}×
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -500,7 +570,8 @@ const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, 
   const inputRef = useRef(null);
   const [recording, setRecording] = useState(false);
   const [recSecs, setRecSecs] = useState(0);
-  const recRef = useRef(null); // { recorder, chunks, stream, timer, startedAt }
+  const [recBars, setRecBars] = useState([]); // niveles reales del micrófono (0..1), estilo WhatsApp
+  const recRef = useRef(null); // { recorder, chunks, stream, timer, startedAt, actx, waveTimer }
 
   // Al entrar en modo edición, precarga el texto original.
   useEffect(() => { if (editing) setDraft(editing.text || ""); }, [editing]);
@@ -524,14 +595,39 @@ const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, 
       recorder.start();
       const startedAt = Date.now();
       const timer = setInterval(() => setRecSecs(Math.floor((Date.now() - startedAt) / 1000)), 250);
-      recRef.current = { recorder, chunks, stream, timer, startedAt };
-      setRecSecs(0); setRecording(true);
+
+      // Onda EN VIVO real (no una animación falsa): AnalyserNode de la Web Audio
+      // API sobre el MISMO stream del micrófono que está grabando. Cada 90ms se
+      // mide el volumen real (RMS de la forma de onda) y se agrega como una
+      // barra nueva a la cola — estilo WhatsApp, crece y se desplaza.
+      let actx = null, waveTimer = null;
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        actx = new AudioCtx();
+        const source = actx.createMediaStreamSource(stream);
+        const analyser = actx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        waveTimer = setInterval(() => {
+          analyser.getByteTimeDomainData(data);
+          let sum = 0;
+          for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sum += v * v; }
+          const level = Math.min(1, Math.sqrt(sum / data.length) * 4); // amplificado: la voz normal no debe saturar
+          setRecBars(b => (b.length >= 32 ? [...b.slice(1), level] : [...b, level]));
+        }, 90);
+      } catch (e) { /* Web Audio no disponible: se graba igual, solo sin la onda visual */ }
+
+      recRef.current = { recorder, chunks, stream, timer, startedAt, actx, waveTimer };
+      setRecSecs(0); setRecBars([]); setRecording(true);
     } catch (e) { /* sin permiso de micrófono: no se puede grabar */ }
   };
   const stopRecording = (send) => new Promise((resolve) => {
     const r = recRef.current;
     if (!r) return resolve(null);
     clearInterval(r.timer);
+    if (r.waveTimer) clearInterval(r.waveTimer);
+    if (r.actx) r.actx.close().catch(() => {});
     r.recorder.onstop = () => {
       r.stream.getTracks().forEach(t => t.stop());
       const duration = Math.max(1, Math.round((Date.now() - r.startedAt) / 1000));
@@ -574,13 +670,19 @@ const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, 
       )}
       {recording ? (
         <div style={{ padding: "8px 12px calc(8px + env(safe-area-inset-bottom, 0px))", display: "flex", gap: 9, alignItems: "center" }}>
-          <button onClick={cancelRecording} className="p" style={{ width: 38, height: 38, borderRadius: "50%", background: "none", border: `1px solid ${B}`, color: T3, fontSize: 16, cursor: "pointer" }}>×</button>
-          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#ef4444", flexShrink: 0, animation: "blk 1.1s ease-in-out infinite" }} />
-            <span style={{ fontSize: 13, color: T1, fontWeight: 700 }}>{fmtRec(recSecs)}</span>
-            <span style={{ fontSize: 11.5, color: T3 }}>Grabando nota de voz…</span>
+          <button onClick={cancelRecording} className="p" title="Cancelar" style={{ width: 38, height: 38, borderRadius: "50%", background: "none", border: `1px solid ${B}`, color: "#ef4444", fontSize: 15, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>🗑️</button>
+          <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, background: S, border: `1px solid ${B}`, borderRadius: 50, padding: "8px 13px", height: 22 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444", flexShrink: 0, animation: "blk 1.1s ease-in-out infinite" }} />
+            <span style={{ fontSize: 12.5, color: T1, fontWeight: 800, fontFamily: "var(--mo)", flexShrink: 0 }}>{fmtRec(recSecs)}</span>
+            {/* Onda real del volumen del micrófono (AnalyserNode) — cada barra es
+                una muestra real tomada mientras se graba, no una animación de relleno. */}
+            <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 2, height: 24, overflow: "hidden" }}>
+              {recBars.length === 0
+                ? <span style={{ fontSize: 10.5, color: T3 }}>Grabando…</span>
+                : recBars.map((lv, i) => <span key={i} style={{ width: 2.5, minWidth: 2.5, borderRadius: 2, background: G, height: `${Math.max(3, Math.round(lv * 22))}px`, flexShrink: 0, transition: "height .07s linear" }} />)}
+            </div>
           </div>
-          <button onClick={finishRecording} className="p" style={{ width: 42, height: 42, background: G, border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <button onClick={finishRecording} className="p" title="Enviar" style={{ width: 42, height: 42, background: G, border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             <Ic n="send" c="#000" s={18} />
           </button>
         </div>
@@ -595,7 +697,7 @@ const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, 
                 style={{ width: 42, height: 42, background: G, border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 10px rgba(255,192,30,.35)" }}>
                 <Ic n="send" c="#000" s={20} />
               </button>
-            : <button onClick={startRecording} disabled={!!editing} className="p" onPointerDown={e => e.preventDefault()}
+            : <button onClick={startRecording} disabled={!!editing} title="Grabar nota de voz" className="p" onPointerDown={e => e.preventDefault()}
                 style={{ width: 42, height: 42, background: S, border: `2px solid ${editing ? T3 : G}`, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: editing ? .4 : 1, cursor: editing ? "default" : "pointer" }}>
                 <MicGlyph isDark={isDark} />
               </button>}
@@ -676,7 +778,7 @@ function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, 
   );
 }
 
-export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = [], onOpenOrder, onOpenProduct, onConvId }) {
+export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = [], onOpenOrder, onOpenProduct, onStartOrder, onConvId }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const [convId,    setConvId]    = useState(chat.id || chat.key || null);
   // Avisa al padre qué conversación está EN PANTALLA ahora mismo (para que, si llega
@@ -720,10 +822,21 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
   const [forwardMsgs, setForwardMsgs] = useState([]); // mensajes a reenviar (abre el picker de conversaciones)
   const [editing,   setEditing]   = useState(null);   // mensaje que se está editando
   const [highlightId, setHighlightId] = useState(null);
-  // CONTEXTO (estilo AliExpress): si el chat se abrió desde un producto/pedido,
-  // una franja sobre el input lo recuerda; el PRIMER mensaje enviado lleva esa
-  // referencia (meta) y se pinta como tarjetica tocable. Luego se limpia.
+  // CONTEXTO pendiente (estilo AliExpress): si el chat se abrió desde un
+  // producto/servicio, el PRIMER mensaje enviado lleva esa referencia (meta) y
+  // se pinta como tarjetica tocable dentro de ese mensaje. Se limpia justo
+  // después de enviarlo — NO controla el panel fijo (ver linkedProduct abajo).
   const [ctx, setCtx] = useState(chat.context || null);
+  // PRODUCTO/SERVICIO que originó este chat (estilo Alibaba): panel FIJO sobre
+  // el campo de escribir, pegado, con foto/título/precio y acciones reales.
+  // A diferencia de ctx, este NO se limpia al enviar — se queda mientras dure
+  // la visita al chat (el usuario puede cerrarlo con la "✕", solo para esa
+  // visita). Si el chat se reabre sin context fresco (desde la lista de
+  // Mensajes) se deriva del PRIMER mensaje del historial que traiga esa
+  // referencia, así el panel también aparece al reabrir una conversación vieja.
+  const [linkedProduct, setLinkedProduct] = useState(chat.context || null);
+  const [panelClosed, setPanelClosed] = useState(false);
+  const [showTrust, setShowTrust] = useState(false);
   const scrollRef = useRef(null);
   const subRef = useRef(null);
   const convIdRef = useRef(convId);
@@ -872,6 +985,27 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     })();
     return () => { alive = false; if (subRef.current) getSB().then(c => c?.removeChannel(subRef.current)).catch(() => {}); };
   }, [convId]);
+
+  // Si el chat se reabrió SIN context fresco (viene de la lista de Mensajes,
+  // no de "Contactar" en un producto/servicio), busca en el historial ya
+  // cargado el primer mensaje con esa referencia y lo adopta para el panel fijo.
+  useEffect(() => {
+    if (linkedProduct || loading || !msgs.length) return;
+    const first = msgs.find(m => m.meta && typeof m.meta === "object" && (m.meta.type === "product" || m.meta.type === "service"));
+    if (first) setLinkedProduct({ type: first.meta.type, id: first.meta.id, title: first.meta.title || "", image: first.meta.image || null, price: first.meta.price ?? null, currency: first.meta.currency || null });
+  }, [msgs, loading, linkedProduct]);
+
+  // Aviso de confianza — UNA sola vez por conversación (marcado en localStorage
+  // por otherId+producto, estable aunque el convId todavía no exista al abrir
+  // el chat por primera vez). Es un mensaje de SISTEMA, no de ninguna de las
+  // dos personas — nunca se guarda en `messages`, solo se pinta.
+  useEffect(() => {
+    if (loading || !linkedProduct || !chat.otherId) return;
+    const key = `retador_trust_${chat.otherId}_${linkedProduct.type}_${linkedProduct.id}`;
+    try {
+      if (!localStorage.getItem(key)) { localStorage.setItem(key, "1"); setShowTrust(true); }
+    } catch (e) { setShowTrust(true); }
+  }, [loading, linkedProduct, chat.otherId]);
 
   // onSend estable: no depende del borrador (lo maneja ChatInput), así el input
   // no se recrea. Crea la conversación la primera vez y se suscribe.
@@ -1034,6 +1168,16 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
         {selectionMode && (
           <div onClick={clearSelection} style={{ position: "absolute", inset: 0, background: isDark ? "rgba(0,0,0,.45)" : "rgba(0,0,0,.25)", zIndex: 10 }} />
         )}
+        {/* Aviso de confianza — mensaje de SISTEMA (no de ninguna de las dos
+            personas), una sola vez por conversación originada en un producto/servicio. */}
+        {showTrust && (
+          <div style={{ display: "flex", justifyContent: "center", margin: "2px 0 4px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, maxWidth: "92%", background: isDark ? "rgba(255,192,30,.09)" : "rgba(180,130,0,.09)", border: `1px solid ${G}40`, borderRadius: 13, padding: "9px 14px" }}>
+              <span style={{ fontSize: 15, flexShrink: 0 }}>🛡️</span>
+              <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.4 }}>Coordina y compra dentro de RETADOR — así quedas respaldado. Evita acordar fuera de la plataforma.</p>
+            </div>
+          </div>
+        )}
         {loading
           ? <div style={{ display: "flex", justifyContent: "center", padding: "24px 0" }}><Spin size={22} /></div>
           : msgs.length === 0
@@ -1058,16 +1202,15 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
         }
       </div>
 
-      {/* Franja de contexto: "estás consultando sobre esto" (se limpia al enviar o con la X) */}
-      {ctx && !blocked && (
-        <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 14px", borderTop: `1px solid ${B}`, background: S, flexShrink: 0 }}>
-          {ctx.image && <img src={ctx.image} alt="" style={{ width: 34, height: 34, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: 11.5, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ctx.type === "order" ? "📦 " : ctx.type === "service" ? "🛠️ " : "🛍️ "}{ctx.title || ""}{Number(ctx.price) > 0 ? <span style={{ color: "#22C55E", fontWeight: 800 }}> · {money(Number(ctx.price) || 0, ctx.currency || "USD")}</span> : null}</p>
-            <p style={{ fontSize: 9.5, color: T3, marginTop: 1 }}>Estás consultando sobre esto</p>
-          </div>
-          <button onClick={() => setCtx(null)} style={{ background: "none", border: "none", color: T3, fontSize: 17, cursor: "pointer", lineHeight: 1, padding: 4 }}>×</button>
-        </div>
+      {/* Panel FIJO de producto/servicio (estilo Alibaba): pegado justo arriba del
+          campo de escribir, no una tarjeta más dentro de los mensajes. Se queda
+          mientras dure la visita al chat (no se limpia al enviar, a diferencia
+          de ctx); "✕" solo lo oculta para esta visita. */}
+      {linkedProduct && !panelClosed && !blocked && (
+        <ChatProductPanel item={linkedProduct} onClose={() => setPanelClosed(true)}
+          onOpenDetail={() => onOpenProduct && onOpenProduct(linkedProduct.id)}
+          onStartOrder={() => onStartOrder && onStartOrder(linkedProduct.id)}
+          S={S} B={B} T1={T1} T3={T3} isDark={isDark} />
       )}
       <ChatInput
         onSend={handleSend} onSendVoice={handleSendVoice} blocked={blocked} S={S} B={B} T1={T1} T3={T3} isDark={isDark} initialDraft={chat.draft || ""}

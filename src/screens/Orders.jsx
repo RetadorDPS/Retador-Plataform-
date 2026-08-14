@@ -36,8 +36,8 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
     const courierId = o.courierId || o.courier_id || null;
     try {
       const jobs = [];
-      if (sellerId && rate.seller > 0) jobs.push(submitOrderReview(sellerId, user?.id, o.id, rate.seller, rateMsg.seller));
-      if (courierId && rate.courier > 0) jobs.push(submitOrderReview(courierId, user?.id, o.id, rate.courier, rateMsg.courier));
+      if (sellerId && rate.seller > 0) jobs.push(submitOrderReview(sellerId, user?.id, o.id, rate.seller, rateMsg.seller, 'seller'));
+      if (courierId && rate.courier > 0) jobs.push(submitOrderReview(courierId, user?.id, o.id, rate.courier, rateMsg.courier, 'courier'));
       await Promise.all(jobs);
     } catch (e) {
       flash && flash("⚠️ No se pudo guardar tu calificación: " + (e?.message || "Intenta de nuevo"));

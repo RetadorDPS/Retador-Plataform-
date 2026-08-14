@@ -389,12 +389,15 @@ export const submitSellerReview = async (targetId, reviewerId, rating, comment) 
 // pedido completado con esa persona genera su propia fila, se suman todas al
 // promedio/contador del perfil. La política de INSERT exige que sea mi pedido,
 // completado, y con esa misma persona (como vendedor o como mensajero); el
-// índice único (seller_id, reviewer_id, order_id) impide calificar el mismo
-// pedido dos veces — si ocurriera, el error real de la base sube tal cual.
-export const submitOrderReview = async (targetId, reviewerId, orderId, rating, comment) => {
+// índice único (seller_id, reviewer_id, order_id, role) impide calificar el
+// mismo pedido dos veces EN EL MISMO PAPEL — si ocurriera, el error real de la
+// base sube tal cual. role ('seller'|'courier') es lo que distingue las dos
+// reseñas cuando vendedor y mensajero son la misma persona: sin esto, el
+// candado único chocaba en ese caso real (mismo seller_id + order_id).
+export const submitOrderReview = async (targetId, reviewerId, orderId, rating, comment, role = null) => {
   if (!targetId || !reviewerId || !orderId) throw new Error("Sesión no válida");
   if (targetId === reviewerId) throw new Error("No puedes valorarte a ti mismo");
-  const { error } = await supabase.from("seller_reviews").insert({ seller_id: targetId, reviewer_id: reviewerId, order_id: orderId, rating, comment: comment || "" });
+  const { error } = await supabase.from("seller_reviews").insert({ seller_id: targetId, reviewer_id: reviewerId, order_id: orderId, rating, comment: comment || "", role });
   if (error) throw error;
 };
 // Borra MI valoración LIBRE sobre esa persona (el RLS ya limita a la propia y

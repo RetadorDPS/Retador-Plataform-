@@ -2688,25 +2688,43 @@ const permSummary=(p)=>{
   const parts=PERM_CATALOG.filter(s=>p[s.key]&&p[s.key]!=='none').map(s=>`${s.label}: ${LVL_TXT[p[s.key]]||p[s.key]}`);
   return parts.length?parts.join(' · '):'Sin permisos';
 };
+// Cuenta rápida para el resumen de arriba de la parrilla ("3 de 10 con acceso").
+const permAccessCount=(p)=>{
+  const n=PERM_CATALOG.length;
+  if(!p||typeof p!=='object') return { access:0, manage:0, total:n };
+  const access=PERM_CATALOG.filter(s=>p[s.key]&&p[s.key]!=='none').length;
+  const manage=PERM_CATALOG.filter(s=>p[s.key]==='manage').length;
+  return { access, manage, total:n };
+};
+
+// Estilo de cada segmento de la pastilla, uno por nivel — así se distingue de un
+// vistazo quién tiene acceso completo sin tener que leer cada palabra:
+//   Administrar → dorado sólido y texto fuerte (el color de acción de la app).
+//   Ver         → contorno dorado suave, sin relleno.
+//   Sin acceso  → apagado/gris, igual que un segmento sin seleccionar.
+const LEVEL_ON_STYLE={
+  none:   { background:'var(--bg3)', border:'1px solid var(--bd2)', color:'var(--tx3)', fontWeight:700 },
+  view:   { background:'transparent', border:'1px solid var(--ac2)', color:'var(--ac2)', fontWeight:700 },
+  manage: { background:'var(--ac)',  border:'1px solid var(--ac)',  color:'#000',       fontWeight:800 },
+};
 
 function PermGrid({ value, onChange }){
-  return <div style={{display:'flex',flexDirection:'column',gap:8}}>
+  return <div style={{display:'flex',flexDirection:'column',gap:10}}>
     {PERM_CATALOG.map(s=>{
       const cur=value[s.key]||'none';
-      return <div key={s.key} style={{background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:12,padding:'10px 12px'}}>
-        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
-          <span style={{fontSize:15,width:20,textAlign:'center'}}>{s.icon}</span>
-          <span style={{fontSize:12.5,fontWeight:700,color:'var(--tx)'}}>{s.label}</span>
+      return <div key={s.key} style={{background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:13,padding:'11px 12px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:9,marginBottom:9}}>
+          <span style={{fontSize:16,width:22,textAlign:'center'}}>{s.icon}</span>
+          <span style={{fontSize:12.5,fontWeight:700,color:'var(--tx)',flex:1}}>{s.label}</span>
         </div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6}}>
+        <div style={{display:'flex',gap:3,background:'var(--bg3)',border:'1px solid var(--bd)',borderRadius:10,padding:3}}>
           {LEVELS.map(l=>{
             const on=cur===l.v;
+            const st=on?LEVEL_ON_STYLE[l.v]:{ background:'transparent', border:'1px solid transparent', color:'var(--tx3)', fontWeight:600 };
             return <button key={l.v} onClick={()=>onChange(s.key,l.v)}
-              style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2,padding:'7px 4px',borderRadius:9,cursor:'pointer',
-                border:on?'1px solid var(--ac)':'1px solid var(--bd2)',
-                background:on?'var(--ag)':'transparent',
-                color:on?'var(--tx)':'var(--tx2)',fontWeight:on?700:600,fontSize:10.5,transition:'all .14s'}}>
-              <span style={{fontSize:15}}>{l.icon}</span>{l.label}
+              style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:4,padding:'7px 4px',borderRadius:8,cursor:'pointer',
+                fontSize:10.5,transition:'all .14s',...st}}>
+              <span style={{fontSize:13}}>{l.icon}</span>{l.label}
             </button>;
           })}
         </div>
@@ -2777,7 +2795,10 @@ function TeamScreen({ toast, meId }){
         </div>
       </div>
       <div className="card cp mb16">
-        <div className="ch"><span className="ct">Permisos por sección</span></div>
+        <div className="ch">
+          <span className="ct">Permisos por sección</span>
+          <span className="bdg bb">{permAccessCount(perm).access} de {permAccessCount(perm).total} con acceso</span>
+        </div>
         <div style={{fontSize:11,color:'var(--tx3)',margin:'2px 0 12px'}}>Elige, sección por sección, qué puede hacer este miembro. Por defecto, todo en <b>Sin acceso</b>.</div>
         <PermGrid value={perm} onChange={setLvl} />
       </div>

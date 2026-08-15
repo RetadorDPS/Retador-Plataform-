@@ -2,15 +2,22 @@ import { useState, useEffect, useRef, createContext, useContext, useCallback, us
 import { Avatar, AvatarUser, G, Ic, ORDER_FLOW, PullIndicator, Spin, getMyConversations, getSB, getUserName, getProductById, isBlockedPair, isBlockSendError, toggleBlockUser, editMessage, deleteMessage, uploadVoiceNote, voiceNoteSignedUrl, setReaction, getReactionsForMessages, loadMessages, markRead, markDelivered, money, pushBackHandler, sendMessage, supabase, trackEvent, useAt, useR, usePullToRefresh } from "../shared/index.js";
 
 // Fondo del chat: textura de identidad RETADOR — sutil pero SÍ perceptible (un
-// patrón de puntos dorados en diagonal), en ambos temas. No compite con las
-// burbujas (siguen siendo lo más contrastado de la pantalla) pero ya no es
-// invisible como antes.
-const chatBgStyle = (isDark) => ({
-  backgroundColor: isDark ? "#0a0a0a" : "#f2f3f6",
-  backgroundImage: `radial-gradient(${isDark ? "rgba(255,192,30,.16)" : "rgba(180,130,0,.16)"} 1.6px, transparent 1.6px), radial-gradient(${isDark ? "rgba(255,192,30,.09)" : "rgba(180,130,0,.09)"} 1.6px, transparent 1.6px)`,
-  backgroundSize: "26px 26px, 26px 26px",
-  backgroundPosition: "0 0, 13px 13px",
-});
+// patrón de puntos en diagonal), teñida con el color de chat elegido (antes
+// siempre dorado fijo) para darle más presencia al color más allá de las
+// burbujas propias. Nunca fuerte: opacidad baja, y en modo claro el color se
+// oscurece un poco (igual que se hacía antes solo para el dorado) para que
+// siga notándose sobre fondo blanco sin volverse chillón.
+const chatBgStyle = (isDark, themeHex = "#FFC01E") => {
+  const h = themeHex.replace("#", "");
+  let r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+  if (!isDark) { r = Math.round(r * 0.7); g = Math.round(g * 0.7); b = Math.round(b * 0.7); }
+  return {
+    backgroundColor: isDark ? "#0a0a0a" : "#f2f3f6",
+    backgroundImage: `radial-gradient(rgba(${r},${g},${b},.16) 1.6px, transparent 1.6px), radial-gradient(rgba(${r},${g},${b},.09) 1.6px, transparent 1.6px)`,
+    backgroundSize: "26px 26px, 26px 26px",
+    backgroundPosition: "0 0, 13px 13px",
+  };
+};
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 // Selector COMPLETO propio (sin librería externa ni picker nativo invocable por
@@ -241,19 +248,20 @@ let _activeVoiceAudio = null;
 // elige cada usuario, así nunca se pierde contra ningún color de burbuja.
 export const READ_BLUE = "#0EA5E9";
 
-// ── 8 colores del "Estilo de chat" (profiles.chat_theme) — se aplican SOLO al
-// fondo de mis propias burbujas. Texto calculado por luminancia real para que
-// se siga leyendo bien con cualquiera de los 8 (oscuro sobre los claros,
-// blanco sobre los más saturados/oscuros) — nunca queda a ojo.
+// ── 7 colores del "Estilo de chat" (profiles.chat_theme) — se aplican SOLO al
+// fondo de mis propias burbujas (además del botón de enviar, el círculo de
+// grabar y ahora un matiz sutil del fondo del chat). Texto calculado por
+// luminancia real para que se siga leyendo bien con cualquiera de los 7
+// (oscuro sobre los claros, blanco sobre los más saturados/oscuros) — nunca
+// queda a ojo.
 export const CHAT_THEMES = [
-  { key: "dorado",    label: "Dorado",         hex: "#FFC01E" },
-  { key: "esmeralda", label: "Verde esmeralda", hex: "#10B981" },
-  { key: "azul",      label: "Azul cielo",     hex: READ_BLUE },
-  { key: "morado",    label: "Morado intenso", hex: "#7C3AED" },
-  { key: "rosa",      label: "Rosa/Fucsia",    hex: "#EC4899" },
-  { key: "naranja",   label: "Naranja",        hex: "#F97316" },
-  { key: "turquesa",  label: "Turquesa",       hex: "#14B8A6" },
-  { key: "coral",     label: "Rojo coral",     hex: "#F43F5E" },
+  { key: "dorado",     label: "Dorado",            hex: "#FFC01E" },
+  { key: "esmeralda",  label: "Verde esmeralda",   hex: "#10B981" },
+  { key: "morado",     label: "Morado intenso",    hex: "#7C3AED" },
+  { key: "naranja",    label: "Naranja",           hex: "#F97316" },
+  { key: "medianoche", label: "Azul medianoche",   hex: "#1E3A8A" },
+  { key: "vino",       label: "Vino tinto",        hex: "#9F1239" },
+  { key: "petroleo",   label: "Verde petróleo",    hex: "#065F46" },
 ];
 export function textColorFor(hex) {
   const c = hex.replace("#", "");
@@ -483,7 +491,7 @@ function EmojiPickerModal({ onPick, onClose, CARD, B, T1, T2, isDark }) {
   );
 }
 
-// ── Selector de "Estilo de chat" — 8 colores reales, persistentes (profiles.
+// ── Selector de "Estilo de chat" — 7 colores reales, persistentes (profiles.
 // chat_theme). Se aplican SOLO al fondo de mis propias burbujas; las palomitas
 // siempre quedan en el azul fijo (READ_BLUE), nunca en este color.
 function ChatThemePickerModal({ current, onPick, onClose, CARD, B, T1, T2, isDark }) {
@@ -1392,15 +1400,7 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
         </div>
       )}
 
-      {showTrust && <>
-        <div onClick={() => setShowTrust(false)} style={{ position: "fixed", inset: 0, zIndex: 5150 }} />
-        <div style={{ position: "fixed", top: "calc(11px + env(safe-area-inset-top, 0px) + 46px)", right: 14, maxWidth: 260, display: "flex", alignItems: "center", gap: 8, background: isDark ? "rgba(255,192,30,.1)" : "rgba(180,130,0,.09)", border: `1px solid ${G}40`, borderRadius: 13, padding: "10px 14px", boxShadow: isDark ? "0 8px 24px rgba(0,0,0,.35)" : "0 8px 24px rgba(0,0,0,.18)", zIndex: 5151 }}>
-          <span style={{ fontSize: 15, flexShrink: 0 }}>🛡️</span>
-          <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.4 }}>Coordina y compra dentro de RETADOR — así quedas respaldado. Evita acordar fuera de la plataforma.</p>
-        </div>
-      </>}
-
-      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "12px clamp(18px,3vw,48px)", display: "flex", flexDirection: "column", gap: 7, position: "relative", ...chatBgStyle(isDark) }}>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "12px clamp(18px,3vw,48px)", display: "flex", flexDirection: "column", gap: 7, position: "relative", ...chatBgStyle(isDark, themeHex) }}>
         {/* Forma "a" de salir del modo selección: tocar en cualquier parte fuera
             de los mensajes cancela la selección (sin forzar a elegir reacción).
             Los mensajes SELECCIONADOS quedan por encima de este velo (z-index
@@ -1478,6 +1478,22 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
           <button onClick={() => { setChatOpts(false); setThemePicker(true); }} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", padding: "12px 14px", fontSize: 12.5, fontWeight: 600, color: T1, cursor: "pointer" }}>🎨 Estilo de chat</button>
           <button onClick={handleToggleBlock} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderTop: `1px solid ${B}`, padding: "12px 14px", fontSize: 12.5, fontWeight: 600, color: T1, cursor: "pointer" }}>{blocked ? "Desbloquear usuario" : "Bloquear usuario"}</button>
           <button onClick={() => { setChatOpts(false); flash("Reporte enviado al equipo de RETADOR"); }} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderTop: `1px solid ${B}`, padding: "12px 14px", fontSize: 12.5, fontWeight: 600, color: "#ef4444", cursor: "pointer" }}>Reportar usuario</button>
+        </div>
+      </>}
+
+      {/* Popover del escudo de confianza — mismo "hermano de tope" y mismo
+          patrón que el menú "⋮" de arriba: renderizarlo ANTES del contenedor
+          con scroll (como estaba) reproducía el mismo bug real ya encontrado
+          ahí — el compositing del scroll en móvil pintaba los mensajes por
+          ENCIMA de un position:fixed anidado más adentro del árbol al
+          desplazar, sin importar el z-index. Aquí afuera queda sin ambigüedad,
+          siempre arriba de todo. El overlay invisible a pantalla completa
+          cierra al tocar cualquier parte fuera del popover. */}
+      {showTrust && <>
+        <div onClick={() => setShowTrust(false)} style={{ position: "fixed", inset: 0, zIndex: 5150 }} />
+        <div style={{ position: "fixed", top: "calc(11px + env(safe-area-inset-top, 0px) + 46px)", right: 14, maxWidth: 260, display: "flex", alignItems: "center", gap: 8, background: isDark ? "rgba(255,192,30,.1)" : "rgba(180,130,0,.09)", border: `1px solid ${G}40`, borderRadius: 13, padding: "10px 14px", boxShadow: isDark ? "0 8px 24px rgba(0,0,0,.35)" : "0 8px 24px rgba(0,0,0,.18)", zIndex: 5151 }}>
+          <span style={{ fontSize: 15, flexShrink: 0 }}>🛡️</span>
+          <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.4 }}>Coordina y compra dentro de RETADOR — así quedas respaldado. Evita acordar fuera de la plataforma.</p>
         </div>
       </>}
 

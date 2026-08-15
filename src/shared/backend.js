@@ -547,11 +547,15 @@ const _getOrCreateConversation = async (otherId) => {
 // Envía un mensaje: asegura la conversación y lo inserta. Devuelve conversation_id.
 // `meta` opcional: referencia a un producto/pedido ({type,id,title,image}) que el
 // chat pinta como tarjetica tocable junto al texto.
-export const sendMessage = async (senderId, otherId, text, meta = null) => {
+// id opcional: lo genera el cliente (crypto.randomUUID()) para envío OPTIMISTA
+// — el mensaje ya aparece en pantalla antes de que el servidor confirme, y
+// cuando llega el mismo id por realtime, se reconcilia en vez de duplicarse.
+export const sendMessage = async (senderId, otherId, text, meta = null, id = null) => {
   if (!senderId || !otherId || !text || !text.trim()) throw new Error("Faltan datos del mensaje");
   const cid = await _getOrCreateConversation(otherId);
   const row = { conversation_id: cid, sender_id: senderId, text: text.trim() };
   if (meta) row.meta = meta;
+  if (id) row.id = id;
   const { error } = await supabase.from("messages").insert(row);
   if (error) throw error;
   return cid;
@@ -637,6 +641,12 @@ export const getReactionsForMessages = async (messageIds) => {
 export const markRead = async (convId, userId) => {
   if (!convId) return;
   try { await supabase.rpc("mark_conversation_read", { p_conversation_id: convId }); } catch (e) {}
+};
+// Palomita de "entregado" (✓✓ gris) — la llama quien RECIBE el mensaje en
+// tiempo real (no el que lo envía). "Leído" (azul) sigue siendo mark_conversation_read.
+export const markDelivered = async (messageId) => {
+  if (!messageId) return;
+  try { await supabase.rpc("mark_delivered", { p_message_id: messageId }); } catch (e) {}
 };
 // Total de mensajes SIN LEER — usa la RPC OFICIAL del backend (misma fuente de
 // verdad para toda la app). Alimenta el botón "Mensajes" y la barra inferior.

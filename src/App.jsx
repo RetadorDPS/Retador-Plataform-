@@ -1685,7 +1685,15 @@ function AppShell({ sessionUser }) {
           estándar) — nada del producto/pantalla de atrás puede asomar. */}
       {chatOpen && selChat && (
         <div style={{ position: "fixed", inset: 0, zIndex: 5100, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
-          <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => setChatOpen(false)} onConvId={setOpenConvId} flash={flash} onViewProfile={openPublicProfile} orders={mergedOrders} onOpenOrder={openOrderFromChat} onOpenProduct={openProductFromChat} onStartOrder={startOrderFromChat} />
+          <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => setChatOpen(false)} onConvId={setOpenConvId} flash={flash} onViewProfile={openPublicProfile} orders={mergedOrders} onOpenOrder={openOrderFromChat} onOpenProduct={openProductFromChat} onStartOrder={startOrderFromChat}
+            /* BUG REAL corregido: chat.context (el producto pendiente de
+               adjuntar) vivía en selChat, que NUNCA se limpiaba tras enviarlo
+               — así que si el chat se desmontaba y volvía a montar (p.ej. al
+               ir a "Ver ficha completa"/"Iniciar pedido" y volver, que ponen
+               chatOpen=false para navegar), la tarjeta "revivía" como
+               pendiente sin que nadie la pidiera. Ahora, en cuanto deja de
+               ser relevante (se envía o se cancela), se limpia también aquí. */
+            onAttachmentCleared={() => setSelChat(prev => prev ? { ...prev, context: null } : prev)} />
         </div>
       )}
       {/* Hoja "¿con quién quieres chatear?" — pedidos con vendedor Y mensajero a la vez. */}

@@ -167,14 +167,17 @@ const _AV_COLORS = ["#6366F1", "#0EA5E9", "#10B981", "#F59E0B", "#EF4444", "#8B5
 
 // ── INSIGNIA DE VERIFICADO — ÚNICO componente para el sello ✓ en TODA la app
 // (avatares, tarjetas de producto, chat, perfil…). Fondo SÓLIDO dorado (sello
-// de garantía, no un detalle), palomita negra dentro, con sombra propia para
-// que "flote" sobre lo que tenga debajo. Cambiar esto lo cambia en todos lados.
+// de garantía, no un detalle), palomita negra dentro. Borde sólido (en vez del
+// truco de sombra "0 0 0 2px", que a tamaños chicos se veía borroso/sucio
+// contra la foto) para un contorno nítido, con una sombra más discreta para
+// que "flote" sin ensuciarse con lo que tenga debajo. Cambiar esto lo cambia
+// en todos lados.
 export const VerifiedTick = ({ size = 10, color = "#0a0a0a" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
 );
 export const VerifiedBadge = ({ size = 18, style }) => (
-  <div title="Verificado" style={{ width: size, height: size, borderRadius: "50%", background: G, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 0 2px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.45)", ...style }}>
-    <VerifiedTick size={Math.round(size * 0.58)} />
+  <div title="Verificado" style={{ width: size, height: size, borderRadius: "50%", background: G, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", border: `${Math.max(1.5, Math.round(size * 0.09))}px solid #0a0a0a`, boxShadow: "0 1px 4px rgba(0,0,0,.4)", ...style }}>
+    <VerifiedTick size={Math.round(size * 0.54)} />
   </div>
 );
 // AVATAR REUTILIZABLE — único en toda la app. Si hay foto muestra <img>; si no,

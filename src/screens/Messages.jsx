@@ -984,7 +984,7 @@ function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, 
   );
 }
 
-export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = [], onOpenOrder, onOpenProduct, onStartOrder, onConvId }) {
+export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = [], onOpenOrder, onOpenProduct, onStartOrder, onConvId, onAttachmentCleared }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const [convId,    setConvId]    = useState(chat.id || chat.key || null);
   // Avisa al padre qué conversación está EN PANTALLA ahora mismo (para que, si llega
@@ -1257,10 +1257,18 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
       : replyTo ? { reply_to: replyTo.id, reply_preview: replyTo.preview } : null;
     // Sin texto escrito pero CON adjunto: el producto ES el mensaje.
     const finalText = (text && text.trim()) ? text.trim() : (ctx ? `🛍️ ${ctx.title || "Producto"}` : text);
-    if (ctx) setCtx(null);
+    // BUG REAL corregido: `ctx` arranca de `chat.context` (prop del padre) SOLO
+    // en el useState inicial — limpiarlo aquí es estado LOCAL de este montaje.
+    // Si el padre (App.jsx) desmonta este ChatScreen (p.ej. "Ver ficha
+    // completa"/"Iniciar pedido" ponen chatOpen=false para navegar) y luego lo
+    // vuelve a montar con el MISMO objeto `chat` de siempre, `chat.context`
+    // seguía teniendo el producto original — la tarjeta "revivía" como
+    // pendiente sin que nadie la pidiera. onAttachmentCleared avisa al padre para
+    // que limpie ESE estado también, así no sobrevive un remontaje.
+    if (ctx) { setCtx(null); onAttachmentCleared && onAttachmentCleared(); }
     if (replyTo) setReplyTo(null);
     doSend(finalText, meta);
-  }, [ctx, replyTo, doSend]);
+  }, [ctx, replyTo, doSend, onAttachmentCleared]);
 
   const retrySend = useCallback((m) => { doSend(m.text, m.meta, m.id); }, [doSend]);
 
@@ -1440,7 +1448,7 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
         onSend={handleSend} onSendVoice={handleSendVoice} blocked={blocked} S={S} B={B} T1={T1} T3={T3} isDark={isDark} initialDraft={chat.draft || ""}
         replyTo={replyTo} onCancelReply={() => setReplyTo(null)}
         editing={editing} onSaveEdit={handleSaveEdit} onCancelEdit={() => setEditing(null)}
-        attachment={ctx} onCancelAttachment={() => setCtx(null)}
+        attachment={ctx} onCancelAttachment={() => { setCtx(null); onAttachmentCleared && onAttachmentCleared(); }}
         onOpenProduct={onOpenProduct} onStartOrder={onStartOrder} orders={orders}
         themeHex={themeHex} themeText={themeText}
       />
@@ -1491,7 +1499,10 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
           cierra al tocar cualquier parte fuera del popover. */}
       {showTrust && <>
         <div onClick={() => setShowTrust(false)} style={{ position: "fixed", inset: 0, zIndex: 5150 }} />
-        <div style={{ position: "fixed", top: "calc(11px + env(safe-area-inset-top, 0px) + 46px)", right: 14, maxWidth: 260, display: "flex", alignItems: "center", gap: 8, background: isDark ? "rgba(255,192,30,.1)" : "rgba(180,130,0,.09)", border: `1px solid ${G}40`, borderRadius: 13, padding: "10px 14px", boxShadow: isDark ? "0 8px 24px rgba(0,0,0,.35)" : "0 8px 24px rgba(0,0,0,.18)", zIndex: 5151 }}>
+        {/* Fondo SÓLIDO (CARD, la misma tarjeta que usa el resto de la app —
+            igual que el menú "⋮" de arriba), no el tinte semi-transparente de
+            antes: se veía el mensaje/tarjeta de atrás por encima, ilegible. */}
+        <div style={{ position: "fixed", top: "calc(11px + env(safe-area-inset-top, 0px) + 46px)", right: 14, maxWidth: 260, display: "flex", alignItems: "center", gap: 8, background: CARD, border: `1px solid ${B}`, borderRadius: 13, padding: "10px 14px", boxShadow: isDark ? "0 8px 24px rgba(0,0,0,.45)" : "0 8px 24px rgba(0,0,0,.18)", zIndex: 5151 }}>
           <span style={{ fontSize: 15, flexShrink: 0 }}>🛡️</span>
           <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.4 }}>Coordina y compra dentro de RETADOR — así quedas respaldado. Evita acordar fuera de la plataforma.</p>
         </div>

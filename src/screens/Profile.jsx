@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { Edit2, Trash2 } from "lucide-react";
+import { Edit2, Trash2, Archive, ArchiveRestore } from "lucide-react";
 import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
@@ -502,14 +502,14 @@ const FP_TAG_STYLE = {
   "Nuevo":       { bg:FP_C.accentSoft,  color:FP_C.accentText, border:"#1A2550" },
 };
 
-function FP_ProductCard({ product, onClick, onDelete, onEdit, onPromote }) {
+function FP_ProductCard({ product, onClick, onDelete, onEdit, onPromote, onArchive }) {
   const FP_C = useFP_C();
   const [liked, setLiked] = useState(false);
   // Si la foto falla al cargar (archivo roto, borrado del storage, etc.),
   // caemos al ícono simple — nunca la interfaz de error cruda del navegador.
   const [imgError, setImgError] = useState(false);
   const tc = FP_TAG_STYLE[product.tag] || {};
-  const own = !!(onDelete || onEdit);
+  const own = !!(onDelete || onEdit || onArchive);
   const rejected = product.moderation_status === "rejected";
   const rejectReason = product.moderation_reason || product.rejection_reason || product.rejected_reason || "";
   const isService = product.kind === "service";
@@ -548,8 +548,13 @@ function FP_ProductCard({ product, onClick, onDelete, onEdit, onPromote }) {
               <Edit2 size={13} color="#fff" />
             </button>
           )}
+          {onArchive && (
+            <button title="Archivar" onClick={e => { e.stopPropagation(); onArchive(); }} style={{ ...ownBtn, border:`1px solid rgba(96,165,250,.55)`, background:"rgba(96,165,250,.14)" }}>
+              <Archive size={13} color="#60a5fa" />
+            </button>
+          )}
           {onDelete && (
-            <button onClick={e => { e.stopPropagation(); onDelete(); }} style={{ ...ownBtn, border:`1px solid rgba(239,68,68,.55)`, background:"rgba(239,68,68,.12)" }}>
+            <button title="Borrar" onClick={e => { e.stopPropagation(); onDelete(); }} style={{ ...ownBtn, border:`1px solid rgba(239,68,68,.55)`, background:"rgba(239,68,68,.12)" }}>
               <Trash2 size={13} color="#ef4444" />
             </button>
           )}
@@ -599,6 +604,46 @@ function FP_ProductCard({ product, onClick, onDelete, onEdit, onPromote }) {
         {product.sales != null && <div style={{ fontSize:10, color:FP_C.textMuted, marginTop:3 }}>
           {product.sales} vendidos
         </div>}
+      </div>
+    </div>
+  );
+}
+
+// ── Fila de un producto ARCHIVADO — cuándo vence + Recuperar/Borrar ahora ────
+function FP_ArchivedProductCard({ product, onRecover, onDeleteNow }) {
+  const FP_C = useFP_C();
+  const [imgError, setImgError] = useState(false);
+  const isService = product.kind === "service";
+  const vence = product.archive_expires_at ? new Date(product.archive_expires_at) : null;
+  const venceTxt = vence ? vence.toLocaleDateString("es-ES", { day:"2-digit", month:"short", year:"numeric" }) : null;
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:10, background:FP_C.surface,
+      border:`1px solid ${FP_C.border}`, borderRadius:10, padding:"10px 12px" }}>
+      <div style={{ width:46, height:46, borderRadius:8, background:FP_C.surfaceHigh, flexShrink:0,
+        display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, overflow:"hidden" }}>
+        {(product.image && !imgError)
+          ? <img src={product.image} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", filter:"grayscale(.6) brightness(.75)" }} onError={() => setImgError(true)}/>
+          : (isService ? "🛠️" : "📦")}
+      </div>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontSize:12.5, fontWeight:700, color:FP_C.textPrimary, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+          {product.name || product.title}
+        </div>
+        <div style={{ fontSize:10.5, color:FP_C.textSecondary, marginTop:2 }}>
+          {venceTxt ? `Vence el ${venceTxt}` : "Archivado"}
+        </div>
+        <div style={{ display:"flex", gap:6, marginTop:7 }}>
+          {onRecover && (
+            <button onClick={onRecover} style={{ background:FP_C.accent, border:"none", borderRadius:7, padding:"5px 10px", fontSize:10.5, fontWeight:700, color:"#fff", cursor:"pointer", display:"flex", alignItems:"center", gap:4 }}>
+              <ArchiveRestore size={11} /> Recuperar
+            </button>
+          )}
+          {onDeleteNow && (
+            <button onClick={onDeleteNow} style={{ background:"rgba(239,68,68,.12)", border:"1px solid rgba(239,68,68,.4)", borderRadius:7, padding:"5px 10px", fontSize:10.5, fontWeight:700, color:"#ef4444", cursor:"pointer", display:"flex", alignItems:"center", gap:4 }}>
+              <Trash2 size={11} /> Borrar ahora
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1348,7 +1393,7 @@ function FP_ReportModal({ targetName, onClose, onSubmit, C }) {
     </div>
   );
 }
-export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, onRequestPlan, currentPlan = "Básico", plans = [], myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct }) {
+export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, onRequestPlan, currentPlan = "Básico", plans = [], myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct, archivedProducts = [], archiveDays = 30, onArchiveProduct, onUnarchiveProduct, onDeleteArchivedProduct }) {
   // ⭐ Destacar: visible solo si el admin tiene la función encendida (config en vivo).
   const promoOn = usePlatformCfg().promoActive === true;
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
@@ -2133,9 +2178,11 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
         position:"sticky", top:50, zIndex:90 }}>
         {[
           { k:"productos", top:fmtBig(userProducts.length), l:"En venta" },
+          // "Archivados" SOLO para el dueño — nunca público, nunca para otros.
+          isOwner && { k:"archivados", top:fmtBig(archivedProducts.length), l:"Archivados" },
           { k:"reseñas",   top:fmtBig(sellerRatingInfo?.count || 0), l:"Valoraciones" },
           { k:"acerca",    top:"+", l:"Info" },
-        ].map(t => (
+        ].filter(Boolean).map(t => (
           <button key={t.k} onClick={() => setTab(t.k)} style={{
             flex:1, background:"none", border:"none", cursor:"pointer",
             padding:"11px 8px 12px", fontFamily:FP_FB,
@@ -2175,7 +2222,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                 {[...userProducts].sort((a, b) => {
                   const so = p => p.kind !== "service" && p.stock != null && Number(p.stock) <= 0 ? 1 : 0;
                   return so(a) - so(b);
-                }).map(p => <FP_ProductCard key={p.id} product={p} onClick={() => onProduct && onProduct(p)} onDelete={onDeleteProduct ? (() => onDeleteProduct(p.id)) : null} onEdit={onEditProduct ? (() => onEditProduct(p)) : null} onPromote={(promoOn && onPromoteProduct && !p.promoted && p.kind !== "service") ? (() => onPromoteProduct(p)) : null}/>)}
+                }).map(p => <FP_ProductCard key={p.id} product={p} onClick={() => onProduct && onProduct(p)} onDelete={onDeleteProduct ? (() => onDeleteProduct(p.id)) : null} onEdit={onEditProduct ? (() => onEditProduct(p)) : null} onArchive={onArchiveProduct ? (() => onArchiveProduct(p.id)) : null} onPromote={(promoOn && onPromoteProduct && !p.promoted && p.kind !== "service") ? (() => onPromoteProduct(p)) : null}/>)}
               </div>
             )}
             {isOwner && (
@@ -2194,6 +2241,28 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                   Ver Pro
                   <FP_Icon d={FP_Icons.chevronR} size={14} color={FP_C.accentText}/>
                 </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ARCHIVADOS — solo el dueño llega aquí (la pestaña ni existe si no lo es) */}
+        {tab === "archivados" && isOwner && (
+          <>
+            <div style={{ fontSize:11.5, color:FP_C.textSecondary, marginBottom:14, lineHeight:1.5 }}>
+              Se guardan ocultos por <strong style={{ color:FP_C.textPrimary }}>{archiveDays} días</strong> desde que los archivaste. No cuentan para el límite de tu plan mientras estén aquí.
+            </div>
+            {archivedProducts.length === 0 ? (
+              <div style={{ textAlign:"center", color:FP_C.textSecondary, fontSize:12.5, padding:"28px 10px" }}>
+                No tienes productos archivados.
+              </div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {archivedProducts.map(p => (
+                  <FP_ArchivedProductCard key={p.id} product={p}
+                    onRecover={onUnarchiveProduct ? (() => onUnarchiveProduct(p.id)) : null}
+                    onDeleteNow={onDeleteArchivedProduct ? (() => onDeleteArchivedProduct(p.id)) : null} />
+                ))}
               </div>
             )}
           </>

@@ -18,6 +18,7 @@ import {
   authSignUp, authSignIn, authSignOut, authGetSession,
   getUserById, getUserName, updateUserName,
   mapProduct, loadProducts, loadServices, getFeed, saveProduct, deleteProduct, getProductsBySeller, uploadImage, DEMO_PRODUCT,
+  archiveProduct, unarchiveProduct, deleteProductHard, sweepExpiredArchives,
   sendMessage, loadMessages, markRead, getMyConversations,
   toggleFavorite, getMyFavorites, getPlatformStats, getPlatformConfig, setPlatformConfig, setPlatformBlocks, myPermissions, promoteProduct,
   getLedgerEntries, createEscrow, releaseEscrow, getSystemStatus,
@@ -343,7 +344,7 @@ function AppShell({ sessionUser }) {
   const [prodBackTo, setProdBackTo] = useState(null);
   const [editProd,  setEditProd]  = useState(null);
   const [confirmCfg, setConfirmCfg] = useState(null);
-  const askConfirm = (msg, onYes) => setConfirmCfg({ msg, onYes });
+  const askConfirm = (msg, onYes, opts = {}) => setConfirmCfg({ msg, onYes, label: opts.label || "Eliminar", color: opts.color || "#ef4444" });
   const updateProduct = async (id, changes) => {
     const upd = {};
     if (changes.title       !== undefined) upd.title       = changes.title;
@@ -617,7 +618,25 @@ function AppShell({ sessionUser }) {
   // MIS publicaciones (productos + servicios, INCLUIDAS las retiradas): el dueño las
   // ve todas en su perfil, marcando las retiradas. Fuente: getProductsBySeller (sin filtrar).
   const [ownListings, setOwnListings] = useState([]);
-  const reloadOwn = useCallback(() => { if (sessionUser?.id) getProductsBySeller(sessionUser.id).then(setOwnListings).catch(() => {}); }, [sessionUser?.id]);
+  // Archivados (SOLO el dueño los ve — nunca públicos): pestaña aparte en "Mis
+  // productos". Antes de cada carga se barre lo vencido de forma silenciosa
+  // (sweep_expired_archives) — mientras no exista un cron real, el uso normal
+  // de la pantalla lo hace por su cuenta.
+  const [ownArchived, setOwnArchived] = useState([]);
+  const reloadOwn = useCallback(() => {
+    if (!sessionUser?.id) return;
+    sweepExpiredArchives().finally(() => {
+      getProductsBySeller(sessionUser.id).then(setOwnListings).catch(() => {});
+      getProductsBySeller(sessionUser.id, { archived: true }).then(setOwnArchived).catch(() => {});
+    });
+  }, [sessionUser?.id]);
+  // Preferencia real de "cuánto tiempo guardar mis archivados" (profiles.archive_days).
+  const [archiveDays, setArchiveDays] = useState(30);
+  useEffect(() => {
+    if (!sessionUser?.id) return;
+    supabase.from("profiles").select("archive_days").eq("id", sessionUser.id).maybeSingle()
+      .then(({ data }) => { if (data?.archive_days) setArchiveDays(data.archive_days); }).catch(() => {});
+  }, [sessionUser?.id]);
   useEffect(() => { reloadOwn(); }, [reloadOwn]);
   // NOTA: antes había aquí una segunda consulta a la tabla `exchange_rates` como
   // "respaldo" de las tasas mientras platform_config cargaba. Se quita: era una
@@ -867,14 +886,44 @@ function AppShell({ sessionUser }) {
     if (d.promote && adminCfg.promoActive === true) promoteFlow(data.id, { skipConfirm: true });
   };
 
+  // Borrado REAL — delete_product_hard: fotos de Storage + fila para siempre.
+  // Antes esto solo ponía status='deleted' (nunca desaparecía de verdad), de ahí
+  // las tarjetas fantasma en el chat con fotos de productos que el dueño creía
+  // borrados. Ya no queda ningún rastro después de esto.
   const handleDelete = async id => {
-    const { error } = await supabase.from("products").update({ status: "deleted" }).eq("id", id);
-    if (error) { flash("⚠️ " + (error.message || "No se pudo eliminar")); return; }
+    try { await deleteProductHard(id); }
+    catch (e) { flash("⚠️ " + (e?.message || "No se pudo eliminar")); return; }
+    setProducts(prev => prev.filter(p => p.id !== id));
+    setServices(prev => prev.filter(p => p.id !== id));
+    setOwnArchived(prev => prev.filter(p => p.id !== id));
+    reloadOwn();
+    flash("🗑️ Eliminado para siempre");
+  };
+  // Archivar: esconde el producto (no cuenta para el límite del plan) y guarda
+  // por profiles.archive_days — recuperable mientras haya cupo.
+  const handleArchive = async (id) => {
+    let vence = null;
+    try { vence = await archiveProduct(id); }
+    catch (e) { flash("⚠️ " + (e?.message || "No se pudo archivar")); return; }
     setProducts(prev => prev.filter(p => p.id !== id));
     setServices(prev => prev.filter(p => p.id !== id));
     reloadOwn();
-    flash("🗑️ Eliminado");
+    const d = vence ? new Date(vence).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }) : null;
+    flash(`🗄️ Archivado${d ? " · vence el " + d : ""} — puedes recuperarlo cuando quieras si tienes cupo en tu plan`);
   };
+  // Recuperar: si no hay cupo en el plan actual, el backend rechaza con SU
+  // mensaje real (ej. "Ya tienes 10 de 10 productos activos...") — se muestra tal cual.
+  const handleUnarchive = async (id) => {
+    try { await unarchiveProduct(id); }
+    catch (e) { flash("⚠️ " + (e?.message || "No se pudo recuperar")); return; }
+    reloadOwn();
+    flash("♻️ Recuperado — ya está de vuelta en tus productos");
+  };
+  // Textos de confirmación reales — la de Borrar es explícita a propósito
+  // (fotos y reseñas se pierden para siempre); la de Archivar no da miedo,
+  // solo informa dónde queda y por cuánto tiempo.
+  const confirmDeleteProduct = (id) => askConfirm("Se elimina para siempre. Perderás las fotos y las reseñas de este producto. Esta acción no se puede deshacer.", () => handleDelete(id));
+  const confirmArchiveProduct = (id) => askConfirm(`Se guarda oculto por ${archiveDays} días. Puedes recuperarlo cuando quieras si tienes cupo en tu plan.`, () => handleArchive(id), { label: "Archivar", color: "#2563EB" });
 
   // Abre el chat CONECTADO (realtime) con la otra persona. La identidad SIEMPRE es
   // el uuid real del usuario: así "mensaje" con la misma persona abre SIEMPRE la
@@ -1600,7 +1649,7 @@ function AppShell({ sessionUser }) {
             <div style={{ fontSize: 14, fontWeight: 600, color: effectiveTheme === "dark" ? "#f0f0f2" : "#1a1a1a", marginBottom: 18, lineHeight: 1.4 }}>{confirmCfg.msg}</div>
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => setConfirmCfg(null)} style={{ flex: 1, height: 44, borderRadius: 11, border: `1px solid ${effectiveTheme === "dark" ? "#333" : "#e0e0e0"}`, background: "transparent", color: effectiveTheme === "dark" ? "#f0f0f2" : "#1a1a1a", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
-              <button onClick={() => { confirmCfg.onYes && confirmCfg.onYes(); setConfirmCfg(null); }} style={{ flex: 1, height: 44, borderRadius: 11, border: "none", background: "#ef4444", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Eliminar</button>
+              <button onClick={() => { confirmCfg.onYes && confirmCfg.onYes(); setConfirmCfg(null); }} style={{ flex: 1, height: 44, borderRadius: 11, border: "none", background: confirmCfg.color, color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>{confirmCfg.label}</button>
             </div>
           </div>
         </div>
@@ -1890,7 +1939,7 @@ function AppShell({ sessionUser }) {
                 onDelivery={() => { setTab("envios"); setEScr("local"); }}
                 onChat={requestChat} onViewProfile={id => { setSelSeller(id); setMScr("sellerProfile"); }}
                 onBuy={handleBuy} onFav={toggleFav} isFav={favorites.has(selProd.id)} canChat={hasOrderWith(selProd.seller_id)}
-                onDelete={(selProd.seller_id === user?.id) ? (() => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => { handleDelete(selProd.id); if (prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); } else setMScr("home"); })) : null}
+                onDelete={(selProd.seller_id === user?.id) ? (() => askConfirm("Se elimina para siempre. Perderás las fotos y las reseñas de este producto. Esta acción no se puede deshacer.", () => { handleDelete(selProd.id); if (prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); } else setMScr("home"); })) : null}
                 onEdit={(selProd.seller_id === user?.id) ? (() => setEditProd(selProd)) : null}
                 flash={flash} requireAuth={requireAuth} user={user}
               />
@@ -1960,17 +2009,18 @@ function AppShell({ sessionUser }) {
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
               const paid = payments.filter(p => p.sellerName === me).reduce((a, p) => a + (p.amount || 0), 0);
               const myDebt = Math.max(0, accrued - paid);
-              return <FreeProfileScreen embedded onMenu={() => setProfileMenuOpen(true)} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} onRequestPlan={() => {}} currentPlan={(user?.plan && user.plan !== "gratis") ? (user.plan === "pro" ? "Pro" : user.plan === "premium" ? "Premium" : userPlans[me] || "Básico") : (userPlans[me] || "Básico")} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)} />;
+              return <FreeProfileScreen embedded onMenu={() => setProfileMenuOpen(true)} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} onRequestPlan={() => {}} currentPlan={(user?.plan && user.plan !== "gratis") ? (user.plan === "pro" ? "Pro" : user.plan === "premium" ? "Premium" : userPlans[me] || "Básico") : (userPlans[me] || "Básico")} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} archivedProducts={ownArchived} archiveDays={archiveDays} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={confirmDeleteProduct} onArchiveProduct={confirmArchiveProduct} onUnarchiveProduct={handleUnarchive} onDeleteArchivedProduct={confirmDeleteProduct} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)} />;
             })()}
             {pScr === "profile-full" && (() => {
               const me = profileData?.name || user?.name;
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
               const paid = payments.filter(p => p.sellerName === me).reduce((a, p) => a + (p.amount || 0), 0);
               const myDebt = Math.max(0, accrued - paid);
-              return <FreeProfileScreen onBack={() => setPScr("main")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} onRequestPlan={() => {}} currentPlan={(user?.plan && user.plan !== "gratis") ? (user.plan === "pro" ? "Pro" : user.plan === "premium" ? "Premium" : userPlans[me] || "Básico") : (userPlans[me] || "Básico")} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={(id) => askConfirm("¿Eliminar este producto? No se puede deshacer.", () => handleDelete(id))} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)} />;
+              return <FreeProfileScreen onBack={() => setPScr("main")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} onRequestPlan={() => {}} currentPlan={(user?.plan && user.plan !== "gratis") ? (user.plan === "pro" ? "Pro" : user.plan === "premium" ? "Premium" : userPlans[me] || "Básico") : (userPlans[me] || "Básico")} plans={adminCfg.plans} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} archivedProducts={ownArchived} archiveDays={archiveDays} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={confirmDeleteProduct} onArchiveProduct={confirmArchiveProduct} onUnarchiveProduct={handleUnarchive} onDeleteArchivedProduct={confirmDeleteProduct} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)} />;
             })()}
             {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
             {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}
+              archiveDays={archiveDays} onArchiveDaysChange={setArchiveDays}
               productView={productView} onProductViewChange={setProductView}
               profileData={profileData} onProfileUpdate={setProfileData}
               isVerified={!!user?.verified}

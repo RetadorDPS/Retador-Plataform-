@@ -280,14 +280,18 @@ function VoiceMessage({ meta, mine, isDark, T1, T3, accentBg, autoPlay, onEnded 
     audio.currentTime = t;
     setCur(t);
   };
+  // stopPropagation en las tres: el control de audio captura el toque para sí
+  // solo — sin esto, el mismo gesto burbujeaba hasta la burbuja del mensaje y
+  // el arrastre horizontal se confundía con "deslizar para responder".
   const onTrackDown = (e) => {
+    e.stopPropagation();
     if (!total) return;
     setDragging(true);
     seekToClientX(e.clientX);
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
   };
-  const onTrackMove = (e) => { if (dragging) seekToClientX(e.clientX); };
-  const endDrag = () => setDragging(false);
+  const onTrackMove = (e) => { e.stopPropagation(); if (dragging) seekToClientX(e.clientX); };
+  const endDrag = (e) => { e.stopPropagation(); setDragging(false); };
   const trackBg = mine ? "#00000022" : (isDark ? "#ffffff22" : "#00000018");
   const pct = total ? Math.min(100, (cur / total) * 100) : 0;
   const dot = mine ? "#000" : G;
@@ -760,17 +764,30 @@ function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, 
         {gesture.dx > 4 && (
           <div style={{ position: "absolute", top: "50%", left: -34, transform: "translateY(-50%)", opacity: Math.min(1, gesture.dx / 42), fontSize: 17 }}>↩️</div>
         )}
-        <div {...gesture.handlers} style={{ touchAction: "pan-y", maxWidth: "100%", background: bubbleBg, border: mine ? "none" : `1px solid ${B}`, borderRadius: mine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "10px 13px", transform: gesture.dx ? `translateX(${gesture.dx}px)` : "none", transition: gesture.dragging ? "none" : "transform .25s cubic-bezier(.34,1.56,.64,1), outline .3s, box-shadow .3s", outline: isHighlighted ? `2px solid ${G}` : "none", outlineOffset: 2, boxShadow: isHighlighted ? `0 0 0 5px ${G}22` : "none" }}>
+        <div {...gesture.handlers} style={{ touchAction: "pan-y", maxWidth: "100%", background: bubbleBg, border: mine ? "none" : `1px solid ${B}`, borderRadius: mine ? "20px 20px 6px 20px" : "20px 20px 20px 6px", padding: "10px 13px", transform: gesture.dx ? `translateX(${gesture.dx}px)` : "none", transition: gesture.dragging ? "none" : "transform .25s cubic-bezier(.34,1.56,.64,1), outline .3s, box-shadow .3s", outline: isHighlighted ? `2px solid ${G}` : "none", outlineOffset: 2, boxShadow: isHighlighted ? `0 0 0 5px ${G}22` : "none" }}>
           {isReply && <ReplyStrip meta={meta} mine={mine} isDark={isDark} onJump={() => onJumpTo(meta.reply_to)} />}
           {meta && (meta.type === "product" || meta.type === "service" || meta.type === "order" || meta.type === "admin_request") && <RefChatCard meta={meta} onOpen={openRef} orders={orders} B={mine ? "#00000022" : B} T1={mine ? "#000" : T1} T3={mine ? "#00000088" : T3} soft={mine ? "#ffffff55" : soft} />}
-          {isVoice
-            ? <VoiceMessage meta={meta} mine={mine} isDark={isDark} T1={bubbleText} T3={T3} accentBg={mine ? "#00000022" : `${G}33`} autoPlay={autoPlayVoice} onEnded={onVoiceEnded} />
-            : <p style={{ fontSize: 12, color: bubbleText, lineHeight: 1.5, wordBreak: "break-word", ...noNativeSelect }}>{m.text}</p>}
-          <p style={{ fontSize: 9, color: mine ? "#00000066" : T3, marginTop: 4, textAlign: "right" }}>
-            {m.edited_at && <span style={{ fontStyle: "italic" }}>Editado · </span>}
-            {new Date(m.created_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
-            {mine && (m.read_at ? " ✓✓" : " ✓")}
-          </p>
+          {isVoice ? (
+            <>
+              <VoiceMessage meta={meta} mine={mine} isDark={isDark} T1={bubbleText} T3={T3} accentBg={mine ? "#00000022" : `${G}33`} autoPlay={autoPlayVoice} onEnded={onVoiceEnded} />
+              <p style={{ fontSize: 9, color: mine ? "#00000066" : T3, marginTop: 4, textAlign: "right" }}>
+                {new Date(m.created_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                {mine && (m.read_at ? " ✓✓" : " ✓")}
+              </p>
+            </>
+          ) : (
+            // Hora dentro de la MISMA burbuja, en la esquina inferior derecha del
+            // texto (no una línea aparte) — el span "flota" a la derecha dentro del
+            // párrafo, así el texto se acomoda alrededor en vez de dejarla suelta.
+            <p style={{ fontSize: 12, color: bubbleText, lineHeight: 1.5, wordBreak: "break-word", margin: 0, ...noNativeSelect }}>
+              {m.text}
+              <span style={{ float: "right", clear: "both", marginLeft: 8, marginTop: 4, fontSize: 9, color: mine ? "#00000066" : T3, whiteSpace: "nowrap" }}>
+                {m.edited_at && <span style={{ fontStyle: "italic" }}>Editado · </span>}
+                {new Date(m.created_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                {mine && (m.read_at ? " ✓✓" : " ✓")}
+              </span>
+            </p>
+          )}
         </div>
       </div>
       <ReactionsRow list={msgReactions} meId={meId} mine={mine} onToggle={(emoji) => onReact(m.id, emoji)} />
@@ -994,6 +1011,22 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     const first = msgs.find(m => m.meta && typeof m.meta === "object" && (m.meta.type === "product" || m.meta.type === "service"));
     if (first) setLinkedProduct({ type: first.meta.type, id: first.meta.id, title: first.meta.title || "", image: first.meta.image || null, price: first.meta.price ?? null, currency: first.meta.currency || null });
   }, [msgs, loading, linkedProduct]);
+
+  // El panel fijo deja de mostrarse en dos casos reales, nunca por su cuenta:
+  // 1) el producto se borró de verdad (delete_product_hard) — ya no existe.
+  // 2) ya se creó un pedido real desde él — para eso estaba, ya cumplió.
+  // Cerrar con la "✕" también usa panelClosed (solo para esa visita); estos
+  // dos casos son permanentes porque la razón de fondo cambió de verdad.
+  useEffect(() => {
+    if (!linkedProduct || linkedProduct.type !== "product") return;
+    let alive = true;
+    getProductById(linkedProduct.id).then(p => { if (alive && !p) setPanelClosed(true); }).catch(() => {});
+    return () => { alive = false; };
+  }, [linkedProduct]);
+  useEffect(() => {
+    if (!linkedProduct || linkedProduct.type !== "product") return;
+    if (orders.some(o => o.productId === linkedProduct.id)) setPanelClosed(true);
+  }, [orders, linkedProduct]);
 
   // Aviso de confianza — UNA sola vez por conversación (marcado en localStorage
   // por otherId+producto, estable aunque el convId todavía no exista al abrir

@@ -254,12 +254,44 @@ export const deleteProduct = async (id) => {
 // nunca agotados — misma regla que el feed/búsqueda. publicView=false (default,
 // el propio dueño gestionando "En venta"): trae TODO, agotados incluidos, para
 // que pueda reponerlos o borrarlos.
-export const getProductsBySeller = async (id, { publicView = false } = {}) => {
-  let q = supabase.from("products").select(PRODUCT_SELECT).eq("seller_id", id).neq("status", "deleted").order("created_at", { ascending: false });
+// archived=true trae SOLO los archivados (para la pestaña "Archivados" del
+// propio dueño); por defecto (false) trae los activos, sin los archivados —
+// un producto archivado no pertenece a "En venta" hasta que se recupera.
+export const getProductsBySeller = async (id, { publicView = false, archived = false } = {}) => {
+  let q = supabase.from("products").select(PRODUCT_SELECT).eq("seller_id", id).neq("status", "deleted");
+  q = archived ? q.not("archived_at", "is", null) : q.is("archived_at", null);
+  q = q.order("created_at", { ascending: false });
   if (publicView) q = q.or("kind.eq.service,stock.is.null,stock.gt.0");
   const { data, error } = await q;
   if (error) { console.error("getProductsBySeller:", error.message); return []; }
   return (data || []).map(mapProduct);
+};
+// ── ARCHIVAR vs BORRAR — el candado de límite de productos SOLO cuenta los
+// activos (ni deleted ni archivados). Archivar esconde y guarda por
+// profiles.archive_days; Borrar es delete_product_hard: fotos de Storage + fila
+// para siempre (nunca vuelve, nunca queda un fantasma). ──────────────────────
+export const archiveProduct = async (id) => {
+  const { data, error } = await supabase.rpc("archive_product", { p_product_id: id });
+  if (error) throw error;
+  return data; // timestamptz de vencimiento
+};
+export const unarchiveProduct = async (id) => {
+  const { error } = await supabase.rpc("unarchive_product", { p_product_id: id });
+  if (error) throw error;
+};
+export const deleteProductHard = async (id) => {
+  const { error } = await supabase.rpc("delete_product_hard", { p_product_id: id });
+  if (error) throw error;
+};
+// Barrido oportunista de archivados vencidos — se llama silenciosamente al
+// entrar a "Mis productos" (mientras no exista un cron real). Nunca lanza.
+export const sweepExpiredArchives = async () => {
+  try { const { data } = await supabase.rpc("sweep_expired_archives"); return data || 0; }
+  catch (e) { return 0; }
+};
+export const updateArchiveDays = async (id, days) => {
+  const { error } = await supabase.from("profiles").update({ archive_days: days }).eq("id", id);
+  if (error) throw error;
 };
 
 // ── Reseñas REALES de productos (tabla reviews: product_id, user_id, rating,

@@ -1200,11 +1200,14 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     return () => { alive = false; if (subRef.current) getSB().then(c => c?.removeChannel(subRef.current)).catch(() => {}); };
   }, [convId]);
 
-  // Aviso de confianza — UNA sola vez por conversación (marcado en localStorage
-  // por otherId+producto, estable aunque el convId todavía no exista al abrir
-  // el chat por primera vez). Es un mensaje de SISTEMA, no de ninguna de las
-  // dos personas — nunca se guarda en `messages`, solo se pinta. Depende del
-  // adjunto FRESCO (ctx) — nunca se re-deriva del historial al reabrir.
+  // Aviso de confianza — el ícono 🛡️ del encabezado es SIEMPRE visible en
+  // cualquier chat; este efecto solo abre el popover automáticamente la
+  // primera vez que la conversación arranca desde un producto/servicio
+  // (marcado en localStorage por otherId+producto, estable aunque el convId
+  // todavía no exista al abrir el chat por primera vez). Depende del adjunto
+  // FRESCO (ctx) — nunca se re-deriva del historial al reabrir. Después de esa
+  // primera vez el ícono se queda ahí, permanente, para volver a abrirlo
+  // cuando se quiera.
   useEffect(() => {
     if (loading || !ctx || !chat.otherId) return;
     const key = `retador_trust_${chat.otherId}_${ctx.type}_${ctx.id}`;
@@ -1376,11 +1379,26 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
               <p style={{ fontSize: 10, color: blocked ? "#F87171" : (onViewProfile && chat.otherId ? G : "#22C55E"), marginTop: 1, fontWeight: 600 }}>{blocked ? "🚫 Bloqueado" : (onViewProfile && chat.otherId ? "Ver perfil ›" : "● Activo")}</p>
             </div>
           </div>
+          {/* Escudo de confianza — ícono FIJO, siempre presente en cualquier
+              chat (antes era un banner que se perdía al salir y volver a
+              entrar). Minimalista, sin animación: solo un botón que abre el
+              mismo mensaje de siempre en un popover pequeño. */}
+          <button onClick={() => setShowTrust(o => !o)} title="Mensaje de confianza" style={{ background: "none", border: `1px solid ${B}`, borderRadius: "50%", width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer" }}>
+            <span style={{ fontSize: 14 }}>🛡️</span>
+          </button>
           <div style={{ position: "relative" }}>
             <button onClick={() => setChatOpts(o => !o)} style={{ background: "none", border: "none", color: T2, fontSize: 19, cursor: "pointer", lineHeight: 1 }}>⋯</button>
           </div>
         </div>
       )}
+
+      {showTrust && <>
+        <div onClick={() => setShowTrust(false)} style={{ position: "fixed", inset: 0, zIndex: 5150 }} />
+        <div style={{ position: "fixed", top: "calc(11px + env(safe-area-inset-top, 0px) + 46px)", right: 14, maxWidth: 260, display: "flex", alignItems: "center", gap: 8, background: isDark ? "rgba(255,192,30,.1)" : "rgba(180,130,0,.09)", border: `1px solid ${G}40`, borderRadius: 13, padding: "10px 14px", boxShadow: isDark ? "0 8px 24px rgba(0,0,0,.35)" : "0 8px 24px rgba(0,0,0,.18)", zIndex: 5151 }}>
+          <span style={{ fontSize: 15, flexShrink: 0 }}>🛡️</span>
+          <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.4 }}>Coordina y compra dentro de RETADOR — así quedas respaldado. Evita acordar fuera de la plataforma.</p>
+        </div>
+      </>}
 
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "12px clamp(18px,3vw,48px)", display: "flex", flexDirection: "column", gap: 7, position: "relative", ...chatBgStyle(isDark) }}>
         {/* Forma "a" de salir del modo selección: tocar en cualquier parte fuera
@@ -1391,19 +1409,6 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
             selección, que es justo lo que hace onTap más abajo. */}
         {selectionMode && (
           <div onClick={clearSelection} style={{ position: "absolute", inset: 0, background: isDark ? "rgba(0,0,0,.45)" : "rgba(0,0,0,.25)", zIndex: 10 }} />
-        )}
-        {/* Aviso de confianza — mensaje de SISTEMA (no de ninguna de las dos
-            personas), una sola vez por conversación originada en un producto/servicio.
-            Fijo (sticky) arriba del scroll del chat para que no se pierda al bajar
-            en conversaciones largas — antes era el primer elemento de la lista y
-            desaparecía scrolleando como cualquier mensaje más. */}
-        {showTrust && (
-          <div style={{ position: "sticky", top: 0, zIndex: 6, display: "flex", justifyContent: "center", padding: "6px 0 4px", margin: "-12px calc(-1 * clamp(18px,3vw,48px)) 4px", background: isDark ? "rgba(20,20,20,.94)" : "rgba(250,250,250,.94)", backdropFilter: "blur(6px)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, maxWidth: "92%", background: isDark ? "rgba(255,192,30,.09)" : "rgba(180,130,0,.09)", border: `1px solid ${G}40`, borderRadius: 13, padding: "9px 14px" }}>
-              <span style={{ fontSize: 15, flexShrink: 0 }}>🛡️</span>
-              <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.4 }}>Coordina y compra dentro de RETADOR — así quedas respaldado. Evita acordar fuera de la plataforma.</p>
-            </div>
-          </div>
         )}
         {loading
           ? <div style={{ display: "flex", justifyContent: "center", padding: "24px 0" }}><Spin size={22} /></div>

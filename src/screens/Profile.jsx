@@ -158,12 +158,12 @@ export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, on
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 4600, pointerEvents: open ? "auto" : "none" }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.5)", opacity: open ? 1 : 0, transition: "opacity .25s" }} />
-      <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "82%", maxWidth: 330, background: BG, borderRight: `1px solid ${B}`, transform: open ? "translateX(0)" : "translateX(-100%)", transition: "transform .28s cubic-bezier(.4,0,.2,1)", display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top,0px)", overflowY: "auto" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 16px 10px" }}>
+      <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "82%", maxWidth: 330, background: BG, borderRight: `1px solid ${B}`, transform: open ? "translateX(0)" : "translateX(-100%)", transition: "transform .28s cubic-bezier(.4,0,.2,1)", display: "flex", flexDirection: "column", paddingTop: "env(safe-area-inset-top,0px)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 16px 10px", flexShrink: 0 }}>
           <span style={{ fontSize: 15, fontWeight: 800, color: T1 }}>Menú</span>
           <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${B}`, color: T2, width: 30, height: 30, borderRadius: "50%", cursor: "pointer", fontSize: 15 }}>×</button>
         </div>
-        <div style={{ padding: "0 12px 24px" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: "0 12px 12px", minHeight: 0 }}>
           {items.map((it, i) => (
             <div key={i} onClick={() => go(it.action)} style={{ display: "flex", alignItems: "center", gap: 13, padding: "12px 12px", marginBottom: 7, background: isDark ? "#0d0d0d" : S, border: `1px solid ${B}`, borderRadius: 14, cursor: "pointer" }}>
               <div style={{ width: 38, height: 38, borderRadius: 12, background: isDark ? it.color + "22" : it.color + "18", border: `1.5px solid ${it.color}55`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -177,9 +177,10 @@ export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, on
               <span style={{ color: T3, fontSize: 18, fontWeight: 300 }}>›</span>
             </div>
           ))}
-          {/* Tirita de tasas del día — vivía en el perfil (no quedaba bien ahí);
-              este es el espacio vacío debajo del menú, mismo componente y
-              comportamiento de siempre (toca para expandir el detalle). */}
+        </div>
+        {/* Tirita de tasas del día — pegada al borde inferior del todo, separada
+            del bloque de opciones (no solo "el espacio de abajo" del menú). */}
+        <div style={{ flexShrink: 0, padding: "10px 12px calc(12px + env(safe-area-inset-bottom,0px))", borderTop: `1px solid ${B}` }}>
           <FxTirita />
         </div>
       </div>

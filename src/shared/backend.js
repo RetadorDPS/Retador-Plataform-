@@ -267,9 +267,10 @@ export const getProductsBySeller = async (id, { publicView = false, archived = f
   return (data || []).map(mapProduct);
 };
 // ── ARCHIVAR vs BORRAR — el candado de límite de productos SOLO cuenta los
-// activos (ni deleted ni archivados). Archivar esconde y guarda por
-// profiles.archive_days; Borrar es delete_product_hard: fotos de Storage + fila
-// para siempre (nunca vuelve, nunca queda un fantasma). ──────────────────────
+// activos (ni deleted ni archivados). Archivar esconde por 30 días fijos (el
+// backend ya no depende de ninguna preferencia del usuario); Borrar es
+// delete_product_hard: fotos de Storage + fila para siempre (nunca vuelve,
+// nunca queda un fantasma). ──────────────────────────────────────────────
 export const archiveProduct = async (id) => {
   const { data, error } = await supabase.rpc("archive_product", { p_product_id: id });
   if (error) throw error;
@@ -288,10 +289,6 @@ export const deleteProductHard = async (id) => {
 export const sweepExpiredArchives = async () => {
   try { const { data } = await supabase.rpc("sweep_expired_archives"); return data || 0; }
   catch (e) { return 0; }
-};
-export const updateArchiveDays = async (id, days) => {
-  const { error } = await supabase.from("profiles").update({ archive_days: days }).eq("id", id);
-  if (error) throw error;
 };
 
 // ── Reseñas REALES de productos (tabla reviews: product_id, user_id, rating,
@@ -1336,6 +1333,22 @@ export const adminListPlanLimits = async () => {
 export const adminUpdatePlanLimit = async (planId, maxProducts) => {
   const { data, error } = await supabase.rpc("admin_update_plan", { p_plan_id: planId, p_max_products: maxProducts });
   if (error) { console.error("adminUpdatePlanLimit:", error.message); throw error; }
+  return data;
+};
+// ── Misma tabla `plans` de arriba, pero de lectura pública (RLS "planes
+// visibles" ya la deja abierta a cualquiera) — es la fuente ÚNICA para la
+// pantalla de planes del comprador: nombre, precio, límite y comisión reales,
+// sin texto de marketing inventado ni datos desincronizados.
+export const getPlans = async () => {
+  const { data, error } = await supabase.from("plans").select("id, name, max_products, price, currency, commission_pct").eq("active", true).order("price", { ascending: true });
+  if (error) { console.error("getPlans:", error.message); return []; }
+  return data || [];
+};
+// Bajar a un plan de igual o menor precio, sin aprobación — subir a uno más
+// caro sigue exigiendo la solicitud de siempre (submitPlanRequest).
+export const downgradePlan = async (planId) => {
+  const { data, error } = await supabase.rpc("downgrade_plan", { p_plan_id: planId });
+  if (error) { console.error("downgradePlan:", error.message); throw error; }
   return data;
 };
 

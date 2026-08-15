@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2, Archive, ArchiveRestore } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -177,6 +177,10 @@ export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, on
               <span style={{ color: T3, fontSize: 18, fontWeight: 300 }}>›</span>
             </div>
           ))}
+          {/* Tirita de tasas del día — vivía en el perfil (no quedaba bien ahí);
+              este es el espacio vacío debajo del menú, mismo componente y
+              comportamiento de siempre (toca para expandir el detalle). */}
+          <FxTirita />
         </div>
       </div>
     </div>
@@ -412,6 +416,24 @@ function FP_Row({ children, border=false, onClick, style={} }) {
 // color. Nunca emoji.
 function FP_Avatar({ avatar, name, size=72, verified=false }) {
   return <Avatar avatar={avatar} name={name} size={size} verified={verified} />;
+}
+
+// ── VISOR AMPLIADO DE LA FOTO DE PERFIL ──────────────────────────────
+// Solo ver en grande, sin botón de descargar ni compartir — a diferencia del
+// visor de fotos de producto. Un único botón de regreso.
+function FP_AvatarView({ url, name, onClose }) {
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:3000, background:"#000", display:"flex", flexDirection:"column" }}>
+      <div style={{ display:"flex", alignItems:"center", padding:"14px 16px", flexShrink:0 }}>
+        <button onClick={onClose} aria-label="Atrás" style={{ background:"rgba(255,255,255,.12)", border:"none", borderRadius:"50%", width:36, height:36, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>
+          <FP_Icon d={FP_Icons.back} size={18} color="#fff"/>
+        </button>
+      </div>
+      <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", padding:24, minHeight:0 }}>
+        <img src={url} alt={name || "Foto de perfil"} onClick={e=>e.stopPropagation()} style={{ maxWidth:"100%", maxHeight:"100%", borderRadius:12, objectFit:"contain" }}/>
+      </div>
+    </div>
+  );
 }
 
 // ── AVATAR PICKER (SOLO FOTO) ─────────────────────────────────────
@@ -658,71 +680,6 @@ function FP_ArchivedProductCard({ product, onRecover, onDeleteNow }) {
 // Esta pestaña ahora solo MUESTRA, en modo lectura, las reseñas reales de
 // todos los productos de este vendedor (con nombre/avatar reales).
 
-// ── PRO MODAL ─────────────────────────────────────────────────────
-function FP_ProModal({ onClose, onSeePlans }) {
-  const FP_C = useFP_C();
-  return (
-    <div onClick={onClose} style={{ position:"fixed", inset:0,
-      background:"rgba(0,0,0,0.85)", backdropFilter:"blur(16px)",
-      zIndex:500, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
-      <div onClick={e => e.stopPropagation()} style={{
-        background:"#0A0B14", border:"1px solid #1E1A40",
-        borderRadius:16, width:"100%", maxWidth:400,
-        overflow:"hidden", boxShadow:"0 40px 100px rgba(0,0,0,0.8)",
-      }}>
-        <div style={{ background:"linear-gradient(160deg,#0A0A18,#12103A)",
-          padding:"28px 24px 24px", position:"relative", overflow:"hidden" }}>
-          <div style={{ position:"absolute", top:-60, right:-30, width:220, height:220,
-            borderRadius:"50%", background:"rgba(80,60,200,0.08)", filter:"blur(40px)" }}/>
-          <div style={{ position:"relative" }}>
-            <div style={{ display:"inline-flex", alignItems:"center", gap:6,
-              background:"rgba(99,102,241,0.1)", border:"1px solid rgba(99,102,241,0.2)",
-              borderRadius:6, padding:"4px 10px", marginBottom:14 }}>
-              <span style={{ fontSize:10, fontWeight:700, color:"#A78BFA",
-                fontFamily:FP_FH, letterSpacing:"0.8px" }}>PRO PLAN</span>
-            </div>
-            <div style={{ fontSize:22, fontWeight:800, color:"#fff",
-              fontFamily:FP_FH, marginBottom:4 }}>
-              Tienda profesional
-            </div>
-            <div style={{ fontSize:13, color:"#4A5270", marginBottom:20, fontFamily:FP_FB }}>
-              Todo lo que necesitas para escalar tus ventas.
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-              {[
-                [FP_Icons.package,  "Página de tienda"],
-                [FP_Icons.eye,      "Tema de marca"],
-                [FP_Icons.zap,      "Analytics en vivo"],
-                [FP_Icons.shield,   "Badge verificado"],
-                [FP_Icons.plus,     "Productos ilimitados"],
-                [FP_Icons.star,     "IA asistente"],
-              ].map(([icon, label]) => (
-                <div key={label} style={{ background:"rgba(255,255,255,0.03)",
-                  border:"1px solid rgba(255,255,255,0.05)",
-                  borderRadius:8, padding:"9px 12px",
-                  display:"flex", alignItems:"center", gap:8 }}>
-                  <FP_Icon d={icon} size={14} color="#5A6480"/>
-                  <span style={{ fontSize:12, color:"#5A6480", fontFamily:FP_FB }}>{label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div style={{ padding:"20px 24px 24px" }}>
-          <FP_Btn onClick={onSeePlans} style={{ width:"100%", marginBottom:8,
-            background:"linear-gradient(135deg,#5B45D4,#7C3AED)",
-            boxShadow:"0 4px 20px rgba(91,69,212,0.3)" }}>
-            Ver planes Pro
-          </FP_Btn>
-          <FP_Btn variant="secondary" onClick={onClose} style={{ width:"100%" }}>
-            Ahora no
-          </FP_Btn>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── CHANGE PASSWORD SCREEN ────────────────────────────────────────
 function FP_ChangePasswordScreen({ hasPassword, onBack }) {
   const FP_C = useFP_C();
@@ -960,7 +917,7 @@ function FP_ChangePasswordScreen({ hasPassword, onBack }) {
 }
 
 // ── SETTINGS SCREEN ───────────────────────────────────────────────
-function FP_SettingsScreen({ onClose }) {
+function FP_SettingsScreen({ onClose, currentPlan = "Gratis", onOpenPlans }) {
   const FP_C = useFP_C();
   const [notif,      setNotif]      = useState({ ventas:true, mensajes:true, reseñas:true, promo:false });
   const [privacy,    setPrivacy]    = useState("public");
@@ -1001,22 +958,23 @@ function FP_SettingsScreen({ onClose }) {
 
       <div style={{ padding:"20px 20px 60px" }}>
 
-        {/* Plan banner */}
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+        {/* Plan banner — nombre real (profiles.plan → plans.name), toca para
+            ir a la misma pantalla real de planes de todo el resto de la app. */}
+        <div onClick={onOpenPlans} role="button" style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
           background:FP_C.accentSoft, border:`1px solid ${FP_C.accent}22`,
-          borderRadius:10, padding:"12px 14px", marginBottom:20 }}>
+          borderRadius:10, padding:"12px 14px", marginBottom:20, cursor:onOpenPlans ? "pointer" : "default" }}>
           <div>
             <div style={{ fontSize:12, fontWeight:700, color:FP_C.accentText, fontFamily:FP_FH }}>
-              Motor de Arranque
+              Tu plan
             </div>
             <div style={{ fontSize:11, color:FP_C.textSecondary, marginTop:1 }}>
-              Plan gratuito activo
+              Plan {currentPlan} activo
             </div>
           </div>
           <div style={{ fontSize:10, fontWeight:700, color:FP_C.accentText, fontFamily:FP_FH,
             background:FP_C.bg, border:`1px solid ${FP_C.accent}33`,
             borderRadius:4, padding:"3px 8px", letterSpacing:"0.5px" }}>
-            FREE
+            {currentPlan.toUpperCase()}
           </div>
         </div>
 
@@ -1309,8 +1267,7 @@ function FP_VerifyModal({ user, isVerified, onClose, onSubmit, C, flash }) {
 }
 // Mapea el nombre del plan (Pro/Premium) al valor del backend (pro/premium).
 const PLAN_KEY = (nameOrId) => { const s = String(nameOrId || "").toLowerCase(); if (s.includes("premium")) return "premium"; if (s.includes("pro")) return "pro"; return null; };
-function FP_PlansModal({ user, plans = [], current, onClose, C, flash }) {
-  const price = p => p.promo && p.promoPrice >= 0 ? p.promoPrice : p.price;
+function FP_PlansModal({ user, plans = [], current, currentPlanId, onClose, C, flash, onPlanChanged }) {
   const [pending, setPending] = useState(null);   // { plan } de la solicitud pendiente
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -1322,6 +1279,9 @@ function FP_PlansModal({ user, plans = [], current, onClose, C, flash }) {
     return () => { alive = false; };
   }, [user?.id]);
 
+  const curPlan = plans.find(pl => pl.id === currentPlanId);
+  const curPrice = Number(curPlan?.price ?? 0);
+
   const request = async (p) => {
     const key = PLAN_KEY(p.id || p.name);
     if (!key) { flash_("Ese plan no se puede solicitar"); return; }
@@ -1332,27 +1292,43 @@ function FP_PlansModal({ user, plans = [], current, onClose, C, flash }) {
     setBusy(false);
   };
 
+  // Bajar de plan es INSTANTÁNEO y sin aprobación (downgrade_plan ya lo valida
+  // en el backend: solo deja bajar a uno de igual o menor precio).
+  const downgrade = async (p) => {
+    if (busy) return;
+    setBusy(true);
+    try { await downgradePlan(p.id); flash_(`✅ Cambiaste al plan ${p.name}`); onPlanChanged && onPlanChanged(p.id); onClose(); }
+    catch (e) { flash_("⚠️ " + (e?.message || "No se pudo cambiar de plan")); }
+    setBusy(false);
+  };
+
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.6)", zIndex:2000, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
       <div onClick={e=>e.stopPropagation()} style={{ background:C.surface, width:"100%", maxWidth:460, borderRadius:"18px 18px 0 0", padding:"20px 18px 26px", border:`1px solid ${C.border}`, maxHeight:"88vh", overflowY:"auto" }}>
         <div style={{ fontSize:16, fontWeight:800, color:C.textPrimary, marginBottom:4 }}>Planes</div>
-        <div style={{ fontSize:12, color:C.textSecondary, marginBottom:16 }}>Elige un plan. El pago se coordina manualmente; cuando se confirme, se activa.</div>
+        <div style={{ fontSize:12, color:C.textSecondary, marginBottom:16 }}>Subir de plan se coordina manualmente (solicitud → aprobación). Bajar a uno de igual o menor precio es instantáneo, sin esperar aprobación.</div>
         {pending && <div style={{ background:`${C.warning}14`, border:`1px solid ${C.warning}44`, borderRadius:10, padding:"11px 12px", color:C.warning, fontSize:12.5, fontWeight:700, marginBottom:14, textAlign:"center" }}>🕐 Solicitud enviada (plan {pending.plan}), pendiente de aprobación</div>}
         <div style={{ display:"flex", flexDirection:"column", gap:11 }}>
           {plans.map(p => {
-            const isCur = current === p.name;
-            const requestable = !isCur && !!PLAN_KEY(p.id || p.name);
+            const isCur = (currentPlanId ? p.id === currentPlanId : current === p.name);
+            const pPrice = Number(p.price ?? 0);
+            const requestable = !isCur && pPrice > curPrice && !!PLAN_KEY(p.id || p.name);
+            const downgradable = !isCur && pPrice <= curPrice;
             const isPendingThis = pending && PLAN_KEY(pending.plan) === PLAN_KEY(p.id || p.name);
             return <div key={p.id} style={{ border:`1.5px solid ${isCur ? C.accent : C.border}`, borderRadius:12, padding:"14px 14px 16px", background: isCur ? `${C.accent}0d` : C.surfaceTop }}>
               <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginBottom:8 }}>
                 <span style={{ fontSize:15, fontWeight:800, color:C.textPrimary }}>{p.name}{isCur && <span style={{ fontSize:10, fontWeight:700, color:C.accent, marginLeft:7 }}>· actual</span>}</span>
-                <span style={{ fontSize:14, fontWeight:800, color:C.textPrimary }}>{price(p) === 0 ? "Gratis" : `$${price(p)}/mes`}{p.promo && p.price !== price(p) && <span style={{ fontSize:11, color:C.textSecondary, textDecoration:"line-through", marginLeft:6 }}>${p.price}</span>}</span>
+                <span style={{ fontSize:14, fontWeight:800, color:C.textPrimary }}>{pPrice === 0 ? "Gratis" : `$${pPrice}/mes`}</span>
               </div>
-              {(p.features||[]).map((f,i)=><div key={i} style={{ display:"flex", gap:7, alignItems:"flex-start", marginBottom:5 }}><span style={{ color:C.positive, fontSize:12, flexShrink:0 }}>✓</span><span style={{ fontSize:12, color:C.textPrimary }}>{f}</span></div>)}
+              <div style={{ display:"flex", gap:7, alignItems:"flex-start", marginBottom:5 }}><span style={{ color:C.positive, fontSize:12, flexShrink:0 }}>✓</span><span style={{ fontSize:12, color:C.textPrimary }}>Hasta {p.max_products ?? "—"} productos publicados</span></div>
+              {p.commission_pct != null && <div style={{ display:"flex", gap:7, alignItems:"flex-start" }}><span style={{ color:C.positive, fontSize:12, flexShrink:0 }}>✓</span><span style={{ fontSize:12, color:C.textPrimary }}>{Number(p.commission_pct)}% de comisión por venta</span></div>}
               {requestable && (
                 isPendingThis
                   ? <button disabled style={{ width:"100%", height:38, marginTop:11, borderRadius:9, background:C.surfaceTop, border:`1px solid ${C.border}`, color:C.textSecondary, fontSize:12.5, fontWeight:700, cursor:"default" }}>🕐 Solicitud enviada</button>
                   : <button disabled={!!pending || busy || loading} onClick={()=>request(p)} style={{ width:"100%", height:38, marginTop:11, borderRadius:9, background: (pending || busy) ? C.surfaceTop : C.accent, border:"none", color: (pending || busy) ? C.textSecondary : "#fff", fontSize:12.5, fontWeight:800, cursor: (pending || busy) ? "default" : "pointer", opacity: (pending || busy) ? .7 : 1 }}>{busy ? "Enviando…" : `Solicitar plan ${p.name}`}</button>
+              )}
+              {downgradable && (
+                <button disabled={busy || loading} onClick={()=>downgrade(p)} style={{ width:"100%", height:38, marginTop:11, borderRadius:9, background:"none", border:`1px solid ${C.border}`, color:C.textPrimary, fontSize:12.5, fontWeight:700, cursor: busy ? "default" : "pointer", opacity: busy ? .7 : 1 }}>{busy ? "Cambiando…" : `Cambiar a ${p.name}`}</button>
               )}
             </div>;
           })}
@@ -1393,7 +1369,7 @@ function FP_ReportModal({ targetName, onClose, onSubmit, C }) {
     </div>
   );
 }
-export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, onRequestPlan, currentPlan = "Básico", plans = [], myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct, archivedProducts = [], archiveDays = 30, onArchiveProduct, onUnarchiveProduct, onDeleteArchivedProduct }) {
+export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, currentPlan = "Gratis", currentPlanId = "gratis", plans = [], maxProducts = null, onPlanChanged, myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct, archivedProducts = [], onArchiveProduct, onUnarchiveProduct, onDeleteArchivedProduct }) {
   // ⭐ Destacar: visible solo si el admin tiene la función encendida (config en vivo).
   const promoOn = usePlatformCfg().promoActive === true;
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
@@ -1402,8 +1378,8 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
 
   const [tab,          setTab]          = useState("productos");
   const [following,    setFollowing]    = useState(false);
-  const [showPro,      setShowPro]      = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAvatarView, setShowAvatarView] = useState(false);
   const [showPicker,   setShowPicker]   = useState(false);
   // Editor UNIFICADO: "Editar perfil" y "Acerca de" ya no son dos flujos
   // separados — un solo booleano abre UN panel con ambas secciones dentro.
@@ -1683,8 +1659,8 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
 
       {/* OVERLAYS */}
       {showPicker   && <FP_AvatarPicker current={pd.avatar} name={pd.name} userId={user?.id} onSelect={a=>{ setPd(d=>({...d,avatar:a})); setShowPicker(false); }} onClose={() => setShowPicker(false)}/>}
-      {showPro      && isOwner && <FP_ProModal onClose={() => setShowPro(false)} onSeePlans={() => { setShowPro(false); setShowPlans(true); }}/>}
-      {showSettings && isOwner && <FP_SettingsScreen onClose={() => setShowSettings(false)}/>}
+      {showSettings && isOwner && <FP_SettingsScreen onClose={() => setShowSettings(false)} currentPlan={currentPlan} onOpenPlans={() => { setShowSettings(false); setShowPlans(true); }}/>}
+      {showAvatarView && <FP_AvatarView url={avatarUrlOf(profile.avatar)} name={profile.name} onClose={() => setShowAvatarView(false)}/>}
       {/* Valoración desde el perfil: crear, EDITAR o BORRAR la mía (una sola). */}
       {reviewOpen && canReview && (
         <div onClick={() => !revBusy && setReviewOpen(false)}
@@ -1741,7 +1717,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
 
       {showReport && !isOwner && <FP_ReportModal targetName={profile.name} onClose={() => setShowReport(false)} onSubmit={(payload) => { onReport?.(payload); setShowReport(false); toast_("Reporte enviado. Gracias por avisar."); }} C={FP_C}/>}
       {showVerify && isOwner && <FP_VerifyModal user={user} isVerified={isVerified} onClose={() => setShowVerify(false)} onSubmit={() => onVerify?.()} C={FP_C} flash={toast_}/>}
-      {showPlans && isOwner && <FP_PlansModal user={user} plans={plans} current={currentPlan} onClose={() => setShowPlans(false)} C={FP_C} flash={toast_}/>}
+      {showPlans && isOwner && <FP_PlansModal user={user} plans={plans} current={currentPlan} currentPlanId={currentPlanId} onPlanChanged={onPlanChanged} onClose={() => setShowPlans(false)} C={FP_C} flash={toast_}/>}
 
       {/* TOAST — rojo/⚠ si es un error real (nunca se finge éxito con un ✓ verde) */}
       {toast && (
@@ -1803,14 +1779,18 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
             }}>
               <FP_Icon d={FP_Icons.settings} size={15} color={FP_C.textSecondary}/>
             </button>
-            <button onClick={() => setShowPro(true)} style={{
+            {/* Único lugar real para ver/cambiar de plan — siempre el nombre
+                real (profiles.plan → plans.name), nunca "Pro" fijo. Ancho
+                flexible (maxWidth con elipsis) para que un nombre largo no
+                rompa el layout. */}
+            <button onClick={() => setShowPlans(true)} title={`Plan ${currentPlan}`} style={{
               background:FP_C.proSoft, border:`1px solid ${FP_C.pro}33`,
-              borderRadius:6, padding:"0 12px", height:32, cursor:"pointer",
+              borderRadius:6, padding:"0 12px", height:32, maxWidth:130, cursor:"pointer",
               color:FP_C.proText, fontSize:11, fontWeight:700, fontFamily:FP_FH,
               display:"flex", alignItems:"center", gap:5, letterSpacing:"0.3px",
             }}>
               <FP_Icon d={FP_Icons.zap} size={12} color={FP_C.proText}/>
-              Pro
+              <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{currentPlan}</span>
             </button>
           </div>
         ) : (
@@ -1826,8 +1806,8 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
         )}
       </div>
 
-      {/* Tirita de tasas del día — visible en la vista principal del perfil (informativa) */}
-      {onMenu && <div style={{ padding:"12px 20px 0" }}><FxTirita /></div>}
+      {/* La tirita de tasas del día se movió al menú lateral (☰ → ProfileMenuDrawer) —
+          no quedaba bien en el perfil. */}
 
       {/* ── PROFILE HEADER ── */}
       {!editing ? (
@@ -1861,7 +1841,13 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
             </div>
             <div style={{ position:"relative", flexShrink:0, display:"flex", flexDirection:"column", alignItems:"center", gap:5 }}>
               <div style={{ position:"relative" }}>
-                <FP_Avatar avatar={profile.avatar} name={profile.name} size={64}/>
+                {/* Un poco más grande que antes (64→78) — dejaba mucho espacio
+                    vacío al lado. Tocar la foto (propia o de cualquier otro
+                    perfil) la abre ampliada, solo si hay una foto real. */}
+                <div onClick={avatarUrlOf(profile.avatar) ? () => setShowAvatarView(true) : undefined}
+                  style={{ cursor: avatarUrlOf(profile.avatar) ? "pointer" : "default" }}>
+                  <FP_Avatar avatar={profile.avatar} name={profile.name} size={78}/>
+                </div>
                 {isOwner && (
                   <button onClick={() => { setPd({...profile}); setAd({...about}); setEditing(true); }}
                     aria-label="Editar perfil"
@@ -1879,7 +1865,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                   borderRadius:4, padding:"1px 6px",
                   fontSize:8, fontWeight:800, color:FP_C.textMuted,
                   fontFamily:FP_FH, letterSpacing:"0.8px", whiteSpace:"nowrap" }}>
-                  {String(currentPlan || "Básico").toUpperCase()}
+                  {String(currentPlan || "Gratis").toUpperCase()}
                 </div>
               )}
             </div>
@@ -1978,22 +1964,16 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
               </div>
             </div>
           )}
-          {isOwner && (
-            <div style={{ display:"flex", gap:8, marginBottom:14 }}>
-              {!isVerified && (
-                <button onClick={() => setShowVerify(true)} style={{
-                  flex:1, background: isDark ? "rgba(25,195,125,.1)" : "#E6FAF3",
-                  border:`1px solid ${isDark ? "rgba(25,195,125,.35)" : "#9DE9CC"}`, color:FP_C.positive,
-                  borderRadius:8, height:38, cursor:"pointer", fontSize:12.5, fontWeight:700,
-                  display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-                  <FP_Icon d={FP_Icons.shield} size={14} color={FP_C.positive}/> Verificar mi perfil
-                </button>
-              )}
-              <button onClick={() => setShowPlans(true)} style={{
-                flex:1, background:FP_C.surfaceTop, border:`1px solid ${FP_C.border}`, color:FP_C.textPrimary,
+          {/* El plan se ve y se cambia en UN solo lugar (botón del plan arriba a
+              la derecha) — este botón quedaba duplicado y desincronizado. */}
+          {isOwner && !isVerified && (
+            <div style={{ marginBottom:14 }}>
+              <button onClick={() => setShowVerify(true)} style={{
+                width:"100%", background: isDark ? "rgba(25,195,125,.1)" : "#E6FAF3",
+                border:`1px solid ${isDark ? "rgba(25,195,125,.35)" : "#9DE9CC"}`, color:FP_C.positive,
                 borderRadius:8, height:38, cursor:"pointer", fontSize:12.5, fontWeight:700,
                 display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-                ⭐ {currentPlan === "Básico" ? "Mejorar mi plan" : `Plan ${currentPlan}`}
+                <FP_Icon d={FP_Icons.shield} size={14} color={FP_C.positive}/> Verificar mi perfil
               </button>
             </div>
           )}
@@ -2225,8 +2205,8 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                 }).map(p => <FP_ProductCard key={p.id} product={p} onClick={() => onProduct && onProduct(p)} onDelete={onDeleteProduct ? (() => onDeleteProduct(p.id)) : null} onEdit={onEditProduct ? (() => onEditProduct(p)) : null} onArchive={onArchiveProduct ? (() => onArchiveProduct(p.id)) : null} onPromote={(promoOn && onPromoteProduct && !p.promoted && p.kind !== "service") ? (() => onPromoteProduct(p)) : null}/>)}
               </div>
             )}
-            {isOwner && (
-              <div onClick={() => setShowPro(true)} style={{
+            {isOwner && maxProducts != null && (
+              <div onClick={() => setShowPlans(true)} style={{
                 display:"flex", alignItems:"center", justifyContent:"space-between",
                 background:FP_C.surface, border:`1px dashed ${FP_C.border}`,
                 borderRadius:8, padding:"12px 14px", cursor:"pointer",
@@ -2234,11 +2214,11 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                 onMouseEnter={e => e.currentTarget.style.borderColor = FP_C.borderMid}
                 onMouseLeave={e => e.currentTarget.style.borderColor = FP_C.border}>
                 <span style={{ fontSize:12, color:FP_C.textSecondary }}>
-                  Límite de <strong style={{ color:FP_C.textPrimary }}>10 productos</strong> en plan Free
+                  Límite de <strong style={{ color:FP_C.textPrimary }}>{maxProducts} productos</strong> en plan {currentPlan}
                 </span>
                 <div style={{ display:"flex", alignItems:"center", gap:5,
                   color:FP_C.accentText, fontSize:12, fontWeight:600, fontFamily:FP_FH }}>
-                  Ver Pro
+                  Ver planes
                   <FP_Icon d={FP_Icons.chevronR} size={14} color={FP_C.accentText}/>
                 </div>
               </div>
@@ -2250,7 +2230,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
         {tab === "archivados" && isOwner && (
           <>
             <div style={{ fontSize:11.5, color:FP_C.textSecondary, marginBottom:14, lineHeight:1.5 }}>
-              Se guardan ocultos por <strong style={{ color:FP_C.textPrimary }}>{archiveDays} días</strong> desde que los archivaste. No cuentan para el límite de tu plan mientras estén aquí.
+              Se guardan ocultos por <strong style={{ color:FP_C.textPrimary }}>30 días</strong> desde que los archivaste. No cuentan para el límite de tu plan mientras estén aquí.
             </div>
             {archivedProducts.length === 0 ? (
               <div style={{ textAlign:"center", color:FP_C.textSecondary, fontSize:12.5, padding:"28px 10px" }}>
@@ -2465,9 +2445,9 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                   </div>
                 )}
 
-                {/* Pro nudge — owner only */}
+                {/* Aviso de plan — owner only, abre la misma pantalla real */}
                 {isOwner && (
-                  <div onClick={() => setShowPro(true)} style={{
+                  <div onClick={() => setShowPlans(true)} style={{
                     background:FP_C.surface, border:`1px solid ${FP_C.border}`,
                     borderRadius:10, padding:"13px 16px", cursor:"pointer",
                     display:"flex", alignItems:"center", justifyContent:"space-between",
@@ -2480,7 +2460,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
                         ¿Vendes con frecuencia?
                       </div>
                       <div style={{ fontSize:11, color:FP_C.textSecondary }}>
-                        Actualiza a Pro y crea tu tienda profesional
+                        Plan actual: {currentPlan} — ver otros planes
                       </div>
                     </div>
                     <FP_Icon d={FP_Icons.chevronR} size={16} color={FP_C.textMuted}/>

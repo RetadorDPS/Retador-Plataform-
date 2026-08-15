@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Gavel, Globe, HardDrive, HelpCircle, Info, Lock, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Phone, Plus, Shield, ShoppingBag, Smartphone, Star, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
-import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser, useAppVersion, updateArchiveDays } from "../shared/index.js";
+import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser, useAppVersion } from "../shared/index.js";
 import { isPushSupported, hasActiveSubscription, enablePush, disablePush } from "../pwa/push.js";
 
 const CFG_DARK = {
@@ -281,7 +281,7 @@ function CFG_HomeScreen({ profile, settings, nav, onBack }) {
 }
 
 /* ── ACCOUNT ──────────────────────────────────────────────────── */
-function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=false, onRequestVerification, accountPassword="", onSetPassword, flash, user, archiveDays=30, onArchiveDaysChange }) {
+function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=false, onRequestVerification, accountPassword="", onSetPassword, flash, user }) {
   const tk = CFG_useTk();
   const [editing, setEditing] = useState(null);
   const [val, setVal] = useState("");
@@ -369,20 +369,6 @@ function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=fal
         ) : (
           <CFG_Row icon={Shield} bg="bg-violet-600" label="Solicitar verificación" sub="Sube tu documento y obtén el sello" onClick={() => onRequestVerification && onRequestVerification()} />
         )}
-      </CFG_Crd>
-      <CFG_Lbl>Productos</CFG_Lbl>
-      <CFG_Crd>
-        <div style={{ background:tk.ROW }} className="px-3.5 pt-2.5 pb-1">
-          <div style={{ color:tk.T2 }} className="text-[11px] leading-snug">Cuánto tiempo guardar mis productos archivados. Aplica a partir de la próxima vez que archives algo — no cambia los que ya están archivados.</div>
-        </div>
-        <CFG_Radio val={archiveDays} change={async v => {
-          onArchiveDaysChange && onArchiveDaysChange(v);
-          try { await updateArchiveDays(user?.id, v); flash && flash("Preferencia guardada"); }
-          catch (e) { flash && flash("⚠️ No se pudo guardar"); }
-        }} opts={[
-          { value:30, label:"30 días",  sub:"Un mes" },
-          { value:90, label:"3 meses",  sub:"90 días" },
-        ]} />
       </CFG_Crd>
       <CFG_Lbl>Seguridad</CFG_Lbl>
       <CFG_Crd>
@@ -1286,7 +1272,7 @@ function CFG_AboutScreen({ nav }) {
 }
 
 /* ── APP ──────────────────────────────────────────────────────── */
-export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTheme="auto", onThemeChange, imgScale=1, onImgScaleChange, appTextScale=1, onTextScaleChange, profileData={}, onProfileUpdate, isVerified=false, onRequestVerification, accountPassword="", onSetPassword, blockedUsers=[], onToggleBlock, onOpenWallet, orders=[], productView="grid", onProductViewChange, archiveDays=30, onArchiveDaysChange }) {
+export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTheme="auto", onThemeChange, imgScale=1, onImgScaleChange, appTextScale=1, onTextScaleChange, profileData={}, onProfileUpdate, isVerified=false, onRequestVerification, accountPassword="", onSetPassword, blockedUsers=[], onToggleBlock, onOpenWallet, orders=[], productView="grid", onProductViewChange }) {
   const [screen, setScreen]     = useState("home");
   const me0 = profileData?.name || user?.name || "Usuario";
   const [profile, setProfile]   = useState({
@@ -1317,7 +1303,7 @@ export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTh
     return next;
   });
 
-  const p = { profile, setProfile: saveProfile, settings, upd, nav, appScale:imgScale, onScale:onImgScaleChange, onBack, onSignOut, onThemeChange, appTheme, appTextScale, onTextScaleChange, flash, isVerified, onRequestVerification, accountPassword, onSetPassword, blockedUsers, onToggleBlock, onOpenWallet, orders, productView, onProductViewChange, user, archiveDays, onArchiveDaysChange };
+  const p = { profile, setProfile: saveProfile, settings, upd, nav, appScale:imgScale, onScale:onImgScaleChange, onBack, onSignOut, onThemeChange, appTheme, appTextScale, onTextScaleChange, flash, isVerified, onRequestVerification, accountPassword, onSetPassword, blockedUsers, onToggleBlock, onOpenWallet, orders, productView, onProductViewChange, user };
   const map = {
     home:          <CFG_HomeScreen          {...p} />,
     account:       <CFG_AccountScreen       {...p} />,

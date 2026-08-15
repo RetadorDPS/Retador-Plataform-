@@ -84,14 +84,14 @@ function useMessageGesture({ onLongPress, onTap, onSwipeReply, disabled }) {
 
 // ── Ícono de micrófono PROPIO (no literal): cápsula dorada con detalle propio,
 // dentro de un círculo con borde — distinto del botón de enviar (relleno G).
-function MicGlyph({ isDark }) {
+function MicGlyph({ isDark, color = G }) {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-      <rect x="8" y="2.5" width="8" height="12.5" rx="4" fill={G} />
+      <rect x="8" y="2.5" width="8" height="12.5" rx="4" fill={color} />
       <circle cx="12" cy="7" r="1.15" fill={isDark ? "#000" : "#fff"} opacity=".85" />
-      <path d="M5.5 11a6.5 6.5 0 0 0 13 0" stroke={G} strokeWidth="2" strokeLinecap="round" fill="none" />
-      <path d="M12 17.5v3.2" stroke={G} strokeWidth="2" strokeLinecap="round" />
-      <path d="M8.6 20.7h6.8" stroke={G} strokeWidth="2" strokeLinecap="round" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0" stroke={color} strokeWidth="2" strokeLinecap="round" fill="none" />
+      <path d="M12 17.5v3.2" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <path d="M8.6 20.7h6.8" stroke={color} strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -320,10 +320,17 @@ function VoiceMessage({ meta, mine, isDark, T1, T3, accentBg, autoPlay, onEnded,
   const toggle = () => {
     const el = audioRef.current;
     if (!el) return;
-    if (playing) { el.pause(); } else {
-      el.play().catch(() => {});
-      if (!heard) { try { localStorage.setItem(heardKey, "1"); } catch (e) {} setHeard(true); onFirstPlay && onFirstPlay(); }
-    }
+    if (playing) { el.pause(); } else { el.play().catch(() => {}); }
+  };
+  // Marca "escuchado" (mic gris → azul) en el evento REAL onPlay del <audio> —
+  // no en el toggle manual — así se dispara igual si el audio arranca por un
+  // toque O por la reproducción en cadena automática (el siguiente audio de
+  // la fila), que antes se saltaba esta marca por completo.
+  const markHeard = () => {
+    if (heard) return;
+    try { localStorage.setItem(heardKey, "1"); } catch (e) {}
+    setHeard(true);
+    onFirstPlay && onFirstPlay();
   };
   // Salta al punto real tocado/arrastrado — mueve el currentTime del <audio> de
   // verdad (nunca solo la barra visual), así el punto arrastrable SIEMPRE
@@ -372,12 +379,13 @@ function VoiceMessage({ meta, mine, isDark, T1, T3, accentBg, autoPlay, onEnded,
           setPlaying(true);
           if (_activeVoiceAudio && _activeVoiceAudio !== audioRef.current) _activeVoiceAudio.pause();
           _activeVoiceAudio = audioRef.current;
+          markHeard();
         }}
         onPause={() => setPlaying(false)}
         onEnded={() => { setPlaying(false); setCur(0); if (_activeVoiceAudio === audioRef.current) _activeVoiceAudio = null; onEnded?.(); }}
         onTimeUpdate={e => { if (!dragging) setCur(e.target.currentTime); }} />}
       <button onClick={toggle} onPointerDown={e => e.stopPropagation()} disabled={!url} className="p" style={{ width: 34, height: 34, borderRadius: "50%", background: accentBg, border: "none", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: url ? "pointer" : "default" }}>
-        <span style={{ fontSize: 13, color: mine ? "#000" : "#fff", marginLeft: playing ? 0 : 1 }}>{playing ? "⏸" : "▶"}</span>
+        <span style={{ fontSize: 13, color: mine ? "#00000099" : (isDark ? "#ffffffb0" : "#00000088"), marginLeft: playing ? 0 : 1 }}>{playing ? "⏸" : "▶"}</span>
       </button>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div ref={trackRef} onPointerDown={onTrackDown} onPointerMove={onTrackMove} onPointerUp={endDrag} onPointerCancel={endDrag}
@@ -426,8 +434,8 @@ function ReactionsRow({ list = [], meId, onToggle, mine }) {
         const mineReacted = rs.some(r => r.user_id === meId);
         return (
           <button key={emoji} onClick={() => onToggle(emoji)} className="p"
-            style={{ display: "flex", alignItems: "center", gap: 3, background: mineReacted ? `${G}26` : "rgba(128,128,128,.16)", border: `1px solid ${mineReacted ? G : "transparent"}`, borderRadius: 100, padding: "2px 7px", fontSize: 11, cursor: "pointer" }}>
-            <span>{emoji}</span>{rs.length > 1 && <span style={{ fontWeight: 700, color: mineReacted ? G : "inherit" }}>{rs.length}</span>}
+            style={{ display: "flex", alignItems: "center", gap: 3, background: mineReacted ? "rgba(128,128,128,.28)" : "rgba(128,128,128,.16)", border: `1px solid ${mineReacted ? "rgba(128,128,128,.5)" : "transparent"}`, borderRadius: 100, padding: "2px 7px", fontSize: 11, cursor: "pointer" }}>
+            <span>{emoji}</span>{rs.length > 1 && <span style={{ fontWeight: 700 }}>{rs.length}</span>}
           </button>
         );
       })}
@@ -446,12 +454,12 @@ function QuickReactionBar({ current, onPick, onOpenFull, mine, CARD, B, isDark }
         const active = current === e;
         return (
           <button key={e} onClick={() => onPick(e)} className="p"
-            style={{ fontSize: 19, width: 30, height: 30, borderRadius: "50%", background: active ? `${G}33` : "transparent", border: active ? `1.5px solid ${G}` : "1.5px solid transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transform: active ? "scale(1.08)" : "scale(1)" }}>
+            style={{ fontSize: 19, width: 30, height: 30, borderRadius: "50%", background: active ? "rgba(128,128,128,.28)" : "transparent", border: active ? "1.5px solid rgba(128,128,128,.5)" : "1.5px solid transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
             {e}
           </button>
         );
       })}
-      <button onClick={onOpenFull} className="p" style={{ width: 30, height: 30, borderRadius: "50%", background: "rgba(128,128,128,.14)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 800, color: G }}>+</button>
+      <button onClick={onOpenFull} className="p" style={{ width: 30, height: 30, borderRadius: "50%", background: "rgba(128,128,128,.14)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 800, color: isDark ? "#ccc" : "#666" }}>+</button>
     </div>
   );
 }
@@ -668,7 +676,7 @@ export function MessagesScreen({ user, onBack, onChat, chatOpen = false }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // Input AISLADO: guarda su propio borrador, así los mensajes que llegan por
 // realtime (que re-renderizan el chat) NO le roban el foco ni borran las letras.
-const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, T1, T3, isDark, initialDraft = "", replyTo, onCancelReply, editing, onSaveEdit, onCancelEdit, attachment, onCancelAttachment }) {
+const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, T1, T3, isDark, initialDraft = "", replyTo, onCancelReply, editing, onSaveEdit, onCancelEdit, attachment, onCancelAttachment, onOpenProduct, onStartOrder, orders = [], themeHex = G, themeText = "#000" }) {
   // initialDraft: mensaje predefinido EDITABLE (ej. el cobro de deuda del admin).
   const [draft, setDraft] = useState(initialDraft || "");
   const inputRef = useRef(null);
@@ -784,19 +792,23 @@ const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, 
 
   return (
     <div style={{ borderTop: `1px solid ${B}`, flexShrink: 0 }}>
-      {/* Adjunto PENDIENTE (estilo WhatsApp: la miniatura antes de mandarla) — se
-          pierde sin problema si se sale sin enviar; al enviar viaja DENTRO del
-          único mensaje real (meta:{type,product_id,...}), nunca un panel aparte. */}
+      {/* Adjunto PENDIENTE — misma tarjeta EXACTA (RefChatCard) que se pinta ya
+          enviada en el historial: foto grande, título, precio y los botones
+          reales "Ver ficha completa"/"Iniciar pedido" funcionando ahí mismo,
+          antes de mandar nada. La única diferencia entre pendiente y enviada es
+          DÓNDE vive (aquí arriba del input vs. fija en el historial) — se
+          reutiliza el mismo componente para que nunca puedan desalinearse. */}
       {attachment && !editing && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", background: S }}>
-          {attachment.image
-            ? <img src={attachment.image} alt="" style={{ width: 40, height: 40, borderRadius: 9, objectFit: "cover", flexShrink: 0 }} onError={e => e.target.style.display = "none"} />
-            : <div style={{ width: 40, height: 40, borderRadius: 9, background: "#8884", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>{attachment.type === "service" ? "🛠️" : "🛍️"}</div>}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: 11.5, fontWeight: 800, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.title || "Producto"}</p>
-            <p style={{ fontSize: 9.5, color: T3, marginTop: 1 }}>Se enviará con tu mensaje</p>
-          </div>
-          <button onClick={onCancelAttachment} style={{ background: "none", border: "none", color: T3, fontSize: 17, cursor: "pointer", padding: 4, flexShrink: 0 }}>×</button>
+        <div style={{ position: "relative", padding: "10px 14px 2px", background: S }}>
+          <button onClick={onCancelAttachment} title="Quitar" style={{ position: "absolute", top: 4, right: 8, zIndex: 1, width: 24, height: 24, borderRadius: "50%", background: isDark ? "#000000aa" : "#ffffffcc", border: "none", color: T3, fontSize: 15, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+          <RefChatCard
+            meta={{ type: attachment.type, product_id: attachment.id, title: attachment.title, image: attachment.image, price: attachment.price, currency: attachment.currency }}
+            onOpen={onOpenProduct ? () => onOpenProduct(attachment.id) : null}
+            onStartOrder={onStartOrder}
+            orders={orders}
+            B={B} T1={T1} T3={T3}
+            soft={isDark ? "#141417" : "#f1f5f9"}
+          />
         </div>
       )}
       {replyTo && !editing && (
@@ -829,12 +841,12 @@ const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, 
                 : recBars.map((lv, i) => <span key={i} style={{ width: 2.5, minWidth: 2.5, borderRadius: 2, background: G, height: `${Math.max(3, Math.round(lv * 22))}px`, flexShrink: 0, transition: "height .07s linear" }} />)}
             </div>
           </div>
-          {/* Tres controles, nuestros colores (dorado/negro) — nunca verde. */}
+          {/* Tres controles: cancelar (rojo), pausar (gris neutro, no sigue el tema), enviar (color del chat). */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 9 }}>
             <button onClick={cancelRecording} className="p" title="Cancelar" style={{ width: 44, height: 44, borderRadius: "50%", background: "none", border: `1px solid ${B}`, color: "#ef4444", fontSize: 17, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>🗑️</button>
-            <button onClick={togglePause} className="p" title={paused ? "Reanudar" : "Pausar"} style={{ width: 44, height: 44, borderRadius: "50%", background: S, border: `2px solid ${G}`, color: T1, fontSize: 17, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{paused ? "▶" : "⏸"}</button>
-            <button onClick={finishRecording} className="p" title="Enviar" style={{ width: 44, height: 44, background: G, border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <Ic n="send" c="#000" s={18} />
+            <button onClick={togglePause} className="p" title={paused ? "Reanudar" : "Pausar"} style={{ width: 44, height: 44, borderRadius: "50%", background: S, border: `2px solid ${T3}`, color: T3, fontSize: 17, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{paused ? "▶" : "⏸"}</button>
+            <button onClick={finishRecording} className="p" title="Enviar" style={{ width: 44, height: 44, background: themeHex, border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Ic n="send" c={themeText} s={18} />
             </button>
           </div>
         </div>
@@ -846,12 +858,12 @@ const ChatInput = memo(function ChatInput({ onSend, onSendVoice, blocked, S, B, 
             style={{ flex: 1, minWidth: 0, background: S, border: `1px solid ${B}`, borderRadius: 50, padding: "10px 15px", color: T1, fontSize: 13, outline: "none" }} />
           {(draft.trim() || attachment)
             ? <button onClick={send} className="p" onPointerDown={e => e.preventDefault()}
-                style={{ width: 42, height: 42, background: G, border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 10px rgba(255,192,30,.35)" }}>
-                <Ic n="send" c="#000" s={20} />
+                style={{ width: 42, height: 42, background: themeHex, border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: `0 2px 10px ${themeHex}59` }}>
+                <Ic n="send" c={themeText} s={20} />
               </button>
             : <button onClick={startRecording} disabled={!!editing} title="Grabar nota de voz" className="p" onPointerDown={e => e.preventDefault()}
-                style={{ width: 42, height: 42, background: S, border: `2px solid ${editing ? T3 : G}`, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: editing ? .4 : 1, cursor: editing ? "default" : "pointer" }}>
-                <MicGlyph isDark={isDark} />
+                style={{ width: 42, height: 42, background: S, border: `2px solid ${editing ? T3 : themeHex}`, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: editing ? .4 : 1, cursor: editing ? "default" : "pointer" }}>
+                <MicGlyph isDark={isDark} color={editing ? T3 : themeHex} />
               </button>}
         </div>
       )}
@@ -931,7 +943,7 @@ function MessageBubble({ m, mine, isDark, B, T1, T3, CARD, orders, onOpenOrder, 
           {meta && (meta.type === "product" || meta.type === "service" || meta.type === "order" || meta.type === "admin_request") && <RefChatCard meta={meta} onOpen={openRef} onStartOrder={onStartOrder} orders={orders} B={mine ? "#00000022" : B} T1={mine ? bubbleText : T1} T3={mine ? bubbleTx2 : T3} soft={mine ? "#ffffff40" : soft} />}
           {isVoice ? (
             <>
-              <VoiceMessage meta={meta} mine={mine} isDark={isDark} T1={bubbleText} T3={T3} accentBg={mine ? "#00000022" : `${G}33`} autoPlay={autoPlayVoice} onEnded={onVoiceEnded} onFirstPlay={onVoiceFirstPlay} />
+              <VoiceMessage meta={meta} mine={mine} isDark={isDark} T1={bubbleText} T3={T3} accentBg={mine ? "#00000018" : (isDark ? "#ffffff22" : "#00000014")} autoPlay={autoPlayVoice} onEnded={onVoiceEnded} onFirstPlay={onVoiceFirstPlay} />
               <p style={{ fontSize: 9, color: bubbleTx2, marginTop: 4, textAlign: "right" }}>
                 {new Date(m.created_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
                 {ticks}
@@ -1381,9 +1393,12 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
           <div onClick={clearSelection} style={{ position: "absolute", inset: 0, background: isDark ? "rgba(0,0,0,.45)" : "rgba(0,0,0,.25)", zIndex: 10 }} />
         )}
         {/* Aviso de confianza — mensaje de SISTEMA (no de ninguna de las dos
-            personas), una sola vez por conversación originada en un producto/servicio. */}
+            personas), una sola vez por conversación originada en un producto/servicio.
+            Fijo (sticky) arriba del scroll del chat para que no se pierda al bajar
+            en conversaciones largas — antes era el primer elemento de la lista y
+            desaparecía scrolleando como cualquier mensaje más. */}
         {showTrust && (
-          <div style={{ display: "flex", justifyContent: "center", margin: "2px 0 4px" }}>
+          <div style={{ position: "sticky", top: 0, zIndex: 6, display: "flex", justifyContent: "center", padding: "6px 0 4px", margin: "-12px calc(-1 * clamp(18px,3vw,48px)) 4px", background: isDark ? "rgba(20,20,20,.94)" : "rgba(250,250,250,.94)", backdropFilter: "blur(6px)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, maxWidth: "92%", background: isDark ? "rgba(255,192,30,.09)" : "rgba(180,130,0,.09)", border: `1px solid ${G}40`, borderRadius: 13, padding: "9px 14px" }}>
               <span style={{ fontSize: 15, flexShrink: 0 }}>🛡️</span>
               <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.4 }}>Coordina y compra dentro de RETADOR — así quedas respaldado. Evita acordar fuera de la plataforma.</p>
@@ -1421,6 +1436,8 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
         replyTo={replyTo} onCancelReply={() => setReplyTo(null)}
         editing={editing} onSaveEdit={handleSaveEdit} onCancelEdit={() => setEditing(null)}
         attachment={ctx} onCancelAttachment={() => setCtx(null)}
+        onOpenProduct={onOpenProduct} onStartOrder={onStartOrder} orders={orders}
+        themeHex={themeHex} themeText={themeText}
       />
 
       {emojiPickerFor && (

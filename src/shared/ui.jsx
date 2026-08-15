@@ -59,6 +59,13 @@ select option{background:#161616;color:#fff}
 .cd{cursor:pointer;transition:transform .13s,box-shadow .13s;box-shadow:0 1px 3px rgba(0,0,0,.22),0 1px 1px rgba(0,0,0,.15)}
 .cd:hover{box-shadow:0 3px 10px rgba(0,0,0,.28),0 1px 3px rgba(0,0,0,.18)}
 .cd:active{transform:scale(.97);box-shadow:0 1px 2px rgba(0,0,0,.18)}
+/* Fila de lista PLANA — mismo gesto de presión que .cd (scale al tocar), pero
+   SIN sombra/elevación en reposo ni en hover: para listas largas (ej.
+   conversaciones del chat) donde una sombra por fila da sensación de tarjetas
+   apiladas/superpuestas. El orden ahí lo da la línea divisoria, no la sombra. */
+.lr{cursor:pointer;transition:transform .13s,background .13s}
+.lr:hover{background:rgba(128,128,128,.06)}
+.lr:active{transform:scale(.97)}
 .btn{display:inline-flex;align-items:center;justify-content:center;cursor:pointer;border-radius:10px;font-weight:700;letter-spacing:.01em;transition:transform .1s,box-shadow .12s,opacity .1s;-webkit-user-select:none;user-select:none}
 .btn:active{transform:scale(.95);opacity:.88}
 .btn-dark{background:#1a1a1a;border:1px solid #2a2a2a;color:#e8e8e8;box-shadow:0 2px 0 #000,0 4px 12px rgba(0,0,0,.55)}

@@ -642,7 +642,7 @@ export function MessagesScreen({ user, onBack, onChat, chatOpen = false }) {
       <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "13px 18px", display: "flex", alignItems: "center", gap: 8, position: "sticky", top: 0, zIndex: 2 }}>
         <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c={T2} s={20} /></button>
         <p style={{ fontSize: 15, fontWeight: 800, color: T1 }}>Mensajes</p>
-        {totalUnread > 0 && <div style={{ marginLeft: "auto", background: G, borderRadius: 100, minWidth: 22, height: 20, padding: "0 6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: "#000" }}>{totalUnread}</div>}
+        {totalUnread > 0 && <div style={{ marginLeft: "auto", background: G, border: "1.5px solid #0a0a0a", boxShadow: "0 1px 3px rgba(0,0,0,.35)", borderRadius: 100, minWidth: 22, height: 20, padding: "0 6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: "#000" }}>{totalUnread}</div>}
       </div>
       {!user
         ? <div style={{ padding: "44px 18px", textAlign: "center" }}><p style={{ color: T2, fontSize: 12 }}>Inicia sesión para ver tus mensajes</p></div>
@@ -655,10 +655,16 @@ export function MessagesScreen({ user, onBack, onChat, chatOpen = false }) {
                 <p style={{ fontSize: 11, color: T2, lineHeight: 1.6 }}>Contacta a un vendedor desde el detalle de un producto.</p>
               </div>
             : <div style={{ padding: "4px 10px 24px" }}>
+                {/* Lista PLANA (clase "lr", no "cd"): antes cada fila llevaba
+                    la sombra/elevación de tarjeta que usa el resto de la app,
+                    y una fila tras otra daba sensación de tarjetas apiladas
+                    de forma desordenada. El orden lo da la línea divisoria de
+                    abajo, no una sombra por fila — el gesto de presión al
+                    tocar (achicarse un poco) se mantiene igual. */}
                 {convs.map(c => {
                   const unread = c.unread || 0;
                   return (
-                    <div key={c.id} className="cd" onClick={() => onChat(c)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 10px", borderRadius: 14, cursor: "pointer" }}>
+                    <div key={c.id} className="lr" onClick={() => onChat(c)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 10px", borderRadius: 10, cursor: "pointer" }}>
                       <AvatarUser userId={c.otherId} name={c.name} size={50} verified={c.otherVerified} />
                       <div style={{ flex: 1, minWidth: 0, borderBottom: `1px solid ${B}`, paddingBottom: 11 }}>
                         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 3 }}>
@@ -667,7 +673,9 @@ export function MessagesScreen({ user, onBack, onChat, chatOpen = false }) {
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <p style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: unread ? T1 : T2, fontWeight: unread ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.lastMsg || "Sin mensajes"}</p>
-                          {unread > 0 && <div style={{ flexShrink: 0, background: G, borderRadius: 100, minWidth: 20, height: 20, padding: "0 6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, fontWeight: 800, color: "#000" }}>{unread > 99 ? "99+" : unread}</div>}
+                          {/* Mismo acabado nítido con borde sólido que la insignia de
+                              verificado (misma familia visual), en vez del óvalo plano de antes. */}
+                          {unread > 0 && <div style={{ flexShrink: 0, background: G, border: "1.5px solid #0a0a0a", boxShadow: "0 1px 3px rgba(0,0,0,.35)", borderRadius: 100, minWidth: 20, height: 20, padding: "0 6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, fontWeight: 800, color: "#000" }}>{unread > 99 ? "99+" : unread}</div>}
                         </div>
                       </div>
                     </div>

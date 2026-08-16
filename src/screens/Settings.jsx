@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Globe, HardDrive, HelpCircle, Info, Lock, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Plus, Shield, ShoppingBag, Smartphone, Star, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
+import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Globe, HelpCircle, Info, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Plus, Shield, ShoppingBag, Smartphone, Star, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
 import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser, useAppVersion, CUBA_PROVINCES, ONBOARDING_PAISES, saveOnboarding, getMyVerification } from "../shared/index.js";
 import { isPushSupported, hasActiveSubscription, enablePush, disablePush } from "../pwa/push.js";
 
@@ -65,39 +65,8 @@ const CFG_INIT = {
     sales:    { total:12, amount:"$31,200" },
     orders:   { made:24,  completed:22     },
     auctions: { participated:18, won:7, lost:11 },
-    history:[
-      { label:"Jun", purchases:4, sales:2 },
-      { label:"May", purchases:3, sales:1 },
-      { label:"Abr", purchases:5, sales:3 },
-      { label:"Mar", purchases:2, sales:2 },
-      { label:"Feb", purchases:6, sales:1 },
-      { label:"Ene", purchases:4, sales:3 },
-    ],
   },
 };
-
-// ── ALMACENAMIENTO REAL — un solo cálculo, compartido entre el resumen de
-// Configuración y la pantalla de detalle, para que SIEMPRE muestren el mismo
-// número (bug real corregido: antes el resumen mostraba un dato inventado
-// aparte — 198 MB fijos — mientras el detalle medía de verdad el localStorage
-// del dispositivo — unos pocos MB reales —, dos números distintos para "lo
-// mismo").
-const CFG_STORAGE_CATS = {
-  conversaciones: ["retador_chatmsgs", "retador_chatpeople", "retador_delconvs", "retador_blocked"],
-  contenido: ["retador_products", "retador_orders", "retador_auctions", "retador_reports", "retador_verifs", "retador_planreq", "retador_payments", "retador_cats", "retador_subcats"],
-  billetera: ["retador_wallet", "retador_wallet_banks", "retador_wallet_sec", "retador_wallet_tx"],
-  ajustes: ["retador_settings", "retador_admincfg", "retador_theme", "retador_txt_scale", "retador_favs", "retador_verified", "retador_userplans", "retador_editor"],
-};
-function cfgMeasureStorage() {
-  const out = {};
-  Object.entries(CFG_STORAGE_CATS).forEach(([cat, keys]) => {
-    let b = 0;
-    keys.forEach(k => { try { const v = localStorage.getItem(k); if (v) b += (k.length + v.length) * 2; } catch {} });
-    out[cat] = b;
-  });
-  return out;
-}
-function cfgFmtSize(b) { return b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1024 / 1024).toFixed(2)} MB`; }
 
 /* ── ÁTOMOS ───────────────────────────────────────────────────── */
 function CFG_Sw({ on, change }) {
@@ -233,7 +202,6 @@ function CFG_Bdg({ s }) {
 function CFG_HomeScreen({ profile, settings, nav, onBack, user }) {
   const tk = CFG_useTk();
   const appVersion = useAppVersion();
-  const storageTotal = Object.values(cfgMeasureStorage()).reduce((a,b)=>a+b,0);
   const themeLabel = { auto:"Auto", light:"Claro", dark:"Oscuro" };
   const idiomaLabel = { es:"Español", en:"English" };
   const paisLabel = { cuba:"Cuba", espana:"España", eeuu:"Estados Unidos" };
@@ -259,7 +227,6 @@ function CFG_HomeScreen({ profile, settings, nav, onBack, user }) {
     { title:"Datos y Privacidad", items:[
       { id:"activity",      Icon:BarChart2,     label:"Actividad",           bg:"bg-pink-600"  },
       { id:"privacy",       Icon:Shield,        label:"Privacidad",          bg:"bg-red-600" },
-      { id:"storage",       Icon:HardDrive,     label:"Almacenamiento",      value:cfgFmtSize(storageTotal), bg:"bg-zinc-600" },
     ]},
     { title:"Soporte", items:[
       { id:"help",          Icon:HelpCircle,    label:"Ayuda",               bg:"bg-cyan-700"  },
@@ -296,9 +263,8 @@ function CFG_HomeScreen({ profile, settings, nav, onBack, user }) {
 // Teléfono: NO existe una columna real para esto en `profiles` (verificado
 // contra Supabase) — no se inventa aquí; si el dueño confirma una columna
 // real, se puede agregar entonces.
-function CFG_AccountScreen({ profile, nav, onSignOut, isVerified=false, onRequestVerification, onEditProfile, onSetPassword, flash, user }) {
+function CFG_AccountScreen({ profile, nav, onSignOut, isVerified=false, onRequestVerification, onEditProfile, flash, user }) {
   const tk = CFG_useTk();
-  const [pwSheet, setPwSheet] = useState(false);
   const [verif, setVerif] = useState(null);
   const [verifLoading, setVerifLoading] = useState(true);
   useEffect(() => {
@@ -379,14 +345,9 @@ function CFG_AccountScreen({ profile, nav, onSignOut, isVerified=false, onReques
           <CFG_Row icon={Shield} bg="bg-violet-600" label={verifStatus ? "Volver a solicitar verificación" : "Solicitar verificación"} sub="Sube tu documento y obtén el sello" onClick={() => onRequestVerification && onRequestVerification()} />
         )}
       </CFG_Crd>
-      <CFG_Lbl>Seguridad</CFG_Lbl>
-      <CFG_Crd>
-        <CFG_Row icon={Lock} bg="bg-zinc-600" label="Cambiar contraseña" sub="Para poder entrar sin depender solo de Google" onClick={() => setPwSheet(true)} />
-      </CFG_Crd>
       <CFG_Lbl>Sesión</CFG_Lbl>
       <CFG_Crd><CFG_Row icon={LogOut} bg="bg-red-700" label="Cerrar sesión" danger onClick={onSignOut || (() => signOutUser())} /></CFG_Crd>
       <div className="h-8" />
-      {pwSheet && <CFG_PasswordSheet onClose={() => setPwSheet(false)} onSave={(pw) => { onSetPassword && onSetPassword(pw); setPwSheet(false); }} />}
     </div>
   );
 }
@@ -459,37 +420,6 @@ function CFG_RegionScreen({ user, nav, flash, onUpdate }) {
         </button>
       </div>
       <div className="h-8" />
-    </div>
-  );
-}
-
-// Ya no pide "contraseña actual": la sesión ya está autenticada (con Google o
-// con la contraseña anterior), así que Supabase Auth cambia la contraseña
-// directo con la sesión activa — no hace falta volver a comprobarla aquí.
-function CFG_PasswordSheet({ onClose, onSave }) {
-  const tk = CFG_useTk();
-  const [pw1, setPw1] = useState("");
-  const [pw2, setPw2] = useState("");
-  const [err, setErr] = useState("");
-  const submit = () => {
-    if (pw1.length < 6) { setErr("Mínimo 6 caracteres"); return; }
-    if (pw1 !== pw2) { setErr("Las contraseñas no coinciden"); return; }
-    onSave(pw1);
-  };
-  const inp = { background:tk.CARD2, color:tk.T1, borderColor:"rgba(128,128,128,.25)" };
-  return (
-    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:5000, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
-      <div onClick={e=>e.stopPropagation()} style={{ background:tk.BG, width:"100%", maxWidth:440, borderRadius:"18px 18px 0 0", padding:"20px 18px 26px", maxHeight:"88vh", overflowY:"auto" }}>
-        <div style={{ color:tk.T1 }} className="text-[16px] font-bold mb-1">Cambiar contraseña</div>
-        <div style={{ color:tk.T2 }} className="text-[12px] mb-4">Sirve para poder entrar con correo y contraseña, sin depender solo de Google.</div>
-        <input type="password" value={pw1} onChange={e=>{setPw1(e.target.value);setErr("");}} placeholder="Nueva contraseña" style={inp} className="w-full h-11 rounded-xl px-3 text-[14px] border outline-none mb-2.5" />
-        <input type="password" value={pw2} onChange={e=>{setPw2(e.target.value);setErr("");}} placeholder="Repite la nueva contraseña" style={inp} className="w-full h-11 rounded-xl px-3 text-[14px] border outline-none mb-2.5" />
-        {err && <div className="text-[12px] mb-2" style={{ color:"#ef4444" }}>{err}</div>}
-        <div className="flex gap-2.5 mt-2">
-          <button onClick={onClose} style={{ background:tk.CARD2, color:tk.T1 }} className="flex-1 h-11 rounded-xl text-[13px] font-semibold">Cancelar</button>
-          <button onClick={submit} style={{ background:"#FFC01E", color:"#000" }} className="flex-1 h-11 rounded-xl text-[13px] font-bold">Actualizar</button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -928,7 +858,6 @@ function CFG_PaymentsScreen({ settings, upd, nav, onOpenWallet, walletOn=true, o
 function CFG_ActivityScreen({ settings, nav }) {
   const tk = CFG_useTk();
   const ac = settings.activity;
-  const maxH = Math.max(...ac.history.map(h => h.purchases + h.sales));
   return (
     <div style={{ background:tk.BG }} className="">
       <CFG_Hdr title="Actividad" onBack={() => nav("home")} />
@@ -950,29 +879,6 @@ function CFG_ActivityScreen({ settings, nav }) {
           </div>
         ))}
       </div>
-      <CFG_Lbl>Historial mensual</CFG_Lbl>
-      <CFG_Crd>
-        <div style={{ background:tk.ROW }} className="px-3.5 pt-3 pb-2.5">
-          <div className="flex items-end gap-1.5 h-20 mb-2">
-            {ac.history.map(m => {
-              const total = m.purchases + m.sales;
-              return (
-                <div key={m.label} className="flex-1 flex flex-col items-center">
-                  <div className="w-full flex flex-col justify-end gap-px" style={{ height:`${(total/maxH)*100}%` }}>
-                    <div style={{ height:`${(m.purchases/total)*100}%`, background:tk.P  }} className="w-full rounded-t min-h-px" />
-                    <div style={{ height:`${(m.sales/total)*100}%`, background:"#22C55E" }} className="w-full rounded-b min-h-px" />
-                  </div>
-                  <div style={{ color:tk.T3 }} className="text-[9px] mt-1">{m.label}</div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="flex gap-3">
-            <div className="flex items-center gap-1"><div style={{ background:tk.P      }} className="w-2 h-2 rounded-sm" /><span style={{ color:tk.T2 }} className="text-[10px]">Compras</span></div>
-            <div className="flex items-center gap-1"><div style={{ background:"#22C55E" }} className="w-2 h-2 rounded-sm" /><span style={{ color:tk.T2 }} className="text-[10px]">Ventas</span></div>
-          </div>
-        </div>
-      </CFG_Crd>
       <div className="h-8" />
     </div>
   );
@@ -1020,84 +926,6 @@ function CFG_LanguageScreen({ nav, user, onUpdate, flash }) {
           <span style={{ fontSize:8, color:tk.T2, fontWeight:700, background:tk.CARD2, borderRadius:6, padding:"3px 7px" }}>Muy pronto</span>
         </div>
       </CFG_Crd>
-      <div className="h-8" />
-    </div>
-  );
-}
-
-/* ── STORAGE ──────────────────────────────────────────────────── */
-function CFG_StorageScreen({ settings, upd, nav, flash }) {
-  const tk = CFG_useTk();
-  const [usage, setUsage] = useState(cfgMeasureStorage);
-  const fmtSize = cfgFmtSize;
-  const total = Object.values(usage).reduce((a, b) => a + b, 0);
-
-  const clearCat = (cat) => {
-    CFG_STORAGE_CATS[cat].forEach(k => { try { localStorage.removeItem(k); } catch {} });
-    setUsage(cfgMeasureStorage());
-    flash && flash("🧹 Espacio liberado");
-  };
-
-  const META = {
-    conversaciones: { label: "Conversaciones", sub: "Mensajes y contactos del chat", color: "#F59E0B", Icon: MessageCircle, clearable: true },
-    contenido: { label: "Contenido", sub: "Productos, pedidos y subastas", color: tk.P, Icon: Package, clearable: false },
-    billetera: { label: "Billetera", sub: "Saldo, movimientos y cuentas", color: "#22C55E", Icon: Wallet, clearable: false },
-    ajustes: { label: "Ajustes y diseño", sub: "Preferencias y configuración", color: "#60A5FA", Icon: HardDrive, clearable: false },
-  };
-
-  return (
-    <div style={{ background:tk.BG }} className="">
-      <CFG_Hdr title="Almacenamiento" onBack={() => nav("home")} />
-      <CFG_Lbl>Uso real en este dispositivo</CFG_Lbl>
-      <CFG_Crd>
-        <div style={{ background:tk.ROW }} className="px-3.5 py-3.5">
-          <div className="flex items-baseline gap-1 mb-2.5">
-            <span style={{ color:tk.T1 }} className="text-[26px] font-black leading-none">{fmtSize(total).split(" ")[0]}</span>
-            <span style={{ color:tk.T2 }} className="text-[12px]">{fmtSize(total).split(" ")[1]}</span>
-          </div>
-          <div style={{ background:tk.CARD2 }} className="h-2 rounded-full overflow-hidden flex">
-            {Object.entries(usage).filter(([, b]) => b > 0).map(([cat, b]) => (
-              <div key={cat} style={{ width:`${(b/total)*100}%`, background:META[cat].color }} className="h-full" />
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-3 mt-2">
-            {Object.entries(usage).map(([cat, b]) => (
-              <div key={cat} className="flex items-center gap-1">
-                <div style={{ background:META[cat].color }} className="w-1.5 h-1.5 rounded-full" />
-                <span style={{ color:tk.T2 }} className="text-[10px]">{META[cat].label} {fmtSize(b)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </CFG_Crd>
-
-      <CFG_Lbl>Gestionar</CFG_Lbl>
-      <CFG_Crd>
-        {Object.entries(META).map(([cat, m], i) => (
-          <div key={cat}>
-            {i > 0 && <CFG_Hr />}
-            <div style={{ background:tk.ROW }} className="flex items-center gap-2.5 px-3.5 py-2.5">
-              <div style={{ background:m.color+"22" }} className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0">
-                <m.Icon size={14} style={{ color:m.color }} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div style={{ color:tk.T1 }} className="text-[14px] font-medium">{m.label}</div>
-                <div style={{ color:tk.T2 }} className="text-[11px]">{fmtSize(usage[cat])} · {m.sub}</div>
-              </div>
-              {m.clearable
-                ? <button onClick={() => clearCat(cat)} style={{ background:tk.ERR_BG, color:tk.ERR_T }} className="text-[11px] font-bold px-2.5 py-1 rounded-full flex-shrink-0">Limpiar</button>
-                : <span style={{ color:tk.T3 }} className="text-[10px] flex-shrink-0">Tus datos</span>}
-            </div>
-          </div>
-        ))}
-      </CFG_Crd>
-
-      <div style={{ background:tk.OK_BG, borderColor:tk.OK_T+"44" }} className="mx-4 mt-2.5 rounded-xl px-3.5 py-2.5 border">
-        <div className="flex items-start gap-2">
-          <Info size={13} style={{ color:tk.OK_T, marginTop:1, flexShrink:0 }} />
-          <p style={{ color:tk.OK_T }} className="text-[11px] leading-snug">Las fotos de productos y subastas se ven directamente sin descargarse, así que casi no ocupan espacio. Solo se guarda lo que descargas a propósito.</p>
-        </div>
-      </div>
       <div className="h-8" />
     </div>
   );
@@ -1211,7 +1039,7 @@ function CFG_AboutScreen({ nav }) {
 }
 
 /* ── APP ──────────────────────────────────────────────────────── */
-export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTheme="auto", onThemeChange, imgScale=1, onImgScaleChange, appTextScale=1, onTextScaleChange, profileData={}, onProfileUpdate, isVerified=false, onRequestVerification, onEditProfile, onSetPassword, blockedUsers=[], onToggleBlock, onOpenWallet, walletOn=true, orders=[], productView="grid", onProductViewChange }) {
+export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTheme="auto", onThemeChange, imgScale=1, onImgScaleChange, appTextScale=1, onTextScaleChange, profileData={}, onProfileUpdate, isVerified=false, onRequestVerification, onEditProfile, blockedUsers=[], onToggleBlock, onOpenWallet, walletOn=true, orders=[], productView="grid", onProductViewChange }) {
   const [screen, setScreen]     = useState("home");
   const me0 = profileData?.name || user?.name || "Usuario";
   // Solo LECTURA aquí (nombre/correo se editan de verdad en Perfil → Editar
@@ -1235,7 +1063,7 @@ export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTh
            : appTheme==="dark"  ? CFG_DARK
            : (typeof window!=="undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? CFG_DARK : CFG_LIGHT);
 
-  const p = { profile, settings, upd, nav, appScale:imgScale, onScale:onImgScaleChange, onBack, onSignOut, onThemeChange, appTheme, appTextScale, onTextScaleChange, flash, isVerified, onRequestVerification, onEditProfile, onSetPassword, blockedUsers, onToggleBlock, onOpenWallet, walletOn, orders, productView, onProductViewChange, user, onUpdate };
+  const p = { profile, settings, upd, nav, appScale:imgScale, onScale:onImgScaleChange, onBack, onSignOut, onThemeChange, appTheme, appTextScale, onTextScaleChange, flash, isVerified, onRequestVerification, onEditProfile, blockedUsers, onToggleBlock, onOpenWallet, walletOn, orders, productView, onProductViewChange, user, onUpdate };
   const map = {
     home:          <CFG_HomeScreen          {...p} />,
     account:       <CFG_AccountScreen       {...p} />,
@@ -1247,7 +1075,6 @@ export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTh
     payments:      <CFG_PaymentsScreen      {...p} />,
     activity:      <CFG_ActivityScreen      {...p} />,
     language:      <CFG_LanguageScreen      {...p} />,
-    storage:       <CFG_StorageScreen       {...p} />,
     help:          <CFG_HelpScreen          {...p} />,
     about:         <CFG_AboutScreen         {...p} />,
   };

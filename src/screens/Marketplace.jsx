@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getUserName, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getUserName, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -720,6 +720,33 @@ export function AdvancedSearch({ products, services = [], onProduct, favorites, 
   const [catSuggestion, setCatSuggestion] = useState(null); // { id, name, term }
   useEffect(() => { setCatSuggestion(null); }, [searchText, selectedCat]);
 
+  // BÚSQUEDA REAL: antes esto comparaba el texto a mano solo contra
+  // título/descripción — "teléfono" nunca encontraba un Redmi cuya
+  // subcategoría es "Teléfonos" pero cuyo título no trae esa palabra. Ahora
+  // usa search_products (real, en el backend): busca también en subcategoría
+  // y en el nombre de la categoría, con similitud de respaldo, y devuelve el
+  // orden de relevancia real (empieza-igual primero, luego más parecido).
+  // `searchIds`: null = sin búsqueda de texto activa (se navega por
+  // categoría como siempre); array = ids que sí calzaron, en ese orden.
+  const [searchIds, setSearchIds] = useState(null);
+  const [searching, setSearching] = useState(false);
+  useEffect(() => {
+    const term = searchText.trim();
+    if (!term) { setSearchIds(null); setSearching(false); return; }
+    let alive = true;
+    setSearching(true);
+    const t = setTimeout(() => {
+      searchProducts(term).then(rows => {
+        if (!alive) return;
+        setSearchIds(rows.map(r => r.id));
+        setSearching(false);
+      }).catch(() => { if (alive) { setSearchIds([]); setSearching(false); } });
+    }, 260);
+    return () => { alive = false; clearTimeout(t); };
+  }, [searchText]);
+  const searchIdOrder = searchIds ? new Map(searchIds.map((id, i) => [id, i])) : null;
+  const searchIdSet = searchIds ? new Set(searchIds) : null;
+
   const _disc = p => p.orig_price && parseFloat(p.orig_price) > parseFloat(p.price || 0);
   const _sold = p => Number(p.sold_count ?? p.soldCount) || 0;
   const _created = p => p.created_at ? new Date(p.created_at).getTime() : 0;
@@ -740,18 +767,19 @@ export function AdvancedSearch({ products, services = [], onProduct, favorites, 
     const matchCat = !effectiveCat || (isServicesCat
       ? (!selectedSubcat || p.subcat === selectedSubcat)
       : (p.cat === effectiveCat && (!selectedSubcat || p.subcat === selectedSubcat)));
-    const matchSearch = catSuggestion ? true : (!searchText || p.title.toLowerCase().includes(searchText.toLowerCase()) || p.description?.toLowerCase().includes(searchText.toLowerCase()));
+    const matchSearch = catSuggestion ? true : (!searchText.trim() ? true : !!searchIdSet?.has(p.id));
     const matchVerified = !onlyVerified || !!p.seller_verified;
     return matchCat && matchSearch && matchQuick(p) && matchVerified;
   });
   if (quickFilter === "NUEVO")            filtered = [...filtered].sort((a, b) => _created(b) - _created(a));
   else if (quickFilter === "MAS_VENDIDO") filtered = [...filtered].sort((a, b) => _sold(b) - _sold(a));
   else if (quickFilter === "OFERTAS")     filtered = [...filtered].sort((a, b) => (parseFloat(b.orig_price || 0) - parseFloat(b.price || 0)) - (parseFloat(a.orig_price || 0) - parseFloat(a.price || 0)));
+  else if (searchIdOrder)                 filtered = [...filtered].sort((a, b) => (searchIdOrder.get(a.id) ?? 999) - (searchIdOrder.get(b.id) ?? 999));
 
   // Solo se intenta match_category cuando la búsqueda de texto normal (sin
   // sugerencia todavía) se quedó en cero, y el usuario no había elegido ya una
   // categoría a mano (si eligió una, "sin resultados" ahí es su elección real).
-  const plainNoResults = searchText.trim() && !selectedCat && !catSuggestion && filtered.length === 0;
+  const plainNoResults = searchText.trim() && !selectedCat && !catSuggestion && !searching && filtered.length === 0;
   useEffect(() => {
     if (!plainNoResults) return;
     let alive = true;
@@ -885,7 +913,12 @@ export function AdvancedSearch({ products, services = [], onProduct, favorites, 
                 </button>
               )}
             </div>
-            {filtered.length === 0 ? (
+            {searching && filtered.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "50px 20px", color: T2 }}>
+                <div style={{ fontSize: 38, marginBottom: 10 }}>🔍</div>
+                <p style={{ fontSize: 11 }}>Buscando…</p>
+              </div>
+            ) : filtered.length === 0 ? (
               <div style={{ textAlign: "center", padding: "50px 20px", color: T2 }}>
                 <div style={{ fontSize: 38, marginBottom: 10 }}>🔍</div>
                 <p style={{ fontSize: 11 }}>No se encontraron resultados</p>

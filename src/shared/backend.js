@@ -469,6 +469,29 @@ export const getProfileHeaderStats = async (userId) => {
   } catch (e) { return empty; }
 };
 
+// ── Búsqueda real de productos/servicios: antes NO existía ninguna función
+// para esto (solo match_category, que es para sugerir categorías al
+// publicar) — la pantalla de Búsqueda comparaba el texto a mano contra
+// título/descripción nada más, así que "teléfono" nunca encontraba un Redmi
+// cuya subcategoría es "Teléfonos" pero cuyo título no trae esa palabra.
+// search_products(p_query) busca en título, descripción, subcategoría Y el
+// nombre real de la categoría (con similitud como respaldo), en la misma
+// tabla `products` que ya guarda productos Y servicios (kind). Devuelve
+// filas reales — el resto de la app (App.jsx) ya tiene esas mismas filas
+// mapeadas con vendedor/verificado, así que la pantalla de Búsqueda solo
+// necesita el ORDEN de ids que da esta función, no re-mapear nada.
+export const searchProducts = async (query, limit = 60) => {
+  if (!query || !query.trim()) return [];
+  try {
+    const { data, error } = await supabase.rpc("search_products", { p_query: query.trim(), p_limit: limit });
+    if (error) { console.error("searchProducts:", error.message); return []; }
+    // Filtro de seguridad: search_products no filtra moderation_status (a
+    // diferencia de loadProducts/loadServices) — se descarta aquí lo que no
+    // esté aprobado, para nunca mostrar en Búsqueda algo que el feed normal
+    // todavía no muestra.
+    return (data || []).filter(r => r.moderation_status === "approved");
+  } catch (e) { return []; }
+};
 // ── Búsqueda inteligente por categoría: si la búsqueda de texto normal no da
 // resultados, match_category(p_query) busca la categoría más parecida (exacta,
 // por prefijo o por similitud) — o ninguna fila si no hay nada razonable. ──

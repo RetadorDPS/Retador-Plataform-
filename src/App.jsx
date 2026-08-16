@@ -13,7 +13,7 @@ import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip,
 // ═════════════════════════════════════════════════════════════════════════════
 import {
   supabase,
-  signInWithGoogle, signOutUser, loadSessionUser, setAccountPassword,
+  signInWithGoogle, signOutUser, loadSessionUser,
   MOCK_PRODUCTS, MOCK_USER,
   authSignUp, authSignIn, authSignOut, authGetSession,
   getUserById, getUserName, updateUserName,
@@ -1061,14 +1061,6 @@ function AppShell({ sessionUser }) {
   const [payments, setPayments] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_payments') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('retador_payments', JSON.stringify(payments)); } catch {} }, [payments]);
   const [verifiedUsers, setVerifiedUsers] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_verified') || '[]'); } catch { return []; } });
-  // BUG REAL corregido: "Cambiar contraseña" en Configuración guardaba la
-  // contraseña en texto plano en localStorage y nunca tocaba Supabase Auth —
-  // cambiarla ahí no cambiaba con qué contraseña se podía entrar de verdad.
-  // Ahora llama al método real (supabase.auth.updateUser), ver shared/auth.js.
-  const handleSetPassword = async (pw) => {
-    try { await setAccountPassword(pw); flash("🔒 Contraseña actualizada"); }
-    catch (e) { flash("⚠️ " + (e?.message || "No se pudo actualizar la contraseña")); }
-  };
   // Señales de "abrir directo" para Perfil, disparadas desde Configuración —
   // así "Solicitar verificación" y "Editar nombre/foto" no duplican esos
   // flujos: enlazan al único lugar real donde ya existen (Perfil).
@@ -2110,7 +2102,6 @@ function AppShell({ sessionUser }) {
               isVerified={!!user?.verified}
               onRequestVerification={() => { setAutoOpenVerify(true); setPScr("profile-full"); }}
               onEditProfile={() => { setAutoOpenEdit(true); setPScr("profile-full"); }}
-              onSetPassword={handleSetPassword}
               blockedUsers={blockedUsers} onToggleBlock={toggleBlock}
               walletOn={sections.wallet !== false}
               onOpenWallet={() => setShowWallet(true)} orders={orders.filter(o => (o.buyerId ? o.buyerId === user?.id : true))} />}

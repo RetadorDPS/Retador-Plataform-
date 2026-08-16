@@ -679,10 +679,24 @@ function HowItWorksSheet({ onClose }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // ADVANCED SEARCH
 // ═════════════════════════════════════════════════════════════════════════════
-export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, view = "grid", onPublishInCat }) {
+// BUG REAL encontrado y corregido: los servicios (kind='service') nunca
+// aparecían en Búsqueda — ni buscando por nombre, ni en su categoría
+// "Servicios" de la barra lateral. Dos causas reales:
+// 1) Esta pantalla solo recibía `products` (kind='product'); `services`
+//    (mundo aparte, ver App.jsx) nunca llegaba aquí — un servicio real, sin
+//    importar el texto, jamás podía coincidir con nada.
+// 2) La categoría "Servicios" de la barra (id fijo "servicios" del catálogo
+//    de PRODUCTOS) filtraba comparando p.cat === "servicios" — pero un
+//    servicio real siempre tiene cat=null (su categoría real va en subcat,
+//    tomada de config.serviceCats, un catálogo total y deliberadamente
+//    aparte del de productos). Esa comparación nunca podía ser cierta: la
+//    categoría "Servicios" estaba estructuralmente vacía siempre, para
+//    cualquier servicio que se publicara.
+export function AdvancedSearch({ products, services = [], onProduct, favorites, onFav, onNav, view = "grid", onPublishInCat }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const { tokens: dt, mode: dMode } = useDensity();
+  const platformCfg = usePlatformCfg();
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedSubcat, setSelectedSubcat] = useState(null);
   const [searchText, setSearchText] = useState("");
@@ -692,7 +706,11 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
 
   const { cats, subcats: allSubs } = useCatalog();
   const cat = selectedCat ? cats.find(c => c.id === selectedCat) : null;
-  const subcats = selectedCat ? (allSubs[selectedCat] || []) : [];
+  // Categorías reales de servicio (editables por el admin) — NUNCA el catálogo
+  // de subcategorías de productos, que es un mundo aparte y no calza con lo
+  // que de verdad se guarda al publicar un servicio.
+  const serviceCatsReal = (Array.isArray(platformCfg.serviceCats) && platformCfg.serviceCats.length) ? platformCfg.serviceCats : DEFAULT_SERVICE_CATS;
+  const subcats = !selectedCat ? [] : (selectedCat === "servicios" ? serviceCatsReal : (allSubs[selectedCat] || []));
 
   // Búsqueda inteligente por categoría: si el texto normal no da resultados y el
   // usuario no eligió una categoría a mano, se prueba match_category(término) en
@@ -711,8 +729,17 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
     || (quickFilter === "RECOMENDADO" && (p.promoted || p.featured || p.badge === "RECOMENDADO"))
     || (quickFilter === "MAS_VENDIDO" && _sold(p) > 0);
   const effectiveCat = catSuggestion ? catSuggestion.id : selectedCat;
-  let filtered = products.filter(p => {
-    const matchCat = (!effectiveCat || p.cat === effectiveCat) && (!selectedSubcat || p.subcat === selectedSubcat);
+  const isServicesCat = effectiveCat === "servicios";
+  // Sin categoría elegida: se busca/navega en productos Y servicios juntos
+  // (así un servicio real aparece al buscarlo por nombre). Con "Servicios"
+  // elegida: solo servicios reales, nunca products filtrados por cat=
+  // "servicios" (eso siempre daba cero, ver nota arriba). Con cualquier otra
+  // categoría: solo productos, como siempre.
+  const pool = !effectiveCat ? [...products, ...services] : (isServicesCat ? services : products);
+  let filtered = pool.filter(p => {
+    const matchCat = !effectiveCat || (isServicesCat
+      ? (!selectedSubcat || p.subcat === selectedSubcat)
+      : (p.cat === effectiveCat && (!selectedSubcat || p.subcat === selectedSubcat)));
     const matchSearch = catSuggestion ? true : (!searchText || p.title.toLowerCase().includes(searchText.toLowerCase()) || p.description?.toLowerCase().includes(searchText.toLowerCase()));
     const matchVerified = !onlyVerified || !!p.seller_verified;
     return matchCat && matchSearch && matchQuick(p) && matchVerified;
@@ -861,7 +888,7 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
             {filtered.length === 0 ? (
               <div style={{ textAlign: "center", padding: "50px 20px", color: T2 }}>
                 <div style={{ fontSize: 38, marginBottom: 10 }}>🔍</div>
-                <p style={{ fontSize: 11 }}>No se encontraron productos</p>
+                <p style={{ fontSize: 11 }}>No se encontraron resultados</p>
               </div>
             ) : (
               view === "muro"
@@ -1183,13 +1210,39 @@ export function MarketHome({ loading, products, filter, setFilter, myProvince = 
   // pérdida total del scroll). Este solo vuelve a pedir los productos.
   const ptr = usePullToRefresh(feedRef, onRefresh, { disabled: !onRefresh });
 
+  // Pista nueva del dueño sobre la "rayita" al minimizar: aparece justo en el
+  // borde de ESTA franja (el header con blur, junto al logo y los botones
+  // +/notificaciones/mensajes). Causa real más probable: este header tenía
+  // `willChange:"transform"` FIJO todo el tiempo, sumado a backdrop-filter —
+  // eso lo deja SIEMPRE en su propia capa de composición aparte del resto de
+  // la página, incluso en reposo (sin scroll, sin animar). La foto que toma
+  // el sistema para "apps recientes" es de esa composición ya congelada — si
+  // la capa del header quedó separada del fondo en ese instante, el borde
+  // entre las dos capas puede verse como una línea. Ahora `willChange` solo
+  // se activa MIENTRAS el header realmente se anima (se oculta/muestra al
+  // hacer scroll) y se quita en cuanto termina — en reposo (que es como está
+  // casi siempre que alguien minimiza) ya no fuerza una capa aparte.
+  // Honesto: no hay forma de reproducir la vista real de "apps recientes" de
+  // Android desde este entorno, así que este cambio no quedó confirmado
+  // contra el problema visual en sí — es la causa más concreta y verificable
+  // encontrada con la pista nueva, a confirmar en el teléfono real.
+  const [headerAnimating, setHeaderAnimating] = useState(false);
+  const prevHiddenRef = useRef(hidden);
+  useEffect(() => {
+    if (prevHiddenRef.current === hidden) return;
+    prevHiddenRef.current = hidden;
+    setHeaderAnimating(true);
+    const t = setTimeout(() => setHeaderAnimating(false), 320);
+    return () => clearTimeout(t);
+  }, [hidden]);
+
   return (
     <div ref={feedRef} {...ptr.handlers} onScroll={e => { if (scrollKeeper) scrollKeeper.current = e.currentTarget.scrollTop; }} style={{ flex: 1, overflowY: "auto", overscrollBehaviorY: "contain" }}>
       <PullIndicator pull={ptr.pull} refreshing={ptr.refreshing} />
       {/* Tramo: lo que pusiste ANTES del Encabezado (arriba del todo) */}
       <LiveSlot page="inicio" from={null} to="in_h" onNav={onNav} pad="12px 16px 0" />
       {/* Header */}
-      <div style={{ position: "sticky", top: 0, zIndex: 52, background: isDark ? "rgba(8,8,8,.78)" : "rgba(255,255,255,.8)", backdropFilter: "blur(14px) saturate(1.4)", WebkitBackdropFilter: "blur(14px) saturate(1.4)", borderBottom: "none", padding: isDesktop ? "8px 36px" : "8px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, transform: hidden ? "translateY(-115%)" : "translateY(0)", transition: "transform .28s cubic-bezier(.4,0,.2,1)", willChange: "transform" }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 52, background: isDark ? "rgba(8,8,8,.78)" : "rgba(255,255,255,.8)", backdropFilter: "blur(14px) saturate(1.4)", WebkitBackdropFilter: "blur(14px) saturate(1.4)", borderBottom: "none", padding: isDesktop ? "8px 36px" : "8px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, transform: hidden ? "translateY(-115%)" : "translateY(0)", transition: "transform .28s cubic-bezier(.4,0,.2,1)", willChange: headerAnimating ? "transform" : "auto" }}>
         {!isDesktop && <Logo size={19} />}
         {isDesktop && (
           <div style={{ flex: 1, maxWidth: 520 }}>

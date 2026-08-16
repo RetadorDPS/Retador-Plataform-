@@ -17,6 +17,14 @@ export async function signOutUser() {
   await supabase.auth.signOut();
 }
 
+// Crear o cambiar la contraseña de la cuenta (Supabase Auth real). Útil para
+// poder entrar sin depender solo de Google. No hace falta pedir la contraseña
+// actual: la sesión ya está autenticada, así que Supabase la cambia directo.
+export async function setAccountPassword(newPassword) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+}
+
 // Convierte la sesión de Supabase + el perfil en el objeto "user" que usa la app.
 export async function loadSessionUser() {
   const { data: { session } } = await supabase.auth.getSession();

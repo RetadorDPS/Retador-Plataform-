@@ -882,7 +882,7 @@ function FP_ReportModal({ targetName, onClose, onSubmit, C }) {
     </div>
   );
 }
-export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, embedded = false, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, currentPlan = "Gratis", currentPlanId = "gratis", plans = [], maxProducts = null, onPlanChanged, myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct, archivedProducts = [], onArchiveProduct, onUnarchiveProduct, onDeleteArchivedProduct }) {
+export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, embedded = false, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, currentPlan = "Gratis", currentPlanId = "gratis", plans = [], maxProducts = null, onPlanChanged, myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct, archivedProducts = [], onArchiveProduct, onUnarchiveProduct, onDeleteArchivedProduct, autoOpenVerify = false, onAutoOpenVerifyDone, autoOpenEdit = false, onAutoOpenEditDone }) {
   // ⭐ Destacar: visible solo si el admin tiene la función encendida (config en vivo).
   const promoOn = usePlatformCfg().promoActive === true;
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
@@ -904,6 +904,12 @@ export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, em
   // El botón "Editar" de Acerca de es un atajo DENTRO del mismo editor unificado:
   // abre el mismo panel y baja hasta esta sección (no es un flujo aparte).
   const aboutEditRef = useRef(null);
+
+  // Entrada directa desde Configuración → Cuenta: "Solicitar verificación" y
+  // "Editar nombre y foto" no duplican estos flujos ahí, enlazan aquí, donde
+  // ya existen de verdad (KYC real y editor unificado).
+  useEffect(() => { if (autoOpenVerify) { setShowVerify(true); onAutoOpenVerifyDone?.(); } }, [autoOpenVerify]);
+  useEffect(() => { if (autoOpenEdit) { setEditing(true); onAutoOpenEditDone?.(); } }, [autoOpenEdit]);
 
   // ÚNICA identidad pública: el nombre real (profiles.full_name). Ya no existe
   // "usuario"/@handle — era un valor inventado en el frontend (pedazo del correo)

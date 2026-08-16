@@ -13,7 +13,7 @@ import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip,
 // ═════════════════════════════════════════════════════════════════════════════
 import {
   supabase,
-  signInWithGoogle, signOutUser, loadSessionUser,
+  signInWithGoogle, signOutUser, loadSessionUser, setAccountPassword,
   MOCK_PRODUCTS, MOCK_USER,
   authSignUp, authSignIn, authSignOut, authGetSession,
   getUserById, getUserName, updateUserName,
@@ -850,9 +850,16 @@ function AppShell({ sessionUser }) {
   const requireAuth = action => { action(); return true; }; // Siempre autorizado - solo visual
   const refreshUser = () => {}; // No-op en versión visual
 
-  const handleSignOut = () => {
-    // En versión visual, solo resetea a la pantalla principal
-    flash("👋 Sesión cerrada (demo)");
+  // BUG REAL corregido (regresión): esto era un resto de una versión de
+  // demostración — solo mostraba un aviso y nunca cerraba la sesión de
+  // verdad. Por eso "Cerrar sesión" dejó de funcionar en la Configuración
+  // consolidada: el botón llamaba a esto en vez de a signOutUser(). Ahora
+  // cierra la sesión real de Supabase Auth; el listener de onAuthStateChange
+  // (arriba, en el componente padre) detecta el cierre y vuelve solo a la
+  // pantalla de bienvenida.
+  const handleSignOut = async () => {
+    try { await signOutUser(); }
+    catch (e) { flash("⚠️ No se pudo cerrar sesión — intenta de nuevo"); }
   };
 
   const handlePublish = async d => {
@@ -1054,8 +1061,19 @@ function AppShell({ sessionUser }) {
   const [payments, setPayments] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_payments') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('retador_payments', JSON.stringify(payments)); } catch {} }, [payments]);
   const [verifiedUsers, setVerifiedUsers] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_verified') || '[]'); } catch { return []; } });
-  const [accountPassword, setAccountPassword] = useState(() => { try { return localStorage.getItem('retador_password') || ''; } catch { return ''; } });
-  useEffect(() => { try { if (accountPassword) localStorage.setItem('retador_password', accountPassword); } catch {} }, [accountPassword]);
+  // BUG REAL corregido: "Cambiar contraseña" en Configuración guardaba la
+  // contraseña en texto plano en localStorage y nunca tocaba Supabase Auth —
+  // cambiarla ahí no cambiaba con qué contraseña se podía entrar de verdad.
+  // Ahora llama al método real (supabase.auth.updateUser), ver shared/auth.js.
+  const handleSetPassword = async (pw) => {
+    try { await setAccountPassword(pw); flash("🔒 Contraseña actualizada"); }
+    catch (e) { flash("⚠️ " + (e?.message || "No se pudo actualizar la contraseña")); }
+  };
+  // Señales de "abrir directo" para Perfil, disparadas desde Configuración —
+  // así "Solicitar verificación" y "Editar nombre/foto" no duplican esos
+  // flujos: enlazan al único lugar real donde ya existen (Perfil).
+  const [autoOpenVerify, setAutoOpenVerify] = useState(false);
+  const [autoOpenEdit, setAutoOpenEdit] = useState(false);
   // Equipo y permisos: miembros con secciones delegadas
   const [teamMembers, setTeamMembers] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_team') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('retador_team', JSON.stringify(teamMembers)); } catch {} }, [teamMembers]);
@@ -2030,6 +2048,7 @@ function AppShell({ sessionUser }) {
               <AdvancedSearch
                 view={productView}
                 products={products}
+                services={services}
                 onProduct={p => {
                   setSelProd(p);
                   setTab("market");
@@ -2080,16 +2099,20 @@ function AppShell({ sessionUser }) {
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
               const paid = payments.filter(p => p.sellerName === me).reduce((a, p) => a + (p.amount || 0), 0);
               const myDebt = Math.max(0, accrued - paid);
-              return <FreeProfileScreen onBack={() => setPScr("main")} onSettings={() => setPScr("settings")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} currentPlan={currentPlanName} currentPlanId={user?.plan || "gratis"} plans={realPlans} maxProducts={myRealPlan?.max_products ?? null} onPlanChanged={(planId) => setUser(prev => prev ? { ...prev, plan: planId } : prev)} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} archivedProducts={ownArchived} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={confirmDeleteProduct} onArchiveProduct={confirmArchiveProduct} onUnarchiveProduct={handleUnarchive} onDeleteArchivedProduct={confirmDeleteProduct} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)} />;
+              return <FreeProfileScreen onBack={() => setPScr("main")} onSettings={() => setPScr("settings")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} currentPlan={currentPlanName} currentPlanId={user?.plan || "gratis"} plans={realPlans} maxProducts={myRealPlan?.max_products ?? null} onPlanChanged={(planId) => setUser(prev => prev ? { ...prev, plan: planId } : prev)} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} archivedProducts={ownArchived} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={confirmDeleteProduct} onArchiveProduct={confirmArchiveProduct} onUnarchiveProduct={handleUnarchive} onDeleteArchivedProduct={confirmDeleteProduct} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)}
+                autoOpenVerify={autoOpenVerify} onAutoOpenVerifyDone={() => setAutoOpenVerify(false)}
+                autoOpenEdit={autoOpenEdit} onAutoOpenEditDone={() => setAutoOpenEdit(false)} />;
             })()}
             {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
             {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}
               productView={productView} onProductViewChange={setProductView}
               profileData={profileData} onProfileUpdate={setProfileData}
               isVerified={!!user?.verified}
-              onRequestVerification={() => setPScr("profile-full")}
-              accountPassword={accountPassword} onSetPassword={setAccountPassword}
+              onRequestVerification={() => { setAutoOpenVerify(true); setPScr("profile-full"); }}
+              onEditProfile={() => { setAutoOpenEdit(true); setPScr("profile-full"); }}
+              onSetPassword={handleSetPassword}
               blockedUsers={blockedUsers} onToggleBlock={toggleBlock}
+              walletOn={sections.wallet !== false}
               onOpenWallet={() => setShowWallet(true)} orders={orders.filter(o => (o.buyerId ? o.buyerId === user?.id : true))} />}
             {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} seenIds={seenOrderIds} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { markOrderSeen(o.id); setSelOrderId(o.id); setPScr("order-detail"); }} onRefresh={loadOrders} />}
             {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => openOrderChat(o)} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} seenIds={seenOrderIds} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { markOrderSeen(x.id); setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}

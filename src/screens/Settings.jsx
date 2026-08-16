@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Gavel, Globe, HardDrive, HelpCircle, Info, Lock, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Phone, Plus, Shield, ShoppingBag, Smartphone, Star, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
-import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser, useAppVersion, CUBA_PROVINCES, ONBOARDING_PAISES, saveOnboarding } from "../shared/index.js";
+import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Globe, HardDrive, HelpCircle, Info, Lock, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Plus, Shield, ShoppingBag, Smartphone, Star, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
+import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser, useAppVersion, CUBA_PROVINCES, ONBOARDING_PAISES, saveOnboarding, getMyVerification } from "../shared/index.js";
 import { isPushSupported, hasActiveSubscription, enablePush, disablePush } from "../pwa/push.js";
 
 const CFG_DARK = {
@@ -288,22 +288,31 @@ function CFG_HomeScreen({ profile, settings, nav, onBack, user }) {
 }
 
 /* ── ACCOUNT ──────────────────────────────────────────────────── */
-function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=false, onRequestVerification, accountPassword="", onSetPassword, flash, user }) {
+// Nombre y correo se MUESTRAN aquí (son reales), pero se EDITAN en Perfil →
+// Editar perfil — el único lugar donde ese guardado es real (RPC
+// save_profile_all). Antes esta pantalla tenía su propio lápiz de "editar"
+// que solo cambiaba estado local en memoria y nunca llegaba a la base de
+// datos: parecía guardar y no guardaba nada. Se quitó, para no mentir.
+// Teléfono: NO existe una columna real para esto en `profiles` (verificado
+// contra Supabase) — no se inventa aquí; si el dueño confirma una columna
+// real, se puede agregar entonces.
+function CFG_AccountScreen({ profile, nav, onSignOut, isVerified=false, onRequestVerification, onEditProfile, onSetPassword, flash, user }) {
   const tk = CFG_useTk();
-  const [editing, setEditing] = useState(null);
-  const [val, setVal] = useState("");
   const [pwSheet, setPwSheet] = useState(false);
-  const hasPw = !!accountPassword;
-  function startEdit(f, v) { setEditing(f); setVal(v); }
-  function save() {
-    if (editing==="name") { const ini=val.trim().split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase(); setProfile(p=>({...p,name:val.trim(),initials:ini})); }
-    else if (editing==="phone") setProfile(p=>({...p,phone:val.trim()}));
-    setEditing(null);
-  }
+  const [verif, setVerif] = useState(null);
+  const [verifLoading, setVerifLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    if (!user?.id) { setVerifLoading(false); return; }
+    getMyVerification(user.id).then(v => { if (alive) { setVerif(v); setVerifLoading(false); } }).catch(() => { if (alive) setVerifLoading(false); });
+    return () => { alive = false; };
+  }, [user?.id]);
+  const verifStatus = verif?.status || null; // pending | approved | rejected | revoked | null
+  const isPending = !isVerified && verifStatus === "pending";
+  const canRequest = !isVerified && !isPending;
   const fields = [
-    { field:"name",  label:"Nombre",  value:profile.name,  Icon:User  },
-    { field:"email", label:"Correo",  value:profile.email, Icon:Mail  },
-    { field:"phone", label:"Teléfono", value:profile.phone, Icon:Phone },
+    { label:"Nombre", value:profile.name,  Icon:User },
+    { label:"Correo", value:profile.email, Icon:Mail },
   ];
   return (
     <div style={{ background:tk.BG }} className="">
@@ -320,45 +329,25 @@ function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=fal
             </div>
           )}
         </div>
-        {/* Cambiar foto ya es real, pero vive en Perfil (donde se ve el
-            avatar en grande) — no se duplica aquí un botón sin acción. */}
       </div>
       <CFG_Lbl>Información personal</CFG_Lbl>
       <CFG_Crd>
-        {fields.map(({ field, label, value, Icon }, i) => {
-          // El correo de la cuenta viene de Google/el backend y no se puede
-          // cambiar desde la app — se muestra fijo, sin lápiz de editar.
-          const locked = field === "email";
-          return (
-          <div key={field}>
+        {fields.map(({ label, value, Icon }, i) => (
+          <div key={label}>
             {i > 0 && <CFG_Hr />}
-            <div style={{ background:tk.ROW }} className="px-3.5 py-2.5">
-              <div className="flex items-center gap-2.5">
-                <div style={{ background:tk.CARD2 }} className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Icon size={14} style={{ color:tk.T2 }} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div style={{ color:tk.T3 }} className="text-[10px] font-bold uppercase tracking-wide">{label}</div>
-                  {editing===field
-                    ? <input autoFocus value={val} onChange={e=>setVal(e.target.value)}
-                        style={{ borderColor:tk.P, color:tk.T1, background:"transparent" }}
-                        className="text-[14px] font-medium border-b-2 outline-none w-full" />
-                    : <div style={{ color:tk.T1 }} className="text-[14px] font-medium">{value}</div>}
-                  {locked && editing!==field && <div style={{ color:tk.T3 }} className="text-[10.5px] mt-0.5">El correo de tu cuenta no se puede cambiar</div>}
-                </div>
-                {locked ? null : editing===field ? (
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <button onClick={() => setEditing(null)} style={{ color:tk.T2 }} className="text-[12px]">Cancelar</button>
-                    <button onClick={save} style={{ color:tk.P }} className="text-[12px] font-bold">OK</button>
-                  </div>
-                ) : (
-                  <button onClick={() => startEdit(field, value)} style={{ color:tk.T3 }} className="flex-shrink-0"><Edit2 size={14} /></button>
-                )}
+            <div style={{ background:tk.ROW }} className="flex items-center gap-2.5 px-3.5 py-2.5">
+              <div style={{ background:tk.CARD2 }} className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0">
+                <Icon size={14} style={{ color:tk.T2 }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div style={{ color:tk.T3 }} className="text-[10px] font-bold uppercase tracking-wide">{label}</div>
+                <div style={{ color:tk.T1 }} className="text-[14px] font-medium truncate">{value}</div>
               </div>
             </div>
           </div>
-          );
-        })}
+        ))}
+        <CFG_Hr />
+        <CFG_Row icon={Edit2} bg="bg-zinc-600" label="Editar nombre y foto" sub="Se hace desde tu perfil" onClick={() => onEditProfile && onEditProfile()} />
       </CFG_Crd>
       <CFG_Lbl>Estado</CFG_Lbl>
       <CFG_Crd>
@@ -372,18 +361,32 @@ function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=fal
               <div style={{ color:tk.T2 }} className="text-[11px]">Miembro desde {profile.memberSince}</div>
             </div>
           </div>
+        ) : verifLoading ? (
+          <div style={{ background:tk.ROW }} className="px-3.5 py-3.5">
+            <div style={{ color:tk.T2 }} className="text-[12px]">Consultando estado…</div>
+          </div>
+        ) : isPending ? (
+          <div style={{ background:tk.ROW }} className="flex items-center gap-2.5 px-3.5 py-2.5">
+            <div style={{ background:tk.WRN_BG }} className="w-8 h-8 rounded-lg flex items-center justify-center">
+              <Clock size={15} style={{ color:tk.WRN_T }} />
+            </div>
+            <div>
+              <div style={{ color:tk.T1 }} className="text-[14px] font-medium">En revisión</div>
+              <div style={{ color:tk.T2 }} className="text-[11px]">Te avisamos cuando la revisemos</div>
+            </div>
+          </div>
         ) : (
-          <CFG_Row icon={Shield} bg="bg-violet-600" label="Solicitar verificación" sub="Sube tu documento y obtén el sello" onClick={() => onRequestVerification && onRequestVerification()} />
+          <CFG_Row icon={Shield} bg="bg-violet-600" label={verifStatus ? "Volver a solicitar verificación" : "Solicitar verificación"} sub="Sube tu documento y obtén el sello" onClick={() => onRequestVerification && onRequestVerification()} />
         )}
       </CFG_Crd>
       <CFG_Lbl>Seguridad</CFG_Lbl>
       <CFG_Crd>
-        <CFG_Row icon={Lock} bg="bg-zinc-600" label={hasPw ? "Cambiar contraseña" : "Crear contraseña"} sub={hasPw ? "Actualiza tu contraseña" : "Aún no tienes contraseña"} onClick={() => setPwSheet(true)} />
+        <CFG_Row icon={Lock} bg="bg-zinc-600" label="Cambiar contraseña" sub="Para poder entrar sin depender solo de Google" onClick={() => setPwSheet(true)} />
       </CFG_Crd>
       <CFG_Lbl>Sesión</CFG_Lbl>
       <CFG_Crd><CFG_Row icon={LogOut} bg="bg-red-700" label="Cerrar sesión" danger onClick={onSignOut || (() => signOutUser())} /></CFG_Crd>
       <div className="h-8" />
-      {pwSheet && <CFG_PasswordSheet hasPw={hasPw} current={accountPassword} onClose={() => setPwSheet(false)} onSave={(pw) => { onSetPassword && onSetPassword(pw); setPwSheet(false); flash && flash(hasPw ? "🔒 Contraseña actualizada" : "🔒 Contraseña creada"); }} />}
+      {pwSheet && <CFG_PasswordSheet onClose={() => setPwSheet(false)} onSave={(pw) => { onSetPassword && onSetPassword(pw); setPwSheet(false); }} />}
     </div>
   );
 }
@@ -460,15 +463,16 @@ function CFG_RegionScreen({ user, nav, flash, onUpdate }) {
   );
 }
 
-function CFG_PasswordSheet({ hasPw, current, onClose, onSave }) {
+// Ya no pide "contraseña actual": la sesión ya está autenticada (con Google o
+// con la contraseña anterior), así que Supabase Auth cambia la contraseña
+// directo con la sesión activa — no hace falta volver a comprobarla aquí.
+function CFG_PasswordSheet({ onClose, onSave }) {
   const tk = CFG_useTk();
-  const [cur, setCur] = useState("");
   const [pw1, setPw1] = useState("");
   const [pw2, setPw2] = useState("");
   const [err, setErr] = useState("");
   const submit = () => {
-    if (hasPw && cur !== current) { setErr("La contraseña actual no es correcta"); return; }
-    if (pw1.length < 4) { setErr("Mínimo 4 caracteres"); return; }
+    if (pw1.length < 6) { setErr("Mínimo 6 caracteres"); return; }
     if (pw1 !== pw2) { setErr("Las contraseñas no coinciden"); return; }
     onSave(pw1);
   };
@@ -476,15 +480,14 @@ function CFG_PasswordSheet({ hasPw, current, onClose, onSave }) {
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:5000, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
       <div onClick={e=>e.stopPropagation()} style={{ background:tk.BG, width:"100%", maxWidth:440, borderRadius:"18px 18px 0 0", padding:"20px 18px 26px", maxHeight:"88vh", overflowY:"auto" }}>
-        <div style={{ color:tk.T1 }} className="text-[16px] font-bold mb-1">{hasPw ? "Cambiar contraseña" : "Crear contraseña"}</div>
-        <div style={{ color:tk.T2 }} className="text-[12px] mb-4">{hasPw ? "Introduce tu contraseña actual y la nueva." : "Crea una contraseña para proteger tu cuenta."}</div>
-        {hasPw && <input type="password" value={cur} onChange={e=>{setCur(e.target.value);setErr("");}} placeholder="Contraseña actual" style={inp} className="w-full h-11 rounded-xl px-3 text-[14px] border outline-none mb-2.5" />}
+        <div style={{ color:tk.T1 }} className="text-[16px] font-bold mb-1">Cambiar contraseña</div>
+        <div style={{ color:tk.T2 }} className="text-[12px] mb-4">Sirve para poder entrar con correo y contraseña, sin depender solo de Google.</div>
         <input type="password" value={pw1} onChange={e=>{setPw1(e.target.value);setErr("");}} placeholder="Nueva contraseña" style={inp} className="w-full h-11 rounded-xl px-3 text-[14px] border outline-none mb-2.5" />
         <input type="password" value={pw2} onChange={e=>{setPw2(e.target.value);setErr("");}} placeholder="Repite la nueva contraseña" style={inp} className="w-full h-11 rounded-xl px-3 text-[14px] border outline-none mb-2.5" />
         {err && <div className="text-[12px] mb-2" style={{ color:"#ef4444" }}>{err}</div>}
         <div className="flex gap-2.5 mt-2">
           <button onClick={onClose} style={{ background:tk.CARD2, color:tk.T1 }} className="flex-1 h-11 rounded-xl text-[13px] font-semibold">Cancelar</button>
-          <button onClick={submit} style={{ background:"#FFC01E", color:"#000" }} className="flex-1 h-11 rounded-xl text-[13px] font-bold">{hasPw ? "Actualizar" : "Crear"}</button>
+          <button onClick={submit} style={{ background:"#FFC01E", color:"#000" }} className="flex-1 h-11 rounded-xl text-[13px] font-bold">Actualizar</button>
         </div>
       </div>
     </div>
@@ -811,7 +814,13 @@ function CFG_DeliveriesScreen({ settings, upd, nav }) {
 }
 
 /* ── PAYMENTS ─────────────────────────────────────────────────── */
-function CFG_PaymentsScreen({ settings, upd, nav, onOpenWallet, orders = [], flash }) {
+// La billetera sigue apagada a propósito (wallet_config.is_active=false,
+// decisión ya tomada). Antes esta pantalla prometía "gestionar métodos de
+// pago, cuentas bancarias" como si funcionara, y el botón llevaba a una
+// billetera real pero deshabilitada — se sentía rota. Ahora, si está
+// apagada, lo dice claro aquí mismo: "Próximamente", sin botones que
+// prometen algo que hoy no existe.
+function CFG_PaymentsScreen({ settings, upd, nav, onOpenWallet, walletOn=true, orders = [], flash }) {
   const tk = CFG_useTk();
   const [showInvoices, setShowInvoices] = useState(false);
 
@@ -855,26 +864,34 @@ function CFG_PaymentsScreen({ settings, upd, nav, onOpenWallet, orders = [], fla
             </div>
             <div className="flex-1">
               <div style={{ color:tk.T1 }} className="text-[14px] font-bold">Billetera RETADOR</div>
-              <div style={{ color:tk.T2 }} className="text-[11px]">Saldo, métodos de pago, recargas y conversión de monedas</div>
+              <div style={{ color:tk.T2 }} className="text-[11px]">{walletOn ? "Saldo, métodos de pago, recargas y conversión de monedas" : "Saldo, métodos de pago y conversión de monedas"}</div>
             </div>
           </div>
-          <button onClick={() => onOpenWallet && onOpenWallet()} style={{ background:"#FFC01E", color:"#000" }} className="w-full h-10 rounded-xl text-[13px] font-bold">Abrir billetera</button>
+          {walletOn
+            ? <button onClick={() => onOpenWallet && onOpenWallet()} style={{ background:"#FFC01E", color:"#000" }} className="w-full h-10 rounded-xl text-[13px] font-bold">Abrir billetera</button>
+            : <div style={{ background:tk.WRN_BG, color:tk.WRN_T }} className="w-full text-center py-2.5 rounded-xl text-[12.5px] font-bold">🔜 Próximamente</div>}
         </div>
       </CFG_Crd>
 
       <CFG_Lbl>Métodos de pago</CFG_Lbl>
       <CFG_Crd>
-        <CFG_Row icon={CreditCard} bg="bg-violet-600" label="Gestionar métodos de pago" sub="Cuentas bancarias y recargas (en la billetera)" onClick={() => onOpenWallet && onOpenWallet()} />
-        <CFG_Hr />
-        <div style={{ background:tk.ROW }} className="px-3.5 py-2.5">
-          <div style={{ color:tk.T3 }} className="text-[11px]">Próximamente: PayPal, Visa y tarjetas internacionales.</div>
-        </div>
+        {walletOn ? (
+          <CFG_Row icon={CreditCard} bg="bg-violet-600" label="Gestionar métodos de pago" sub="Cuentas bancarias y recargas (en la billetera)" onClick={() => onOpenWallet && onOpenWallet()} />
+        ) : (
+          <div style={{ background:tk.ROW }} className="px-3.5 py-3">
+            <div style={{ color:tk.T2 }} className="text-[12.5px] leading-relaxed">Aún no puedes gestionar cuentas bancarias ni métodos de pago desde la app — <b>próximamente</b>.</div>
+          </div>
+        )}
       </CFG_Crd>
 
-      <CFG_Lbl>Transacciones</CFG_Lbl>
-      <CFG_Crd>
-        <CFG_Row icon={FileText} bg="bg-blue-600" label="Ver mis transacciones" sub="Historial completo en la billetera" onClick={() => onOpenWallet && onOpenWallet()} />
-      </CFG_Crd>
+      {walletOn && (
+        <>
+          <CFG_Lbl>Transacciones</CFG_Lbl>
+          <CFG_Crd>
+            <CFG_Row icon={FileText} bg="bg-blue-600" label="Ver mis transacciones" sub="Historial completo en la billetera" onClick={() => onOpenWallet && onOpenWallet()} />
+          </CFG_Crd>
+        </>
+      )}
 
       <CFG_Lbl>Documentos</CFG_Lbl>
       <CFG_Crd>
@@ -1089,8 +1106,12 @@ function CFG_StorageScreen({ settings, upd, nav, flash }) {
 /* ── HELP ─────────────────────────────────────────────────────── */
 // "¿Cómo funciona el pago?" y "¿Cómo participo en una subasta?" se quitaron:
 // describían cosas que hoy no pasan así (subastas sigue apagada) — mentira si
-// se dejan ahí. "Reportar un problema" ya no finge un envío que no va a
-// ningún lado: abre el correo real, igual que "Contactar soporte".
+// se dejan ahí.
+// "Contactar soporte" y "Reportar un problema": SIN correo real todavía (el
+// dueño lo confirmó — no existe una dirección real que usar). Una ronda
+// anterior había puesto un mailto inventado (soporte@retador.app, que no
+// existe) — se revierte aquí. Mientras no haya un correo real, estas dos
+// filas se muestran sin acción, avisando por qué.
 function CFG_HelpScreen({ nav, flash }) {
   const tk = CFG_useTk();
   const [open, setOpen] = useState(null);
@@ -1099,7 +1120,6 @@ function CFG_HelpScreen({ nav, flash }) {
     { q: "¿Cómo verifico mi cuenta?", a: "En Configuración → Cuenta → Solicitar verificación. Subes tu documento por delante y por detrás; al aprobarse, tu cuenta queda verificada." },
     { q: "¿Cómo cambio el tema o el tamaño del texto?", a: "En Configuración → Apariencia (tema claro/oscuro, vista de productos y tamaño de texto). Se aplica a toda la app al instante." },
   ];
-  const mailto = (subject) => { try { window.location.href = `mailto:soporte@retador.app?subject=${encodeURIComponent(subject)}`; } catch(e){} flash && flash("📧 Abriendo tu correo…"); };
   return (
     <div style={{ background:tk.BG }} className="">
       <CFG_Hdr title="Ayuda" onBack={() => nav("home")} />
@@ -1120,11 +1140,25 @@ function CFG_HelpScreen({ nav, flash }) {
       </CFG_Crd>
       <CFG_Lbl>Soporte</CFG_Lbl>
       <CFG_Crd>
-        <CFG_Row icon={MessageCircle} bg="bg-teal-600" label="Contactar soporte" sub="Te respondemos por correo"
-          onClick={() => mailto("Soporte RETADOR")} />
+        <div style={{ background:tk.ROW }} className="flex items-center gap-2.5 px-3.5 py-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-teal-600 opacity-60">
+            <MessageCircle size={15} className="text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div style={{ color:tk.T1 }} className="text-[14px] font-medium">Contactar soporte</div>
+            <div style={{ color:tk.T2 }} className="text-[11px] mt-0.5">Aún no disponible — no hay un correo de soporte todavía</div>
+          </div>
+        </div>
         <CFG_Hr />
-        <CFG_Row icon={AlertCircle} bg="bg-orange-600" label="Reportar un problema" sub="Te respondemos por correo"
-          onClick={() => mailto("Reporte de un problema — RETADOR")} />
+        <div style={{ background:tk.ROW }} className="flex items-center gap-2.5 px-3.5 py-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-orange-600 opacity-60">
+            <AlertCircle size={15} className="text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div style={{ color:tk.T1 }} className="text-[14px] font-medium">Reportar un problema</div>
+            <div style={{ color:tk.T2 }} className="text-[11px] mt-0.5">Aún no disponible — no hay un correo de soporte todavía</div>
+          </div>
+        </div>
       </CFG_Crd>
       <div className="h-8" />
     </div>
@@ -1132,6 +1166,10 @@ function CFG_HelpScreen({ nav, flash }) {
 }
 
 /* ── ABOUT ────────────────────────────────────────────────────── */
+// Ícono real de la app (icons/icon-192.png) — el mismo que usa el manifest
+// PWA, la pestaña del navegador y la pantalla de inicio del teléfono. Antes
+// aquí se mostraba un martillo de subastas (Gavel) sin relación con la marca.
+const CFG_ABOUT_ICON = (import.meta.env.BASE_URL || "/") + "icons/icon-192.png";
 function CFG_AboutScreen({ nav }) {
   const tk = CFG_useTk();
   const appVersion = useAppVersion();
@@ -1140,8 +1178,8 @@ function CFG_AboutScreen({ nav }) {
       <CFG_Hdr title="Acerca de" onBack={() => nav("home")} />
       <div className="flex flex-col items-center py-6">
         <div style={{ background:"linear-gradient(135deg,#b8860b,#FFC01E)" }}
-          className="w-14 h-14 rounded-2xl flex items-center justify-center mb-2.5">
-          <Gavel size={26} className="text-white" />
+          className="w-14 h-14 rounded-2xl flex items-center justify-center mb-2.5 overflow-hidden">
+          <img src={CFG_ABOUT_ICON} alt="RETADOR" className="w-full h-full object-cover" />
         </div>
         <h2 style={{ color:tk.T1 }} className="text-[18px] font-black tracking-tight">RETADOR</h2>
         <div style={{ color:tk.T2 }} className="text-[11px] mt-0.5">Marketplace · Cuba</div>
@@ -1173,19 +1211,18 @@ function CFG_AboutScreen({ nav }) {
 }
 
 /* ── APP ──────────────────────────────────────────────────────── */
-export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTheme="auto", onThemeChange, imgScale=1, onImgScaleChange, appTextScale=1, onTextScaleChange, profileData={}, onProfileUpdate, isVerified=false, onRequestVerification, accountPassword="", onSetPassword, blockedUsers=[], onToggleBlock, onOpenWallet, orders=[], productView="grid", onProductViewChange }) {
+export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTheme="auto", onThemeChange, imgScale=1, onImgScaleChange, appTextScale=1, onTextScaleChange, profileData={}, onProfileUpdate, isVerified=false, onRequestVerification, onEditProfile, onSetPassword, blockedUsers=[], onToggleBlock, onOpenWallet, walletOn=true, orders=[], productView="grid", onProductViewChange }) {
   const [screen, setScreen]     = useState("home");
   const me0 = profileData?.name || user?.name || "Usuario";
-  const [profile, setProfile]   = useState({
+  // Solo LECTURA aquí (nombre/correo se editan de verdad en Perfil → Editar
+  // perfil): este objeto ya no se guarda hacia atrás, solo refleja lo real.
+  const profile = {
     name: me0,
     email: profileData?.email || user?.email || "",
-    phone: profileData?.phone || "",
     verified: isVerified,
     initials: me0.trim().split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase(),
     memberSince: profileData?.memberSince || "2026",
-  });
-  // refleja cambios externos de verificación
-  useEffect(() => { setProfile(p => ({ ...p, verified: isVerified })); }, [isVerified]);
+  };
   const [settings, setSettings] = useState(() => {
     try { const r = localStorage.getItem("retador_settings"); if (r) return { ...CFG_INIT, ...JSON.parse(r) }; } catch {}
     return CFG_INIT;
@@ -1198,13 +1235,7 @@ export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTh
            : appTheme==="dark"  ? CFG_DARK
            : (typeof window!=="undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? CFG_DARK : CFG_LIGHT);
 
-  const saveProfile = (updater) => setProfile(prev => {
-    const next = typeof updater === "function" ? updater(prev) : updater;
-    onProfileUpdate && onProfileUpdate(pd => ({ ...(pd || {}), name: next.name, email: next.email, phone: next.phone, initials: next.initials }));
-    return next;
-  });
-
-  const p = { profile, setProfile: saveProfile, settings, upd, nav, appScale:imgScale, onScale:onImgScaleChange, onBack, onSignOut, onThemeChange, appTheme, appTextScale, onTextScaleChange, flash, isVerified, onRequestVerification, accountPassword, onSetPassword, blockedUsers, onToggleBlock, onOpenWallet, orders, productView, onProductViewChange, user, onUpdate };
+  const p = { profile, settings, upd, nav, appScale:imgScale, onScale:onImgScaleChange, onBack, onSignOut, onThemeChange, appTheme, appTextScale, onTextScaleChange, flash, isVerified, onRequestVerification, onEditProfile, onSetPassword, blockedUsers, onToggleBlock, onOpenWallet, walletOn, orders, productView, onProductViewChange, user, onUpdate };
   const map = {
     home:          <CFG_HomeScreen          {...p} />,
     account:       <CFG_AccountScreen       {...p} />,

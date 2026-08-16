@@ -36,7 +36,20 @@ function esc(s = "") {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function pageHtml({ title, description, image, redirectTo }) {
+function pageHtml({ title, description, image, url, redirectTo }) {
+  // BUG REAL encontrado y corregido: el <meta http-equiv="refresh" content="0;...">
+  // hacía que rastreadores como el de Facebook (que no ejecutan JavaScript, pero
+  // SÍ siguen una redirección de 0 segundos declarada en el propio HTML) saltaran
+  // derecho al destino (la app raíz, "/?openProduct=<id>") ANTES de leer las
+  // etiquetas Open Graph de ESTA página — y esa app raíz solo tiene el título y
+  // logo genéricos de RETADOR (no hay foto/precio: es una SPA, no genera meta
+  // tags por producto). Resultado real reportado: la vista previa compartida
+  // mostraba solo "RETADOR" y el dominio, sin foto ni precio, aunque el enlace
+  // SÍ llevaba al producto correcto al tocarlo (el navegador humano sí sigue la
+  // redirección; el rastreador la sigue TAMBIÉN, pero para leer metadatos, no
+  // para navegar). Quitando el meta-refresh y dejando SOLO la redirección por
+  // JavaScript, los rastreadores (que no ejecutan JS) se quedan leyendo estas
+  // etiquetas reales, y las personas reales igual son enviadas al instante.
   return `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -46,9 +59,9 @@ function pageHtml({ title, description, image, redirectTo }) {
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:image" content="${esc(image)}">
+<meta property="og:url" content="${esc(url)}">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
-<meta http-equiv="refresh" content="0;url=${esc(redirectTo)}">
 <script>location.replace(${JSON.stringify(redirectTo)});</script>
 </head>
 <body>Redirigiendo a RETADOR…</body>
@@ -87,6 +100,7 @@ async function main() {
       title: p.title || "RETADOR Marketplace",
       description,
       image,
+      url: `${APP_URL}/share/producto/${encodeURIComponent(p.id)}.html`,
       redirectTo: `${APP_URL}/?openProduct=${encodeURIComponent(p.id)}`,
     });
     fs.writeFileSync(path.join(prodDir, `${p.id}.html`), html);
@@ -103,6 +117,7 @@ async function main() {
       title: u.full_name || "RETADOR Marketplace",
       description: u.bio || "Mira mi tienda en RETADOR.",
       image: u.avatar_url || DEFAULT_IMAGE,
+      url: `${APP_URL}/share/perfil/${encodeURIComponent(u.id)}.html`,
       redirectTo: `${APP_URL}/?openProfile=${encodeURIComponent(u.id)}`,
     });
     fs.writeFileSync(path.join(profDir, `${u.id}.html`), html);

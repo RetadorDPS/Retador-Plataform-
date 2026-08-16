@@ -34,38 +34,20 @@ const CFG_ThemeCtx = createContext(CFG_DARK);
 const CFG_useTk = () => useContext(CFG_ThemeCtx);
 
 /* ── DATA ─────────────────────────────────────────────────────── */
-const CFG_INIT_PROFILE = {
-  name:"Carlos Rivera", email:"carlos.rivera@gmail.com",
-  phone:"+52 999 123 4567", verified:true, initials:"CR", memberSince:"2023",
-};
+// Ronda de consolidación: se quitaron de aquí todos los ajustes que nunca
+// estuvieron conectados a nada real (notificaciones por categoría, chat,
+// subastas, privacidad decorativa, almacenamiento inventado) — ver el
+// historial de commits para el detalle. Lo que queda es exactamente lo que
+// alguna pantalla real todavía lee.
 const CFG_INIT = {
-  appearance:{ theme:"auto", density:"standard", textSize:"normal", reduceAnimations:false },
-  notifications:{
-    chat:       { newMessages:true,  sounds:true,  vibration:true  },
-    marketplace:{ newSales:true,     newOrders:true                },
-    deliveries: { orderStatus:true,  delivered:true, shippingUpdate:false },
-    auctions:   { newBid:true,       endingSoon:true, won:true     },
-    promotions: { offers:false,      events:false,  news:false     },
-  },
-  privacy:{
-    twoFactor:false, fingerprint:true, publicProfile:true,
-    showLastSeen:false, showOnlineStatus:true,
-    blockedUsers:[
-      { id:1, name:"Miguel Torres" },
-      { id:2, name:"Ana González"  },
-    ],
-  },
-  chat:{ readReceipts:true, autoDownloadImages:false, autoDownloadVideos:false },
+  appearance:{ theme:"auto", density:"standard", textSize:"normal" },
   deliveries:{
     addresses:[
       { id:1, label:"Casa",    address:"Av. Paseo de Montejo 120, Mérida, Yucatán", main:true  },
       { id:2, label:"Trabajo", address:"Calle 62 #456, Centro Histórico, Mérida",   main:false },
     ],
     instructions:"Dejar en la puerta principal. Llamar antes de entregar.",
-    searchRadius:15, internationalShipping:false,
   },
-  auctions:{ confirmBeforeBid:true, closingReminders:true },
-  language:"es",
   payments:{
     methods:[
       { id:1, type:"card",   last4:"4532", brand:"Visa", expires:"12/26", main:true  },
@@ -92,8 +74,30 @@ const CFG_INIT = {
       { label:"Ene", purchases:4, sales:3 },
     ],
   },
-  storage:{ cache:47.3, temp:23.1, downloads:128.4 },
 };
+
+// ── ALMACENAMIENTO REAL — un solo cálculo, compartido entre el resumen de
+// Configuración y la pantalla de detalle, para que SIEMPRE muestren el mismo
+// número (bug real corregido: antes el resumen mostraba un dato inventado
+// aparte — 198 MB fijos — mientras el detalle medía de verdad el localStorage
+// del dispositivo — unos pocos MB reales —, dos números distintos para "lo
+// mismo").
+const CFG_STORAGE_CATS = {
+  conversaciones: ["retador_chatmsgs", "retador_chatpeople", "retador_delconvs", "retador_blocked"],
+  contenido: ["retador_products", "retador_orders", "retador_auctions", "retador_reports", "retador_verifs", "retador_planreq", "retador_payments", "retador_cats", "retador_subcats"],
+  billetera: ["retador_wallet", "retador_wallet_banks", "retador_wallet_sec", "retador_wallet_tx"],
+  ajustes: ["retador_settings", "retador_admincfg", "retador_theme", "retador_txt_scale", "retador_favs", "retador_verified", "retador_userplans", "retador_editor"],
+};
+function cfgMeasureStorage() {
+  const out = {};
+  Object.entries(CFG_STORAGE_CATS).forEach(([cat, keys]) => {
+    let b = 0;
+    keys.forEach(k => { try { const v = localStorage.getItem(k); if (v) b += (k.length + v.length) * 2; } catch {} });
+    out[cat] = b;
+  });
+  return out;
+}
+function cfgFmtSize(b) { return b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1024 / 1024).toFixed(2)} MB`; }
 
 /* ── ÁTOMOS ───────────────────────────────────────────────────── */
 function CFG_Sw({ on, change }) {
@@ -229,9 +233,9 @@ function CFG_Bdg({ s }) {
 function CFG_HomeScreen({ profile, settings, nav, onBack, user }) {
   const tk = CFG_useTk();
   const appVersion = useAppVersion();
-  const storMB = Math.round(Object.values(settings.storage).reduce((a,b)=>a+b,0));
+  const storageTotal = Object.values(cfgMeasureStorage()).reduce((a,b)=>a+b,0);
   const themeLabel = { auto:"Auto", light:"Claro", dark:"Oscuro" };
-  const langLabel  = { es:"Español", en:"English" };
+  const idiomaLabel = { es:"Español", en:"English" };
   const paisLabel = { cuba:"Cuba", espana:"España", eeuu:"Estados Unidos" };
   const shopCountry = user?.profile?.shop_country || null;
   const shopProvince = user?.profile?.shop_province || null;
@@ -242,22 +246,20 @@ function CFG_HomeScreen({ profile, settings, nav, onBack, user }) {
     ]},
     { title:"Personalización", items:[
       { id:"appearance",    Icon:Palette,       label:"Apariencia",          value:themeLabel[settings.appearance.theme]||"Auto", bg:"bg-indigo-600" },
-      { id:"language",      Icon:Globe,         label:"Idioma",              value:langLabel[settings.language]||"Español",        bg:"bg-sky-600"    },
+      { id:"language",      Icon:Globe,         label:"Idioma",              value:idiomaLabel[user?.profile?.idioma || "es"]||"Español", bg:"bg-sky-600"    },
     ]},
     { title:"Comunicación", items:[
       { id:"notifications", Icon:Bell,          label:"Notificaciones",      bg:"bg-orange-600" },
-      { id:"chat",          Icon:MessageCircle, label:"Chat",                bg:"bg-teal-600"   },
     ]},
     { title:"Marketplace", items:[
       { id:"region",        Icon:MapPin,        label:"Región",              value:regionValue, bg:"bg-lime-600" },
       { id:"deliveries",    Icon:Truck,         label:"Entregas y Envíos",   value:`${settings.deliveries.addresses.length} dirs.`,  bg:"bg-blue-600"    },
-      { id:"auctions",      Icon:Gavel,         label:"Subastas",            value:`${settings.activity.auctions.won}/${settings.activity.auctions.participated}`, bg:"bg-amber-600" },
       { id:"payments",      Icon:CreditCard,    label:"Pagos",               value:`${settings.payments.methods.length} métodos`,    bg:"bg-emerald-600" },
     ]},
     { title:"Datos y Privacidad", items:[
       { id:"activity",      Icon:BarChart2,     label:"Actividad",           bg:"bg-pink-600"  },
-      { id:"privacy",       Icon:Shield,        label:"Privacidad",          value:settings.privacy.twoFactor?"2FA ✓":"2FA", bg:"bg-red-600" },
-      { id:"storage",       Icon:HardDrive,     label:"Almacenamiento",      value:`${storMB} MB`, bg:"bg-zinc-600" },
+      { id:"privacy",       Icon:Shield,        label:"Privacidad",          bg:"bg-red-600" },
+      { id:"storage",       Icon:HardDrive,     label:"Almacenamiento",      value:cfgFmtSize(storageTotal), bg:"bg-zinc-600" },
     ]},
     { title:"Soporte", items:[
       { id:"help",          Icon:HelpCircle,    label:"Ayuda",               bg:"bg-cyan-700"  },
@@ -318,9 +320,8 @@ function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=fal
             </div>
           )}
         </div>
-        <button style={{ color:tk.P }} className="mt-2.5 flex items-center gap-1 text-[12px] font-medium">
-          <Camera size={12} /> Cambiar foto
-        </button>
+        {/* Cambiar foto ya es real, pero vive en Perfil (donde se ve el
+            avatar en grande) — no se duplica aquí un botón sin acción. */}
       </div>
       <CFG_Lbl>Información personal</CFG_Lbl>
       <CFG_Crd>
@@ -574,11 +575,6 @@ function CFG_AppearanceScreen({ settings, upd, nav, appScale = 1, onScale, onThe
           </div>
         </div>
       </CFG_Crd>
-      <CFG_Lbl>Accesibilidad</CFG_Lbl>
-      <CFG_Crd>
-        <CFG_TRow icon={Zap} bg="bg-amber-600" label="Reducir animaciones" sub="Mejora el rendimiento"
-          on={ap.reduceAnimations} change={v => set("reduceAnimations", v)} />
-      </CFG_Crd>
       <div className="h-8" />
     </div>
   );
@@ -657,94 +653,48 @@ function CFG_NotifReliabilityTip() {
 }
 
 /* ── NOTIFICATIONS ─────────────────────────────────────────────── */
-function CFG_NotificationsScreen({ settings, upd, nav, user, flash }) {
+// Se quitaron de aquí los interruptores por categoría (mensajes/ventas/
+// pedidos/subastas/promociones): nunca estuvieron conectados a nada — activar
+// o apagar cualquiera de esos no cambiaba si el aviso llegaba de verdad. Lo
+// único real es el interruptor de este dispositivo (Web Push).
+function CFG_NotificationsScreen({ nav, user, flash }) {
   const tk = CFG_useTk();
-  const n = settings.notifications;
-  function set(g, k, v) { upd("notifications", { ...n, [g]:{ ...n[g], [k]:v } }); }
-  const groups = [
-    { id:"chat", label:"Chat", items:[
-      { k:"newMessages", l:"Mensajes nuevos", Icon:MessageCircle, bg:"bg-teal-600"   },
-      { k:"sounds",      l:"Sonidos",         Icon:Volume2,       bg:"bg-sky-700"    },
-      { k:"vibration",   l:"Vibración",       Icon:Smartphone,    bg:"bg-blue-700"   },
-    ]},
-    { id:"marketplace", label:"Marketplace", items:[
-      { k:"newSales",  l:"Nuevas ventas",  Icon:ShoppingBag, bg:"bg-violet-600" },
-      { k:"newOrders", l:"Nuevos pedidos", Icon:Package,     bg:"bg-indigo-600" },
-    ]},
-    { id:"deliveries", label:"Entregas y Envíos", items:[
-      { k:"orderStatus",    l:"Estado del pedido",     Icon:Truck,        bg:"bg-blue-600"    },
-      { k:"delivered",      l:"Pedido entregado",      Icon:CheckCircle2, bg:"bg-emerald-600" },
-      { k:"shippingUpdate", l:"Actualización de envío", Icon:MapPin,      bg:"bg-cyan-700"    },
-    ]},
-    { id:"auctions", label:"Subastas", items:[
-      { k:"newBid",     l:"Nueva oferta",     Icon:Gavel, bg:"bg-amber-600"  },
-      { k:"endingSoon", l:"Próxima a cerrar", Icon:Clock, bg:"bg-orange-600" },
-      { k:"won",        l:"Subasta ganada",   Icon:Award, bg:"bg-yellow-600" },
-    ]},
-    { id:"promotions", label:"Promociones", items:[
-      { k:"offers", l:"Ofertas",   Icon:Star,     bg:"bg-pink-600"   },
-      { k:"events", l:"Eventos",   Icon:Calendar, bg:"bg-purple-600" },
-      { k:"news",   l:"Novedades", Icon:Zap,      bg:"bg-rose-600"   },
-    ]},
-  ];
   const pushOk = isPushSupported();
   return (
     <div style={{ background:tk.BG }} className="">
       <CFG_Hdr title="Notificaciones" onBack={() => nav("home")} />
-      {pushOk && <>
+      {pushOk ? <>
         <CFG_Lbl>Este dispositivo</CFG_Lbl>
         <CFG_Crd>
           <CFG_PushRow userId={user?.id} flash={flash} />
         </CFG_Crd>
         <CFG_NotifReliabilityTip />
-      </>}
-      {groups.map(gr => (
-        <div key={gr.id}>
-          <CFG_Lbl>{gr.label}</CFG_Lbl>
-          <CFG_Crd>
-            {gr.items.map((item, i) => (
-              <div key={item.k}>
-                {i > 0 && <CFG_Hr />}
-                <div style={{ background:tk.ROW }} className="flex items-center gap-2.5 px-3.5 py-2.5">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${item.bg}`}>
-                    <item.Icon size={15} className="text-white" />
-                  </div>
-                  <div style={{ color:tk.T1 }} className="flex-1 text-[14px] font-medium">{item.l}</div>
-                  <CFG_Sw on={n[gr.id][item.k]} change={v => set(gr.id, item.k, v)} />
-                </div>
-              </div>
-            ))}
-          </CFG_Crd>
+      </> : (
+        <div className="mx-4 mt-3">
+          <div style={{ background:tk.CARD, borderColor:tk.CARD_BD }} className="rounded-xl border px-3.5 py-3">
+            <p style={{ color:tk.T2 }} className="text-[12px] leading-relaxed">Este navegador no admite avisos push.</p>
+          </div>
         </div>
-      ))}
+      )}
       <div className="h-8" />
     </div>
   );
 }
 
 /* ── PRIVACY ──────────────────────────────────────────────────── */
-function CFG_PrivacyScreen({ settings, upd, nav, blockedUsers=[], onToggleBlock }) {
+// Se quitaron de aquí "Verificación en dos pasos" y "Huella digital" (no
+// están construidas ni hay plan de construirlas pronto) y los 3 interruptores
+// de "Visibilidad" (perfil público/última conexión/estado en línea: ninguno
+// estaba conectado a nada — cambiarlos no cambiaba nada real). Mostrar el
+// correo en el perfil público SÍ es real, y ya vive en Perfil → Editar
+// información — no se duplica aquí. Lo único real de esta pantalla es la
+// lista de bloqueados.
+function CFG_PrivacyScreen({ nav, blockedUsers=[], onToggleBlock }) {
   const tk = CFG_useTk();
-  const pv = settings.privacy;
-  function set(k, v) { upd("privacy", { ...pv, [k]:v }); }
   function unblock(key, name) { onToggleBlock && onToggleBlock(key, name); }
   return (
     <div style={{ background:tk.BG }} className="">
-      <CFG_Hdr title="Privacidad y Seguridad" onBack={() => nav("home")} />
-      <CFG_Lbl>Seguridad</CFG_Lbl>
-      <CFG_Crd>
-        <CFG_TRow icon={Shield}      bg="bg-red-700"    label="Verificación en dos pasos" sub="Capa extra de protección" on={pv.twoFactor}       change={v=>set("twoFactor",v)} />
-        <CFG_Hr />
-        <CFG_TRow icon={Fingerprint} bg="bg-violet-600" label="Huella digital"            sub="Autenticación biométrica"  on={pv.fingerprint}     change={v=>set("fingerprint",v)} />
-      </CFG_Crd>
-      <CFG_Lbl>Visibilidad</CFG_Lbl>
-      <CFG_Crd>
-        <CFG_TRow icon={Globe}    bg="bg-sky-600"     label="Perfil público"  sub="Otros pueden ver tu perfil"  on={pv.publicProfile}    change={v=>set("publicProfile",v)} />
-        <CFG_Hr />
-        <CFG_TRow icon={Clock}    bg="bg-zinc-600"    label="Última conexión" sub="Visible para contactos"       on={pv.showLastSeen}     change={v=>set("showLastSeen",v)} />
-        <CFG_Hr />
-        <CFG_TRow icon={Activity} bg="bg-emerald-600" label="Estado en línea" sub="Punto verde cuando activo"    on={pv.showOnlineStatus} change={v=>set("showOnlineStatus",v)} />
-      </CFG_Crd>
+      <CFG_Hdr title="Privacidad" onBack={() => nav("home")} />
       <CFG_Lbl>Bloqueados · {blockedUsers.length}</CFG_Lbl>
       <CFG_Crd>
         {blockedUsers.length === 0 ? (
@@ -765,52 +715,6 @@ function CFG_PrivacyScreen({ settings, upd, nav, blockedUsers=[], onToggleBlock 
               <button onClick={() => unblock(u.key, u.name)} style={{ background:tk.ERR_BG, color:tk.ERR_T }}
                 className="text-[11px] font-bold px-2.5 py-1 rounded-full">Desbloquear</button>
             </div>
-          </div>
-        ))}
-      </CFG_Crd>
-      <div className="h-8" />
-    </div>
-  );
-}
-
-/* ── CHAT ─────────────────────────────────────────────────────── */
-function CFG_ChatScreen({ settings, upd, nav }) {
-  const tk = CFG_useTk();
-  const { chat } = settings;
-  const [done, setDone] = useState({ conv:false, temp:false });
-  function set(k, v) { upd("chat", { ...chat, [k]:v }); }
-  return (
-    <div style={{ background:tk.BG }} className="">
-      <CFG_Hdr title="Chat" onBack={() => nav("home")} />
-      <CFG_Lbl>Preferencias</CFG_Lbl>
-      <CFG_Crd>
-        <CFG_TRow icon={CheckCircle2} bg="bg-teal-600"   label="Confirmación de lectura"  sub="Muestra cuando lees"   on={chat.readReceipts}       change={v=>set("readReceipts",v)} />
-        <CFG_Hr />
-        <CFG_TRow icon={Download}     bg="bg-sky-600"    label="Descargar imágenes auto." sub="Solo en Wi-Fi"          on={chat.autoDownloadImages} change={v=>set("autoDownloadImages",v)} />
-        <CFG_Hr />
-        <CFG_TRow icon={Download}     bg="bg-indigo-600" label="Descargar videos auto."   sub="Consume datos móviles"  on={chat.autoDownloadVideos} change={v=>set("autoDownloadVideos",v)} />
-      </CFG_Crd>
-      <CFG_Lbl>Limpieza</CFG_Lbl>
-      <CFG_Crd>
-        {[
-          { id:"conv", Icon:MessageCircle, bg:"bg-orange-600", label:"Limpiar conversaciones",  sub:"Mensajes y medios locales" },
-          { id:"temp", Icon:Database,      bg:"bg-zinc-600",   label:"Eliminar archivos temp.", sub:"Libera ~23 MB" },
-        ].map((item, i) => (
-          <div key={item.id}>
-            {i > 0 && <CFG_Hr />}
-            <button onClick={() => setDone(d=>({...d,[item.id]:true}))} style={{ background:tk.ROW }}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left active:opacity-60">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${item.bg}`}>
-                <item.Icon size={15} className="text-white" />
-              </div>
-              <div className="flex-1">
-                <div style={{ color:tk.T1 }} className="text-[14px] font-medium">{item.label}</div>
-                <div style={{ color:tk.T2 }} className="text-[11px]">{item.sub}</div>
-              </div>
-              {done[item.id]
-                ? <span style={{ color:tk.OK_T }} className="text-[11px] font-semibold flex items-center gap-1"><Check size={12} /> Listo</span>
-                : <ChevronRight size={13} style={{ color:tk.T3 }} />}
-            </button>
           </div>
         ))}
       </CFG_Crd>
@@ -900,67 +804,6 @@ function CFG_DeliveriesScreen({ settings, upd, nav }) {
             </div>
           )}
         </div>
-      </CFG_Crd>
-      <div className="h-8" />
-    </div>
-  );
-}
-
-/* ── AUCTIONS ─────────────────────────────────────────────────── */
-function CFG_AuctionsScreen({ settings, upd, nav }) {
-  const tk = CFG_useTk();
-  const { auctions:au, activity } = settings;
-  function set(k, v) { upd("auctions", { ...au, [k]:v }); }
-  const history = [
-    { id:1, title:"Reloj Seiko Presage SARX057",     date:"5 Jun",  bid:"$1,200", won:true  },
-    { id:2, title:"Cámara Fujifilm X100VI",           date:"2 Jun",  bid:"$9,500", won:false },
-    { id:3, title:"Guitarra Fender Stratocaster '65", date:"28 May", bid:"$4,300", won:true  },
-    { id:4, title:"Sneakers Nike SB Dunk Low",        date:"20 May", bid:"$2,100", won:false },
-    { id:5, title:"Consola PS5 Edición Specials",     date:"15 May", bid:"$6,800", won:true  },
-  ];
-  return (
-    <div style={{ background:tk.BG }} className="">
-      <CFG_Hdr title="Subastas" onBack={() => nav("home")} />
-      <CFG_Lbl>Preferencias</CFG_Lbl>
-      <CFG_Crd>
-        <CFG_TRow icon={AlertCircle} bg="bg-amber-600"  label="Confirmar antes de pujar" sub="Confirmación en cada oferta" on={au.confirmBeforeBid}  change={v=>set("confirmBeforeBid",v)} />
-        <CFG_Hr />
-        <CFG_TRow icon={Clock}       bg="bg-orange-600" label="Recordatorios de cierre"  sub="15 min antes del cierre"    on={au.closingReminders}  change={v=>set("closingReminders",v)} />
-      </CFG_Crd>
-      <CFG_Lbl>Resumen</CFG_Lbl>
-      <div className="mx-4 grid grid-cols-3 gap-2">
-        {[
-          { l:"Participadas", v:activity.auctions.participated, c:tk.T1   },
-          { l:"Ganadas",      v:activity.auctions.won,          c:tk.OK_T },
-          { l:"Perdidas",     v:activity.auctions.lost,         c:tk.T3   },
-        ].map(s => (
-          <div key={s.l} style={{ background:tk.ROW, borderColor:tk.CARD_BD }} className="rounded-xl p-2.5 text-center border">
-            <div style={{ color:s.c }} className="text-xl font-black">{s.v}</div>
-            <div style={{ color:tk.T2 }} className="text-[10px] mt-0.5">{s.l}</div>
-          </div>
-        ))}
-      </div>
-      <CFG_Lbl>Historial</CFG_Lbl>
-      <CFG_Crd>
-        {history.map((item, i) => (
-          <div key={item.id}>
-            {i > 0 && <CFG_Hr />}
-            <div style={{ background:tk.ROW }} className="flex items-center gap-2.5 px-3.5 py-2.5">
-              <div style={{ background: item.won ? tk.OK_BG : tk.CARD2 }}
-                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0">
-                <Award size={14} style={{ color: item.won ? tk.OK_T : tk.T3 }} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div style={{ color:tk.T1 }} className="text-[13px] font-medium truncate">{item.title}</div>
-                <div style={{ color:tk.T2 }} className="text-[11px]">{item.date} · {item.bid}</div>
-              </div>
-              <span style={item.won ? { background:tk.OK_BG, color:tk.OK_T } : { background:tk.CARD2, color:tk.T3 }}
-                className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0">
-                {item.won ? "Ganada" : "Perdida"}
-              </span>
-            </div>
-          </div>
-        ))}
       </CFG_Crd>
       <div className="h-8" />
     </div>
@@ -1119,36 +962,46 @@ function CFG_ActivityScreen({ settings, nav }) {
 }
 
 /* ── LANGUAGE ─────────────────────────────────────────────────── */
-function CFG_LanguageScreen({ settings, upd, nav }) {
+// BUG REAL corregido: este selector dejaba "elegir" English de verdad,
+// guardándolo solo en un estado local (settings.language) que ninguna otra
+// pantalla leía — ni siquiera llegaba a profiles.idioma. Igual que en el
+// onboarding, solo español está construido; inglés se muestra pero
+// deshabilitado "Muy pronto", nunca seleccionable.
+function CFG_LanguageScreen({ nav, user, onUpdate, flash }) {
   const tk = CFG_useTk();
-  const { language } = settings;
-  const langs = [
-    { code:"es", label:"Español",   flag:"🇪🇸", sub:"España"        },
-    { code:"en", label:"English",   flag:"🇺🇸", sub:"United States" },
-  ];
+  const idioma = user?.profile?.idioma || "es";
+  const confirmEs = async () => {
+    if (idioma === "es") return;
+    try {
+      await saveOnboarding({ idioma: "es" });
+      onUpdate && onUpdate({ profile: { ...(user?.profile || {}), idioma: "es" } });
+    } catch (e) { flash && flash("⚠️ No se pudo guardar — intenta de nuevo"); }
+  };
   return (
     <div style={{ background:tk.BG }} className="">
       <CFG_Hdr title="Idioma" onBack={() => nav("home")} />
       <CFG_Lbl>Seleccionar idioma</CFG_Lbl>
       <CFG_Crd>
-        {langs.map((l, i) => (
-          <div key={l.code}>
-            {i > 0 && <CFG_Hr />}
-            <button onClick={() => upd("language", l.code)} style={{ background:tk.ROW }}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left active:opacity-60">
-              <span className="text-xl w-8 text-center flex-shrink-0">{l.flag}</span>
-              <div className="flex-1">
-                <div style={{ color:tk.T1 }} className="text-[14px] font-medium">{l.label}</div>
-                <div style={{ color:tk.T2 }} className="text-[11px]">{l.sub}</div>
-              </div>
-              {language === l.code && (
-                <div style={{ background:tk.P }} className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0">
-                  <Check size={10} className="text-white" strokeWidth={3} />
-                </div>
-              )}
-            </button>
+        <button onClick={confirmEs} style={{ background:tk.ROW }}
+          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left active:opacity-60">
+          <span className="text-xl w-8 text-center flex-shrink-0">🇪🇸</span>
+          <div className="flex-1">
+            <div style={{ color:tk.T1 }} className="text-[14px] font-medium">Español</div>
+            <div style={{ color:tk.T2 }} className="text-[11px]">España</div>
           </div>
-        ))}
+          <div style={{ background:tk.P }} className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0">
+            <Check size={10} className="text-white" strokeWidth={3} />
+          </div>
+        </button>
+        <CFG_Hr />
+        <div style={{ background:tk.ROW, opacity:.5 }} className="w-full flex items-center gap-2.5 px-3.5 py-2.5">
+          <span className="text-xl w-8 text-center flex-shrink-0">🇺🇸</span>
+          <div className="flex-1">
+            <div style={{ color:tk.T1 }} className="text-[14px] font-medium">English</div>
+            <div style={{ color:tk.T2 }} className="text-[11px]">United States</div>
+          </div>
+          <span style={{ fontSize:8, color:tk.T2, fontWeight:700, background:tk.CARD2, borderRadius:6, padding:"3px 7px" }}>Muy pronto</span>
+        </div>
       </CFG_Crd>
       <div className="h-8" />
     </div>
@@ -1158,28 +1011,13 @@ function CFG_LanguageScreen({ settings, upd, nav }) {
 /* ── STORAGE ──────────────────────────────────────────────────── */
 function CFG_StorageScreen({ settings, upd, nav, flash }) {
   const tk = CFG_useTk();
-  const CATS = {
-    conversaciones: ["retador_chatmsgs", "retador_chatpeople", "retador_delconvs", "retador_blocked"],
-    contenido: ["retador_products", "retador_orders", "retador_auctions", "retador_reports", "retador_verifs", "retador_planreq", "retador_payments", "retador_cats", "retador_subcats"],
-    billetera: ["retador_wallet", "retador_wallet_banks", "retador_wallet_sec", "retador_wallet_tx"],
-    ajustes: ["retador_settings", "retador_admincfg", "retador_theme", "retador_txt_scale", "retador_favs", "retador_verified", "retador_userplans", "retador_editor"],
-  };
-  const measure = () => {
-    const out = {};
-    Object.entries(CATS).forEach(([cat, keys]) => {
-      let b = 0;
-      keys.forEach(k => { try { const v = localStorage.getItem(k); if (v) b += (k.length + v.length) * 2; } catch {} });
-      out[cat] = b;
-    });
-    return out;
-  };
-  const [usage, setUsage] = useState(measure);
-  const fmtSize = (b) => b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1024 / 1024).toFixed(2)} MB`;
+  const [usage, setUsage] = useState(cfgMeasureStorage);
+  const fmtSize = cfgFmtSize;
   const total = Object.values(usage).reduce((a, b) => a + b, 0);
 
   const clearCat = (cat) => {
-    CATS[cat].forEach(k => { try { localStorage.removeItem(k); } catch {} });
-    setUsage(measure());
+    CFG_STORAGE_CATS[cat].forEach(k => { try { localStorage.removeItem(k); } catch {} });
+    setUsage(cfgMeasureStorage());
     flash && flash("🧹 Espacio liberado");
   };
 
@@ -1249,18 +1087,19 @@ function CFG_StorageScreen({ settings, upd, nav, flash }) {
 }
 
 /* ── HELP ─────────────────────────────────────────────────────── */
+// "¿Cómo funciona el pago?" y "¿Cómo participo en una subasta?" se quitaron:
+// describían cosas que hoy no pasan así (subastas sigue apagada) — mentira si
+// se dejan ahí. "Reportar un problema" ya no finge un envío que no va a
+// ningún lado: abre el correo real, igual que "Contactar soporte".
 function CFG_HelpScreen({ nav, flash }) {
   const tk = CFG_useTk();
   const [open, setOpen] = useState(null);
-  const [report, setReport] = useState(false);
-  const [rtext, setRtext] = useState("");
   const FAQ = [
     { q: "¿Cómo publico un producto?", a: "Ve a tu perfil o al botón de publicar, sube al menos una foto, pon título, precio y categoría, y listo: queda visible para todos al instante." },
-    { q: "¿Cómo funciona el pago?", a: "Pagas desde tu Billetera. El dinero del producto va al vendedor y, si hay envío, esa parte va al mensajero o a la empresa de envíos, todo desglosado antes de confirmar." },
     { q: "¿Cómo verifico mi cuenta?", a: "En Configuración → Cuenta → Solicitar verificación. Subes tu documento por delante y por detrás; al aprobarse, tu cuenta queda verificada." },
-    { q: "¿Cómo participo en una subasta?", a: "Entra a Subastas, abre la que te interese y puja. En las subastas VIP se paga una cuota de acceso que el organizador aprueba." },
-    { q: "¿Cómo cambio el idioma o el tema?", a: "En Configuración → Apariencia (tema claro/oscuro y tamaño de texto) y en Idioma. Se aplica a toda la app al instante." },
+    { q: "¿Cómo cambio el tema o el tamaño del texto?", a: "En Configuración → Apariencia (tema claro/oscuro, vista de productos y tamaño de texto). Se aplica a toda la app al instante." },
   ];
+  const mailto = (subject) => { try { window.location.href = `mailto:soporte@retador.app?subject=${encodeURIComponent(subject)}`; } catch(e){} flash && flash("📧 Abriendo tu correo…"); };
   return (
     <div style={{ background:tk.BG }} className="">
       <CFG_Hdr title="Ayuda" onBack={() => nav("home")} />
@@ -1282,27 +1121,12 @@ function CFG_HelpScreen({ nav, flash }) {
       <CFG_Lbl>Soporte</CFG_Lbl>
       <CFG_Crd>
         <CFG_Row icon={MessageCircle} bg="bg-teal-600" label="Contactar soporte" sub="Te respondemos por correo"
-          onClick={() => { try { window.location.href = "mailto:soporte@retador.app?subject=Soporte%20RETADOR"; } catch(e){} flash && flash("📧 Abriendo tu correo…"); }} />
+          onClick={() => mailto("Soporte RETADOR")} />
         <CFG_Hr />
-        <CFG_Row icon={AlertCircle} bg="bg-orange-600" label="Reportar un problema" sub="Cuéntanos qué pasó" onClick={() => setReport(true)} />
+        <CFG_Row icon={AlertCircle} bg="bg-orange-600" label="Reportar un problema" sub="Te respondemos por correo"
+          onClick={() => mailto("Reporte de un problema — RETADOR")} />
       </CFG_Crd>
       <div className="h-8" />
-
-      {report && (
-        <div onClick={() => setReport(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:5000, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
-          <div onClick={e=>e.stopPropagation()} style={{ background:tk.BG, width:"100%", maxWidth:440, borderRadius:"18px 18px 0 0", padding:"18px 16px 26px" }}>
-            <div style={{ color:tk.T1 }} className="text-[16px] font-bold mb-1">Reportar un problema</div>
-            <div style={{ color:tk.T2 }} className="text-[12px] mb-3">Describe el problema y lo revisamos.</div>
-            <textarea value={rtext} onChange={e=>setRtext(e.target.value)} rows={4} placeholder="¿Qué pasó?"
-              style={{ background:tk.CARD2, color:tk.T1, borderColor:"rgba(128,128,128,.25)" }} className="w-full rounded-xl px-3 py-2.5 text-[14px] border outline-none resize-none mb-3" />
-            <div className="flex gap-2.5">
-              <button onClick={() => setReport(false)} style={{ background:tk.CARD2, color:tk.T1 }} className="flex-1 h-11 rounded-xl text-[13px] font-semibold">Cancelar</button>
-              <button onClick={() => { setReport(false); setRtext(""); flash && flash("✅ Reporte enviado. ¡Gracias!"); }} disabled={!rtext.trim()}
-                style={{ background: rtext.trim() ? "#FFC01E" : tk.CARD2, color: rtext.trim() ? "#000" : tk.T3 }} className="flex-1 h-11 rounded-xl text-[13px] font-bold">Enviar</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1388,9 +1212,7 @@ export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTh
     appearance:    <CFG_AppearanceScreen    {...p} />,
     notifications: <CFG_NotificationsScreen {...p} />,
     privacy:       <CFG_PrivacyScreen       {...p} />,
-    chat:          <CFG_ChatScreen          {...p} />,
     deliveries:    <CFG_DeliveriesScreen    {...p} />,
-    auctions:      <CFG_AuctionsScreen      {...p} />,
     payments:      <CFG_PaymentsScreen      {...p} />,
     activity:      <CFG_ActivityScreen      {...p} />,
     language:      <CFG_LanguageScreen      {...p} />,

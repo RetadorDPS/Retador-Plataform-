@@ -62,88 +62,14 @@ function FxTirita() {
   );
 }
 
-export function ProfileMain({ user, onMessages, onSettings, onOrders, onViewProfile, onAdmin, onWallet, onTools, onCourier, isOwner, profileData = {}, ordersBadge = 0, messagesBadge = 0, adminBadge = 0 }) {
-  const { cols, isMobile, isTablet, isDesktop } = useR();
-  const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
-  const name     = profileData.name || user?.name || "Usuario";
-  // Datos REALES: nada inventado. Sin reputación aún → "Nuevo", 0 ventas.
-  const rating   = Number(profileData.rating) || 0;
-  const sales    = Number(profileData.sales) || 0;
-  // Foto de perfil real: del avatar guardado (objeto) o de user.avatar (URL de
-  // Google/Supabase). Si no hay, la inicial del nombre. Nunca emoji.
-  const avatarSrc = avatarUrlOf(profileData.avatar) || avatarUrlOf(user?.avatar);
-
-  return (
-    <div style={{ flex: 1, overflowY: "auto" }}>
-      <div style={{ padding: "22px 18px 110px" }}>
-
-        {/* Avatar/nombre — toca para ver perfil completo */}
-        <div onClick={onViewProfile} className="cd" style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, background: CARD, border: `1px solid ${B}`, borderRadius: 16, padding: "14px 14px", cursor: "pointer" }}>
-          <Avatar url={avatarSrc} name={name} size={56} verified={!!user?.verified} style={{ boxShadow: `0 0 18px ${G}35` }} />
-          <div style={{ flex: 1 }}>
-            <p style={{ fontSize: 15 * ts, fontWeight: 800, color: T1 }}>{name}</p>
-            <p style={{ fontSize: 10 * ts, color: T2, marginTop: 2 }}>{user?.email || "Ver perfil completo"}</p>
-            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ fontSize: 9 * ts, fontWeight: 700, color: "#9A7C2A", background: "#9A7C2A18", border: "1px solid #9A7C2A30", borderRadius: 4, padding: "2px 7px" }}>FREE</span>
-              {/* Condición del staff: el usuario debe saber que es admin o equipo. */}
-              {user?.role === "admin"
-                ? <span style={{ fontSize: 9 * ts, fontWeight: 800, color: G, background: `${G}1c`, border: `1px solid ${G}40`, borderRadius: 4, padding: "2px 7px" }}>👑 Administrador</span>
-                : isOwner
-                  ? <span style={{ fontSize: 9 * ts, fontWeight: 800, color: "#A78BFA", background: "#A78BFA1c", border: "1px solid #A78BFA40", borderRadius: 4, padding: "2px 7px" }}>🛡️ Equipo RETADOR</span>
-                  : null}
-              <span style={{ fontSize: 9 * ts, color: T3 }}>{rating > 0 ? `⭐ ${rating}` : "⭐ Nuevo"} · {sales} {sales === 1 ? "venta" : "ventas"}</span>
-            </div>
-          </div>
-          <span style={{ color: T3, fontSize: 18 }}>›</span>
-        </div>
-
-        {/* Tirita de tasas del día (discreta, en vivo, controlada por el admin) */}
-        <FxTirita />
-
-        {[
-          { ic: "msg",  label: "Mensajes",       sub: "Chats y conversaciones",     action: onMessages, color: G, badge: messagesBadge },
-          { ic: "pkg",  label: "Mis pedidos",     sub: "Compras y ventas",           action: onOrders,   color: "#60A5FA", badge: ordersBadge },
-          { ic: "wallet", label: "Mi billetera",  sub: "Enviar, recibir, pagar y convertir", action: onWallet, color: "#22C55E" },
-          { ic: "tools", label: "Herramientas",  sub: "Importador inteligente y más", action: onTools, color: "#6EE7B7" },
-          { ic: "moto", label: "Modo Mensajero",  sub: "Gana dinero repartiendo pedidos", action: onCourier, color: "#6366F1" },
-          { ic: "cog",  label: "Configuración",   sub: "Cuenta, privacidad, nombre", action: onSettings, color: "#94A3B8" },
-          ...(isOwner ? [{ ic: "shield", label: "Panel de administración", sub: "Control total de la plataforma", action: onAdmin, color: "#F5A623", badge: adminBadge }] : []),
-        ].map((it, i) => (
-          <div key={i} className={it.action ? "cd" : ""} onClick={it.action || undefined}
-            style={{ display: "flex", alignItems: "center", gap: 13, padding: "12px 14px", marginBottom: 7,
-              background: isDark ? "#0d0d0d" : S, border: `1px solid ${B}`, borderRadius: 14,
-              opacity: it.action ? 1 : 0.6 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 12,
-              background: isDark ? it.color + "22" : it.color + "18",
-              border: `1.5px solid ${it.color}55`,
-              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <Ic n={it.ic} c={it.color} s={19} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <p style={{ fontSize: 13 * ts, fontWeight: 700, color: T1 }}>{it.label}</p>
-              <p style={{ fontSize: 9 * ts, color: T2, marginTop: 1 }}>{it.sub}</p>
-            </div>
-            {it.badge > 0 && (
-              <span style={{ minWidth: 18, height: 18, borderRadius: 999, background: "#EF4444", color: "#fff", fontSize: 10.5 * ts, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px", marginRight: 2 }}>
-                {it.badge > 99 ? "99+" : it.badge}
-              </span>
-            )}
-            {it.action
-              ? <span style={{ color: T3, fontSize: 18, fontWeight: 300 }}>›</span>
-              : <span style={{ fontSize: 8 * ts, color: T2, fontWeight: 700, background: isDark ? "#141414" : B, borderRadius: 6, padding: "3px 7px" }}>PRONTO</span>
-            }
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // PANEL LATERAL del Perfil: se abre con ☰ desde la vista principal del perfil y
 // contiene TODO lo que antes estaba apilado (Mensajes, Pedidos, Billetera,
 // Herramientas, Modo mensajero, Configuración, Panel admin). Respeta permisos:
 // el Panel de administración solo aparece si isOwner.
-export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, onOrders, onWallet, onTools, onCourier, onSettings, onAdmin, messagesBadge = 0, ordersBadge = 0, adminBadge = 0 }) {
+// "Configuración" se quitó de este menú: consolidada en un solo lugar real
+// (el engranaje arriba a la derecha del Perfil) — dos entradas a la misma
+// pantalla eran ruido, y el dueño pidió dejar solo una.
+export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, onOrders, onWallet, onTools, onCourier, onAdmin, messagesBadge = 0, ordersBadge = 0, adminBadge = 0 }) {
   const { BG, S, B, T1, T2, T3, isDark } = useAt();
   const items = [
     { ic: "msg",    label: "Mensajes",                sub: "Chats y conversaciones",              action: onMessages, color: G,         badge: messagesBadge },
@@ -151,7 +77,6 @@ export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, on
     { ic: "wallet", label: "Mi billetera",            sub: "Enviar, recibir, pagar y convertir",  action: onWallet,   color: "#22C55E" },
     { ic: "tools",  label: "Herramientas",            sub: "Importador inteligente y más",        action: onTools,    color: "#6EE7B7" },
     { ic: "moto",   label: "Modo Mensajero",          sub: "Gana dinero repartiendo pedidos",     action: onCourier,  color: "#6366F1" },
-    { ic: "cog",    label: "Configuración",           sub: "Cuenta, privacidad, nombre",          action: onSettings, color: "#94A3B8" },
     ...(isOwner ? [{ ic: "shield", label: "Panel de administración", sub: "Control total de la plataforma", action: onAdmin, color: "#F5A623", badge: adminBadge }] : []),
   ];
   const go = (a) => { onClose && onClose(); if (a) a(); };
@@ -681,419 +606,6 @@ function FP_ArchivedProductCard({ product, onRecover, onDeleteNow }) {
 // Esta pestaña ahora solo MUESTRA, en modo lectura, las reseñas reales de
 // todos los productos de este vendedor (con nombre/avatar reales).
 
-// ── CHANGE PASSWORD SCREEN ────────────────────────────────────────
-function FP_ChangePasswordScreen({ hasPassword, onBack }) {
-  const FP_C = useFP_C();
-  // hasPassword: false = usuario aún no tiene contraseña configurada (entra directo a la app)
-  //              true  = tiene contraseña y quiere cambiarla
-  // INTEGRATION POINT: GET /api/user → { hasPassword: boolean }
-
-  const [currentPw,  setCurrentPw]  = useState("");
-  const [newPw,      setNewPw]      = useState("");
-  const [confirmPw,  setConfirmPw]  = useState("");
-  const [showCur,    setShowCur]    = useState(false);
-  const [showNew,    setShowNew]    = useState(false);
-  const [showConf,   setShowConf]   = useState(false);
-  const [error,      setError]      = useState("");
-  const [loading,    setLoading]    = useState(false);
-  const [done,       setDone]       = useState(false);
-
-  // Password strength
-  function strength(pw) {
-    if (!pw) return 0;
-    let s = 0;
-    if (pw.length >= 8)         s++;
-    if (/[A-Z]/.test(pw))       s++;
-    if (/[0-9]/.test(pw))       s++;
-    if (/[^A-Za-z0-9]/.test(pw))s++;
-    return s;
-  }
-  const str = strength(newPw);
-  const strLabel = ["","Débil","Regular","Buena","Fuerte"][str];
-  const strColor = [FP_C.textMuted, FP_C.danger, FP_C.warning, FP_C.accentText, FP_C.positive][str];
-
-  const mismatch = confirmPw && newPw !== confirmPw;
-  const canSubmit =
-    (!hasPassword || currentPw.length >= 1) &&
-    newPw.length >= 8 && str >= 2 && !mismatch && !loading;
-
-  function handleSubmit() {
-    if (!canSubmit) return;
-    setError("");
-    setLoading(true);
-    // INTEGRATION POINT:
-    // Si hasPassword:   POST /api/user/change-password  { currentPassword, newPassword }
-    // Si !hasPassword:  POST /api/user/set-password     { newPassword }
-    // On error: setError("Contraseña actual incorrecta")
-    setTimeout(() => { setLoading(false); setDone(true); }, 1200);
-  }
-
-  const eyeBtn = (show, setShow) => (
-    <button onClick={() => setShow(!show)} style={{
-      position:"absolute", right:12, top:"50%",
-      transform:"translateY(-50%)",
-      background:"none", border:"none", cursor:"pointer", padding:2,
-    }}>
-      <FP_Icon d={show ? FP_Icons.eye : FP_Icons.lock} size={16} color={FP_C.textMuted}/>
-    </button>
-  );
-
-  return (
-    <div style={{ position:"fixed", inset:0, zIndex:600,
-      background:FP_C.bg, display:"flex", flexDirection:"column" }}>
-
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"0 20px", height:50, flexShrink:0, background:FP_C.bg,
-        borderBottom:`1px solid ${FP_C.border}`, position:"sticky", top:0 }}>
-        <button onClick={onBack} style={{ background:"none", border:"none",
-          cursor:"pointer", display:"flex", alignItems:"center", gap:8, padding:0 }}>
-          <FP_Icon d={FP_Icons.back} size={18} color={FP_C.textSecondary}/>
-          <span style={{ fontSize:13, fontWeight:600, fontFamily:FP_FB, color:FP_C.textSecondary }}>
-            Atrás
-          </span>
-        </button>
-        <span style={{ fontFamily:FP_FH, fontWeight:700, fontSize:14, color:FP_C.textPrimary }}>
-          {hasPassword ? "Cambiar contraseña" : "Crear contraseña"}
-        </span>
-        <div style={{ width:60 }}/>
-      </div>
-
-      <div style={{ flex:1, padding:"32px 24px", display:"flex", flexDirection:"column",
-        overflowY:"auto" }}>
-        {!done ? (
-          <>
-            <div style={{ marginBottom:28 }}>
-              <div style={{ fontSize:16, fontWeight:700, color:FP_C.textPrimary,
-                fontFamily:FP_FH, marginBottom:6 }}>
-                {hasPassword ? "Actualiza tu contraseña" : "Protege tu cuenta"}
-              </div>
-              <div style={{ fontSize:13, color:FP_C.textSecondary, lineHeight:1.6 }}>
-                {hasPassword
-                  ? "Ingresa tu contraseña actual y luego la nueva."
-                  : "Si creas una contraseña, se te pedirá cada vez que abras la app."
-                }
-              </div>
-            </div>
-
-            {/* Contraseña actual — solo si ya tiene una */}
-            {hasPassword && (
-              <FP_Field label="Contraseña actual">
-                <div style={{ position:"relative" }}>
-                  <input type={showCur ? "text" : "password"}
-                    value={currentPw} placeholder="Tu contraseña actual"
-                    onChange={e => { setCurrentPw(e.target.value); setError(""); }}
-                    onFocus={e => e.target.style.borderColor = FP_C.accent}
-                    onBlur={e => e.target.style.borderColor = FP_C.border}
-                    style={{ ...fpInputStyle(FP_C), paddingRight:44 }}/>
-                  {eyeBtn(showCur, setShowCur)}
-                </div>
-              </FP_Field>
-            )}
-
-            {/* Nueva contraseña */}
-            <FP_Field label={hasPassword ? "Nueva contraseña" : "Contraseña"}>
-              <div style={{ position:"relative" }}>
-                <input type={showNew ? "text" : "password"}
-                  value={newPw} placeholder="Mínimo 8 caracteres"
-                  onChange={e => { setNewPw(e.target.value); setError(""); }}
-                  onFocus={e => e.target.style.borderColor = FP_C.accent}
-                  onBlur={e => e.target.style.borderColor = FP_C.border}
-                  style={{ ...fpInputStyle(FP_C), paddingRight:44 }}/>
-                {eyeBtn(showNew, setShowNew)}
-              </div>
-              {/* Strength bar */}
-              {newPw.length > 0 && (
-                <div style={{ marginTop:8 }}>
-                  <div style={{ display:"flex", gap:4, marginBottom:5 }}>
-                    {[1,2,3,4].map(i => (
-                      <div key={i} style={{ flex:1, height:3, borderRadius:2,
-                        background: str >= i ? strColor : FP_C.borderMid,
-                        transition:"background 0.2s" }}/>
-                    ))}
-                  </div>
-                  <div style={{ fontSize:11, color:strColor, fontWeight:600 }}>
-                    {strLabel}
-                    {str < 2 && " · Agrega mayúsculas, números o símbolos"}
-                  </div>
-                </div>
-              )}
-            </FP_Field>
-
-            {/* Confirmar contraseña */}
-            <FP_Field label="Confirmar contraseña">
-              <div style={{ position:"relative" }}>
-                <input type={showConf ? "text" : "password"}
-                  value={confirmPw} placeholder="Repite la contraseña"
-                  onChange={e => setConfirmPw(e.target.value)}
-                  onFocus={e => e.target.style.borderColor = FP_C.accent}
-                  onBlur={e => e.target.style.borderColor =
-                    mismatch ? FP_C.danger : FP_C.border}
-                  style={{ ...fpInputStyle(FP_C), paddingRight:44,
-                    borderColor: mismatch ? FP_C.danger : FP_C.border }}/>
-                {eyeBtn(showConf, setShowConf)}
-              </div>
-              {mismatch && (
-                <div style={{ fontSize:11, color:FP_C.danger, marginTop:5 }}>
-                  Las contraseñas no coinciden
-                </div>
-              )}
-            </FP_Field>
-
-            {/* Requisitos */}
-            <div style={{ background:FP_C.surfaceHigh, border:`1px solid ${FP_C.border}`,
-              borderRadius:8, padding:"12px 14px", marginBottom:16 }}>
-              <div style={{ fontSize:10, fontWeight:700, color:FP_C.textMuted,
-                fontFamily:FP_FH, letterSpacing:"0.5px", textTransform:"uppercase",
-                marginBottom:8 }}>
-                Requisitos
-              </div>
-              {[
-                { ok: newPw.length >= 8,          text:"Mínimo 8 caracteres" },
-                { ok: /[A-Z]/.test(newPw),         text:"Al menos una mayúscula" },
-                { ok: /[0-9]/.test(newPw),         text:"Al menos un número" },
-                { ok: /[^A-Za-z0-9]/.test(newPw), text:"Al menos un símbolo (!@#…)" },
-              ].map((r, i) => (
-                <div key={i} style={{ display:"flex", alignItems:"center", gap:8,
-                  marginBottom:i<3?6:0 }}>
-                  <FP_Icon d={r.ok ? FP_Icons.check : FP_Icons.x} size={13}
-                    color={r.ok ? FP_C.positive : FP_C.textMuted}/>
-                  <span style={{ fontSize:12,
-                    color: r.ok ? FP_C.textPrimary : FP_C.textSecondary }}>
-                    {r.text}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {error && (
-              <div style={{ background:FP_C.dangerDim, border:`1px solid ${FP_C.danger}33`,
-                borderRadius:8, padding:"10px 12px", marginBottom:16,
-                fontSize:12, color:FP_C.danger, display:"flex", alignItems:"center", gap:8 }}>
-                <FP_Icon d={FP_Icons.x} size={14} color={FP_C.danger}/>
-                {error}
-              </div>
-            )}
-
-            <div style={{ marginTop:"auto", paddingTop:8 }}>
-              <FP_Btn onClick={handleSubmit} disabled={!canSubmit}
-                style={{ width:"100%", padding:"13px",
-                  opacity: loading ? 0.7 : 1 }}>
-                {loading
-                  ? "Guardando…"
-                  : hasPassword ? "Actualizar contraseña" : "Crear contraseña"
-                }
-              </FP_Btn>
-            </div>
-          </>
-        ) : (
-          /* ── SUCCESS ── */
-          <div style={{ flex:1, display:"flex", flexDirection:"column",
-            alignItems:"center", justifyContent:"center",
-            textAlign:"center", gap:16 }}>
-            <div style={{ width:64, height:64, borderRadius:"50%",
-              background:FP_C.positiveDim, border:`1px solid #0D2218`,
-              display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <FP_Icon d={FP_Icons.check} size={28} color={FP_C.positive}/>
-            </div>
-            <div>
-              <div style={{ fontSize:17, fontWeight:700, color:FP_C.textPrimary,
-                fontFamily:FP_FH, marginBottom:8 }}>
-                {hasPassword ? "Contraseña actualizada" : "Contraseña creada"}
-              </div>
-              <div style={{ fontSize:13, color:FP_C.textSecondary, lineHeight:1.7 }}>
-                {hasPassword
-                  ? "Tu contraseña fue cambiada correctamente."
-                  : "A partir de ahora se te pedirá tu contraseña al abrir la app."
-                }
-              </div>
-            </div>
-            <FP_Btn variant="secondary" onClick={onBack} style={{ marginTop:8 }}>
-              Volver a configuración
-            </FP_Btn>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── SETTINGS SCREEN ───────────────────────────────────────────────
-function FP_SettingsScreen({ onClose, currentPlan = "Gratis", onOpenPlans }) {
-  const FP_C = useFP_C();
-  const [notif,      setNotif]      = useState({ ventas:true, mensajes:true, reseñas:true, promo:false });
-  const [privacy,    setPrivacy]    = useState("public");
-  const [subScreen,  setSubScreen]  = useState(null); // null | "password"
-  const [toast,      setToast]      = useState(null);
-  function toast_(msg) { setToast(msg); setTimeout(() => setToast(null), 2500); }
-
-  // INTEGRATION POINT:
-  // const { settings, save } = useSettings()   → GET/POST /api/user/settings
-  // const { hasPassword }    = useAuth()        → GET /api/user → { hasPassword: bool }
-  // onLogout()  → auth.signOut()
-  // onDelete()  → DELETE /api/user (con confirmación)
-  const hasPassword = false; // INTEGRATION POINT: reemplazar con dato real del backend
-
-  if (subScreen === "password") return <FP_ChangePasswordScreen hasPassword={hasPassword} onBack={() => setSubScreen(null)}/>;
-
-  return (
-    <div style={{ position:"fixed", inset:0, zIndex:500,
-      background:FP_C.bg, overflowY:"auto", display:"flex", flexDirection:"column" }}>
-
-      {/* Top bar */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"0 20px", height:50, flexShrink:0, background:FP_C.bg,
-        borderBottom:`1px solid ${FP_C.border}`, position:"sticky", top:0, zIndex:10 }}>
-        <button onClick={onClose} style={{ background:"none", border:"none",
-          cursor:"pointer", display:"flex", alignItems:"center", gap:8,
-          color:FP_C.textSecondary, padding:0 }}>
-          <FP_Icon d={FP_Icons.back} size={18} color={FP_C.textSecondary}/>
-          <span style={{ fontSize:13, fontWeight:600, fontFamily:FP_FB, color:FP_C.textSecondary }}>
-            Atrás
-          </span>
-        </button>
-        <span style={{ fontFamily:FP_FH, fontWeight:700, fontSize:14, color:FP_C.textPrimary }}>
-          Configuración
-        </span>
-        <div style={{ width:70 }}/>
-      </div>
-
-      <div style={{ padding:"20px 20px 60px" }}>
-
-        {/* Plan banner — nombre real (profiles.plan → plans.name), toca para
-            ir a la misma pantalla real de planes de todo el resto de la app. */}
-        <div onClick={onOpenPlans} role="button" style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-          background:FP_C.accentSoft, border:`1px solid ${FP_C.accent}22`,
-          borderRadius:10, padding:"12px 14px", marginBottom:20, cursor:onOpenPlans ? "pointer" : "default" }}>
-          <div>
-            <div style={{ fontSize:12, fontWeight:700, color:FP_C.accentText, fontFamily:FP_FH }}>
-              Tu plan
-            </div>
-            <div style={{ fontSize:11, color:FP_C.textSecondary, marginTop:1 }}>
-              Plan {currentPlan} activo
-            </div>
-          </div>
-          <div style={{ fontSize:10, fontWeight:700, color:FP_C.accentText, fontFamily:FP_FH,
-            background:FP_C.bg, border:`1px solid ${FP_C.accent}33`,
-            borderRadius:4, padding:"3px 8px", letterSpacing:"0.5px" }}>
-            {currentPlan.toUpperCase()}
-          </div>
-        </div>
-
-        {/* Privacidad */}
-        <div style={{ marginBottom:6 }}><FP_SectionHead>Privacidad</FP_SectionHead></div>
-        <div style={{ background:FP_C.surface, border:`1px solid ${FP_C.border}`,
-          borderRadius:10, overflow:"hidden", marginBottom:16 }}>
-          {[
-            { v:"public",  l:"Perfil público",  d:"Cualquiera puede ver tu perfil" },
-            { v:"private", l:"Perfil privado",  d:"Solo tus seguidores te ven" },
-          ].map((opt, i, arr) => (
-            <FP_Row key={opt.v} border={i < arr.length-1} onClick={() => setPrivacy(opt.v)}>
-              <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-                <FP_Icon d={FP_Icons.lock} size={15} color={FP_C.textSecondary}/>
-                <div>
-                  <div style={{ fontSize:13, fontWeight:600, color:FP_C.textPrimary }}>{opt.l}</div>
-                  <div style={{ fontSize:11, color:FP_C.textSecondary, marginTop:1 }}>{opt.d}</div>
-                </div>
-              </div>
-              <div style={{ width:18, height:18, borderRadius:"50%", flexShrink:0,
-                border:`2px solid ${privacy===opt.v ? FP_C.accent : FP_C.borderMid}`,
-                background: privacy===opt.v ? FP_C.accent : "none",
-                display:"flex", alignItems:"center", justifyContent:"center" }}>
-                {privacy===opt.v && <div style={{ width:6, height:6, borderRadius:"50%", background:"#fff" }}/>}
-              </div>
-            </FP_Row>
-          ))}
-        </div>
-
-        {/* Notificaciones */}
-        <div style={{ marginBottom:6 }}><FP_SectionHead>Notificaciones</FP_SectionHead></div>
-        <div style={{ background:FP_C.surface, border:`1px solid ${FP_C.border}`,
-          borderRadius:10, overflow:"hidden", marginBottom:16 }}>
-          {[
-            { k:"ventas",   l:"Nuevas ventas",       icon:FP_Icons.package },
-            { k:"mensajes", l:"Mensajes recibidos",  icon:FP_Icons.message },
-            { k:"reseñas",  l:"Nuevas reseñas",      icon:FP_Icons.star    },
-            { k:"promo",    l:"Ofertas y novedades", icon:FP_Icons.bell    },
-          ].map((n, i, arr) => (
-            <FP_Row key={n.k} border={i < arr.length-1}>
-              <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-                <FP_Icon d={n.icon} size={15} color={FP_C.textSecondary}/>
-                <span style={{ fontSize:13, color:FP_C.textPrimary }}>{n.l}</span>
-              </div>
-              <FP_Toggle on={notif[n.k]} onChange={() => setNotif(p => ({...p,[n.k]:!p[n.k]}))}/>
-            </FP_Row>
-          ))}
-        </div>
-
-        {/* Cuenta */}
-        <div style={{ marginBottom:6 }}><FP_SectionHead>Cuenta</FP_SectionHead></div>
-        <div style={{ background:FP_C.surface, border:`1px solid ${FP_C.border}`,
-          borderRadius:10, overflow:"hidden", marginBottom:16 }}>
-          <FP_Row border onClick={() => setSubScreen("password")}>
-            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-              <FP_Icon d={FP_Icons.key} size={15} color={FP_C.textSecondary}/>
-              <div>
-                <div style={{ fontSize:13, color:FP_C.textPrimary }}>
-                  {hasPassword ? "Cambiar contraseña" : "Crear contraseña"}
-                </div>
-                {!hasPassword && (
-                  <div style={{ fontSize:10, color:FP_C.textMuted, marginTop:1 }}>
-                    Sin contraseña — acceso directo a la app
-                  </div>
-                )}
-              </div>
-            </div>
-            <FP_Icon d={FP_Icons.chevronR} size={15} color={FP_C.textMuted}/>
-          </FP_Row>
-          <FP_Row onClick={() => toast_("Términos y privacidad — el texto legal se enlazará aquí antes del lanzamiento")}>
-            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-              <FP_Icon d={FP_Icons.file} size={15} color={FP_C.textSecondary}/>
-              <span style={{ fontSize:13, color:FP_C.textPrimary }}>Términos y privacidad</span>
-            </div>
-            <FP_Icon d={FP_Icons.chevronR} size={15} color={FP_C.textMuted}/>
-          </FP_Row>
-        </div>
-
-        {/* Zona peligro */}
-        <div style={{ background:FP_C.surface, border:`1px solid ${FP_C.border}`,
-          borderRadius:10, overflow:"hidden", marginBottom:24 }}>
-          <FP_Row border onClick={() => signOutUser()}>
-            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-              <FP_Icon d={FP_Icons.logout} size={15} color={FP_C.warning}/>
-              <span style={{ fontSize:13, fontWeight:600, color:FP_C.warning }}>Cerrar sesión</span>
-            </div>
-          </FP_Row>
-          <FP_Row onClick={() => { /* INTEGRATION POINT: DELETE /api/user */ }}>
-            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-              <FP_Icon d={FP_Icons.trash} size={15} color={FP_C.danger}/>
-              <span style={{ fontSize:13, fontWeight:600, color:FP_C.danger }}>Eliminar cuenta</span>
-            </div>
-          </FP_Row>
-        </div>
-
-        <div style={{ textAlign:"center", fontSize:11, color:FP_C.textMuted, fontFamily:FP_FH }}>
-          Motor de Arranque · v1.0.0
-        </div>
-      </div>
-
-      {/* TOAST */}
-      {toast && (
-        <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)",
-          background:FP_C.surfaceTop, color:FP_C.positive,
-          border:`1px solid ${FP_C.positiveDim}`,
-          borderRadius:10, padding:"11px 16px", fontSize:12, fontWeight:600,
-          fontFamily:FP_FH, zIndex:700, boxShadow:"0 8px 24px rgba(0,0,0,0.6)",
-          display:"flex", alignItems:"flex-start", gap:8,
-          whiteSpace:"pre-wrap", overflowWrap:"anywhere", wordBreak:"break-word", lineHeight:1.45,
-          maxWidth:"min(92vw, 420px)",
-          letterSpacing:"0.2px" }}>
-          <FP_Icon d={FP_Icons.check} size={14} color={FP_C.positive}/>
-          {toast}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── VERIFICAR MI CUENTA (KYC real) ─────────────────────────────────
 function FP_VerifyModal({ user, isVerified, onClose, onSubmit, C, flash }) {
@@ -1370,7 +882,7 @@ function FP_ReportModal({ targetName, onClose, onSubmit, C }) {
     </div>
   );
 }
-export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, currentPlan = "Gratis", currentPlanId = "gratis", plans = [], maxProducts = null, onPlanChanged, myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct, archivedProducts = [], onArchiveProduct, onUnarchiveProduct, onDeleteArchivedProduct }) {
+export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, embedded = false, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, currentPlan = "Gratis", currentPlanId = "gratis", plans = [], maxProducts = null, onPlanChanged, myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct, archivedProducts = [], onArchiveProduct, onUnarchiveProduct, onDeleteArchivedProduct }) {
   // ⭐ Destacar: visible solo si el admin tiene la función encendida (config en vivo).
   const promoOn = usePlatformCfg().promoActive === true;
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
@@ -1379,7 +891,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
 
   const [tab,          setTab]          = useState("productos");
   const [following,    setFollowing]    = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [showAvatarView, setShowAvatarView] = useState(false);
   const [showPicker,   setShowPicker]   = useState(false);
   // Editor UNIFICADO: "Editar perfil" y "Acerca de" ya no son dos flujos
@@ -1660,7 +1171,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
 
       {/* OVERLAYS */}
       {showPicker   && <FP_AvatarPicker current={pd.avatar} name={pd.name} userId={user?.id} onSelect={a=>{ setPd(d=>({...d,avatar:a})); setShowPicker(false); }} onClose={() => setShowPicker(false)}/>}
-      {showSettings && isOwner && <FP_SettingsScreen onClose={() => setShowSettings(false)} currentPlan={currentPlan} onOpenPlans={() => { setShowSettings(false); setShowPlans(true); }}/>}
       {showAvatarView && <FP_AvatarView url={avatarUrlOf(profile.avatar)} name={profile.name} onClose={() => setShowAvatarView(false)}/>}
       {/* Valoración desde el perfil: crear, EDITAR o BORRAR la mía (una sola). */}
       {reviewOpen && canReview && (
@@ -1773,7 +1283,7 @@ export function FreeProfileScreen({ onBack, onMenu = null, embedded = false, use
             }}>
               <Ic n="share" c={FP_C.textSecondary} s={15} />
             </button>
-            <button onClick={() => setShowSettings(true)} style={{
+            <button onClick={() => onSettings && onSettings()} style={{
               background:"none", border:`1px solid ${FP_C.border}`,
               borderRadius:6, width:32, height:32, cursor:"pointer",
               display:"flex", alignItems:"center", justifyContent:"center",

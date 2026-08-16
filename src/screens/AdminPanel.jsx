@@ -1374,16 +1374,24 @@ function Overview({toast, data={}, go}){
               ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'12px 0' }}>Cargando…</div>
               : (() => {
                   const total = n(obStats.total_completado);
+                  // BUG REAL encontrado y corregido (reportado por el dueño: un 700% en
+                  // "Sin decir"): cada grupo (por_pais/por_provincia/por_intencion) cuenta
+                  // TODOS los perfiles con ese valor, no solo los que ya completaron el
+                  // onboarding — dividir su cuenta entre total_completado inflaba el
+                  // porcentaje muy por encima de 100%. El % correcto es la parte que
+                  // representa dentro de SU PROPIO grupo (reparte 100% entre sus miembros).
+                  const paisLabel = { cuba: "Cuba", espana: "España", eeuu: "Estados Unidos", sin_decir: "Sin decir" };
                   const Grupo = ({ titulo, datos, etiqueta }) => {
                     const entradas = Object.entries(datos || {}).sort((a, b) => n(b[1]) - n(a[1]));
                     if (!entradas.length) return null;
+                    const grupoTotal = entradas.reduce((acc, [, v]) => acc + n(v), 0);
                     return (
                       <div style={{ marginTop: 12 }}>
                         <div style={{ fontSize:10.5, fontWeight:800, color:'var(--tx2,#aaa)', marginBottom:6 }}>{titulo}</div>
                         <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
                           {entradas.map(([k, v]) => {
                             const cnt = n(v);
-                            const pct = total > 0 ? Math.round((cnt / total) * 100) : 0;
+                            const pct = grupoTotal > 0 ? Math.round((cnt / grupoTotal) * 100) : 0;
                             return (
                               <div key={k} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', fontSize:11.5 }}>
                                 <span style={{ color:'var(--tx1)', fontWeight:600 }}>{etiqueta ? etiqueta(k) : k}</span>
@@ -1400,9 +1408,9 @@ function Overview({toast, data={}, go}){
                       <span style={{ fontSize:12, fontWeight:700, color:'var(--tx2,#aaa)' }}>Total completaron el onboarding</span>
                       <span style={{ fontSize:16, fontWeight:800, color:G }}>{num(total)}</span>
                     </div>
-                    <Grupo titulo="Por país" datos={obStats.por_pais} etiqueta={k => k === 'sin_decir' ? 'Sin decir' : k} />
+                    <Grupo titulo="Por país (todos los perfiles)" datos={obStats.por_pais} etiqueta={k => paisLabel[k] || k} />
                     <Grupo titulo="Por provincia (Cuba)" datos={obStats.por_provincia} />
-                    <Grupo titulo="Por intención" datos={obStats.por_intencion} />
+                    <Grupo titulo="Por intención (quienes completaron)" datos={obStats.por_intencion} />
                   </>;
                 })()}
           </div>

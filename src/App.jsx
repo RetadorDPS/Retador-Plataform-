@@ -235,14 +235,20 @@ export default function App() {
                 ? (entered
                     ? (needsOnboarding
                         ? <OnboardingScreen user={sessionUser} onDone={() => {
-                            // Antes de pasar a AppShell, se refresca sessionUser de verdad:
-                            // AppShell arranca su propio estado "user" leyendo sessionUser
-                            // UNA vez al montar (useState(sessionUser)) — sin este refresco
-                            // llegaría con profile.shop_province/onboarding_done_at viejos
-                            // (los de ANTES de guardar el onboarding), aunque save_onboarding
-                            // ya haya guardado todo bien en la base.
-                            loadSessionUser().then(u => { if (u) setSessionUser(u); });
-                            setOnboardingComplete(true);
+                            // BUG REAL encontrado y corregido: antes esto ponía
+                            // setOnboardingComplete(true) YA, en el mismo tick — eso
+                            // revela <AppShell> de inmediato, que arranca su propio
+                            // estado "user" leyendo sessionUser UNA sola vez al montar
+                            // (useState(sessionUser)). Como loadSessionUser() es
+                            // asíncrono, AppShell casi siempre alcanzaba a montar ANTES
+                            // de que llegara el perfil fresco, y se quedaba pegado para
+                            // siempre con profile.shop_province/onboarding_done_at
+                            // viejos (aunque save_onboarding ya hubiera guardado bien en
+                            // la base) — de ahí que el recordatorio de región siguiera
+                            // apareciendo después de completar el onboarding. Ahora se
+                            // espera a tener el perfil fresco ANTES de dejar pasar a
+                            // AppShell, para que arranque ya con los datos reales.
+                            loadSessionUser().then(u => { if (u) setSessionUser(u); setOnboardingComplete(true); });
                           }} />
                         : <AppShell sessionUser={sessionUser} />)
                     : <RetadorInicio onEnter={() => setEntered(true)} subtitle={homeCfg.subtitle} enterLabel={homeCfg.enterLabel} stats={platformStats} dark={welcomeDark} />)
@@ -660,9 +666,10 @@ function AppShell({ sessionUser }) {
   // Ahora fx sale SIEMPRE de config.fx (con reintento arriba, ver punto 9).
   const [search,    setSearch]    = useState("");
   const [filter,    setFilter]    = useState("TODOS");
-  // Filtro "Mi provincia / Todo el país" — la provincia real viene de
-  // profiles.shop_province (onboarding o Configuración → Región).
-  const [provinceOnly, setProvinceOnly] = useState(false);
+  // Región real del usuario (profiles.shop_province, elegida en el onboarding
+  // o en Configuración → Región) — SOLO reordena en silencio "Todos los
+  // productos" (los de su región primero, el resto después, nunca vacío). Sin
+  // ningún filtro/interruptor visible: el dueño decidió que sea lógica interna.
   const myProvince = user?.profile?.shop_province || null;
   // VISTA de productos (Cuadrícula / Muro). Preferencia del usuario, persistente.
   // Si no hay preferencia, se usa el default de plataforma (luego lo pondrá el admin).
@@ -1589,20 +1596,17 @@ function AppShell({ sessionUser }) {
         || (filter === "RECOMENDADO" && (p.promoted || p.featured || p.badge === "RECOMENDADO"))
         || (filter === "MAS_VENDIDO" && sold(p) > 0)
         || (filter === "FAVORITOS");
-      // "Mi provincia": filtro EXPLÍCITO del usuario (nunca deja la pantalla
-      // vacía sola — solo se activa si él mismo lo prende, y solo si ya tiene
-      // provincia elegida).
-      const mp = !provinceOnly || !myProvince || p.province === myProvince;
-      return ms && mf && mp;
+      return ms && mf;
     });
     // Ordenamientos por defecto de cada filtro.
     if (filter === "NUEVO")            list = [...list].sort((a, b) => created(b) - created(a));
     else if (filter === "MAS_VENDIDO") list = [...list].sort((a, b) => sold(b) - sold(a));
     else if (filter === "OFERTAS")     list = [...list].sort((a, b) => (parseFloat(b.orig_price || 0) - parseFloat(b.price || 0)) - (parseFloat(a.orig_price || 0) - parseFloat(a.price || 0)));
-    // "Todos los productos" PRIORIZA (nunca excluye) lo de mi provincia: los
-    // productos con province=myProvince van primero, el resto del país queda
-    // justo debajo — la pantalla nunca se queda vacía por esto.
-    else if (filter === "TODOS" && myProvince && !provinceOnly) {
+    // "Todos los productos" PRIORIZA (nunca excluye) lo de mi región: los
+    // productos con province=myProvince van primero, el resto queda justo
+    // debajo — reordenamiento silencioso, sin ningún filtro visible; la
+    // pantalla nunca se queda vacía por esto.
+    else if (filter === "TODOS" && myProvince) {
       const mine = list.filter(p => p.province === myProvince);
       const rest = list.filter(p => p.province !== myProvince);
       list = [...mine, ...rest];
@@ -1961,7 +1965,7 @@ function AppShell({ sessionUser }) {
                 scrollKeeper={marketScrollRef}
                 view={productView}
                 loading={loading} products={marketVisible} filter={filter} setFilter={setFilter}
-                myProvince={myProvince} provinceOnly={provinceOnly} setProvinceOnly={setProvinceOnly}
+                myProvince={myProvince}
                 onGoToRegion={() => { setTab("perfil"); setPScr("settings"); }}
                 search={search} setSearch={setSearch} activeCat={activeCat} setActiveCat={cat => { setActiveCat(cat); }}
                 onCats={() => setShowCats(true)}
@@ -2026,7 +2030,6 @@ function AppShell({ sessionUser }) {
               <AdvancedSearch
                 view={productView}
                 products={products}
-                myProvince={myProvince}
                 onProduct={p => {
                   setSelProd(p);
                   setTab("market");

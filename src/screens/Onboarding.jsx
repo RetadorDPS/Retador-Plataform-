@@ -243,7 +243,7 @@ export default function OnboardingScreen({ user, onDone }) {
           <p className="text-[13px] font-bold text-[#FFC01E] tracking-wide uppercase mb-2">Paso 2 de 3</p>
           <h2 className="text-[25px] font-black tracking-tight leading-tight">¿Desde dónde vas a usar RETADOR?</h2>
           <p className="mt-2 text-[13.5px] text-[#9a9a95] leading-relaxed">
-            Elige tu provincia y te mostraremos primero lo que tienes cerca — sin dejar nunca de mostrarte el resto del país.
+            Con tu región, te mostramos primero lo que tienes cerca — sin dejar de mostrarte el resto.
           </p>
         </div>
         <div className="rise rise-2 mt-6 flex gap-2">
@@ -259,7 +259,7 @@ export default function OnboardingScreen({ user, onDone }) {
         </div>
         {pais === "cuba" && (
           <div className="rise rise-3 mt-5">
-            <div className="flex items-center gap-1.5 mb-3 text-[#9a9a95]"><MapPin size={13} /><span className="text-[12px] font-semibold tracking-wide uppercase">Elige tu provincia</span></div>
+            <div className="flex items-center gap-1.5 mb-3 text-[#9a9a95]"><MapPin size={13} /><span className="text-[12px] font-semibold tracking-wide uppercase">Tu región en Cuba</span></div>
             <div className="max-h-[236px] overflow-y-auto grid grid-cols-2 gap-2 pr-1 pb-1">
               {CUBA_PROVINCES.map((prov) => (
                 <button

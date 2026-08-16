@@ -387,22 +387,30 @@ function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=fal
   );
 }
 
-/* ── REGIÓN (país/provincia) ─────────────────────────────────────
+/* ── REGIÓN ─────────────────────────────────────────────────────
    Mismo selector del onboarding, para cambiarlo cuando se quiera — llama a la
    MISMA RPC real (save_onboarding), sin marcar p_mark_done (ya quedó en true
    la primera vez). Cambiar de país fuera de Cuba limpia la provincia sola
-   (mismo comportamiento del backend: shop_province solo aplica a Cuba). */
-function CFG_RegionScreen({ user, nav, flash }) {
+   (mismo comportamiento del backend: shop_province solo aplica a Cuba).
+   BUG REAL corregido: guardaba de verdad en la base, pero nunca avisaba al
+   resto de la app (AppShell seguía con el perfil viejo en memoria) — por eso
+   la pantalla volvía a mostrar "Sin elegir" y el recordatorio de la Tienda
+   seguía apareciendo aunque save_onboarding ya hubiera funcionado. onUpdate
+   (ya existía en SettingsScreen, pero nunca se usaba) parcha el usuario en
+   memoria al instante, sin esperar a recargar la app entera. */
+function CFG_RegionScreen({ user, nav, flash, onUpdate }) {
   const tk = CFG_useTk();
   const [pais, setPais] = useState(user?.profile?.shop_country || null);
   const [provincia, setProvincia] = useState(user?.profile?.shop_province || null);
   const [saving, setSaving] = useState(false);
   const save = async () => {
-    if (!pais) { flash && flash("⚠️ Elige un país"); return; }
-    if (pais === "cuba" && !provincia) { flash && flash("⚠️ Elige tu provincia"); return; }
+    if (!pais) { flash && flash("⚠️ Elige tu región"); return; }
+    if (pais === "cuba" && !provincia) { flash && flash("⚠️ Elige tu región en Cuba"); return; }
     setSaving(true);
     try {
-      await saveOnboarding({ shopCountry: pais, shopProvince: pais === "cuba" ? provincia : null });
+      const shopProvince = pais === "cuba" ? provincia : null;
+      await saveOnboarding({ shopCountry: pais, shopProvince });
+      onUpdate && onUpdate({ profile: { ...(user?.profile || {}), shop_country: pais, shop_province: shopProvince } });
       flash && flash("📍 Región guardada");
     } catch (e) { flash && flash("⚠️ No se pudo guardar — intenta de nuevo"); }
     setSaving(false);
@@ -411,9 +419,9 @@ function CFG_RegionScreen({ user, nav, flash }) {
     <div style={{ background:tk.BG }}>
       <CFG_Hdr title="Región" onBack={() => nav("home")} />
       <p style={{ color:tk.T2 }} className="px-4 pb-1 text-[11.5px] leading-relaxed">
-        Con tu provincia, la Tienda te muestra primero lo que tienes cerca — sin dejar de mostrarte el resto del país.
+        Con tu región, te mostramos primero lo que tienes cerca — sin dejar de mostrarte el resto.
       </p>
-      <CFG_Lbl>País</CFG_Lbl>
+      <CFG_Lbl>Región</CFG_Lbl>
       <CFG_Crd>
         <div className="flex gap-2 p-3">
           {ONBOARDING_PAISES.map(p => (
@@ -427,7 +435,7 @@ function CFG_RegionScreen({ user, nav, flash }) {
       </CFG_Crd>
       {pais === "cuba" && (
         <>
-          <CFG_Lbl>Provincia</CFG_Lbl>
+          <CFG_Lbl>Tu región en Cuba</CFG_Lbl>
           <CFG_Crd>
             <div className="grid grid-cols-2 gap-2 p-3">
               {CUBA_PROVINCES.map(prov => (
@@ -1372,7 +1380,7 @@ export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTh
     return next;
   });
 
-  const p = { profile, setProfile: saveProfile, settings, upd, nav, appScale:imgScale, onScale:onImgScaleChange, onBack, onSignOut, onThemeChange, appTheme, appTextScale, onTextScaleChange, flash, isVerified, onRequestVerification, accountPassword, onSetPassword, blockedUsers, onToggleBlock, onOpenWallet, orders, productView, onProductViewChange, user };
+  const p = { profile, setProfile: saveProfile, settings, upd, nav, appScale:imgScale, onScale:onImgScaleChange, onBack, onSignOut, onThemeChange, appTheme, appTextScale, onTextScaleChange, flash, isVerified, onRequestVerification, accountPassword, onSetPassword, blockedUsers, onToggleBlock, onOpenWallet, orders, productView, onProductViewChange, user, onUpdate };
   const map = {
     home:          <CFG_HomeScreen          {...p} />,
     account:       <CFG_AccountScreen       {...p} />,

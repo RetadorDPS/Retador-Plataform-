@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -1278,9 +1278,11 @@ function UseInPicker({ onConfirm, onCancel }) {
 function Overview({toast, data={}, go}){
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [obStats, setObStats] = useState(null);
   const load = useCallback(() => {
     setLoading(true);
     adminDashboardStats().then(s => { setStats(s); setLoading(false); }).catch(() => { setStats(null); setLoading(false); });
+    getOnboardingStats().then(setObStats).catch(() => setObStats(null));
   }, []);
   useEffect(() => { load(); }, [load]);
   // Refresco EN VIVO: cuando cambian solicitudes o pedidos, recalcula (debounce).
@@ -1364,6 +1366,45 @@ function Overview({toast, data={}, go}){
             <Card icon="🪪" label="Verificaciones" value={num(pendV)} sub={pendV ? 'toca para revisar' : 'todo al día'} gold={pendV > 0} badge={pendV} onClick={() => go && go('verif')} />
             <Card icon="⭐" label="Planes" value={num(pendP)} sub={pendP ? 'toca para revisar' : 'todo al día'} gold={pendP > 0} badge={pendP} onClick={() => go && go('plans')} />
             <Card icon="🛵" label="Mensajeros" value={num(pendC)} sub={pendC ? 'toca para revisar' : 'todo al día'} gold={pendC > 0} badge={pendC} onClick={() => go && go('delivery')} />
+          </div>
+
+          <Head>📊 Onboarding <span style={{ fontWeight:500, fontSize:10, color:'var(--tx3)' }}>(solo lectura · no afecta la app)</span></Head>
+          <div className="card cp mb16">
+            {!obStats
+              ? <div style={{ textAlign:'center', color:'var(--tx3)', fontSize:12, padding:'12px 0' }}>Cargando…</div>
+              : (() => {
+                  const total = n(obStats.total_completado);
+                  const Grupo = ({ titulo, datos, etiqueta }) => {
+                    const entradas = Object.entries(datos || {}).sort((a, b) => n(b[1]) - n(a[1]));
+                    if (!entradas.length) return null;
+                    return (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ fontSize:10.5, fontWeight:800, color:'var(--tx2,#aaa)', marginBottom:6 }}>{titulo}</div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                          {entradas.map(([k, v]) => {
+                            const cnt = n(v);
+                            const pct = total > 0 ? Math.round((cnt / total) * 100) : 0;
+                            return (
+                              <div key={k} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', fontSize:11.5 }}>
+                                <span style={{ color:'var(--tx1)', fontWeight:600 }}>{etiqueta ? etiqueta(k) : k}</span>
+                                <span style={{ color:'var(--tx3)' }}>{num(cnt)} · {pct}%</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  };
+                  return <>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                      <span style={{ fontSize:12, fontWeight:700, color:'var(--tx2,#aaa)' }}>Total completaron el onboarding</span>
+                      <span style={{ fontSize:16, fontWeight:800, color:G }}>{num(total)}</span>
+                    </div>
+                    <Grupo titulo="Por país" datos={obStats.por_pais} etiqueta={k => k === 'sin_decir' ? 'Sin decir' : k} />
+                    <Grupo titulo="Por provincia (Cuba)" datos={obStats.por_provincia} />
+                    <Grupo titulo="Por intención" datos={obStats.por_intencion} />
+                  </>;
+                })()}
           </div>
 
           <div className="card cp">

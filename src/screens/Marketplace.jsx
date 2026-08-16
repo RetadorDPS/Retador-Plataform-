@@ -679,7 +679,7 @@ function HowItWorksSheet({ onClose }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // ADVANCED SEARCH
 // ═════════════════════════════════════════════════════════════════════════════
-export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, view = "grid", onPublishInCat }) {
+export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, view = "grid", onPublishInCat, myProvince = null }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const { tokens: dt, mode: dMode } = useDensity();
@@ -688,6 +688,7 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
   const [searchText, setSearchText] = useState("");
   const [quickFilter, setQuickFilter] = useState("TODOS");
   const [onlyVerified, setOnlyVerified] = useState(false); // filtro "solo verificados" — interruptor aparte, no excluyente con los demás
+  const [provinceOnly, setProvinceOnly] = useState(false); // "Mi provincia / Todo el país" — solo si ya hay provincia elegida
   const feedAds = useFeedAds("busqueda"); // anuncios intercalados cada N productos
 
   const { cats, subcats: allSubs } = useCatalog();
@@ -715,7 +716,8 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
     const matchCat = (!effectiveCat || p.cat === effectiveCat) && (!selectedSubcat || p.subcat === selectedSubcat);
     const matchSearch = catSuggestion ? true : (!searchText || p.title.toLowerCase().includes(searchText.toLowerCase()) || p.description?.toLowerCase().includes(searchText.toLowerCase()));
     const matchVerified = !onlyVerified || !!p.seller_verified;
-    return matchCat && matchSearch && matchQuick(p) && matchVerified;
+    const matchProvince = !provinceOnly || !myProvince || p.province === myProvince;
+    return matchCat && matchSearch && matchQuick(p) && matchVerified && matchProvince;
   });
   if (quickFilter === "NUEVO")            filtered = [...filtered].sort((a, b) => _created(b) - _created(a));
   else if (quickFilter === "MAS_VENDIDO") filtered = [...filtered].sort((a, b) => _sold(b) - _sold(a));
@@ -829,6 +831,13 @@ export function AdvancedSearch({ products, onProduct, favorites, onFav, onNav, v
               style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 4, background: onlyVerified ? G : isDark ? "#111" : S, color: onlyVerified ? "#000" : T2, border: `1px solid ${onlyVerified ? G : B}`, borderRadius: 999, padding: "6px 12px", fontSize: 9.5, fontWeight: 700, whiteSpace: "nowrap" }}>
               <Ic n="check" c={onlyVerified ? "#000" : T2} s={11} /> Verificados
             </button>
+            {/* "Mi provincia / Todo el país" — solo si ya hay provincia real elegida. */}
+            {myProvince && (
+              <button onClick={() => setProvinceOnly(v => !v)} className={`chip ${isDark ? "" : "chip-light"}`}
+                style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 4, background: provinceOnly ? G : isDark ? "#111" : S, color: provinceOnly ? "#000" : T2, border: `1px solid ${provinceOnly ? G : B}`, borderRadius: 999, padding: "6px 12px", fontSize: 9.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+                📍 {provinceOnly ? myProvince : "Todo el país"}
+              </button>
+            )}
           </div>
 
           {/* Tramo: anuncios entre los filtros y los resultados */}
@@ -1144,13 +1153,34 @@ export function ChatsModal({ onClose, initial, orders = [], chatMsgs = {}, chatP
    reales RESPETANDO la posición: cada anuncio se renderiza en el tramo donde el
    usuario lo colocó, entre las partes fijas del sistema. Botones que navegan. */
 
-export function MarketHome({ loading, products, filter, setFilter, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, messagesBadge = 0, onServices, onNav, hidden = false, scrollKeeper = null, view = "grid", onRefresh = null }) {
+// Recordatorio de región — discreto y descartable (NUNCA un modal), de vez en
+// cuando (no en cada visita): se apoya en un timestamp propio en localStorage,
+// nunca se vuelve a mostrar antes de que pasen unos días desde la última vez
+// que se vio o se descartó. Deja de aparecer solo en cuanto haya provincia real.
+const REGION_REMINDER_KEY = "retador_region_reminder_last";
+const REGION_REMINDER_DAYS = 3;
+function useRegionReminder(myProvince) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (myProvince) { setShow(false); return; }
+    try {
+      const last = Number(localStorage.getItem(REGION_REMINDER_KEY) || 0);
+      const dueMs = REGION_REMINDER_DAYS * 24 * 60 * 60 * 1000;
+      if (Date.now() - last >= dueMs) setShow(true);
+    } catch (e) {}
+  }, [myProvince]);
+  const dismiss = () => { try { localStorage.setItem(REGION_REMINDER_KEY, String(Date.now())); } catch (e) {} setShow(false); };
+  return { show, dismiss };
+}
+
+export function MarketHome({ loading, products, filter, setFilter, myProvince = null, provinceOnly = false, setProvinceOnly = null, onGoToRegion = null, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, messagesBadge = 0, onServices, onNav, hidden = false, scrollKeeper = null, view = "grid", onRefresh = null }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { cats } = useCatalog();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const { tokens: dt, mode: dMode } = useDensity();
   const plusBtnRef = useRef(null);
   const feedAds = useFeedAds("inicio"); // anuncios intercalados cada N productos
+  const regionReminder = useRegionReminder(myProvince);
   // Conserva la posición del scroll del feed: se guarda al scrollear y se
   // restaura al volver (entrar a un producto y regresar no salta al inicio).
   const feedRef = useRef(null);
@@ -1226,6 +1256,17 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
       </div>
 
 
+      {/* Recordatorio de región — discreto, descartable, nunca bloqueante. Solo
+          aparece si todavía no hay provincia real y ya tocaba (no en cada visita). */}
+      {regionReminder.show && onGoToRegion && (
+        <div style={{ margin: "10px 16px 0", background: isDark ? `${G}14` : `${G}12`, border: `1px solid ${G}40`, borderRadius: 13, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 16, flexShrink: 0 }}>📍</span>
+          <p style={{ flex: 1, fontSize: 11, color: T2, lineHeight: 1.4 }}>Agrega tu provincia para ver primero lo que tienes cerca.</p>
+          <button onClick={() => { regionReminder.dismiss(); onGoToRegion(); }} className="p" style={{ flexShrink: 0, background: G, border: "none", borderRadius: 100, padding: "6px 12px", fontSize: 10.5, fontWeight: 800, color: "#000", cursor: "pointer" }}>Agregar</button>
+          <button onClick={regionReminder.dismiss} className="p" aria-label="Descartar" style={{ flexShrink: 0, background: "none", border: "none", color: T3, fontSize: 15, cursor: "pointer", padding: 2 }}>×</button>
+        </div>
+      )}
+
       {/* Hueco SUPERIOR (entre Encabezado y Filtros): banners de inicio en ese hueco
           + páginas Banners/Promociones. Config global, en vivo. El CTA navega. */}
       <MarketBanners onNav={onNav} />
@@ -1237,6 +1278,14 @@ export function MarketHome({ loading, products, filter, setFilter, search, setSe
         ))}
         {/* Entrada a SERVICIOS (mundo aparte) */}
         {onServices && <button onClick={onServices} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: isDark ? "#0e0e0e" : S, color: G, border: `1.5px solid ${G}55`, borderRadius: 999, padding: "7px 13px", fontSize: 10 * ts, fontWeight: 800, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>🛠️ Servicios</button>}
+        {/* "Mi provincia / Todo el país" — solo aparece si ya se eligió una
+            provincia real (onboarding o Configuración → Región). Nunca deja
+            la pantalla vacía: solo se activa si el propio usuario lo prende. */}
+        {myProvince && setProvinceOnly && (
+          <button onClick={() => setProvinceOnly(o => !o)} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: provinceOnly ? G : isDark ? "#0e0e0e" : S, color: provinceOnly ? "#000" : T3, border: `1.5px solid ${provinceOnly ? G : B}`, borderRadius: 999, padding: "7px 13px", fontSize: 10 * ts, fontWeight: 700, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+            📍 {provinceOnly ? myProvince : "Todo el país"}
+          </button>
+        )}
       </div>
 
       {/* Tramo: lo que pusiste entre los Filtros y la Zona de productos */}
@@ -2388,6 +2437,7 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash, initialCa
     acceptedCurrencies: [], // monedas en las que el vendedor acepta cobrar (selección múltiple, opcional)
     shipModes: { local: true, intl: false, persona: false }, // combinables: el vendedor marca las que quiera
     location: "",
+    province: (() => { try { return localStorage.getItem("retador_last_province") || ""; } catch (e) { return ""; } })() || user?.profile?.shop_province || "",
     pickupAddress: (() => { try { return JSON.parse(localStorage.getItem("retador_pickup") || "{}").address || ""; } catch (e) { return ""; } })(),
     pickupPhone: (() => { try { return JSON.parse(localStorage.getItem("retador_pickup") || "{}").phone || ""; } catch (e) { return ""; } })(),
     shippingPrice: "", shippingType: "standard", promote: false,
@@ -2421,7 +2471,7 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash, initialCa
   const anyShip = form.shipModes.local || form.shipModes.intl || form.shipModes.persona;
   const needsLoc = form.shipModes.local || form.shipModes.persona;
   const hasStock = Number(form.stock) > 0;
-  const canPublish = form.title && form.cat && form.price && hasStock && anyShip && (!needsLoc || form.location) && (!form.shipModes.intl || form.shippingPrice);
+  const canPublish = form.title && form.cat && form.price && hasStock && anyShip && form.province && (!needsLoc || form.location) && (!form.shipModes.intl || form.shippingPrice);
 
   const submit = async () => {
     if (!canPublish) {
@@ -2430,12 +2480,14 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash, initialCa
       else if (!form.price) flash("⚠️ Define el precio");
       else if (!hasStock) flash("⚠️ Indica la cantidad disponible (mínimo 1)");
       else if (!anyShip) flash("⚠️ Marca al menos una forma de entrega");
+      else if (!form.province) flash("⚠️ Elige la provincia");
       else if (needsLoc && !form.location) flash("⚠️ Indica tu ubicación / zona");
       else if (form.shipModes.intl && !form.shippingPrice) flash("⚠️ Define precio de envío internacional");
       return;
     }
     setSaving(true);
     try { if (form.pickupAddress || form.pickupPhone) localStorage.setItem("retador_pickup", JSON.stringify({ address: form.pickupAddress, phone: form.pickupPhone })); } catch (e) {}
+    try { localStorage.setItem("retador_last_province", form.province); } catch (e) {}
     const bulkDiscounts = form.bulkDiscounts.filter(t => t.min && t.pct).map(t => ({ min: Number(t.min), pct: Number(t.pct) }));
     await onPublish({ ...form, kind: "product", bulkDiscounts, img: form.images[0] });
     setSaving(false);
@@ -2549,6 +2601,16 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash, initialCa
           })}
         </select>
         {!form.cat && <p style={{ fontSize: 9.5, color: T3, marginTop: 5 }}>Obligatorio · ayuda a que aparezca en la búsqueda correcta.</p>}
+      </div>
+
+      {/* PROVINCIA */}
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>📍</span> Provincia</div>
+        <select style={{ ...inp, appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23666' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 13px center", paddingRight: 40, cursor: "pointer", color: form.province ? T1 : T3 }} value={form.province} onChange={e => set("province", e.target.value)}>
+          <option value="">Selecciona tu provincia…</option>
+          {CUBA_PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        {!form.province && <p style={{ fontSize: 9.5, color: T3, marginTop: 5 }}>Obligatorio · ayuda a mostrar tu producto primero a compradores de tu zona.</p>}
       </div>
 
       {form.shipModes.local && <div style={sectionStyle}>
@@ -2699,7 +2761,9 @@ function PublishServiceForm({ onClose, onBack, onPublish, user, flash }) {
   const { CARD, B, T1, T2, T3, isDark } = useAt();
   const platformCfg = usePlatformCfg();
   const serviceCats = (Array.isArray(platformCfg.serviceCats) && platformCfg.serviceCats.length) ? platformCfg.serviceCats : DEFAULT_SERVICE_CATS;
-  const [form, setForm] = useState({ title: "", price: "", desc: "", images: [], location: "", cat: "", availability: "" });
+  const [form, setForm] = useState({ title: "", price: "", desc: "", images: [], location: "", cat: "", availability: "",
+    province: (() => { try { return localStorage.getItem("retador_last_province") || ""; } catch (e) { return ""; } })() || user?.profile?.shop_province || "",
+  });
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
@@ -2720,18 +2784,20 @@ function PublishServiceForm({ onClose, onBack, onPublish, user, flash }) {
   };
   const removeImage = (idx) => set("images", form.images.filter((_, i) => i !== idx));
 
-  const canPublish = form.title && form.cat;
+  const canPublish = form.title && form.cat && form.province;
   const submit = async () => {
     if (!canPublish) {
       if (!form.title) flash("⚠️ Escribe un título");
       else if (!form.cat) flash("⚠️ Elige una categoría de servicio");
+      else if (!form.province) flash("⚠️ Elige la provincia");
       return;
     }
     setSaving(true);
+    try { localStorage.setItem("retador_last_province", form.province); } catch (e) {}
     // Sin columna dedicada de contacto/disponibilidad: se agrega a la descripción,
     // visible igual para quien vea el servicio.
     const desc = form.availability.trim() ? `${form.desc.trim()}${form.desc.trim() ? "\n\n" : ""}📞 Contacto y disponibilidad: ${form.availability.trim()}` : form.desc;
-    await onPublish({ kind: "service", title: form.title, price: form.price, desc, images: form.images, location: form.location, cat: form.cat, img: form.images[0] });
+    await onPublish({ kind: "service", title: form.title, price: form.price, desc, images: form.images, location: form.location, province: form.province, cat: form.cat, img: form.images[0] });
     setSaving(false);
   };
 
@@ -2781,8 +2847,17 @@ function PublishServiceForm({ onClose, onBack, onPublish, user, flash }) {
       </div>
 
       <div style={sectionStyle}>
-        <div style={sectionTitle}><span>📍</span> Zona donde ofreces el servicio</div>
-        <input style={inp} placeholder="Ej: La Habana, Vedado (o «toda Cuba», «en línea»…)" value={form.location} onChange={e => set("location", e.target.value)} />
+        <div style={sectionTitle}><span>📍</span> Provincia</div>
+        <select style={{ ...inp, appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23666' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 13px center", paddingRight: 40, cursor: "pointer", color: form.province ? T1 : T3 }} value={form.province} onChange={e => set("province", e.target.value)}>
+          <option value="">Selecciona tu provincia…</option>
+          {CUBA_PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        {!form.province && <p style={{ fontSize: 9.5, color: T3, marginTop: 5 }}>Obligatorio · ayuda a mostrar tu servicio primero a quienes están en tu zona.</p>}
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>🗺️</span> Zona donde ofreces el servicio <span style={{ fontWeight: 500, color: T3, fontSize: 9 }}>(opcional)</span></div>
+        <input style={inp} placeholder="Ej: Vedado (o «toda la provincia», «en línea»…)" value={form.location} onChange={e => set("location", e.target.value)} />
       </div>
 
       <div style={sectionStyle}>

@@ -51,6 +51,7 @@ import { ProfileMain, FreeProfileScreen, ProfileMenuDrawer } from "./screens/Pro
 import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
+import OnboardingScreen from "./screens/Onboarding.jsx";
 import InstallPrompt from "./pwa/InstallPrompt.jsx";
 import PushPrompt from "./pwa/PushPrompt.jsx";
 import { ensurePushSubscription } from "./pwa/push.js";
@@ -157,6 +158,14 @@ export default function App() {
   // botón entra al marketplace (no vuelve a mostrarse hasta reabrir / re-loguear).
   const [entered, setEntered] = useState(false);
   useEffect(() => { if (!sessionUser) setEntered(false); }, [sessionUser]);
+  // ONBOARDING (idioma/región/intención) — se muestra UNA sola vez, justo tras
+  // entrar, mientras profiles.onboarding_done_at siga en null (el backend es
+  // la única fuente de verdad: nunca se vuelve a mostrar completo después de
+  // terminarlo). onboardingComplete es un cerrojo LOCAL para esta sesión —
+  // evita tener que releer sessionUser tras cada paso solo para saber si ya
+  // se puede pasar a AppShell.
+  const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const needsOnboarding = !!sessionUser && !onboardingComplete && !sessionUser?.profile?.onboarding_done_at;
   // Si YA hay sesión (p.ej. el propio dueño probando el enlace) y viene de un
   // enlace compartido, nos saltamos el toque manual de "Entrar a RETADOR" —
   // AppShell ya sabe abrir directo el producto/perfil (App.jsx lee
@@ -224,7 +233,18 @@ export default function App() {
             <CatalogProvider>
               {sessionUser
                 ? (entered
-                    ? <AppShell sessionUser={sessionUser} />
+                    ? (needsOnboarding
+                        ? <OnboardingScreen user={sessionUser} onDone={() => {
+                            // Antes de pasar a AppShell, se refresca sessionUser de verdad:
+                            // AppShell arranca su propio estado "user" leyendo sessionUser
+                            // UNA vez al montar (useState(sessionUser)) — sin este refresco
+                            // llegaría con profile.shop_province/onboarding_done_at viejos
+                            // (los de ANTES de guardar el onboarding), aunque save_onboarding
+                            // ya haya guardado todo bien en la base.
+                            loadSessionUser().then(u => { if (u) setSessionUser(u); });
+                            setOnboardingComplete(true);
+                          }} />
+                        : <AppShell sessionUser={sessionUser} />)
                     : <RetadorInicio onEnter={() => setEntered(true)} subtitle={homeCfg.subtitle} enterLabel={homeCfg.enterLabel} stats={platformStats} dark={welcomeDark} />)
                 : (deepLink && !guestWantsAuth
                     ? <GuestDeepLinkPreview deepLink={deepLink} onChangeDeepLink={setDeepLink} onExit={() => setDeepLink(null)} onRequestAuth={() => setGuestWantsAuth(true)} />
@@ -640,6 +660,10 @@ function AppShell({ sessionUser }) {
   // Ahora fx sale SIEMPRE de config.fx (con reintento arriba, ver punto 9).
   const [search,    setSearch]    = useState("");
   const [filter,    setFilter]    = useState("TODOS");
+  // Filtro "Mi provincia / Todo el país" — la provincia real viene de
+  // profiles.shop_province (onboarding o Configuración → Región).
+  const [provinceOnly, setProvinceOnly] = useState(false);
+  const myProvince = user?.profile?.shop_province || null;
   // VISTA de productos (Cuadrícula / Muro). Preferencia del usuario, persistente.
   // Si no hay preferencia, se usa el default de plataforma (luego lo pondrá el admin).
   const [productView, setProductView] = useState(() => { try { return localStorage.getItem("retador_prodview") || PLATFORM_DEFAULT_VIEW; } catch { return PLATFORM_DEFAULT_VIEW; } });
@@ -850,6 +874,7 @@ function AppShell({ sessionUser }) {
       ship_modes: isService ? null : (d.shipModes || { local: true, intl: false, persona: false }),
       ship_price: isService ? 0 : (Number(d.shippingPrice) || 0),
       location: d.location || null,   // zona (donde ofrece el servicio / ubicación del producto)
+      province: d.province || null,   // provincia estructurada (Cuba) — prioriza en la Tienda
       pickup_address: isService ? null : (d.pickupAddress || null),
       pickup_phone: isService ? null : (d.pickupPhone || null),
       // GRUPO 1 — cantidad disponible, descuentos por cantidad y monedas que el
@@ -1564,12 +1589,24 @@ function AppShell({ sessionUser }) {
         || (filter === "RECOMENDADO" && (p.promoted || p.featured || p.badge === "RECOMENDADO"))
         || (filter === "MAS_VENDIDO" && sold(p) > 0)
         || (filter === "FAVORITOS");
-      return ms && mf;
+      // "Mi provincia": filtro EXPLÍCITO del usuario (nunca deja la pantalla
+      // vacía sola — solo se activa si él mismo lo prende, y solo si ya tiene
+      // provincia elegida).
+      const mp = !provinceOnly || !myProvince || p.province === myProvince;
+      return ms && mf && mp;
     });
     // Ordenamientos por defecto de cada filtro.
     if (filter === "NUEVO")            list = [...list].sort((a, b) => created(b) - created(a));
     else if (filter === "MAS_VENDIDO") list = [...list].sort((a, b) => sold(b) - sold(a));
     else if (filter === "OFERTAS")     list = [...list].sort((a, b) => (parseFloat(b.orig_price || 0) - parseFloat(b.price || 0)) - (parseFloat(a.orig_price || 0) - parseFloat(a.price || 0)));
+    // "Todos los productos" PRIORIZA (nunca excluye) lo de mi provincia: los
+    // productos con province=myProvince van primero, el resto del país queda
+    // justo debajo — la pantalla nunca se queda vacía por esto.
+    else if (filter === "TODOS" && myProvince && !provinceOnly) {
+      const mine = list.filter(p => p.province === myProvince);
+      const rest = list.filter(p => p.province !== myProvince);
+      list = [...mine, ...rest];
+    }
     return list;
   })();
 
@@ -1924,6 +1961,8 @@ function AppShell({ sessionUser }) {
                 scrollKeeper={marketScrollRef}
                 view={productView}
                 loading={loading} products={marketVisible} filter={filter} setFilter={setFilter}
+                myProvince={myProvince} provinceOnly={provinceOnly} setProvinceOnly={setProvinceOnly}
+                onGoToRegion={() => { setTab("perfil"); setPScr("settings"); }}
                 search={search} setSearch={setSearch} activeCat={activeCat} setActiveCat={cat => { setActiveCat(cat); }}
                 onCats={() => setShowCats(true)}
                 onProduct={p => { setSelProd(p); setMScr("product"); }}
@@ -1987,6 +2026,7 @@ function AppShell({ sessionUser }) {
               <AdvancedSearch
                 view={productView}
                 products={products}
+                myProvince={myProvince}
                 onProduct={p => {
                   setSelProd(p);
                   setTab("market");

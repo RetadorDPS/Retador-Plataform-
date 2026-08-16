@@ -1514,6 +1514,28 @@ export function maskContacts(text) {
 
 export const CUBA_PROVINCES = ["Pinar del Río", "Artemisa", "La Habana", "Mayabeque", "Matanzas", "Cienfuegos", "Villa Clara", "Sancti Spíritus", "Ciego de Ávila", "Camagüey", "Las Tunas", "Holguín", "Granma", "Santiago de Cuba", "Guantánamo", "Isla de la Juventud"];
 
+// ── ONBOARDING (idioma/país/provincia/intención) — RPC real save_onboarding.
+// Los campos en null conservan su valor previo (coalesce del lado del
+// backend); solo se manda p_mark_done:true al terminar el flujo completo
+// (aunque se haya saltado la región), nunca en los pasos intermedios.
+export const ONBOARDING_PAISES = [
+  { id: "cuba", label: "Cuba" },
+  { id: "espana", label: "España" },
+  { id: "eeuu", label: "Estados Unidos" },
+];
+export const saveOnboarding = async ({ idioma = null, shopCountry = null, shopProvince = null, intent = null, markDone = false } = {}) => {
+  const { error } = await supabase.rpc("save_onboarding", {
+    p_idioma: idioma, p_shop_country: shopCountry, p_shop_province: shopProvince, p_intent: intent, p_mark_done: markDone,
+  });
+  if (error) { console.error("saveOnboarding:", error.message); throw error; }
+};
+// Solo lectura, solo admin (RLS/candado real vía can('dashboard') del lado del backend).
+export const getOnboardingStats = async () => {
+  const { data, error } = await supabase.rpc("get_onboarding_stats");
+  if (error) { console.error("getOnboardingStats:", error.message); return null; }
+  return data;
+};
+
 // Event functions
 export const trackEvent = async (userId, event, data) => {};
 

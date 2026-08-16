@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Gavel, Globe, HardDrive, HelpCircle, Info, Lock, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Phone, Plus, Shield, ShoppingBag, Smartphone, Star, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
-import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser, useAppVersion } from "../shared/index.js";
+import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser, useAppVersion, CUBA_PROVINCES, ONBOARDING_PAISES, saveOnboarding } from "../shared/index.js";
 import { isPushSupported, hasActiveSubscription, enablePush, disablePush } from "../pwa/push.js";
 
 const CFG_DARK = {
@@ -226,12 +226,16 @@ function CFG_Bdg({ s }) {
 }
 
 /* ── HOME ─────────────────────────────────────────────────────── */
-function CFG_HomeScreen({ profile, settings, nav, onBack }) {
+function CFG_HomeScreen({ profile, settings, nav, onBack, user }) {
   const tk = CFG_useTk();
   const appVersion = useAppVersion();
   const storMB = Math.round(Object.values(settings.storage).reduce((a,b)=>a+b,0));
   const themeLabel = { auto:"Auto", light:"Claro", dark:"Oscuro" };
   const langLabel  = { es:"Español", en:"English" };
+  const paisLabel = { cuba:"Cuba", espana:"España", eeuu:"Estados Unidos" };
+  const shopCountry = user?.profile?.shop_country || null;
+  const shopProvince = user?.profile?.shop_province || null;
+  const regionValue = shopProvince || paisLabel[shopCountry] || "Sin elegir";
   const sections = [
     { title:"Cuenta", items:[
       { id:"account",       Icon:User,         label:"Cuenta",              value:profile.name, bg:"bg-violet-600" },
@@ -245,6 +249,7 @@ function CFG_HomeScreen({ profile, settings, nav, onBack }) {
       { id:"chat",          Icon:MessageCircle, label:"Chat",                bg:"bg-teal-600"   },
     ]},
     { title:"Marketplace", items:[
+      { id:"region",        Icon:MapPin,        label:"Región",              value:regionValue, bg:"bg-lime-600" },
       { id:"deliveries",    Icon:Truck,         label:"Entregas y Envíos",   value:`${settings.deliveries.addresses.length} dirs.`,  bg:"bg-blue-600"    },
       { id:"auctions",      Icon:Gavel,         label:"Subastas",            value:`${settings.activity.auctions.won}/${settings.activity.auctions.participated}`, bg:"bg-amber-600" },
       { id:"payments",      Icon:CreditCard,    label:"Pagos",               value:`${settings.payments.methods.length} métodos`,    bg:"bg-emerald-600" },
@@ -378,6 +383,70 @@ function CFG_AccountScreen({ profile, setProfile, nav, onSignOut, isVerified=fal
       <CFG_Crd><CFG_Row icon={LogOut} bg="bg-red-700" label="Cerrar sesión" danger onClick={onSignOut || (() => signOutUser())} /></CFG_Crd>
       <div className="h-8" />
       {pwSheet && <CFG_PasswordSheet hasPw={hasPw} current={accountPassword} onClose={() => setPwSheet(false)} onSave={(pw) => { onSetPassword && onSetPassword(pw); setPwSheet(false); flash && flash(hasPw ? "🔒 Contraseña actualizada" : "🔒 Contraseña creada"); }} />}
+    </div>
+  );
+}
+
+/* ── REGIÓN (país/provincia) ─────────────────────────────────────
+   Mismo selector del onboarding, para cambiarlo cuando se quiera — llama a la
+   MISMA RPC real (save_onboarding), sin marcar p_mark_done (ya quedó en true
+   la primera vez). Cambiar de país fuera de Cuba limpia la provincia sola
+   (mismo comportamiento del backend: shop_province solo aplica a Cuba). */
+function CFG_RegionScreen({ user, nav, flash }) {
+  const tk = CFG_useTk();
+  const [pais, setPais] = useState(user?.profile?.shop_country || null);
+  const [provincia, setProvincia] = useState(user?.profile?.shop_province || null);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!pais) { flash && flash("⚠️ Elige un país"); return; }
+    if (pais === "cuba" && !provincia) { flash && flash("⚠️ Elige tu provincia"); return; }
+    setSaving(true);
+    try {
+      await saveOnboarding({ shopCountry: pais, shopProvince: pais === "cuba" ? provincia : null });
+      flash && flash("📍 Región guardada");
+    } catch (e) { flash && flash("⚠️ No se pudo guardar — intenta de nuevo"); }
+    setSaving(false);
+  };
+  return (
+    <div style={{ background:tk.BG }}>
+      <CFG_Hdr title="Región" onBack={() => nav("home")} />
+      <p style={{ color:tk.T2 }} className="px-4 pb-1 text-[11.5px] leading-relaxed">
+        Con tu provincia, la Tienda te muestra primero lo que tienes cerca — sin dejar de mostrarte el resto del país.
+      </p>
+      <CFG_Lbl>País</CFG_Lbl>
+      <CFG_Crd>
+        <div className="flex gap-2 p-3">
+          {ONBOARDING_PAISES.map(p => (
+            <button key={p.id} onClick={() => { setPais(p.id); setProvincia(null); }}
+              style={{ background: pais===p.id ? tk.P : "transparent", color: pais===p.id ? "#000" : tk.T1, border:`1px solid ${pais===p.id ? tk.P : tk.CARD_BD}` }}
+              className="flex-1 py-2.5 rounded-full text-[12.5px] font-bold">
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </CFG_Crd>
+      {pais === "cuba" && (
+        <>
+          <CFG_Lbl>Provincia</CFG_Lbl>
+          <CFG_Crd>
+            <div className="grid grid-cols-2 gap-2 p-3">
+              {CUBA_PROVINCES.map(prov => (
+                <button key={prov} onClick={() => setProvincia(prov)}
+                  style={{ background: provincia===prov ? tk.P : tk.ROW, color: provincia===prov ? "#000" : tk.T1, border:`1px solid ${provincia===prov ? tk.P : tk.CARD_BD}` }}
+                  className="text-left px-3 py-2.5 rounded-xl text-[12.5px] font-bold">
+                  {prov}
+                </button>
+              ))}
+            </div>
+          </CFG_Crd>
+        </>
+      )}
+      <div className="px-4 mt-3">
+        <button onClick={save} disabled={saving} style={{ background:tk.P, color:"#000", opacity:saving?.7:1 }} className="w-full py-3.5 rounded-2xl font-black text-[14px]">
+          {saving ? "Guardando…" : "Guardar región"}
+        </button>
+      </div>
+      <div className="h-8" />
     </div>
   );
 }
@@ -1307,6 +1376,7 @@ export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTh
   const map = {
     home:          <CFG_HomeScreen          {...p} />,
     account:       <CFG_AccountScreen       {...p} />,
+    region:        <CFG_RegionScreen        {...p} />,
     appearance:    <CFG_AppearanceScreen    {...p} />,
     notifications: <CFG_NotificationsScreen {...p} />,
     privacy:       <CFG_PrivacyScreen       {...p} />,

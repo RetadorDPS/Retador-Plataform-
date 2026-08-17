@@ -28,7 +28,7 @@ import {
   getUserOrders, updateOrderStatus, getUnreadCount, getProductById, getConversationById,
   getPendingCourierApplications, reviewCourierApplication,
   getNotifications, markNotificationsRead, markNotificationsReadByKind, refreshSessionProfile, isSuspendedUser,
-  getPlans, getStoreConfig, upsertMyStoreConfig, getProfileHeaderStats, getSellerRatingInfo, getSellerReviews,
+  getPlans,
   ORDER_FLOW, SHIP_LABELS, MODALIDAD_LABELS,
   CONTACT_PATTERNS, maskContacts, CUBA_PROVINCES,
   trackEvent, blockUser, isBlocked, getBlockedUsers, getSB, convKey,
@@ -48,7 +48,6 @@ import OmniPanel from "./screens/AdminPanel.jsx";
 import { SubastasScreen } from "./screens/Auctions.jsx";
 import { SettingsScreen } from "./screens/Settings.jsx";
 import { FreeProfileScreen, ProfileMenuDrawer } from "./screens/Profile.jsx";
-import { StoreFront, StoreDashboard } from "./screens/Store.jsx";
 import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
@@ -1081,62 +1080,6 @@ function AppShell({ sessionUser }) {
   useEffect(() => { getPlans().then(setRealPlans).catch(() => {}); }, []);
   const myRealPlan = realPlans.find(p => p.id === user?.plan) || realPlans.find(p => p.id === "gratis") || null;
   const currentPlanName = myRealPlan?.name || "Gratis";
-  // ── TIENDA PRO (Fase 1) ─────────────────────────────────────────────────
-  // Gate real: plans.can_customize (columna real ya existente, la misma que
-  // separa "Free" de "Pro/Premium" en la tabla de planes) — no un id de plan
-  // a mano, así cualquier plan pagado que el admin marque can_customize=true
-  // obtiene la tienda, sin tener que tocar código si el admin agrega otro.
-  const isProStore = !!myRealPlan?.can_customize;
-  const [storeCfg, setStoreCfg] = useState(null);
-  const [storeMode, setStoreMode] = useState("store");
-  const [myStoreStats, setMyStoreStats] = useState({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
-  const [myStoreRating, setMyStoreRating] = useState(null);
-  const [myStoreReviews, setMyStoreReviews] = useState([]);
-  useEffect(() => {
-    if (!isProStore || !user?.id) return;
-    let alive = true;
-    getStoreConfig(user.id).then(c => { if (alive) setStoreCfg(c || {}); }).catch(() => { if (alive) setStoreCfg({}); });
-    getProfileHeaderStats(user.id).then(s => { if (alive) setMyStoreStats(s); }).catch(() => {});
-    getSellerRatingInfo(user.id).then(r => { if (alive) setMyStoreRating(r); }).catch(() => {});
-    getSellerReviews(user.id).then(r => { if (alive) setMyStoreReviews(r || []); }).catch(() => {});
-    return () => { alive = false; };
-  }, [isProStore, user?.id]);
-  const myStoreProducts = useMemo(() => [...ownListings, ...ownArchived].filter(p => p.kind !== "service"), [ownListings, ownArchived]);
-  const myStoreOrders = useMemo(() => orders.filter(o => o.sellerId === user?.id), [orders, user?.id]);
-  const storeApi = {
-    onNewProduct: () => setPubOpen("product"),
-    onEditProduct: (p) => setEditProd(p),
-    onArchiveProduct: (id) => confirmArchiveProduct(id),
-    onUnarchiveProduct: (id) => handleUnarchive(id),
-    onDeleteProduct: (id) => confirmDeleteProduct(id),
-    onUpdateConfig: async (draft) => { const saved = await upsertMyStoreConfig(draft); setStoreCfg(saved); },
-    onPlanRequested: () => reloadOwn(),
-  };
-  // Perfiles de OTROS vendedores: si su plan real tiene can_customize, se les
-  // muestra su Tienda en vez del perfil simple — mismo gate que para mí mismo.
-  const [viewedStoreEligible, setViewedStoreEligible] = useState(false);
-  const [viewedStoreCfg, setViewedStoreCfg] = useState(null);
-  const [viewedStoreStats, setViewedStoreStats] = useState({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
-  const [viewedStoreRating, setViewedStoreRating] = useState(null);
-  const [viewedStoreReviews, setViewedStoreReviews] = useState([]);
-  const [viewedStoreProducts, setViewedStoreProducts] = useState([]);
-  useEffect(() => {
-    if (!viewProfileId) { setViewedStoreEligible(false); return; }
-    let alive = true;
-    getUserById(viewProfileId).then(async (u) => {
-      if (!alive) return;
-      const plan = realPlans.find(p => p.id === u?.plan);
-      const eligible = !!plan?.can_customize;
-      setViewedStoreEligible(eligible);
-      if (!eligible) return;
-      const [c, s, r, prods, revs] = await Promise.all([
-        getStoreConfig(viewProfileId), getProfileHeaderStats(viewProfileId), getSellerRatingInfo(viewProfileId), getProductsBySeller(viewProfileId), getSellerReviews(viewProfileId),
-      ]);
-      if (!alive) return;
-      setViewedStoreCfg(c || {}); setViewedStoreStats(s); setViewedStoreRating(r); setViewedStoreProducts((prods || []).filter(p => p.kind !== "service")); setViewedStoreReviews(revs || []);
-    }).catch(() => { if (alive) setViewedStoreEligible(false); });
-    return () => { alive = false; };
-  }, [viewProfileId, realPlans]);
   const [reports, setReports] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_reports') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('retador_reports', JSON.stringify(reports)); } catch {} }, [reports]);
   const addReport = (rep) => setReports(prev => [{ id: 'rep_' + Date.now(), state: 'pending', at: Date.now(), ...rep }, ...prev]);
@@ -1930,19 +1873,6 @@ function AppShell({ sessionUser }) {
           {/* Una excepción en el perfil ya no puede dejar la pantalla EN BLANCO:
               queda acotada aquí, con el error visible y opción de volver. */}
           <ErrorBoundary title="No se pudo mostrar este perfil" onClose={() => setViewProfileId(null)}>
-          {viewedStoreEligible ? (
-            <StoreFront
-              cfg={viewedStoreCfg || {}}
-              products={viewedStoreProducts.filter(p => !p.archived_at)}
-              headerStats={viewedStoreStats}
-              ratingInfo={viewedStoreRating}
-              reviews={viewedStoreReviews}
-              isOwner={false}
-              onBack={() => setViewProfileId(null)}
-              onChat={() => { const id = viewProfileId; setViewProfileId(null); requestChat(id, "Vendedor"); }}
-              onProduct={p => setViewProdOverlay(p)}
-            />
-          ) : (
           <FreeProfileScreen
             onBack={() => setViewProfileId(null)}
             user={user}
@@ -1956,7 +1886,6 @@ function AppShell({ sessionUser }) {
             userProducts={products.filter(p => p.seller_id === viewProfileId)}
             onProduct={p => setViewProdOverlay(p)}
           />
-          )}
           </ErrorBoundary>
         </div>
       )}
@@ -2155,14 +2084,6 @@ function AppShell({ sessionUser }) {
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
               const paid = payments.filter(p => p.sellerName === me).reduce((a, p) => a + (p.amount || 0), 0);
               const myDebt = Math.max(0, accrued - paid);
-              // TIENDA PRO: reemplaza el perfil normal para vendedores con
-              // plan real can_customize=true — ver "línea que no se puede
-              // cruzar": el menú ☰, chat, pedidos, verificación siguen IGUAL.
-              if (isProStore) {
-                return storeMode === "dash"
-                  ? <StoreDashboard user={user} cfg={storeCfg || {}} products={myStoreProducts} orders={myStoreOrders} plans={realPlans} myPlan={myRealPlan} api={storeApi} onStore={() => setStoreMode("store")} onMenu={() => setProfileMenuOpen(true)} onSettings={() => setPScr("settings")} flash={flash} />
-                  : <StoreFront embedded cfg={storeCfg || {}} products={myStoreProducts.filter(p => !p.archived_at)} headerStats={myStoreStats} ratingInfo={myStoreRating} reviews={myStoreReviews} isOwner onDash={() => setStoreMode("dash")} onMenu={() => setProfileMenuOpen(true)} onSettings={() => setPScr("settings")} onChat={() => {}} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} />;
-              }
               return <FreeProfileScreen embedded onMenu={() => setProfileMenuOpen(true)} onSettings={() => setPScr("settings")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} currentPlan={currentPlanName} currentPlanId={user?.plan || "gratis"} plans={realPlans} maxProducts={myRealPlan?.max_products ?? null} onPlanChanged={(planId) => setUser(prev => prev ? { ...prev, plan: planId } : prev)} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} archivedProducts={ownArchived} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={confirmDeleteProduct} onArchiveProduct={confirmArchiveProduct} onUnarchiveProduct={handleUnarchive} onDeleteArchivedProduct={confirmDeleteProduct} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)} />;
             })()}
             {pScr === "profile-full" && (() => {
@@ -2170,17 +2091,6 @@ function AppShell({ sessionUser }) {
               const accrued = orders.filter(o => (o.sellerName || o.sellerId) === me).reduce((a, o) => a + (o.amount || 0) * ((o.commissionPct ?? adminCfg.commissionPct ?? 10) / 100), 0);
               const paid = payments.filter(p => p.sellerName === me).reduce((a, p) => a + (p.amount || 0), 0);
               const myDebt = Math.max(0, accrued - paid);
-              if (isProStore) {
-                // CRÍTICO: StoreDashboard aquí NO tenía ningún onBack — si el
-                // dueño entraba a este punto (p.ej. tras ver un producto y
-                // pulsar Atrás) quedaba atrapado: la barra inferior se oculta
-                // en pScr!=="main" (por diseño, igual que en el perfil Free) y
-                // sin onBack no había ninguna forma de salir. Se agrega el
-                // mismo "Atrás" que ya tenía StoreFront en este mismo punto.
-                return storeMode === "dash"
-                  ? <StoreDashboard user={user} cfg={storeCfg || {}} products={myStoreProducts} orders={myStoreOrders} plans={realPlans} myPlan={myRealPlan} api={storeApi} onStore={() => setStoreMode("store")} onBack={() => setPScr("main")} onSettings={() => setPScr("settings")} flash={flash} />
-                  : <StoreFront cfg={storeCfg || {}} products={myStoreProducts.filter(p => !p.archived_at)} headerStats={myStoreStats} ratingInfo={myStoreRating} reviews={myStoreReviews} isOwner onDash={() => setStoreMode("dash")} onBack={() => setPScr("main")} onSettings={() => setPScr("settings")} onChat={() => {}} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} />;
-              }
               return <FreeProfileScreen onBack={() => setPScr("main")} onSettings={() => setPScr("settings")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} currentPlan={currentPlanName} currentPlanId={user?.plan || "gratis"} plans={realPlans} maxProducts={myRealPlan?.max_products ?? null} onPlanChanged={(planId) => setUser(prev => prev ? { ...prev, plan: planId } : prev)} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} archivedProducts={ownArchived} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={confirmDeleteProduct} onArchiveProduct={confirmArchiveProduct} onUnarchiveProduct={handleUnarchive} onDeleteArchivedProduct={confirmDeleteProduct} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)}
                 autoOpenVerify={autoOpenVerify} onAutoOpenVerifyDone={() => setAutoOpenVerify(false)}
                 autoOpenEdit={autoOpenEdit} onAutoOpenEditDone={() => setAutoOpenEdit(false)} />;

@@ -89,11 +89,15 @@ function deriveCategories(products) {
 }
 
 /* ── STOREFRONT (vista pública) ────────────────────────────────────────── */
-export function StoreFront({ cfg, products, sellerName, headerStats, ratingInfo, isOwner, onDash, onBack, onChat, onProduct, embedded = false }) {
+export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [], isOwner, onDash, onBack, onMenu, onSettings, onChat, onProduct, embedded = false }) {
   const C = useSTk();
   const [tab, setTab] = useState("inicio");
   const [selCat, setSelCat] = useState("all");
   const ac = cfg.accent || "#FFC01E", r = toRgb(ac);
+  // El nombre de la tienda NUNCA cae al nombre personal del vendedor — si no
+  // ha puesto nombre de tienda todavía, se usa un texto neutro ("Mi tienda"),
+  // igual que ya hacía el sidebar de StoreDashboard.
+  const storeName = cfg.name || "Mi tienda";
   const cats = useMemo(() => deriveCategories(products), [products]);
   const hero = cfg.banner_url ? { backgroundImage:`url(${cfg.banner_url})`, backgroundSize:"cover", backgroundPosition:"center" } : { background: BANNERS[0] };
   const filt = useMemo(() => selCat === "all" ? products : products.filter(p => p.subcat === selCat), [products, selCat]);
@@ -148,6 +152,39 @@ export function StoreFront({ cfg, products, sellerName, headerStats, ratingInfo,
         </div>
       );
     }
+    // Reseñas REALES (seller_reviews) — esta sección venía marcada visible en
+    // la plantilla de fábrica pero no tenía implementación: se quedaba en
+    // blanco en silencio. Sin datos inventados: si no hay reseñas reales
+    // todavía, se dice explícitamente en vez de mostrar algo vacío sin más.
+    if (sec.id === "reviews") {
+      return (
+        <div key="revs" style={{ marginBottom:28 }}>
+          <h2 style={{ fontSize:16, fontWeight:800, marginBottom:14, color:C.t }}>{sec.label}</h2>
+          {ratingInfo?.rating != null && (
+            <Card C={C} style={{ marginBottom:12, display:"flex", alignItems:"center", gap:16 }}>
+              <div style={{ fontSize:32, fontWeight:800, color:C.t, lineHeight:1 }}>{ratingInfo.rating.toFixed(1)}</div>
+              <div>
+                <div style={{ color:"#FBBF24", fontSize:13 }}>{"★".repeat(Math.round(ratingInfo.rating))}{"☆".repeat(5-Math.round(ratingInfo.rating))}</div>
+                <div style={{ fontSize:11, color:C.m, marginTop:2 }}>{ratingInfo.count} reseña{ratingInfo.count !== 1 ? "s" : ""}</div>
+              </div>
+            </Card>
+          )}
+          {reviews.length === 0 && <div style={{ textAlign:"center", padding:"30px 0", color:C.m, fontSize:13 }}>Aún no tiene reseñas.</div>}
+          {reviews.slice(0, 5).map(rv => (
+            <div key={rv.id} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, padding:14, marginBottom:8 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:9 }}>
+                  <div style={{ width:28, height:28, borderRadius:"50%", background:`linear-gradient(135deg,#3730a3,${ac})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:700, color:"#fff" }}>{(rv.name||"U")[0]}</div>
+                  <div><div style={{ fontSize:12, fontWeight:600, color:C.t }}>{rv.name}</div><div style={{ color:"#FBBF24", fontSize:10 }}>{"★".repeat(rv.rating)}</div></div>
+                </div>
+                <span style={{ fontSize:10, color:C.m }}>{rv.createdAt ? new Date(rv.createdAt).toLocaleDateString("es-ES") : ""}</span>
+              </div>
+              {rv.comment && <p style={{ fontSize:12, color:C.m, lineHeight:1.55 }}>{rv.comment}</p>}
+            </div>
+          ))}
+        </div>
+      );
+    }
     return null;
   };
 
@@ -155,8 +192,17 @@ export function StoreFront({ cfg, products, sellerName, headerStats, ratingInfo,
     <div style={{ background:C.bg, color:C.t, minHeight:"100%" }}>
       <div style={{ position:"relative", height:260, overflow:"hidden", ...hero }}>
         {cfg.banner_url && <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.48)" }}/>}
-        {!embedded && <button onClick={onBack} style={{ position:"absolute", top:14, left:14, background:"rgba(0,0,0,0.45)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, padding:"6px 10px", color:"#fff", fontSize:11, cursor:"pointer", zIndex:2, display:"flex", alignItems:"center", gap:4 }}><ChevronLeft size={13}/> Volver</button>}
-        {isOwner && <button onClick={onDash} style={{ position:"absolute", top:14, right:14, background:`linear-gradient(135deg,#3730a3,${ac})`, border:"none", borderRadius:20, padding:"6px 14px", color:"#fff", fontSize:11, fontWeight:800, cursor:"pointer", zIndex:2 }}>⚡ Mi Panel</button>}
+        {/* Acceso SIEMPRE disponible al resto de la app: ☰ Menú en la raíz
+            (mismo botón que usa el perfil Free), o Volver en pantallas de detalle
+            — nunca ninguno de los dos ausente. */}
+        {onMenu && <button onClick={onMenu} style={{ position:"absolute", top:14, left:14, background:"rgba(0,0,0,0.45)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, padding:"6px 12px", color:"#fff", fontSize:12, fontWeight:700, cursor:"pointer", zIndex:2, display:"flex", alignItems:"center", gap:6 }}><span style={{ fontSize:15, lineHeight:1 }}>☰</span> Menú</button>}
+        {!onMenu && !embedded && <button onClick={onBack} style={{ position:"absolute", top:14, left:14, background:"rgba(0,0,0,0.45)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, padding:"6px 10px", color:"#fff", fontSize:11, cursor:"pointer", zIndex:2, display:"flex", alignItems:"center", gap:4 }}><ChevronLeft size={13}/> Volver</button>}
+        {isOwner && (
+          <div style={{ position:"absolute", top:14, right:14, zIndex:2, display:"flex", alignItems:"center", gap:6 }}>
+            {onSettings && <button onClick={onSettings} aria-label="Configuración" style={{ background:"rgba(0,0,0,0.45)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, width:28, height:28, color:"#fff", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><SettingsIcon size={13}/></button>}
+            <button onClick={onDash} style={{ background:`linear-gradient(135deg,#3730a3,${ac})`, border:"none", borderRadius:20, padding:"6px 14px", color:"#fff", fontSize:11, fontWeight:800, cursor:"pointer" }}>⚡ Mi Panel</button>
+          </div>
+        )}
         <div style={{ position:"absolute", bottom:0, left:0, right:0, padding:"0 20px 18px", zIndex:2 }}>
           <div style={{ display:"flex", alignItems:"flex-end", gap:14, marginBottom:12 }}>
             {cfg.logo_url
@@ -164,7 +210,7 @@ export function StoreFront({ cfg, products, sellerName, headerStats, ratingInfo,
               : <div style={{ width:64, height:64, borderRadius:"50%", background:`linear-gradient(135deg,#3730a3,${ac})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, border:"3px solid #09090B", flexShrink:0 }}>{cfg.logo_emoji || "🛍️"}</div>}
             <div style={{ flex:1 }}>
               <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
-                <h1 style={{ fontSize:20, fontWeight:800, color:"#fff" }}>{cfg.name || sellerName}</h1>
+                <h1 style={{ fontSize:20, fontWeight:800, color:"#fff" }}>{storeName}</h1>
                 <div style={{ width:16, height:16, borderRadius:"50%", background:ac, display:"flex", alignItems:"center", justifyContent:"center" }}><Check size={9} color="#000" strokeWidth={3}/></div>
               </div>
               {cfg.tagline && <p style={{ color:"rgba(255,255,255,.62)", fontSize:12, lineHeight:1.45, marginBottom:8 }}>{cfg.tagline}</p>}
@@ -182,6 +228,18 @@ export function StoreFront({ cfg, products, sellerName, headerStats, ratingInfo,
             </div>
           )}
         </div>
+      </div>
+
+      {/* Insignias de confianza — parte de la plantilla original, con datos
+          reales de envío/cambios ya guardados en store_config (ship_days /
+          return_days), nunca números fijos de ejemplo. */}
+      <div style={{ padding:"8px 14px", display:"flex", gap:5, borderBottom:`1px solid ${C.b}` }}>
+        {[["🛡️","Compra Segura"], ["⚡", `Envío ${cfg.ship_days ?? 3}d`], ["↩️", `${cfg.return_days ?? 30}d Cambios`], ["✅","Verificado"]].map(([ic,lb]) => (
+          <div key={lb} style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:4, padding:"6px 2px", borderRadius:10, background:C.s2, border:`1px solid ${C.b}`, minWidth:0 }}>
+            <span style={{ fontSize:11, flexShrink:0 }}>{ic}</span>
+            <span style={{ fontSize:9, color:C.m, fontWeight:600, textAlign:"center", lineHeight:1.2 }}>{lb}</span>
+          </div>
+        ))}
       </div>
 
       <div style={{ display:"flex", borderBottom:`1px solid ${C.b}`, overflowX:"auto" }}>
@@ -208,7 +266,7 @@ export function StoreFront({ cfg, products, sellerName, headerStats, ratingInfo,
 
       {cfg.show_footer !== false && (
         <div style={{ borderTop:`1px solid ${C.b}`, padding:"20px", background:C.s1 }}>
-          <div style={{ fontSize:14, fontWeight:800, marginBottom:4, color:C.t }}>{cfg.logo_emoji} {cfg.name || sellerName}</div>
+          <div style={{ fontSize:14, fontWeight:800, marginBottom:4, color:C.t }}>{cfg.logo_emoji} {storeName}</div>
           {cfg.location && <div style={{ fontSize:11, color:C.m, marginBottom:6 }}>📍 {cfg.location}</div>}
           {cfg.schedule && <div style={{ fontSize:11, color:C.m }}>🕐 {cfg.schedule}</div>}
         </div>
@@ -651,7 +709,7 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
 }
 
 /* ── DASHBOARD (panel de gestión Pro) ───────────────────────────────────── */
-export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api, onStore, flash }) {
+export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api, onStore, onMenu, onBack, onSettings, flash }) {
   const C = useSTk();
   const [sec, setSec] = useState("overview");
   const [col, setCol] = useState(false);
@@ -713,6 +771,19 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
         </div>}
       </div>
       <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:isDesign?"hidden":"auto", minWidth:0 }}>
+        {/* Acceso SIEMPRE disponible al resto de la app, en TODAS las secciones
+            del panel — nunca una pantalla donde el dueño quede atrapado sin
+            ☰, sin Atrás y sin Configuración. */}
+        {(onMenu || onBack || onSettings) && (
+          <div style={{ padding:"9px 22px", borderBottom:`1px solid ${C.b}`, display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
+            {onMenu
+              ? <button onClick={onMenu} style={{ background:"none", border:`1px solid ${C.b}`, borderRadius:6, height:30, padding:"0 12px", cursor:"pointer", display:"flex", alignItems:"center", gap:7, color:C.t, fontSize:12, fontWeight:700 }}><span style={{ fontSize:15, lineHeight:1 }}>☰</span> Menú</button>
+              : onBack
+                ? <button onClick={onBack} style={{ background:"none", border:"none", cursor:"pointer", padding:0, display:"flex", alignItems:"center", gap:6, color:C.m, fontSize:12, fontWeight:600 }}><ChevronLeft size={15}/> Atrás</button>
+                : <span/>}
+            {onSettings && <button onClick={onSettings} aria-label="Configuración" style={{ background:"none", border:`1px solid ${C.b}`, borderRadius:6, width:30, height:30, cursor:"pointer", color:C.m, display:"flex", alignItems:"center", justifyContent:"center" }}><SettingsIcon size={14}/></button>}
+          </div>
+        )}
         {!isDesign && <div style={{ padding:"14px 22px", flex:1 }}>{renderSec()}</div>}
         {isDesign && <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>{renderSec()}</div>}
       </div>

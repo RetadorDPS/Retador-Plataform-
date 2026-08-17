@@ -1362,8 +1362,13 @@ export const adminUpdatePlanLimit = async (planId, maxProducts) => {
 // visibles" ya la deja abierta a cualquiera) — es la fuente ÚNICA para la
 // pantalla de planes del comprador: nombre, precio, límite y comisión reales,
 // sin texto de marketing inventado ni datos desincronizados.
+// BUG REAL corregido: no traía can_customize — el dato con el que App.jsx
+// decide si un plan da Tienda Pro. Sin esta columna, myRealPlan.can_customize
+// siempre llegaba undefined al frontend (sin importar el plan real de la
+// cuenta ni cuántas veces se recargara la app), así que la Tienda nunca se
+// activaba para nadie.
 export const getPlans = async () => {
-  const { data, error } = await supabase.from("plans").select("id, name, max_products, price, currency, commission_pct").eq("active", true).order("price", { ascending: true });
+  const { data, error } = await supabase.from("plans").select("id, name, max_products, price, currency, commission_pct, can_customize").eq("active", true).order("price", { ascending: true });
   if (error) { console.error("getPlans:", error.message); return []; }
   return data || [];
 };

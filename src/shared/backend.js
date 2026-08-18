@@ -469,6 +469,45 @@ export const getProfileHeaderStats = async (userId) => {
   } catch (e) { return empty; }
 };
 
+// ── TIENDA PRO (store_config) — Fase 2 (reintegración definitiva) ────────────
+// Lectura pública (cualquiera puede ver la tienda de un vendedor Pro real).
+export const getStoreConfig = async (userId) => {
+  if (!userId) return null;
+  const { data, error } = await supabase.from("store_config").select("*").eq("user_id", userId).maybeSingle();
+  if (error) { console.error("getStoreConfig:", error.message); return null; }
+  return data || null;
+};
+// Única vía de escritura: upsert_store_config (RPC) — crea la fila si no
+// existe y solo pisa los campos presentes en `updates` (fusión real, nunca
+// sobrescribe con vacío lo que no se mandó).
+export const upsertMyStoreConfig = async (updates) => {
+  const { data, error } = await supabase.rpc("upsert_store_config", { p_updates: updates });
+  if (error) { console.error("upsertMyStoreConfig:", error.message); throw error; }
+  return data;
+};
+
+// ── PRO GRATIS: compartir o referidos reales ──────────────────────────────
+// request_plan_promo valida en el backend (mínimo real de enlaces para
+// compartir, al menos un referido real calificado para referidos) antes de
+// crear la solicitud — nunca se confía en lo que mande el frontend.
+export const requestPlanPromo = async (plan, via, evidenceUrls = null) => {
+  const { data, error } = await supabase.rpc("request_plan_promo", { p_plan: plan, p_via: via, p_evidence_urls: evidenceUrls });
+  if (error) { console.error("requestPlanPromo:", error.message); throw error; }
+  return data;
+};
+export const getOrCreateReferralCode = async () => {
+  const { data, error } = await supabase.rpc("get_or_create_referral_code");
+  if (error) { console.error("getOrCreateReferralCode:", error.message); return null; }
+  return data;
+};
+// qualifies se calcula en el backend al vuelo (publicó algo activo o
+// completó una compra real) — nunca un contador editable a mano.
+export const getReferralStats = async () => {
+  const { data, error } = await supabase.rpc("get_referral_stats");
+  if (error) { console.error("getReferralStats:", error.message); return []; }
+  return data || [];
+};
+
 // ── Búsqueda real de productos/servicios: antes NO existía ninguna función
 // para esto (solo match_category, que es para sugerir categorías al
 // publicar) — la pantalla de Búsqueda comparaba el texto a mano contra
@@ -1363,7 +1402,7 @@ export const adminUpdatePlanLimit = async (planId, maxProducts) => {
 // pantalla de planes del comprador: nombre, precio, límite y comisión reales,
 // sin texto de marketing inventado ni datos desincronizados.
 export const getPlans = async () => {
-  const { data, error } = await supabase.from("plans").select("id, name, max_products, price, currency, commission_pct").eq("active", true).order("price", { ascending: true });
+  const { data, error } = await supabase.from("plans").select("id, name, max_products, price, currency, commission_pct, can_customize").eq("active", true).order("price", { ascending: true });
   if (error) { console.error("getPlans:", error.message); return []; }
   return data || [];
 };

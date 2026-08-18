@@ -24,9 +24,9 @@ import { AreaChart, Area, BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Ce
 import {
   ShoppingCart, TrendingUp, Package, BarChart2, Settings as SettingsIcon, Palette, Tag, CreditCard,
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
-  Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save,
+  Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star,
 } from "lucide-react";
-import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, getOrCreateReferralCode, getReferralStats, requestPlanPromo } from "../shared/index.js";
+import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, getOrCreateReferralCode, getReferralStats, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser } from "../shared/index.js";
 
 /* ── TEMA — propio y compacto, como el resto de paneles "premium" de la app ── */
 const S_DARK = {
@@ -50,6 +50,17 @@ const BANNERS = [
   "linear-gradient(140deg,#0a0808,#1a0f0a 55%,#0a0505)",
 ];
 const COLORS = ["#FFC01E","#818CF8","#EC4899","#10B981","#F59E0B","#EF4444","#06B6D4","#8B5CF6"];
+// banner_url guarda o una foto real (URL) o uno de estos degradados — se
+// distinguen por el propio valor (un degradado siempre empieza así), sin
+// columna aparte. Vivos y coordinados con el Color de Marca elegido: se
+// generan a partir del accent real, nunca un set fijo desconectado de él.
+const isGradientBanner = (v) => typeof v === "string" && /^(linear|radial)-gradient\(/.test(v);
+const vividBanners = (ac) => ([
+  `linear-gradient(135deg, ${ac}, #1a1033 85%)`,
+  `linear-gradient(140deg, #0b0b14, ${ac} 130%)`,
+  `radial-gradient(130% 130% at 15% 15%, ${ac}, #0a0a12 72%)`,
+  `linear-gradient(120deg, ${ac}, #3730a3)`,
+]);
 const SC = { pendiente:"#FBBF24", enviado:"#818CF8", entregado:"#34D399", confirmado:"#34D399", completado:"#34D399", asignado:"#818CF8", cancelado:"#F87171" };
 const STATUS_LABEL = { pendiente:"Pendiente", enviado:"Enviado", entregado:"Entregado", confirmado:"Confirmado", completado:"Completado", asignado:"Asignado", cancelado:"Cancelado" };
 // Reserva real del espacio de la barra inferior de la app (position:absolute,
@@ -100,9 +111,76 @@ function deriveCategories(products) {
   return [...map.entries()].map(([name, count]) => ({ id: name, name, count }));
 }
 
+// Dejar/editar/borrar MI reseña libre sobre este vendedor — EXACTAMENTE el
+// mismo sistema real que ya usa el perfil Free (submitSellerReview/
+// getMySellerReview/deleteSellerReview): una sola, libre, sin necesitar un
+// pedido, nunca sobre uno mismo. onSaved recarga la lista/promedio reales
+// en el padre (App.jsx), que es quien de verdad los tiene cargados.
+function WriteReview({ sellerId, viewerId, C, ac, onSaved }) {
+  const canReview = !!viewerId && !!sellerId && viewerId !== sellerId;
+  const [myReview, setMyReview] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [stars, setStars] = useState(0);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (!canReview) { setMyReview(null); return; }
+    let alive = true;
+    getMySellerReview(sellerId, viewerId).then(r => { if (alive) setMyReview(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, [canReview, sellerId, viewerId]);
+
+  if (!canReview) return null;
+
+  const openEditor = () => { setStars(myReview?.rating || 0); setText(myReview?.comment || ""); setErr(""); setOpen(true); };
+  const save = async () => {
+    if (!stars || busy) return;
+    setBusy(true); setErr("");
+    try { await submitSellerReview(sellerId, viewerId, stars, text.trim()); setOpen(false); onSaved?.(); }
+    catch (e) { setErr(e?.message || "No se pudo guardar tu reseña"); }
+    setBusy(false);
+  };
+  const remove = async () => {
+    if (busy) return;
+    setBusy(true); setErr("");
+    try { await deleteSellerReview(sellerId, viewerId); setOpen(false); onSaved?.(); }
+    catch (e) { setErr(e?.message || "No se pudo eliminar"); }
+    setBusy(false);
+  };
+
+  if (!open) {
+    return (
+      <button onClick={openEditor} style={{ width:"100%", marginBottom:14, padding:11, borderRadius:10, border:`1px solid ${ac}`, background:"transparent", color:ac, fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:7 }}>
+        <Star size={14} fill={myReview ? ac : "none"}/> {myReview ? "Editar mi reseña" : "Dejar una reseña"}
+      </button>
+    );
+  }
+  return (
+    <Card C={C} style={{ marginBottom:14 }}>
+      <div style={{ fontSize:13, fontWeight:800, color:C.t, marginBottom:10 }}>{myReview ? "Editar mi reseña" : "Dejar una reseña"}</div>
+      <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+        {[1,2,3,4,5].map(n => (
+          <button key={n} onClick={() => setStars(n)} style={{ background:"none", border:"none", cursor:"pointer", padding:0 }}>
+            <Star size={22} color="#FBBF24" fill={n<=stars ? "#FBBF24" : "none"}/>
+          </button>
+        ))}
+      </div>
+      <textarea value={text} onChange={e=>setText(e.target.value)} placeholder="¿Qué te pareció esta tienda? (opcional)" rows={3} style={{ ...inpStyle(C), resize:"vertical", marginBottom:10 }}/>
+      {err && <div style={{ fontSize:11, color:C.err, marginBottom:10 }}>{err}</div>}
+      <div style={{ display:"flex", gap:8 }}>
+        <button onClick={() => setOpen(false)} style={{ flex:1, padding:9, borderRadius:8, border:`1px solid ${C.b}`, background:"transparent", color:C.m, fontSize:12, cursor:"pointer" }}>Cancelar</button>
+        {myReview && <button onClick={remove} disabled={busy} style={{ flex:1, padding:9, borderRadius:8, border:`1px solid ${C.err}`, background:"transparent", color:C.err, fontSize:12, cursor:"pointer" }}>Eliminar</button>}
+        <button onClick={save} disabled={!stars || busy} style={{ flex:1, padding:9, borderRadius:8, border:"none", background:(!stars||busy)?C.s3:ac, color:(!stars||busy)?C.m:"#000", fontSize:12, fontWeight:700, cursor:(!stars||busy)?"default":"pointer" }}>{busy?"Guardando…":"Guardar"}</button>
+      </div>
+    </Card>
+  );
+}
+
 // Reseñas REALES (seller_reviews) — se usa tanto en el bloque "Reseñas" de
 // Inicio como en la pestaña dedicada "Reviews", sin duplicar el marcado.
-function ReviewsList({ ratingInfo, reviews, C, ac }) {
+function ReviewsList({ ratingInfo, reviews, C, ac, sellerId, viewerId, onReviewChanged }) {
   return (
     <>
       {ratingInfo?.rating != null && (
@@ -114,6 +192,7 @@ function ReviewsList({ ratingInfo, reviews, C, ac }) {
           </div>
         </Card>
       )}
+      <WriteReview sellerId={sellerId} viewerId={viewerId} C={C} ac={ac} onSaved={onReviewChanged}/>
       {reviews.length === 0 && <div style={{ textAlign:"center", padding:"30px 0", color:C.m, fontSize:13 }}>Aún no tiene reseñas.</div>}
       {reviews.slice(0, 5).map(rv => (
         <div key={rv.id} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, padding:14, marginBottom:8 }}>
@@ -132,7 +211,7 @@ function ReviewsList({ ratingInfo, reviews, C, ac }) {
 }
 
 /* ── STOREFRONT (vista pública — los 4 bloques configurables) ──────────── */
-export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [], isOwner, onDash, onBack, onMenu, onSettings, onChat, onProduct, embedded = false, profileRealName }) {
+export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [], isOwner, onDash, onBack, onMenu, onSettings, onChat, onProduct, embedded = false, profileRealName, isVerified = false, sellerId = null, viewerId = null, onReviewChanged }) {
   const C = useSTk();
   const [tab, setTab] = useState("inicio");
   const [selCat, setSelCat] = useState("all");
@@ -142,12 +221,19 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
   // vendedor lo cambió.
   const storeName = cfg.name || profileRealName || "Vendedor";
   const cats = useMemo(() => deriveCategories(products), [products]);
-  const hero = cfg.banner_url ? { backgroundImage:`url(${cfg.banner_url})`, backgroundSize:"cover", backgroundPosition:"center" } : { background: BANNERS[0] };
+  const hero = cfg.banner_url
+    ? (isGradientBanner(cfg.banner_url) ? { background: cfg.banner_url } : { backgroundImage:`url(${cfg.banner_url})`, backgroundSize:"cover", backgroundPosition:"center" })
+    : { background: BANNERS[0] };
   const filt = useMemo(() => selCat === "all" ? products : products.filter(p => p.subcat === selCat), [products, selCat]);
   const visSecs = (cfg.sections || []).filter(s => s.visible);
   // Ofertas reales: productos con precio original mayor al precio actual —
   // el mismo dato que ya usa Promociones en el Panel, nunca inventado.
   const onSale = useMemo(() => products.filter(p => p.orig_price != null && Number(p.orig_price) > Number(p.price)), [products]);
+  // Regla de fondo: sin foto/emoji propios todavía, el logo por defecto es la
+  // FOTO REAL del perfil (nunca una tienda "en blanco" como si fuera cuenta
+  // nueva) — logo_emoji trae "🛍️" de fábrica en TODA fila nueva de
+  // store_config, así que solo lo tratamos como elección real si es distinto.
+  const customEmoji = cfg.logo_emoji && cfg.logo_emoji !== "🛍️" ? cfg.logo_emoji : null;
 
   const prodCard = (p, h, fz) => (
     <div key={p.id} onClick={() => onProduct?.(p)} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden", cursor:"pointer" }}>
@@ -207,7 +293,7 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
       return (
         <div key="revs" style={{ marginBottom:28 }}>
           <h2 style={{ fontSize:16, fontWeight:800, marginBottom:14, color:C.t }}>{sec.label}</h2>
-          <ReviewsList ratingInfo={ratingInfo} reviews={reviews} C={C} ac={ac}/>
+          <ReviewsList ratingInfo={ratingInfo} reviews={reviews} C={C} ac={ac} sellerId={sellerId} viewerId={viewerId} onReviewChanged={onReviewChanged}/>
         </div>
       );
     }
@@ -217,7 +303,7 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
   return (
     <div style={{ background:C.bg, color:C.t, flex:1, minHeight:0, overflowY:"auto", overscrollBehaviorY:"contain", WebkitOverflowScrolling:"touch", paddingBottom: (embedded && isOwner) ? NAV_CLEARANCE : 0 }}>
       <div style={{ position:"relative", height:260, overflow:"hidden", ...hero }}>
-        {cfg.banner_url && <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.48)" }}/>}
+        {cfg.banner_url && !isGradientBanner(cfg.banner_url) && <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.48)" }}/>}
         {/* Acceso SIEMPRE disponible al resto de la app: ☰ Menú en la raíz
             (mismo botón que usa el perfil Free), o Volver en pantallas de detalle. */}
         {onMenu && <button onClick={onMenu} style={{ position:"absolute", top:14, left:14, background:"rgba(0,0,0,0.45)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, padding:"6px 12px", color:"#fff", fontSize:12, fontWeight:700, cursor:"pointer", zIndex:2, display:"flex", alignItems:"center", gap:6 }}><span style={{ fontSize:15, lineHeight:1 }}>☰</span> Menú</button>}
@@ -232,11 +318,13 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
           <div style={{ display:"flex", alignItems:"flex-end", gap:14, marginBottom:12 }}>
             {cfg.logo_url
               ? <img src={cfg.logo_url} style={{ width:64, height:64, borderRadius:"50%", objectFit:"cover", border:"3px solid #09090B", flexShrink:0 }}/>
-              : <div style={{ width:64, height:64, borderRadius:"50%", background:`linear-gradient(135deg,#3730a3,${ac})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, border:"3px solid #09090B", flexShrink:0 }}>{cfg.logo_emoji || "🛍️"}</div>}
+              : customEmoji
+                ? <div style={{ width:64, height:64, borderRadius:"50%", background:`linear-gradient(135deg,#3730a3,${ac})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, border:"3px solid #09090B", flexShrink:0 }}>{customEmoji}</div>
+                : <AvatarUser userId={sellerId} name={storeName} size={64} verified={false} style={{ border:"3px solid #09090B" }}/>}
             <div style={{ flex:1, minWidth:0 }}>
               <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
                 <h1 style={{ fontSize:20, fontWeight:800, color:"#fff", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{storeName}</h1>
-                <div style={{ width:16, height:16, borderRadius:"50%", background:ac, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}><Check size={9} color="#000" strokeWidth={3}/></div>
+                {isVerified && <div style={{ width:16, height:16, borderRadius:"50%", background:ac, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}><Check size={9} color="#000" strokeWidth={3}/></div>}
               </div>
               {cfg.tagline && <p style={{ color:"rgba(255,255,255,.62)", fontSize:12, lineHeight:1.45, marginBottom:8 }}>{cfg.tagline}</p>}
               <div style={{ display:"flex", gap:18 }}>
@@ -256,9 +344,11 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
       </div>
 
       {/* Insignias de confianza — datos reales de store_config (ship_days /
-          return_days), nunca números fijos de ejemplo. */}
+          return_days), nunca números fijos de ejemplo. "Verificado" depende
+          del estado REAL de verificación de la cuenta (igual que el perfil
+          Free) — nunca se muestra fija. */}
       <div style={{ padding:"8px 14px", display:"flex", gap:5, borderBottom:`1px solid ${C.b}` }}>
-        {[["🛡️","Compra Segura"], ["⚡", `Envío ${cfg.ship_days ?? 3}d`], ["↩️", `${cfg.return_days ?? 30}d Cambios`], ["✅","Verificado"]].map(([ic,lb]) => (
+        {[["🛡️","Compra Segura"], ["⚡", `Envío ${cfg.ship_days ?? 3}d`], ["↩️", `${cfg.return_days ?? 30}d Cambios`], ...(isVerified ? [["✅","Verificado"]] : [])].map(([ic,lb]) => (
           <div key={lb} style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:4, padding:"6px 2px", borderRadius:10, background:C.s2, border:`1px solid ${C.b}`, minWidth:0 }}>
             <span style={{ fontSize:11, flexShrink:0 }}>{ic}</span>
             <span style={{ fontSize:9, color:C.m, fontWeight:600, textAlign:"center", lineHeight:1.2 }}>{lb}</span>
@@ -267,7 +357,7 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
       </div>
 
       <div style={{ display:"flex", borderBottom:`1px solid ${C.b}`, overflowX:"auto" }}>
-        {[["inicio","Inicio"],["productos","Productos"],["categorias","Categorías"],["ofertas","Ofertas"],["reviews","Reviews"]].map(([id,label]) => (
+        {[["inicio","Inicio"],["productos","Productos"],["categorias","Categorías"],["ofertas","Ofertas"],["reviews","Reviews"],["info","Info"]].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)} style={{ padding:"12px 16px", background:"none", border:"none", cursor:"pointer", fontSize:13, fontWeight:600, whiteSpace:"nowrap", color:tab===id?ac:C.m, borderBottom:tab===id?`2px solid ${ac}`:"2px solid transparent" }}>{label}</button>
         ))}
       </div>
@@ -307,16 +397,39 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
         )}
         {tab === "reviews" && (
           <div>
-            <ReviewsList ratingInfo={ratingInfo} reviews={reviews} C={C} ac={ac}/>
+            <ReviewsList ratingInfo={ratingInfo} reviews={reviews} C={C} ac={ac} sellerId={sellerId} viewerId={viewerId} onReviewChanged={onReviewChanged}/>
+          </div>
+        )}
+        {tab === "info" && (
+          <div>
+            {[["📍","Ubicación",cfg.location],["🕐","Horario",cfg.schedule],["🌐","Sitio web",cfg.website],["📷","Instagram",cfg.instagram],["📘","Facebook",cfg.facebook]].filter(([,,v]) => v).map(([ic,lb,v]) => (
+              <div key={lb} style={{ display:"flex", alignItems:"center", gap:12, padding:"13px 14px", borderRadius:12, background:C.s2, border:`1px solid ${C.b}`, marginBottom:8 }}>
+                <span style={{ fontSize:17, flexShrink:0 }}>{ic}</span>
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontSize:10, color:C.m, fontWeight:600, textTransform:"uppercase", letterSpacing:".05em" }}>{lb}</div>
+                  <div style={{ fontSize:13, color:C.t, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{v}</div>
+                </div>
+              </div>
+            ))}
+            {!cfg.location && !cfg.schedule && !cfg.website && !cfg.instagram && !cfg.facebook && (
+              <div style={{ textAlign:"center", padding:"40px 0", color:C.m, fontSize:13 }}>Esta tienda todavía no agregó información de contacto.</div>
+            )}
           </div>
         )}
       </div>
 
       {cfg.show_footer !== false && (
-        <div style={{ borderTop:`1px solid ${C.b}`, padding:"20px", background:C.s1 }}>
-          <div style={{ fontSize:14, fontWeight:800, marginBottom:4, color:C.t }}>{cfg.logo_emoji} {storeName}</div>
-          {cfg.location && <div style={{ fontSize:11, color:C.m, marginBottom:6 }}>📍 {cfg.location}</div>}
-          {cfg.schedule && <div style={{ fontSize:11, color:C.m }}>🕐 {cfg.schedule}</div>}
+        <div style={{ borderTop:`1px solid ${C.b}`, padding:"18px 20px", background:C.s1, display:"flex", alignItems:"center", gap:12 }}>
+          {cfg.logo_url
+            ? <img src={cfg.logo_url} style={{ width:38, height:38, borderRadius:"50%", objectFit:"cover", flexShrink:0 }}/>
+            : customEmoji
+              ? <div style={{ width:38, height:38, borderRadius:"50%", background:`linear-gradient(135deg,#3730a3,${ac})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, flexShrink:0 }}>{customEmoji}</div>
+              : <AvatarUser userId={sellerId} name={storeName} size={38} verified={false}/>}
+          <div style={{ minWidth:0 }}>
+            <div style={{ fontSize:14, fontWeight:800, color:C.t, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{storeName}</div>
+            {cfg.location && <div style={{ fontSize:11, color:C.m, marginTop:2 }}>📍 {cfg.location}</div>}
+            {cfg.schedule && <div style={{ fontSize:11, color:C.m, marginTop:1 }}>🕐 {cfg.schedule}</div>}
+          </div>
         </div>
       )}
     </div>
@@ -674,9 +787,10 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
   useEffect(() => { setDraft(cfg); }, [cfg]);
   const [tab, setTab] = useState("branding");
   const [device, setDevice] = useState("mobile");
-  // Plegar/desplegar la vista previa: plegada, el editor gana el espacio que
-  // ella ocupaba; desplegada, la vista previa se ve más grande.
-  const [previewCollapsed, setPreviewCollapsed] = useState(false);
+  // Plegar/desplegar el EDITOR (izquierda): plegado, la vista previa
+  // (derecha) gana ese espacio y se ve más grande; desplegado, vuelven a
+  // convivir editor + vista previa.
+  const [editorCollapsed, setEditorCollapsed] = useState(false);
   const [dIdx, setDIdx] = useState(null);
   const [dOver, setDOver] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -698,23 +812,26 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
     setSaving(false);
   };
 
-  const previewHero = draft.banner_url ? { backgroundImage:`url(${draft.banner_url})`, backgroundSize:"cover", backgroundPosition:"center" } : { background: BANNERS[0] };
+  const previewHero = draft.banner_url
+    ? (isGradientBanner(draft.banner_url) ? { background: draft.banner_url } : { backgroundImage:`url(${draft.banner_url})`, backgroundSize:"cover", backgroundPosition:"center" })
+    : { background: BANNERS[0] };
+  const gradientOpts = useMemo(() => vividBanners(draft.accent || ac), [draft.accent, ac]);
 
   return (
     <div style={{ display:"flex", height:"100%", position:"relative" }}>
-      <div style={{ flex: previewCollapsed ? "1 1 auto" : "0 0 268px", minWidth:0, background:C.s1, borderRight:`1px solid ${C.b}`, display:"flex", flexDirection:"column", overflow:"hidden" }}>
-        <div style={{ padding:"14px 16px", borderBottom:`1px solid ${C.b}`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
-          <div style={{ fontSize:13, fontWeight:800, color:C.t }}>Editor de Tienda</div>
-          <button onClick={() => setPreviewCollapsed(v => !v)} title={previewCollapsed ? "Mostrar vista previa" : "Plegar vista previa"} style={{ width:26, height:26, borderRadius:6, border:`1px solid ${C.b}`, background:C.s3, color:C.m, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-            {previewCollapsed ? <ChevronLeft size={13}/> : <ChevronRight size={13}/>}
-          </button>
+      {/* Placeholder con contraste real — el gris apagado del navegador por
+          defecto se veía casi invisible sobre el fondo oscuro de estos campos. */}
+      <style>{`.rtd-ph::placeholder{color:${C.m};opacity:1}`}</style>
+      <div style={{ flex: editorCollapsed ? "0 0 0px" : "0 0 268px", minWidth:0, background:C.s1, borderRight: editorCollapsed ? "none" : `1px solid ${C.b}`, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+        <div style={{ padding:"14px 16px", borderBottom:`1px solid ${C.b}` }}>
+          <div style={{ fontSize:13, fontWeight:800, color:C.t, whiteSpace:"nowrap" }}>Editor de Tienda</div>
         </div>
         <div style={{ display:"flex", borderBottom:`1px solid ${C.b}` }}>
           {["branding","secciones","categorías"].map(t => (
             <button key={t} onClick={() => setTab(t)} style={{ flex:1, padding:"9px 4px", background:"none", border:"none", cursor:"pointer", fontSize:10, fontWeight:600, textTransform:"capitalize", color:tab===t?ac:C.m, borderBottom:tab===t?`2px solid ${ac}`:"2px solid transparent" }}>{t}</button>
           ))}
         </div>
-        <div style={{ flex:1, overflowY:"auto", padding:14 }}>
+        <div style={{ flex:1, minHeight:0, overflowY:"auto", padding:14 }}>
           {tab === "branding" && (
             <div>
               <Lbl c="Ícono / Logo" C={C}/>
@@ -731,21 +848,28 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
                     <button onClick={() => logoRef.current?.click()} style={{ width:"100%", padding:8, borderRadius:8, border:`1px dashed ${C.b}`, background:"transparent", color:C.m, fontSize:11, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:5, marginBottom:14 }}><Upload size={12}/>O sube una foto real</button>
                   </div>}
               <Lbl c="Nombre de tienda" C={C}/>
-              <input value={draft.name || ""} onChange={e=>upd("name",e.target.value)} placeholder={profileRealName || "Tu nombre real"} style={{ ...inpStyle(C), marginBottom:6 }}/>
+              <input className="rtd-ph" value={draft.name || ""} onChange={e=>upd("name",e.target.value)} placeholder={profileRealName || "Tu nombre real"} style={{ ...inpStyle(C), marginBottom:6 }}/>
               <div style={{ fontSize:10, color:C.m, marginBottom:12, lineHeight:1.5 }}>Vacío = se muestra tu nombre real de perfil ({profileRealName || "—"}).</div>
               <Lbl c="Tagline" C={C}/>
-              <input value={draft.tagline || ""} onChange={e=>upd("tagline",e.target.value)} style={{ ...inpStyle(C), marginBottom:12 }}/>
+              <input className="rtd-ph" value={draft.tagline || ""} onChange={e=>upd("tagline",e.target.value)} placeholder="Ej: Envíos rápidos, atención todos los días" style={{ ...inpStyle(C), marginBottom:12 }}/>
               <Lbl c="Color de marca" C={C}/>
               <div style={{ display:"flex", gap:7, flexWrap:"wrap", marginBottom:16 }}>
                 {COLORS.map(c => <button key={c} onClick={() => upd("accent",c)} style={{ width:26, height:26, borderRadius:"50%", background:c, cursor:"pointer", border:`3px solid ${draft.accent===c?C.t:"transparent"}` }}/>)}
               </div>
               <Lbl c="Banner de portada" C={C}/>
               <input ref={banRef} type="file" accept="image/*" onChange={handleBan} style={{ display:"none" }}/>
-              {draft.banner_url
-                ? <div style={{ height:54, borderRadius:8, backgroundImage:`url(${draft.banner_url})`, backgroundSize:"cover", backgroundPosition:"center", marginBottom:8, border:`1px solid ${C.b}`, position:"relative" }}>
-                    <button onClick={() => upd("banner_url", null)} style={{ position:"absolute", top:4, right:4, width:20, height:20, borderRadius:"50%", background:"rgba(0,0,0,.6)", border:"none", cursor:"pointer", color:"#fff" }}><X size={10}/></button>
-                  </div>
-                : <button onClick={() => banRef.current?.click()} style={{ width:"100%", padding:10, borderRadius:8, border:`1px dashed ${C.b}`, background:"transparent", color:C.m, fontSize:11, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}><Upload size={13}/>Subir foto de portada</button>}
+              {draft.banner_url && (
+                <div style={{ height:54, borderRadius:8, ...(isGradientBanner(draft.banner_url) ? { background:draft.banner_url } : { backgroundImage:`url(${draft.banner_url})`, backgroundSize:"cover", backgroundPosition:"center" }), marginBottom:8, border:`1px solid ${C.b}`, position:"relative" }}>
+                  <button onClick={() => upd("banner_url", null)} style={{ position:"absolute", top:4, right:4, width:20, height:20, borderRadius:"50%", background:"rgba(0,0,0,.6)", border:"none", cursor:"pointer", color:"#fff" }}><X size={10}/></button>
+                </div>
+              )}
+              <button onClick={() => banRef.current?.click()} style={{ width:"100%", padding:10, borderRadius:8, border:`1px dashed ${C.b}`, background:"transparent", color:C.m, fontSize:11, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginBottom:10 }}><Upload size={13}/>Subir foto de portada</button>
+              <div style={{ fontSize:10, color:C.m, marginBottom:8 }}>O elige un degradado, coordinado con tu color de marca:</div>
+              <div style={{ display:"flex", gap:7, marginBottom:4 }}>
+                {gradientOpts.map((g,i) => (
+                  <button key={i} onClick={() => upd("banner_url", g)} style={{ flex:1, height:34, borderRadius:8, background:g, border:`2px solid ${draft.banner_url===g?C.t:"transparent"}`, cursor:"pointer" }}/>
+                ))}
+              </div>
             </div>
           )}
           {tab === "secciones" && (
@@ -798,9 +922,11 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
           <button onClick={save} disabled={saving} style={{ width:"100%", padding:11, borderRadius:9, border:"none", cursor:"pointer", background:`linear-gradient(135deg,#3730a3,${ac})`, color:"#fff", fontSize:13, fontWeight:800, opacity:saving?.7:1 }}>{saving?"Guardando…":"⚡ Publicar cambios"}</button>
         </div>
       </div>
-      {!previewCollapsed && (
       <div style={{ flex:1, background:C.bg, display:"flex", flexDirection:"column", overflow:"hidden", minWidth:0 }}>
-        <div style={{ padding:"10px 16px", borderBottom:`1px solid ${C.b}`, display:"flex", justifyContent:"flex-end", alignItems:"center", flexShrink:0 }}>
+        <div style={{ padding:"10px 16px", borderBottom:`1px solid ${C.b}`, display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0, gap:8 }}>
+          <button onClick={() => setEditorCollapsed(v => !v)} title={editorCollapsed ? "Mostrar editor" : "Plegar editor (agrandar vista previa)"} style={{ width:26, height:26, borderRadius:6, border:`1px solid ${C.b}`, background:C.s3, color:C.m, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+            {editorCollapsed ? <ChevronRight size={13}/> : <ChevronLeft size={13}/>}
+          </button>
           <div style={{ display:"flex", gap:6 }}>
             {[{ id:"mobile", e:"📱" }, { id:"desktop", e:"🖥️" }].map(d => (
               <button key={d.id} onClick={() => setDevice(d.id)} style={{ padding:"4px 10px", borderRadius:6, cursor:"pointer", fontSize:13, border:`1px solid ${device===d.id?ac:C.b}`, background:device===d.id?`rgba(${r},0.12)`:"transparent", color:device===d.id?ac:C.m }}>{d.e}</button>
@@ -811,7 +937,7 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
           <div style={{ width:device==="mobile"?288:480, height:device==="mobile"?500:420, borderRadius:device==="mobile"?22:12, border:`1px solid ${C.b}`, overflow:"hidden", background:C.s1, boxShadow:"0 24px 60px rgba(0,0,0,.35)" }}>
             <div style={{ overflowY:"auto", height:"100%" }}>
               <div style={{ height:120, position:"relative", ...previewHero }}>
-                {draft.banner_url && <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,.45)" }}/>}
+                {draft.banner_url && !isGradientBanner(draft.banner_url) && <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,.45)" }}/>}
                 <div style={{ position:"absolute", bottom:10, left:10, right:10 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                     {draft.logo_url ? <img src={draft.logo_url} style={{ width:36, height:36, borderRadius:"50%", objectFit:"cover", border:`2px solid ${C.s1}` }}/> : <div style={{ width:36, height:36, borderRadius:"50%", background:`linear-gradient(135deg,#3730a3,${draft.accent||ac})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, border:`2px solid ${C.s1}` }}>{draft.logo_emoji||"🛍️"}</div>}
@@ -858,7 +984,6 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
           </div>
         </div>
       </div>
-      )}
     </div>
   );
 }
@@ -953,7 +1078,7 @@ function Config({ cfg, onUpdateConfig, C, ac, flash }) {
         </button>
       </div>
       <div style={{ display:"flex", gap:6, marginBottom:20, overflowX:"auto", paddingBottom:2 }}>
-        {[["envios","Envíos"],["pagos","Pagos"],["politicas","Políticas"],["contacto","Contacto"],["notif","Notificaciones"]].map(([id,l]) => (
+        {[["envios","Envíos"],["pagos","Pagos"],["politicas","Políticas"],["contacto","Información"],["notif","Notificaciones"]].map(([id,l]) => (
           <button key={id} onClick={() => setTab(id)} style={{ padding:"6px 14px", borderRadius:20, border:`1px solid ${tab===id?ac:C.b}`, background:tab===id?`rgba(${r},0.12)`:"transparent", color:tab===id?ac:C.m, cursor:"pointer", fontSize:12, fontWeight:600, whiteSpace:"nowrap", flexShrink:0 }}>{l}</button>
         ))}
       </div>
@@ -990,10 +1115,10 @@ function Config({ cfg, onUpdateConfig, C, ac, flash }) {
         </div>
       </Card>}
       {tab==="contacto" && <Card C={C}>
-        {[["Ubicación","location"],["Horario","schedule"],["Instagram","instagram"],["Twitter","twitter"],["Sitio web","website"]].map(([l,k]) => (
+        {[["Ubicación","location"],["Horario","schedule"],["Sitio web","website"],["Instagram","instagram"],["Facebook","facebook"]].map(([l,k]) => (
           <div key={k}><Lbl c={l} C={C}/><input value={draft[k]||""} onChange={e=>dUpd(k,e.target.value)} style={{ ...inpStyle(C), marginBottom:12 }}/></div>
         ))}
-        <div style={{ fontSize:11, color:C.m }}>Esta información aparece en el pie de tu tienda.</div>
+        <div style={{ fontSize:11, color:C.m }}>Esta información aparece en la pestaña Info y el pie de tu tienda.</div>
       </Card>}
       {tab==="notif" && <Card C={C}>
         <Lbl c="Notificaciones" C={C}/>
@@ -1040,7 +1165,6 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
   const removeLinkRow = (i) => setLinks(p => p.filter((_,idx)=>idx!==i));
   const filled = links.filter(l => l.trim().length > 5).length;
   const realReferrals = referrals.filter(r => r.qualifies).length;
-  const nextPaidPlan = plans.find(p => p.id !== "gratis" && p.id !== myPlan?.id) || plans.find(p => p.id !== "gratis");
 
   const requestUpgrade = async (planId) => {
     setBusy(true);
@@ -1051,7 +1175,9 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
   const sendPromo = async () => {
     setBusy(true);
     try {
-      const plan = nextPaidPlan?.id || "pro";
+      // Aquí SIEMPRE se llega ya siendo Pro/Premium (can_customize) — la
+      // tarjeta ofrece mantener el plan PROPIO gratis, no "pasar" a otro.
+      const plan = myPlan?.id;
       if (promoTab === "compartir") await requestPlanPromo(plan, "compartir", links.filter(l=>l.trim().length>5));
       else await requestPlanPromo(plan, "referidos", null);
       setPending({ plan, status:"pending" });
@@ -1091,11 +1217,16 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
         );
       })}
 
-      {myPlan?.id === "gratis" && (
+      {/* Se llega a "Mi Panel" SIEMPRE ya siendo Pro/Premium (can_customize) —
+          la condición real para esta tarjeta es "pagas algo ahora mismo",
+          nunca myPlan.id==="gratis" (eso nunca puede ser cierto aquí: quien
+          está en el plan gratis no ve la Tienda ni este panel en absoluto,
+          así que ese gate dejaba la tarjeta dormida para siempre). */}
+      {Number(myPlan?.price) > 0 && (
         <div style={{ borderRadius:14, border:`1px dashed rgba(${toRgb(ac)},0.4)`, background:C.s2, marginBottom:20, overflow:"hidden" }}>
           <div onClick={() => setPromoOpen(o=>!o)} style={{ display:"flex", alignItems:"center", gap:8, padding:"12px 16px", cursor:"pointer" }}>
             <span style={{ fontSize:15 }}>🎁</span>
-            <div style={{ fontSize:13, fontWeight:800, flex:1, color:C.t }}>¿Prefieres no pagar? Consigue Pro gratis</div>
+            <div style={{ fontSize:13, fontWeight:800, flex:1, color:C.t }}>¿Prefieres no pagar? Consigue {myPlan?.name || "tu plan"} gratis</div>
             <ChevronDown size={15} color={C.m} style={{ transform:promoOpen?"rotate(180deg)":"none", transition:"transform .2s" }}/>
           </div>
           {promoOpen && <div style={{ padding:"0 16px 16px" }}>
@@ -1234,7 +1365,7 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
           <button onClick={onStore} style={{ width:"100%", padding:9, borderRadius:8, border:"none", background:ac, color:"#000", fontSize:12, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}><Eye size={13}/> Ver tienda</button>
         </div>}
       </div>
-      <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:isDesign?"hidden":"auto", minWidth:0 }}>
+      <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:isDesign?"hidden":"auto", minWidth:0, minHeight:0 }}>
         {/* Acceso SIEMPRE disponible al resto de la app, en TODAS las secciones
             del panel — nunca una pantalla donde el dueño quede atrapado sin
             ☰, sin Atrás y sin Configuración de la app. */}
@@ -1249,7 +1380,7 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
           </div>
         )}
         {!isDesign && <div style={{ padding:"14px 22px", flex:1 }}>{renderSec()}</div>}
-        {isDesign && <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>{renderSec()}</div>}
+        {isDesign && <div style={{ flex:1, minHeight:0, overflow:"hidden", display:"flex", flexDirection:"column" }}>{renderSec()}</div>}
       </div>
     </div>
   );

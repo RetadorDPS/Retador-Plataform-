@@ -50,7 +50,7 @@ export const getUserById = async (id) => {
   if (!id) return null;
   if (_profileCache.has(id)) return _profileCache.get(id);
   try {
-    const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url, bio, is_verified, email").eq("id", id).single();
+    const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url, bio, is_verified, email, plan").eq("id", id).single();
     // ANTES esto se tragaba en silencio: si el RLS/permiso de "profiles" bloquea
     // la lectura de la fila de OTRO usuario (p.ej. is_verified restringido a su
     // propio dueño), la consulta falla con error y esto devolvía null sin dejar
@@ -59,10 +59,27 @@ export const getUserById = async (id) => {
     if (!data) { _profileCache.set(id, null); return null; }
     // El correo se expone tal cual (misma fuente que ve el dueño y el admin) —
     // ya no hay "usuario"/@handle inventado a partir de él.
-    const p = { id: data.id, name: data.full_name || "Usuario", avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified, email: data.email || "" };
+    // plan: se incluye aquí para nombre/avatar/verificado (cacheable sin
+    // riesgo real), pero el gate de la Tienda Pro usa getSellerPlan (sin
+    // caché) para que activar/bajar el plan se refleje ya mismo — root cause
+    // real de "activé Pro y sigue viéndose Free desde otra cuenta": este
+    // select ni siquiera traía la columna plan, así que el gate SIEMPRE
+    // comparaba contra undefined y nunca podía dar elegible=true.
+    const p = { id: data.id, name: data.full_name || "Usuario", avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified, email: data.email || "", plan: data.plan || "gratis" };
     _profileCache.set(id, p);
     return p;
   } catch (e) { console.error("getUserById (excepción):", e?.message || e, "| id:", id); return null; }
+};
+// Plan real del vendedor, SIEMPRE fresco — a propósito NO usa el caché de
+// getUserById (ese vive toda la sesión). El gate de la Tienda Pro necesita
+// ver el plan real EN ESTE INSTANTE, sin esperar a que ese caché expire.
+export const getSellerPlan = async (userId) => {
+  if (!userId) return null;
+  try {
+    const { data, error } = await supabase.from("profiles").select("plan").eq("id", userId).single();
+    if (error || !data) return null;
+    return data.plan || "gratis";
+  } catch (e) { return null; }
 };
 export const getUserName = async (id) => {
   const p = await getUserById(id);

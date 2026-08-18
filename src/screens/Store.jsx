@@ -100,6 +100,37 @@ function deriveCategories(products) {
   return [...map.entries()].map(([name, count]) => ({ id: name, name, count }));
 }
 
+// Reseñas REALES (seller_reviews) — se usa tanto en el bloque "Reseñas" de
+// Inicio como en la pestaña dedicada "Reviews", sin duplicar el marcado.
+function ReviewsList({ ratingInfo, reviews, C, ac }) {
+  return (
+    <>
+      {ratingInfo?.rating != null && (
+        <Card C={C} style={{ marginBottom:12, display:"flex", alignItems:"center", gap:16 }}>
+          <div style={{ fontSize:32, fontWeight:800, color:C.t, lineHeight:1 }}>{ratingInfo.rating.toFixed(1)}</div>
+          <div>
+            <div style={{ color:"#FBBF24", fontSize:13 }}>{"★".repeat(Math.round(ratingInfo.rating))}{"☆".repeat(5-Math.round(ratingInfo.rating))}</div>
+            <div style={{ fontSize:11, color:C.m, marginTop:2 }}>{ratingInfo.count} reseña{ratingInfo.count !== 1 ? "s" : ""}</div>
+          </div>
+        </Card>
+      )}
+      {reviews.length === 0 && <div style={{ textAlign:"center", padding:"30px 0", color:C.m, fontSize:13 }}>Aún no tiene reseñas.</div>}
+      {reviews.slice(0, 5).map(rv => (
+        <div key={rv.id} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, padding:14, marginBottom:8 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:9 }}>
+              <div style={{ width:28, height:28, borderRadius:"50%", background:`linear-gradient(135deg,#3730a3,${ac})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:700, color:"#fff" }}>{(rv.name||"U")[0]}</div>
+              <div><div style={{ fontSize:12, fontWeight:600, color:C.t }}>{rv.name}</div><div style={{ color:"#FBBF24", fontSize:10 }}>{"★".repeat(rv.rating)}</div></div>
+            </div>
+            <span style={{ fontSize:10, color:C.m }}>{rv.createdAt ? new Date(rv.createdAt).toLocaleDateString("es-ES") : ""}</span>
+          </div>
+          {rv.comment && <p style={{ fontSize:12, color:C.m, lineHeight:1.55 }}>{rv.comment}</p>}
+        </div>
+      ))}
+    </>
+  );
+}
+
 /* ── STOREFRONT (vista pública — los 4 bloques configurables) ──────────── */
 export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [], isOwner, onDash, onBack, onMenu, onSettings, onChat, onProduct, embedded = false, profileRealName }) {
   const C = useSTk();
@@ -114,6 +145,9 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
   const hero = cfg.banner_url ? { backgroundImage:`url(${cfg.banner_url})`, backgroundSize:"cover", backgroundPosition:"center" } : { background: BANNERS[0] };
   const filt = useMemo(() => selCat === "all" ? products : products.filter(p => p.subcat === selCat), [products, selCat]);
   const visSecs = (cfg.sections || []).filter(s => s.visible);
+  // Ofertas reales: productos con precio original mayor al precio actual —
+  // el mismo dato que ya usa Promociones en el Panel, nunca inventado.
+  const onSale = useMemo(() => products.filter(p => p.orig_price != null && Number(p.orig_price) > Number(p.price)), [products]);
 
   const prodCard = (p, h, fz) => (
     <div key={p.id} onClick={() => onProduct?.(p)} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden", cursor:"pointer" }}>
@@ -173,28 +207,7 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
       return (
         <div key="revs" style={{ marginBottom:28 }}>
           <h2 style={{ fontSize:16, fontWeight:800, marginBottom:14, color:C.t }}>{sec.label}</h2>
-          {ratingInfo?.rating != null && (
-            <Card C={C} style={{ marginBottom:12, display:"flex", alignItems:"center", gap:16 }}>
-              <div style={{ fontSize:32, fontWeight:800, color:C.t, lineHeight:1 }}>{ratingInfo.rating.toFixed(1)}</div>
-              <div>
-                <div style={{ color:"#FBBF24", fontSize:13 }}>{"★".repeat(Math.round(ratingInfo.rating))}{"☆".repeat(5-Math.round(ratingInfo.rating))}</div>
-                <div style={{ fontSize:11, color:C.m, marginTop:2 }}>{ratingInfo.count} reseña{ratingInfo.count !== 1 ? "s" : ""}</div>
-              </div>
-            </Card>
-          )}
-          {reviews.length === 0 && <div style={{ textAlign:"center", padding:"30px 0", color:C.m, fontSize:13 }}>Aún no tiene reseñas.</div>}
-          {reviews.slice(0, 5).map(rv => (
-            <div key={rv.id} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, padding:14, marginBottom:8 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
-                <div style={{ display:"flex", alignItems:"center", gap:9 }}>
-                  <div style={{ width:28, height:28, borderRadius:"50%", background:`linear-gradient(135deg,#3730a3,${ac})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:700, color:"#fff" }}>{(rv.name||"U")[0]}</div>
-                  <div><div style={{ fontSize:12, fontWeight:600, color:C.t }}>{rv.name}</div><div style={{ color:"#FBBF24", fontSize:10 }}>{"★".repeat(rv.rating)}</div></div>
-                </div>
-                <span style={{ fontSize:10, color:C.m }}>{rv.createdAt ? new Date(rv.createdAt).toLocaleDateString("es-ES") : ""}</span>
-              </div>
-              {rv.comment && <p style={{ fontSize:12, color:C.m, lineHeight:1.55 }}>{rv.comment}</p>}
-            </div>
-          ))}
+          <ReviewsList ratingInfo={ratingInfo} reviews={reviews} C={C} ac={ac}/>
         </div>
       );
     }
@@ -202,7 +215,7 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
   };
 
   return (
-    <div style={{ background:C.bg, color:C.t, minHeight:"100%", paddingBottom: (embedded && isOwner) ? NAV_CLEARANCE : 0 }}>
+    <div style={{ background:C.bg, color:C.t, flex:1, minHeight:0, overflowY:"auto", overscrollBehaviorY:"contain", WebkitOverflowScrolling:"touch", paddingBottom: (embedded && isOwner) ? NAV_CLEARANCE : 0 }}>
       <div style={{ position:"relative", height:260, overflow:"hidden", ...hero }}>
         {cfg.banner_url && <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.48)" }}/>}
         {/* Acceso SIEMPRE disponible al resto de la app: ☰ Menú en la raíz
@@ -254,8 +267,8 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
       </div>
 
       <div style={{ display:"flex", borderBottom:`1px solid ${C.b}`, overflowX:"auto" }}>
-        {["Inicio","Productos"].map(t => (
-          <button key={t} onClick={() => setTab(t.toLowerCase())} style={{ padding:"12px 16px", background:"none", border:"none", cursor:"pointer", fontSize:13, fontWeight:600, whiteSpace:"nowrap", color:tab===t.toLowerCase()?ac:C.m, borderBottom:tab===t.toLowerCase()?`2px solid ${ac}`:"2px solid transparent" }}>{t}</button>
+        {[["inicio","Inicio"],["productos","Productos"],["categorias","Categorías"],["ofertas","Ofertas"],["reviews","Reviews"]].map(([id,label]) => (
+          <button key={id} onClick={() => setTab(id)} style={{ padding:"12px 16px", background:"none", border:"none", cursor:"pointer", fontSize:13, fontWeight:600, whiteSpace:"nowrap", color:tab===id?ac:C.m, borderBottom:tab===id?`2px solid ${ac}`:"2px solid transparent" }}>{label}</button>
         ))}
       </div>
 
@@ -271,6 +284,30 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>{filt.map(p => prodCard(p, 110, 38))}</div>
             {filt.length === 0 && <div style={{ textAlign:"center", padding:"40px 0", color:C.m, fontSize:13 }}>Sin productos en esta categoría.</div>}
+          </div>
+        )}
+        {tab === "categorias" && (
+          <div>
+            {cats.length === 0 && <div style={{ textAlign:"center", padding:"40px 0", color:C.m, fontSize:13 }}>Esta tienda aún no tiene categorías.</div>}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              {cats.map(c => (
+                <div key={c.id} onClick={() => { setSelCat(c.id); setTab("productos"); }} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, padding:16, cursor:"pointer" }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:C.t, marginBottom:4 }}>{c.name}</div>
+                  <div style={{ fontSize:11, color:C.m }}>{c.count} producto{c.count !== 1 ? "s" : ""}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {tab === "ofertas" && (
+          <div>
+            {onSale.length === 0 && <div style={{ textAlign:"center", padding:"40px 0", color:C.m, fontSize:13 }}>Esta tienda no tiene ofertas activas ahora.</div>}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>{onSale.map(p => prodCard(p, 110, 38))}</div>
+          </div>
+        )}
+        {tab === "reviews" && (
+          <div>
+            <ReviewsList ratingInfo={ratingInfo} reviews={reviews} C={C} ac={ac}/>
           </div>
         )}
       </div>
@@ -637,6 +674,9 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
   useEffect(() => { setDraft(cfg); }, [cfg]);
   const [tab, setTab] = useState("branding");
   const [device, setDevice] = useState("mobile");
+  // Plegar/desplegar la vista previa: plegada, el editor gana el espacio que
+  // ella ocupaba; desplegada, la vista previa se ve más grande.
+  const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [dIdx, setDIdx] = useState(null);
   const [dOver, setDOver] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -662,9 +702,12 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
 
   return (
     <div style={{ display:"flex", height:"100%", position:"relative" }}>
-      <div style={{ width:268, flexShrink:0, background:C.s1, borderRight:`1px solid ${C.b}`, display:"flex", flexDirection:"column", overflow:"hidden" }}>
-        <div style={{ padding:"14px 16px", borderBottom:`1px solid ${C.b}` }}>
+      <div style={{ flex: previewCollapsed ? "1 1 auto" : "0 0 268px", minWidth:0, background:C.s1, borderRight:`1px solid ${C.b}`, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+        <div style={{ padding:"14px 16px", borderBottom:`1px solid ${C.b}`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
           <div style={{ fontSize:13, fontWeight:800, color:C.t }}>Editor de Tienda</div>
+          <button onClick={() => setPreviewCollapsed(v => !v)} title={previewCollapsed ? "Mostrar vista previa" : "Plegar vista previa"} style={{ width:26, height:26, borderRadius:6, border:`1px solid ${C.b}`, background:C.s3, color:C.m, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+            {previewCollapsed ? <ChevronLeft size={13}/> : <ChevronRight size={13}/>}
+          </button>
         </div>
         <div style={{ display:"flex", borderBottom:`1px solid ${C.b}` }}>
           {["branding","secciones","categorías"].map(t => (
@@ -755,7 +798,8 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
           <button onClick={save} disabled={saving} style={{ width:"100%", padding:11, borderRadius:9, border:"none", cursor:"pointer", background:`linear-gradient(135deg,#3730a3,${ac})`, color:"#fff", fontSize:13, fontWeight:800, opacity:saving?.7:1 }}>{saving?"Guardando…":"⚡ Publicar cambios"}</button>
         </div>
       </div>
-      <div style={{ flex:1, background:"#040406", display:"flex", flexDirection:"column", overflow:"hidden", minWidth:0 }}>
+      {!previewCollapsed && (
+      <div style={{ flex:1, background:C.bg, display:"flex", flexDirection:"column", overflow:"hidden", minWidth:0 }}>
         <div style={{ padding:"10px 16px", borderBottom:`1px solid ${C.b}`, display:"flex", justifyContent:"flex-end", alignItems:"center", flexShrink:0 }}>
           <div style={{ display:"flex", gap:6 }}>
             {[{ id:"mobile", e:"📱" }, { id:"desktop", e:"🖥️" }].map(d => (
@@ -764,13 +808,13 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
           </div>
         </div>
         <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", padding:16, overflow:"hidden" }}>
-          <div style={{ width:device==="mobile"?288:480, height:device==="mobile"?500:420, borderRadius:device==="mobile"?22:12, border:"1px solid rgba(255,255,255,.1)", overflow:"hidden", background:"#09090B", boxShadow:"0 24px 60px rgba(0,0,0,.8)" }}>
+          <div style={{ width:device==="mobile"?288:480, height:device==="mobile"?500:420, borderRadius:device==="mobile"?22:12, border:`1px solid ${C.b}`, overflow:"hidden", background:C.s1, boxShadow:"0 24px 60px rgba(0,0,0,.35)" }}>
             <div style={{ overflowY:"auto", height:"100%" }}>
               <div style={{ height:120, position:"relative", ...previewHero }}>
                 {draft.banner_url && <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,.45)" }}/>}
                 <div style={{ position:"absolute", bottom:10, left:10, right:10 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    {draft.logo_url ? <img src={draft.logo_url} style={{ width:36, height:36, borderRadius:"50%", objectFit:"cover", border:"2px solid #09090B" }}/> : <div style={{ width:36, height:36, borderRadius:"50%", background:`linear-gradient(135deg,#3730a3,${draft.accent||ac})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, border:"2px solid #09090B" }}>{draft.logo_emoji||"🛍️"}</div>}
+                    {draft.logo_url ? <img src={draft.logo_url} style={{ width:36, height:36, borderRadius:"50%", objectFit:"cover", border:`2px solid ${C.s1}` }}/> : <div style={{ width:36, height:36, borderRadius:"50%", background:`linear-gradient(135deg,#3730a3,${draft.accent||ac})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, border:`2px solid ${C.s1}` }}>{draft.logo_emoji||"🛍️"}</div>}
                     <div style={{ fontSize:12, fontWeight:800, color:"#fff" }}>{previewName}</div>
                   </div>
                 </div>
@@ -779,7 +823,7 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
                 {(draft.sections||[]).filter(s=>s.visible).map(sec => {
                   if (sec.id==="featured") return products.length>0 ? (
                     <div key="fp" style={{ marginBottom:10 }}>
-                      <div style={{ fontSize:10, fontWeight:700, marginBottom:6, color:"#fff" }}>{sec.label}</div>
+                      <div style={{ fontSize:10, fontWeight:700, marginBottom:6, color:C.t }}>{sec.label}</div>
                       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5 }}>
                         {products.slice(0,2).map(p=><div key={p.id} style={{ borderRadius:7, overflow:"hidden" }}><PImg p={p} h={50} fz={20} C={C}/><div style={{ padding:"4px 6px", background:C.s2 }}><div style={{ fontSize:8, fontWeight:500, color:C.t }}>{p.title}</div><div style={{ fontSize:9, fontWeight:700, color:ac }}>{money(p.price,p.currency)}</div></div></div>)}
                       </div>
@@ -787,7 +831,7 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
                   ) : null;
                   if (sec.id==="categories") return cats.length>0 ? (
                     <div key="cp" style={{ marginBottom:10 }}>
-                      <div style={{ fontSize:10, fontWeight:700, marginBottom:6, color:"#fff" }}>{sec.label}</div>
+                      <div style={{ fontSize:10, fontWeight:700, marginBottom:6, color:C.t }}>{sec.label}</div>
                       <div style={{ display:"flex", gap:4, overflowX:"auto" }}>
                         {cats.map(c=><div key={c.id} style={{ padding:"3px 8px", borderRadius:6, background:C.s2, border:`1px solid ${C.b}`, whiteSpace:"nowrap", fontSize:8, flexShrink:0, color:C.t }}>{c.name}</div>)}
                       </div>
@@ -795,7 +839,7 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
                   ) : null;
                   if (sec.id==="allProducts") return (
                     <div key="app" style={{ marginBottom:10 }}>
-                      <div style={{ fontSize:10, fontWeight:700, marginBottom:6, color:"#fff" }}>{sec.label}</div>
+                      <div style={{ fontSize:10, fontWeight:700, marginBottom:6, color:C.t }}>{sec.label}</div>
                       <div style={{ display:"grid", gridTemplateColumns:draft.layout==="list"?"1fr":"1fr 1fr", gap:4 }}>
                         {products.slice(0,4).map(p=>(
                           <div key={p.id} style={{ borderRadius:7, overflow:"hidden", display:draft.layout==="list"?"flex":"block", alignItems:"center" }}>
@@ -806,7 +850,7 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
                       </div>
                     </div>
                   );
-                  if (sec.id==="reviews") return <div key="rp" style={{ marginBottom:10, fontSize:10, fontWeight:700, color:"#fff" }}>{sec.label}</div>;
+                  if (sec.id==="reviews") return <div key="rp" style={{ marginBottom:10, fontSize:10, fontWeight:700, color:C.t }}>{sec.label}</div>;
                   return null;
                 })}
               </div>
@@ -814,6 +858,7 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -1170,7 +1215,7 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
             {cfg.logo_url ? <img src={cfg.logo_url} style={{ width:26, height:26, borderRadius:7, objectFit:"cover", flexShrink:0 }}/> : <div style={{ width:26, height:26, borderRadius:7, background:`linear-gradient(135deg,#3730a3,${ac})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>{cfg.logo_emoji||"🛍️"}</div>}
             <div style={{ minWidth:0 }}><div style={{ fontSize:12, fontWeight:800, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{storeName}</div><div style={{ fontSize:8, color:ac, fontWeight:800, letterSpacing:".08em" }}>{(myPlan?.name || "PRO").toUpperCase()}</div></div>
           </div>}
-          <button onClick={() => setCol(!col)} style={{ width:20, height:20, borderRadius:5, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", color:C.m, display:"flex", alignItems:"center", justifyContent:"center", marginLeft:col?"auto":0, flexShrink:0 }}>{col ? <ChevronRight size={11}/> : <ChevronLeft size={11}/>}</button>
+          <button onClick={() => setCol(!col)} title={col ? "Expandir menú" : "Colapsar menú"} style={{ width:20, height:20, borderRadius:5, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", color:C.m, display:"flex", alignItems:"center", justifyContent:"center", marginLeft:col?"auto":0, flexShrink:0 }}>{col ? <ChevronRight size={11}/> : <ChevronLeft size={11}/>}</button>
         </div>
         <nav style={{ flex:1, padding:"8px 6px", overflowY:"auto" }}>
           {NAVS.map(item => {
@@ -1186,7 +1231,7 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
           })}
         </nav>
         {!col && <div style={{ padding:"8px 10px", borderTop:`1px solid ${C.b}` }}>
-          <button onClick={onStore} style={{ width:"100%", padding:7, borderRadius:8, border:`1px solid ${C.b}`, background:"transparent", color:C.m, fontSize:11, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:5 }}><Eye size={11}/> Ver tienda</button>
+          <button onClick={onStore} style={{ width:"100%", padding:9, borderRadius:8, border:"none", background:ac, color:"#000", fontSize:12, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}><Eye size={13}/> Ver tienda</button>
         </div>}
       </div>
       <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:isDesign?"hidden":"auto", minWidth:0 }}>

@@ -1141,6 +1141,36 @@ function AppShell({ sessionUser }) {
     }).catch(() => { if (alive) setViewedStoreEligible(false); });
     return () => { alive = false; };
   }, [viewProfileId, realPlans]);
+  // Mismo gate, para la OTRA vía real de "ver perfil de vendedor" (desde el
+  // detalle de un producto en la Tienda/mercado, tab="market" → mScr=
+  // "sellerProfile") — antes solo la vía de viewProfileId mostraba la Tienda
+  // Pro; esta se había quedado mostrando siempre el perfil Free plano, sin
+  // insignias de confianza ni el resto de la cabecera de Tienda.
+  const [sellerStoreEligible, setSellerStoreEligible] = useState(false);
+  const [sellerStoreCfg, setSellerStoreCfg] = useState(null);
+  const [sellerStoreStats, setSellerStoreStats] = useState({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
+  const [sellerStoreRating, setSellerStoreRating] = useState(null);
+  const [sellerStoreReviews, setSellerStoreReviews] = useState([]);
+  const [sellerStoreProducts, setSellerStoreProducts] = useState([]);
+  const [sellerStoreName, setSellerStoreName] = useState("");
+  useEffect(() => {
+    if (!selSeller) { setSellerStoreEligible(false); return; }
+    let alive = true;
+    getUserById(selSeller).then(async (u) => {
+      if (!alive) return;
+      const plan = realPlans.find(p => p.id === u?.plan);
+      const eligible = !!plan?.can_customize;
+      setSellerStoreEligible(eligible);
+      setSellerStoreName(u?.full_name || "");
+      if (!eligible) return;
+      const [c, s, r, prods, revs] = await Promise.all([
+        getStoreConfig(selSeller), getProfileHeaderStats(selSeller), getSellerRatingInfo(selSeller), getProductsBySeller(selSeller), getSellerReviews(selSeller),
+      ]);
+      if (!alive) return;
+      setSellerStoreCfg(c || {}); setSellerStoreStats(s); setSellerStoreRating(r); setSellerStoreProducts((prods || []).filter(p => p.kind !== "service")); setSellerStoreReviews(revs || []);
+    }).catch(() => { if (alive) setSellerStoreEligible(false); });
+    return () => { alive = false; };
+  }, [selSeller, realPlans]);
   const [reports, setReports] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_reports') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('retador_reports', JSON.stringify(reports)); } catch {} }, [reports]);
   const addReport = (rep) => setReports(prev => [{ id: 'rep_' + Date.now(), state: 'pending', at: Date.now(), ...rep }, ...prev]);
@@ -1981,6 +2011,18 @@ function AppShell({ sessionUser }) {
           />
         </div>
       )}
+      {/* "Mi Panel" (Tienda Pro) — capa a pantalla completa, EXACTAMENTE igual
+          que el Panel de Administración (misma técnica: position absolute
+          inset:0 por encima de toda la app, con su propia barra lateral
+          interna). Así la barra inferior general nunca coexiste con "Mi
+          Panel" ni le roba espacio real: no está "oculta", está fuera del
+          árbol que se ve. La Tienda (StoreFront) sigue intacta, con su barra
+          inferior general de siempre — esto no la toca. */}
+      {isProStore && storeMode === "dash" && (
+        <div style={{ position:"absolute", top:0, left:0, right:0, bottom:0, zIndex:800, overflow:"hidden", isolation:"isolate" }}>
+          <StoreDashboard user={user} cfg={storeCfg || {}} products={myStoreProducts} orders={myStoreOrders} plans={realPlans} myPlan={myRealPlan} api={storeApi} onStore={() => setStoreMode("store")} onBack={() => setStoreMode("store")} onSettings={() => setPScr("settings")} profileRealName={profileData?.name || user?.name} flash={flash} />
+        </div>
+      )}
       {showAdmin  && <OmniPanel onClose={() => setShowAdmin(false)} theme={appTk} zoom={densZoom} data={{
         meId: user?.id,
         // Página con la que abrir esta vez (p.ej. al tocar una notificación de
@@ -2081,6 +2123,7 @@ function AppShell({ sessionUser }) {
               <ProductDetail
                 product={selProd} onBack={() => {
                   if (prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); }
+                  else if (prodBackTo === "store-main") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("main"); }
                   else if (prodBackTo === "sellerProfile") { setProdBackTo(null); setMScr("sellerProfile"); }
                   else if (prodBackTo === "services") { setProdBackTo(null); setMScr("services"); }
                   else if (prodBackTo === "chat") { setProdBackTo(null); setMScr("home"); setChatOpen(true); }
@@ -2089,25 +2132,40 @@ function AppShell({ sessionUser }) {
                 onDelivery={() => { setTab("envios"); setEScr("local"); }}
                 onChat={requestChat} onViewProfile={id => { setSelSeller(id); setMScr("sellerProfile"); }}
                 onBuy={handleBuy} onFav={toggleFav} isFav={favorites.has(selProd.id)} canChat={hasOrderWith(selProd.seller_id)}
-                onDelete={(selProd.seller_id === user?.id) ? (() => askConfirm("Se elimina para siempre. Perderás las fotos y las reseñas de este producto. Esta acción no se puede deshacer.", () => { handleDelete(selProd.id); if (prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); } else setMScr("home"); })) : null}
+                onDelete={(selProd.seller_id === user?.id) ? (() => askConfirm("Se elimina para siempre. Perderás las fotos y las reseñas de este producto. Esta acción no se puede deshacer.", () => { handleDelete(selProd.id); if (prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); } else if (prodBackTo === "store-main") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("main"); } else setMScr("home"); })) : null}
                 onEdit={(selProd.seller_id === user?.id) ? (() => setEditProd(selProd)) : null}
                 flash={flash} requireAuth={requireAuth} user={user}
               />
             )}
             {mScr === "sellerProfile" && selSeller && (
-              <FreeProfileScreen
-                onBack={() => setMScr(selProd ? "product" : "home")}
-                user={user}
-                sellerId={selSeller}
-                initialProfile={{}}
-                onProfileUpdate={() => {}}
-                isOwner={false}
-                onChat={requestChat}
-                isVerified={false}
-                onReport={(p) => addReport({ targetName: p.targetName, reason: p.reason, detail: p.detail, reporterName: user?.name || "Usuario" })}
-                userProducts={products.filter(p => p.seller_name === selSeller || p.seller_id === selSeller)}
-                onProduct={p => { setSelProd(p); setProdBackTo("sellerProfile"); setMScr("product"); }}
-              />
+              sellerStoreEligible ? (
+                <StoreFront
+                  cfg={sellerStoreCfg || {}}
+                  products={sellerStoreProducts.filter(p => !p.archived_at)}
+                  headerStats={sellerStoreStats}
+                  ratingInfo={sellerStoreRating}
+                  reviews={sellerStoreReviews}
+                  profileRealName={sellerStoreName}
+                  isOwner={false}
+                  onBack={() => setMScr(selProd ? "product" : "home")}
+                  onChat={() => requestChat(selSeller, sellerStoreName || "Vendedor")}
+                  onProduct={p => { setSelProd(p); setProdBackTo("sellerProfile"); setMScr("product"); }}
+                />
+              ) : (
+                <FreeProfileScreen
+                  onBack={() => setMScr(selProd ? "product" : "home")}
+                  user={user}
+                  sellerId={selSeller}
+                  initialProfile={{}}
+                  onProfileUpdate={() => {}}
+                  isOwner={false}
+                  onChat={requestChat}
+                  isVerified={false}
+                  onReport={(p) => addReport({ targetName: p.targetName, reason: p.reason, detail: p.detail, reporterName: user?.name || "Usuario" })}
+                  userProducts={products.filter(p => p.seller_name === selSeller || p.seller_id === selSeller)}
+                  onProduct={p => { setSelProd(p); setProdBackTo("sellerProfile"); setMScr("product"); }}
+                />
+              )
             )}
           </SectionGate>}
 
@@ -2164,9 +2222,11 @@ function AppShell({ sessionUser }) {
               // plan real can_customize=true — el menú ☰, chat, pedidos,
               // verificación siguen accesibles igual (ver onMenu/onSettings).
               if (isProStore) {
-                return storeMode === "dash"
-                  ? <StoreDashboard user={user} cfg={storeCfg || {}} products={myStoreProducts} orders={myStoreOrders} plans={realPlans} myPlan={myRealPlan} api={storeApi} onStore={() => setStoreMode("store")} onMenu={() => setProfileMenuOpen(true)} onSettings={() => setPScr("settings")} profileRealName={me} flash={flash} />
-                  : <StoreFront embedded cfg={storeCfg || {}} products={myStoreProducts.filter(p => !p.archived_at)} headerStats={myStoreStats} ratingInfo={myStoreRating} reviews={myStoreReviews} profileRealName={me} isOwner onDash={() => setStoreMode("dash")} onMenu={() => setProfileMenuOpen(true)} onSettings={() => setPScr("settings")} onChat={() => {}} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} />;
+                // "Mi Panel" (Resumen/Pedidos/Productos/…) ya NO se anida aquí — es
+                // una capa a pantalla completa propia (ver overlay junto a OmniPanel
+                // más abajo), igual que el Panel de Administración. Aquí SIEMPRE se ve
+                // la Tienda (StoreFront); "⚡ Mi Panel" solo cambia storeMode a "dash".
+                return <StoreFront embedded cfg={storeCfg || {}} products={myStoreProducts.filter(p => !p.archived_at)} headerStats={myStoreStats} ratingInfo={myStoreRating} reviews={myStoreReviews} profileRealName={me} isOwner onDash={() => setStoreMode("dash")} onMenu={() => setProfileMenuOpen(true)} onSettings={() => setPScr("settings")} onChat={() => {}} onProduct={p => { setSelProd(p); setProdBackTo("store-main"); setTab("market"); setMScr("product"); }} />;
               }
               return <FreeProfileScreen embedded onMenu={() => setProfileMenuOpen(true)} onSettings={() => setPScr("settings")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} currentPlan={currentPlanName} currentPlanId={user?.plan || "gratis"} plans={realPlans} maxProducts={myRealPlan?.max_products ?? null} onPlanChanged={(planId) => setUser(prev => prev ? { ...prev, plan: planId } : prev)} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} archivedProducts={ownArchived} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={confirmDeleteProduct} onArchiveProduct={confirmArchiveProduct} onUnarchiveProduct={handleUnarchive} onDeleteArchivedProduct={confirmDeleteProduct} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)} />;
             })()}
@@ -2176,13 +2236,9 @@ function AppShell({ sessionUser }) {
               const paid = payments.filter(p => p.sellerName === me).reduce((a, p) => a + (p.amount || 0), 0);
               const myDebt = Math.max(0, accrued - paid);
               if (isProStore) {
-                // CRÍTICO (ronda anterior): StoreDashboard aquí SIEMPRE
-                // necesita onBack — la barra inferior de la app se oculta en
-                // pScr!=="main" (igual que en el perfil Free), así que sin un
-                // "Atrás" propio no habría ninguna forma de salir.
-                return storeMode === "dash"
-                  ? <StoreDashboard user={user} cfg={storeCfg || {}} products={myStoreProducts} orders={myStoreOrders} plans={realPlans} myPlan={myRealPlan} api={storeApi} onStore={() => setStoreMode("store")} onBack={() => setPScr("main")} onSettings={() => setPScr("settings")} profileRealName={me} flash={flash} />
-                  : <StoreFront cfg={storeCfg || {}} products={myStoreProducts.filter(p => !p.archived_at)} headerStats={myStoreStats} ratingInfo={myStoreRating} reviews={myStoreReviews} profileRealName={me} isOwner onDash={() => setStoreMode("dash")} onBack={() => setPScr("main")} onSettings={() => setPScr("settings")} onChat={() => {}} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} />;
+                // Mismo criterio que en pScr="main": "Mi Panel" es la capa a
+                // pantalla completa de más abajo, aquí siempre se ve la Tienda.
+                return <StoreFront cfg={storeCfg || {}} products={myStoreProducts.filter(p => !p.archived_at)} headerStats={myStoreStats} ratingInfo={myStoreRating} reviews={myStoreReviews} profileRealName={me} isOwner onDash={() => setStoreMode("dash")} onBack={() => setPScr("main")} onSettings={() => setPScr("settings")} onChat={() => {}} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} />;
               }
               return <FreeProfileScreen onBack={() => setPScr("main")} onSettings={() => setPScr("settings")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} currentPlan={currentPlanName} currentPlanId={user?.plan || "gratis"} plans={realPlans} maxProducts={myRealPlan?.max_products ?? null} onPlanChanged={(planId) => setUser(prev => prev ? { ...prev, plan: planId } : prev)} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} archivedProducts={ownArchived} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={confirmDeleteProduct} onArchiveProduct={confirmArchiveProduct} onUnarchiveProduct={handleUnarchive} onDeleteArchivedProduct={confirmDeleteProduct} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)}
                 autoOpenVerify={autoOpenVerify} onAutoOpenVerifyDone={() => setAutoOpenVerify(false)}

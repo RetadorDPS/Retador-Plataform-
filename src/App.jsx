@@ -1723,7 +1723,7 @@ function AppShell({ sessionUser }) {
 
       {/* Overlays */}
       {showCats   && <CatModal onClose={() => setShowCats(false)} onSelect={cat => { setActiveCat(cat); setShowCats(false); }} active={activeCat} />}
-      {pubOpen    && <PubSheet onClose={() => { setPubOpen(false); setPubPrefillCat(null); }} onPublish={async d => { setPubOpen(false); setPubPrefillCat(null); await handlePublish(d); }} user={user} flash={flash} initialKind={pubOpen === "service" ? "service" : (pubOpen === "product" || pubPrefillCat) ? "product" : ""} initialCat={pubPrefillCat} />}
+      {pubOpen    && <PubSheet onClose={() => { setPubOpen(false); setPubPrefillCat(null); }} onPublish={async d => { setPubOpen(false); setPubPrefillCat(null); await handlePublish(d); }} user={user} flash={flash} initialKind={pubOpen === "service" ? "service" : (pubPrefillCat ? "product" : "")} initialCat={pubPrefillCat} />}
       {showNotif  && <NotifPanel onClose={() => { markNotifRead(null); setShowNotif(false); }} notifs={myNotifs} onRead={markNotifRead} onOpenOrder={(oid) => { setShowNotif(false); markNotifRead(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }} onOpenConversation={(cid) => { setShowNotif(false); markNotifRead(null); openConversationById(cid); }}
         onOpenQueue={(page) => {
           // Si no tiene ningún acceso al panel, no intenta navegar ahí (el panel

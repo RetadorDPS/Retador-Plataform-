@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2, Archive, ArchiveRestore } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink, checkUsernameAvailable, setUsername as setUsernameReal } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -921,7 +921,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, em
     name:   initialProfile.name   || (isOwner ? (user?.name || "Usuario") : "Vendedor"),
     email:  initialProfile.email  || (isOwner ? (user?.email || "") : ""),
     bio:    initialProfile.bio    || "",
-    username: initialProfile.username || "",
     isVerified: false,
   };
 
@@ -931,22 +930,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, em
   // no del valor por defecto en blanco — el editor y "Guardar" lo usan para
   // no mandar "" por omisión (ver saveAll).
   const [profileLoaded, setProfileLoaded] = useState(false);
-  // @usuario — para CUALQUIER cuenta, no solo Pro. Se valida en vivo mientras
-  // se escribe (check_username_available) y se guarda aparte (set_username es
-  // su propia RPC, distinta de save_profile_all) al tocar Guardar.
-  const [usernameStatus, setUsernameStatus] = useState("idle"); // idle|checking|available|taken|invalid
-  useEffect(() => {
-    const u = (pd.username || "").trim();
-    if (u === (profile.username || "")) { setUsernameStatus("idle"); return; }
-    if (!u) { setUsernameStatus("idle"); return; }
-    if (u.length < 3 || u.length > 20 || !/^[a-zA-Z0-9_]+$/.test(u)) { setUsernameStatus("invalid"); return; }
-    let alive = true;
-    setUsernameStatus("checking");
-    const t = setTimeout(() => {
-      checkUsernameAvailable(u).then(ok => { if (alive) setUsernameStatus(ok ? "available" : "taken"); }).catch(() => { if (alive) setUsernameStatus("idle"); });
-    }, 400);
-    return () => { alive = false; clearTimeout(t); };
-  }, [pd.username, profile.username]);
 
   // Nombre/avatar/bio/verificado REALES — tanto del DUEÑO como de OTRO usuario
   // — SIEMPRE recargados de punta a punta desde el backend (getProfileBasic,
@@ -963,7 +946,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, em
       if (!alive || !p) return;
       setProfile(prev => ({
         ...prev, name: p.name || prev.name, email: p.email || prev.email, bio: p.bio || "",
-        username: p.username || "",
         avatar: p.avatar ? { type: "image", value: p.avatar } : prev.avatar,
         isVerified: isOwner ? prev.isVerified : !!p.verified,
       }));
@@ -1148,22 +1130,12 @@ export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, em
         } : null,
         emailPublic: aboutLoaded ? !!updatedAbout.emailPublic : null,
       });
-      // @usuario: RPC aparte (set_username), no save_profile_all — solo se
-      // llama si de verdad cambió y ya se confirmó disponible (evita mandar
-      // uno "taken"/inválido que el backend rechazaría igual).
-      let savedUsername = updatedProfile.username;
-      const usernameChanged = (updatedProfile.username || "").trim() !== (profile.username || "");
-      if (usernameChanged && updatedProfile.username?.trim()) {
-        if (usernameStatus !== "available") { toast_("Revisa tu @usuario — no quedó guardado.", true); savedUsername = profile.username; }
-        else { try { savedUsername = await setUsernameReal(updatedProfile.username.trim()); } catch (e) { toast_("⚠️ " + (e?.message || "No se pudo guardar el @usuario"), true); savedUsername = profile.username; } }
-      }
       // El estado local sale SIEMPRE de lo que la RPC devolvió, no de `updatedProfile`/`updatedAbout`.
       const si = (saved?.seller_info && typeof saved.seller_info === "object") ? saved.seller_info : {};
       const newProfile = {
         ...profile,
         name: saved?.full_name || updatedProfile.name,
         bio: saved?.bio || "",
-        username: savedUsername || "",
         avatar: saved?.avatar_url ? { type: "image", value: saved.avatar_url } : updatedProfile.avatar,
       };
       const newAbout = {
@@ -1364,16 +1336,12 @@ export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, em
           <div style={{ display:"flex", justifyContent:"space-between",
             alignItems:"flex-start", gap:14, marginBottom:10 }}>
             <div style={{ flex:1, minWidth:0 }}>
-              {/* Nombre — identidad pública principal. El @usuario (si la
-                  persona eligió uno, columna real profiles.username) va
-                  debajo, chico — nunca inventado del correo como antes. */}
+              {/* Nombre — ÚNICA identidad pública. Sin @handle: nunca se muestra un
+                  valor inventado del correo, y el correo en sí va solo en "Acerca de". */}
               <div style={{ fontSize:23, fontWeight:800, color:FP_C.textPrimary,
                 fontFamily:FP_FH, lineHeight:1.2 }}>
                 {profile.name}
               </div>
-              {profile.username && (
-                <div style={{ fontSize:12.5, color:FP_C.textSecondary, marginTop:2 }}>@{profile.username}</div>
-              )}
               {/* "✓ Verificado" — SOLO si is_verified es real. Nunca fingido.
                   Mismo chip (contorno fino dorado) que en las tarjetas de
                   producto, para que el estilo de la insignia sea consistente
@@ -1586,20 +1554,6 @@ export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, em
               onFocus={e => e.target.style.borderColor = FP_C.accent}
               onBlur={e => e.target.style.borderColor = FP_C.border}
               style={fpInputStyle(FP_C)}/>
-          </FP_Field>
-          <FP_Field label="@usuario">
-            <div style={{ position:"relative" }}>
-              <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", color:FP_C.textMuted, fontSize:13, pointerEvents:"none" }}>@</span>
-              <input value={pd.username} placeholder="tu_usuario"
-                onChange={e => setPd(d => ({...d, username: e.target.value.replace(/\s/g, "").toLowerCase()}))}
-                onFocus={e => e.target.style.borderColor = FP_C.accent}
-                onBlur={e => e.target.style.borderColor = FP_C.border}
-                style={{...fpInputStyle(FP_C), paddingLeft:22}}/>
-            </div>
-            {usernameStatus === "checking" && <div style={{ fontSize:11, color:FP_C.textMuted, marginTop:4 }}>Comprobando…</div>}
-            {usernameStatus === "available" && <div style={{ fontSize:11, color:"#4ADE80", marginTop:4 }}>✓ Disponible</div>}
-            {usernameStatus === "taken" && <div style={{ fontSize:11, color:"#F87171", marginTop:4 }}>Ese @usuario ya está en uso</div>}
-            {usernameStatus === "invalid" && <div style={{ fontSize:11, color:"#F87171", marginTop:4 }}>3-20 caracteres: letras, números y _</div>}
           </FP_Field>
           <FP_Field label="Bio">
             <textarea value={pd.bio} placeholder="Cuéntale a los compradores quién eres…"

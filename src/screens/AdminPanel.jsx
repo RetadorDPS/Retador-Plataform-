@@ -2059,7 +2059,6 @@ function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, onOpenC
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:12.5,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{pr?.full_name||'Usuario'}</div>
                 <div style={{fontSize:11,color:'var(--tx3)'}}>quiere <b style={{color:'var(--ac)',textTransform:'capitalize'}}>{r.plan}</b> · {r.created_at?new Date(r.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}):''}</div>
-                {r.via && r.via !== 'pago' && <div style={{marginTop:4}}><span className="bdg by">{r.via === 'compartir' ? '📤 Gratis · compartir' : '🔗 Gratis · referidos'}</span></div>}
               </div>
               <span style={{fontSize:16,color:'var(--tx3)',flexShrink:0}}>›</span>
             </div>
@@ -2154,26 +2153,10 @@ function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, onOpenC
                   : <div style={{ fontSize:12, color:'var(--tx3)' }}>Sin solicitud de verificación de perfil. El ✓ se otorga solo cuando la persona envía sus documentos.</div>}
           </div>}
 
-          {/* Bloque PLAN pendiente — vía 'pago' (normal) o Pro gratis por
-              'compartir'/'referidos' (mismo admin_review_plan de siempre;
-              solo cambia qué se le muestra al admin para decidir). */}
+          {/* Bloque PLAN pendiente */}
           {canPlans && selPlan && <div style={{ background:'var(--bg2)', border:'1px solid var(--bd)', borderRadius:12, padding:'12px', marginBottom:12 }}>
-            <div style={{ fontSize:12, fontWeight:800, color:'var(--tx)', marginBottom:8 }}>⭐ Solicitud de plan{selPlan.via && selPlan.via !== 'pago' ? (selPlan.via === 'compartir' ? ' · 📤 Pro gratis (compartir)' : ' · 🔗 Pro gratis (referidos)') : ''}</div>
-            <div style={{ fontSize:12, color:'var(--tx2)', marginBottom:10 }}>
-              {selPlan.via && selPlan.via !== 'pago'
-                ? <>Pide el plan <b style={{ color:'var(--ac)', textTransform:'capitalize' }}>{selPlan.plan}</b> gratis, por {selPlan.via === 'compartir' ? 'haber compartido' : 'referidos reales'}. Revisa la evidencia y aprueba solo si es real.</>
-                : <>Pide el plan <b style={{ color:'var(--ac)', textTransform:'capitalize' }}>{selPlan.plan}</b>. Confirma el pago y aprueba: el plan cambia de verdad.</>}
-            </div>
-            {selPlan.via === 'compartir' && Array.isArray(selPlan.evidence_urls) && selPlan.evidence_urls.length > 0 && (
-              <div style={{ marginBottom:10 }}>
-                <div style={{ fontSize:10, fontWeight:700, color:'var(--tx3)', marginBottom:5, textTransform:'uppercase' }}>{selPlan.evidence_urls.length} enlaces enviados</div>
-                <div style={{ maxHeight:120, overflowY:'auto', display:'flex', flexDirection:'column', gap:4 }}>
-                  {selPlan.evidence_urls.map((u,i) => (
-                    <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ fontSize:11, color:'var(--ac)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block' }}>{i+1}. {u}</a>
-                  ))}
-                </div>
-              </div>
-            )}
+            <div style={{ fontSize:12, fontWeight:800, color:'var(--tx)', marginBottom:8 }}>⭐ Solicitud de plan</div>
+            <div style={{ fontSize:12, color:'var(--tx2)', marginBottom:10 }}>Pide el plan <b style={{ color:'var(--ac)', textTransform:'capitalize' }}>{selPlan.plan}</b>. Confirma el pago y aprueba: el plan cambia de verdad.</div>
             {mngPlans
               ? <div style={{ display:'flex', gap:8 }}>
                   <button className="btn bts" style={{ flex:1 }} disabled={busy==='p'} onClick={()=>decidePlan(true)}>✅ Aprobar</button>

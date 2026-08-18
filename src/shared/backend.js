@@ -50,7 +50,7 @@ export const getUserById = async (id) => {
   if (!id) return null;
   if (_profileCache.has(id)) return _profileCache.get(id);
   try {
-    const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url, bio, is_verified, email, plan, username").eq("id", id).single();
+    const { data, error } = await supabase.from("profiles").select("id, full_name, avatar_url, bio, is_verified, email").eq("id", id).single();
     // ANTES esto se tragaba en silencio: si el RLS/permiso de "profiles" bloquea
     // la lectura de la fila de OTRO usuario (p.ej. is_verified restringido a su
     // propio dueño), la consulta falla con error y esto devolvía null sin dejar
@@ -59,7 +59,7 @@ export const getUserById = async (id) => {
     if (!data) { _profileCache.set(id, null); return null; }
     // El correo se expone tal cual (misma fuente que ve el dueño y el admin) —
     // ya no hay "usuario"/@handle inventado a partir de él.
-    const p = { id: data.id, name: data.full_name || "Usuario", avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified, email: data.email || "", plan: data.plan || "gratis", username: data.username || null };
+    const p = { id: data.id, name: data.full_name || "Usuario", avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified, email: data.email || "" };
     _profileCache.set(id, p);
     return p;
   } catch (e) { console.error("getUserById (excepción):", e?.message || e, "| id:", id); return null; }
@@ -86,9 +86,9 @@ export const updateUserName = async (id, name) => {
 export const getProfileBasic = async (userId) => {
   if (!userId) return null;
   try {
-    const { data, error } = await supabase.from("profiles").select("full_name, avatar_url, bio, is_verified, email, username").eq("id", userId).single();
+    const { data, error } = await supabase.from("profiles").select("full_name, avatar_url, bio, is_verified, email").eq("id", userId).single();
     if (error || !data) return null;
-    return { name: data.full_name || "", avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified, email: data.email || "", username: data.username || "" };
+    return { name: data.full_name || "", avatar: data.avatar_url || null, bio: data.bio || "", verified: !!data.is_verified, email: data.email || "" };
   } catch (e) { return null; }
 };
 
@@ -1362,13 +1362,8 @@ export const adminUpdatePlanLimit = async (planId, maxProducts) => {
 // visibles" ya la deja abierta a cualquiera) — es la fuente ÚNICA para la
 // pantalla de planes del comprador: nombre, precio, límite y comisión reales,
 // sin texto de marketing inventado ni datos desincronizados.
-// BUG REAL corregido: no traía can_customize — el dato con el que App.jsx
-// decide si un plan da Tienda Pro. Sin esta columna, myRealPlan.can_customize
-// siempre llegaba undefined al frontend (sin importar el plan real de la
-// cuenta ni cuántas veces se recargara la app), así que la Tienda nunca se
-// activaba para nadie.
 export const getPlans = async () => {
-  const { data, error } = await supabase.from("plans").select("id, name, max_products, price, currency, commission_pct, can_customize").eq("active", true).order("price", { ascending: true });
+  const { data, error } = await supabase.from("plans").select("id, name, max_products, price, currency, commission_pct").eq("active", true).order("price", { ascending: true });
   if (error) { console.error("getPlans:", error.message); return []; }
   return data || [];
 };
@@ -1377,69 +1372,6 @@ export const getPlans = async () => {
 export const downgradePlan = async (planId) => {
   const { data, error } = await supabase.rpc("downgrade_plan", { p_plan_id: planId });
   if (error) { console.error("downgradePlan:", error.message); throw error; }
-  return data;
-};
-
-// ── PLAN PRO GRATIS — compartir o referidos reales (plan_requests.via) ───────
-// Misma tabla y mismo admin_review_plan de siempre; esto solo agrega el "vía"
-// y la evidencia. request_plan_promo valida en el backend (mínimo 12 enlaces
-// para compartir, al menos un referido real calificado para referidos) —
-// nunca confía solo en lo que mande el frontend.
-export const requestPlanPromo = async (plan, via, evidenceUrls = null) => {
-  const { data, error } = await supabase.rpc("request_plan_promo", { p_plan: plan, p_via: via, p_evidence_urls: evidenceUrls });
-  if (error) { console.error("requestPlanPromo:", error.message); throw error; }
-  return data;
-};
-export const getOrCreateReferralCode = async () => {
-  const { data, error } = await supabase.rpc("get_or_create_referral_code");
-  if (error) { console.error("getOrCreateReferralCode:", error.message); return null; }
-  return data;
-};
-export const registerReferral = async (code) => {
-  const { data, error } = await supabase.rpc("register_referral", { p_code: code });
-  if (error) { console.error("registerReferral:", error.message); return false; }
-  return !!data;
-};
-// "qualifies" viene calculado de verdad por la función (publicó algo activo o
-// completó una compra real) — nunca un contador editable a mano.
-export const getReferralStats = async () => {
-  const { data, error } = await supabase.rpc("get_referral_stats");
-  if (error) { console.error("getReferralStats:", error.message); return []; }
-  return data || [];
-};
-
-// ── @USUARIO — para cualquier cuenta, no solo Pro ─────────────────────────────
-export const checkUsernameAvailable = async (username) => {
-  const { data, error } = await supabase.rpc("check_username_available", { p_username: username });
-  if (error) { console.error("checkUsernameAvailable:", error.message); return false; }
-  return !!data;
-};
-export const setUsername = async (username) => {
-  const { data, error } = await supabase.rpc("set_username", { p_username: username });
-  if (error) { console.error("setUsername:", error.message); throw error; }
-  return data;
-};
-export const findByUsername = async (username) => {
-  const { data, error } = await supabase.rpc("find_by_username", { p_username: username });
-  if (error) { console.error("findByUsername:", error.message); return null; }
-  const row = Array.isArray(data) ? data[0] : data;
-  return row || null;
-};
-
-// ── TIENDA PRO (store_config) — Fase 1 ────────────────────────────────────────
-// Lectura pública (cualquiera puede ver la tienda de un vendedor Pro real).
-export const getStoreConfig = async (userId) => {
-  if (!userId) return null;
-  const { data, error } = await supabase.from("store_config").select("*").eq("user_id", userId).maybeSingle();
-  if (error) { console.error("getStoreConfig:", error.message); return null; }
-  return data || null;
-};
-// Única vía de escritura: upsert_store_config (RPC) — crea la fila si no
-// existe y solo pisa los campos presentes en `updates` (fusión real, nunca
-// sobrescribe con vacío lo que no se mandó).
-export const upsertMyStoreConfig = async (updates) => {
-  const { data, error } = await supabase.rpc("upsert_store_config", { p_updates: updates });
-  if (error) { console.error("upsertMyStoreConfig:", error.message); throw error; }
   return data;
 };
 

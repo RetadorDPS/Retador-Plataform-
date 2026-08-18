@@ -19,22 +19,44 @@ function isIOS() {
 // desde el ícono), isStandalone() vuelve a dar false y, sin esta marca, el
 // cartel de "Instalar" reaparecía aunque ya estuviera instalada. Se guarda en
 // cuanto detectamos standalone=true (o justo al confirmarse la instalación
-// con nuestro propio botón) y desde ahí el cartel nunca vuelve a ofrecerse
-// EN ESE NAVEGADOR.
-// ⚠️ LÍMITE REAL (no se puede evitar del todo): esta marca vive en el
-// localStorage de ESE navegador/perfil. Si la app se instaló desde Chrome
-// pero luego se abre desde el navegador interno de WhatsApp/Facebook/Instagram
-// (o cualquier otro navegador), es un contexto de almacenamiento COMPLETAMENTE
-// separado que no tiene forma de saber que ya existe una instalación en otro
-// lado — ahí el cartel puede volver a aparecer. No es un descuido: es cómo
-// funciona el almacenamiento web, ningún sitio puede leer el localStorage de
-// otro navegador.
+// con nuestro propio botón) y desde ahí el cartel no vuelve a ofrecerse EN
+// ESE NAVEGADOR — pero con un LÍMITE DE TIEMPO (ver más abajo), nunca a
+// perpetuidad: la web no tiene forma de saber si la app se desinstaló
+// después (evento real "se desinstaló" que ninguna página puede recibir), así
+// que una marca eterna terminaba escondiendo el cartel PARA SIEMPRE en
+// cualquier navegador donde alguna vez se instaló y luego se desinstaló —
+// confirmado con reproducción real: marca puesta + display-mode NO standalone
+// (el estado real de "ya no instalada") → el cartel nunca volvía a aparecer.
+// Por eso ahora se guarda un SELLO DE TIEMPO (no un booleano fijo) y se trata
+// como respaldo temporal: isStandalone() sigue siendo la fuente de verdad
+// PRINCIPAL en cada carga; el sello solo cubre, por un tiempo acotado, el
+// caso legítimo de "instalada de verdad pero abierta ahora en una pestaña
+// normal". Pasada la ventana sin un standalone=true real que la renueve, se
+// vuelve a confiar en el estado real y el cartel puede reaparecer — así se
+// autocorrige sin depender de un evento de desinstalación que la web no tiene.
+// ⚠️ LÍMITE REAL que sigue existiendo (no se puede evitar del todo): esta
+// marca vive en el localStorage de ESE navegador/perfil. Si la app se instaló
+// desde Chrome pero luego se abre desde el navegador interno de WhatsApp/
+// Facebook/Instagram (u otro navegador), es un almacenamiento COMPLETAMENTE
+// separado que no puede saber que ya existe una instalación en otro lado —
+// ahí el cartel puede volver a aparecer. No es un descuido: ningún sitio
+// puede leer el localStorage de otro navegador.
 const INSTALLED_FLAG_KEY = "retador_pwa_installed_confirmed";
+const INSTALLED_TRUST_MS = 30 * 24 * 60 * 60 * 1000; // 30 días de respaldo sin confirmación nueva
 function markInstalledIfStandalone() {
-  try { if (isStandalone()) localStorage.setItem(INSTALLED_FLAG_KEY, "1"); } catch (e) {}
+  try { if (isStandalone()) localStorage.setItem(INSTALLED_FLAG_KEY, String(Date.now())); } catch (e) {}
 }
 function wasInstalledBefore() {
-  try { return localStorage.getItem(INSTALLED_FLAG_KEY) === "1"; } catch (e) { return false; }
+  try {
+    const raw = localStorage.getItem(INSTALLED_FLAG_KEY);
+    if (!raw) return false;
+    // Migra la marca vieja ("1", sin sello de tiempo, de antes de este cambio):
+    // sin fecha real no se puede saber su antigüedad, así que no cuenta como
+    // respaldo válido — se deja que isStandalone() decida de verdad ahora.
+    const t = Number(raw);
+    if (!Number.isFinite(t)) return false;
+    return (Date.now() - t) < INSTALLED_TRUST_MS;
+  } catch (e) { return false; }
 }
 
 const GOLD = "#F5B301";
@@ -54,7 +76,7 @@ export default function InstallPrompt() {
     const off = onPromptChange((e) => {
       if (!e) { // appinstalled: se acaba de instalar de verdad — marca ya mismo, sin esperar al próximo arranque
         setVisible(false);
-        try { localStorage.setItem(INSTALLED_FLAG_KEY, "1"); } catch (err) {}
+        try { localStorage.setItem(INSTALLED_FLAG_KEY, String(Date.now())); } catch (err) {}
       }
     });
 

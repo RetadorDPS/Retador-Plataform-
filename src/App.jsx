@@ -47,7 +47,7 @@ import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProduct
 import OmniPanel from "./screens/AdminPanel.jsx";
 import { SubastasScreen } from "./screens/Auctions.jsx";
 import { SettingsScreen } from "./screens/Settings.jsx";
-import { FreeProfileScreen, ProfileMenuDrawer, FollowingListScreen } from "./screens/Profile.jsx";
+import { FreeProfileScreen, ProfileMenuDrawer } from "./screens/Profile.jsx";
 import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
@@ -198,26 +198,10 @@ export default function App() {
 
   useEffect(() => {
     let alive = true;
-    // CAUSA RAÍZ REAL de la pantalla negra confirmada reproduciendo la app de
-    // verdad en un navegador (con una sesión guardada VENCIDA + red que se
-    // queda colgada sin responder, la condición real de mala señal): antes,
-    // loadSessionUser() (auth.getSession(), que puede disparar un refresh de
-    // token por red si el token guardado venció) no tenía límite de tiempo —
-    // si esa llamada se quedaba colgada, sessionUser se quedaba en undefined
-    // PARA SIEMPRE, y la app nunca sale de <PantallaCargando/> (fondo negro
-    // con un spinner chiquito, fácil de confundir con "la app está rota").
-    // Ahora, si no responde en 8s, se trata como "sin sesión" — la persona ve
-    // la bienvenida y puede volver a intentar, nunca un negro sin salida.
-    const bootSession = () => {
-      Promise.race([
-        loadSessionUser(),
-        new Promise(resolve => setTimeout(() => resolve(undefined), 8000)),
-      ]).then(u => { if (alive) setSessionUser(u === undefined ? null : u); });
-    };
-    bootSession();
+    loadSessionUser().then(u => { if (alive) setSessionUser(u); });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session?.user) { setSessionUser(null); return; }
-      bootSession();
+      loadSessionUser().then(u => { if (alive) setSessionUser(u); });
     });
     return () => { alive = false; sub?.subscription?.unsubscribe?.(); };
   }, []);
@@ -444,12 +428,6 @@ function AppShell({ sessionUser }) {
     if (!viewProfileId) return;
     return pushBackHandler(() => setViewProfileId(null));
   }, [viewProfileId]);
-  // "Siguiendo" es la misma clase de capa (posición fija encima de todo) —
-  // mismo mecanismo de una-capa-un-atrás.
-  useEffect(() => {
-    if (!showFollowing) return;
-    return pushBackHandler(() => setShowFollowing(false));
-  }, [showFollowing]);
 
   // Overlays
   const [showCats,   setShowCats]   = useState(false);
@@ -497,7 +475,6 @@ function AppShell({ sessionUser }) {
   const [toolApp, setToolApp] = useState(false);
   const [showCourier, setShowCourier] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false); // panel lateral del Perfil (☰)
-  const [showFollowing, setShowFollowing] = useState(false); // lista real de "Siguiendo" (☰ → Siguiendo)
   // RETIRADO: el registro local de mensajeros (retador_couriers en localStorage)
   // ya NO es vía de aprobación. La única vía real es courier_applications en el
   // backend + review_courier_application del admin (que pone role='courier').
@@ -1106,17 +1083,11 @@ function AppShell({ sessionUser }) {
   const myRealPlan = realPlans.find(p => p.id === user?.plan) || realPlans.find(p => p.id === "gratis") || null;
   const currentPlanName = myRealPlan?.name || "Gratis";
   // ── TIENDA PRO (integración definitiva) ──────────────────────────────────
-  // CORRECCIÓN DE RAÍZ (emergencia pre-lanzamiento): decidir "¿es Pro?" NUNCA
-  // debe depender de esperar realPlans (tabla aparte, con su propia carga que
-  // puede llegar tarde o fallar) — esa espera era la causa real tanto del
-  // destello Free-antes-de-Pro como de la pantalla negra que vino después.
-  // profiles.plan (el id del plan) ya llega en la MISMA carga rápida que
-  // siempre ha usado el perfil gratis (user.plan, sincronizado por
-  // refreshSessionProfile) — comparación instantánea, sin esperar nada.
-  // realPlans se sigue cargando aparte, pero SOLO para mostrar detalles
-  // (nombre/precio/límites en Suscripción) — nunca para este gate.
-  const isSellerPlanStore = (planId) => planId === "pro" || planId === "premium";
-  const isProStore = isSellerPlanStore(user?.plan);
+  // Gate real: plans.can_customize (columna real ya existente, la misma que
+  // separa "Free" de "Pro/Premium" en la tabla de planes) — no un id de plan
+  // a mano, así cualquier plan pagado que el admin marque can_customize=true
+  // obtiene la tienda, sin tener que tocar código si el admin agrega otro.
+  const isProStore = !!myRealPlan?.can_customize;
   const [storeCfg, setStoreCfg] = useState(null);
   const [storeMode, setStoreMode] = useState("store");
   const [myStoreStats, setMyStoreStats] = useState({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
@@ -1174,13 +1145,11 @@ function AppShell({ sessionUser }) {
     // getSellerPlan (SIN caché) decide el plan real EN ESTE INSTANTE — activar
     // o bajar el plan de otra cuenta debe reflejarse ya mismo, nunca depender
     // del caché de sesión de getUserById (root cause real de "activé Pro y
-    // sigue viéndose Free desde otra cuenta"). NUNCA depende de realPlans:
-    // el id del plan ya basta (isSellerPlanStore), así este efecto resuelve
-    // tan rápido como el perfil gratis siempre ha cargado, sin nada que
-    // esperar aparte — ver corrección de raíz arriba en isProStore.
+    // sigue viéndose Free desde otra cuenta").
     Promise.all([getUserById(viewProfileId), getSellerPlan(viewProfileId)]).then(async ([u, planId]) => {
       if (!alive) return;
-      const eligible = isSellerPlanStore(planId);
+      const plan = realPlans.find(p => p.id === planId);
+      const eligible = !!plan?.can_customize;
       // getUserById devuelve { name, ... } (no "full_name") — antes esto
       // siempre quedaba vacío y la Tienda de otro vendedor caía siempre al
       // "Vendedor" genérico de respaldo en vez de su nombre real.
@@ -1197,7 +1166,7 @@ function AppShell({ sessionUser }) {
       setViewedStoreEligible(true);
     }).catch(() => { if (alive) setViewedStoreEligible(false); });
     return () => { alive = false; };
-  }, [viewProfileId]);
+  }, [viewProfileId, realPlans]);
   // Tras dejar/editar/borrar MI reseña sobre este vendedor, recarga la lista
   // y el promedio reales (el mismo dato que ya vieron todos al entrar).
   const reloadViewedReviews = useCallback(() => {
@@ -1234,11 +1203,10 @@ function AppShell({ sessionUser }) {
     setSellerStoreStats({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
     if (!selSeller) { setSellerStoreEligible(false); return; }
     let alive = true;
-    // Mismo criterio instantáneo que en el efecto de viewProfileId — nunca
-    // depende de realPlans (ver isProStore más arriba).
     Promise.all([getUserById(selSeller), getSellerPlan(selSeller)]).then(async ([u, planId]) => {
       if (!alive) return;
-      const eligible = isSellerPlanStore(planId);
+      const plan = realPlans.find(p => p.id === planId);
+      const eligible = !!plan?.can_customize;
       setSellerStoreName(u?.name || "");
       setSellerStoreVerified(!!u?.verified);
       if (!eligible) { setSellerStoreEligible(false); return; }
@@ -1250,7 +1218,7 @@ function AppShell({ sessionUser }) {
       setSellerStoreEligible(true);
     }).catch(() => { if (alive) setSellerStoreEligible(false); });
     return () => { alive = false; };
-  }, [selSeller]);
+  }, [selSeller, realPlans]);
   const reloadSellerReviews = useCallback(() => {
     if (!selSeller) return;
     Promise.all([getSellerRatingInfo(selSeller), getSellerReviews(selSeller)]).then(([r, revs]) => {
@@ -1910,15 +1878,10 @@ function AppShell({ sessionUser }) {
           setAdminOpenPage(page); setShowAdmin(true);
         }} />}
       {/* Chat: capa OPACA a pantalla completa (inset 0 cubre TODO el viewport,
-          estándar) — nada del producto/pantalla de atrás puede asomar.
-          onBack usa window.history.back() (NUNCA un setState con destino fijo):
-          así la flecha de la pantalla dispara el MISMO popstate/onPop real que
-          ya maneja el botón físico, en vez de "adivinar" a dónde volver —
-          root cause real de "la flecha de atrás manda a Perfil en vez de a
-          donde estaba antes". */}
+          estándar) — nada del producto/pantalla de atrás puede asomar. */}
       {chatOpen && selChat && (
         <div style={{ position: "fixed", inset: 0, zIndex: 5100, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
-          <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => window.history.back()} onConvId={setOpenConvId} flash={flash} onViewProfile={openPublicProfile} orders={mergedOrders} onOpenOrder={openOrderFromChat} onOpenProduct={openProductFromChat} onStartOrder={startOrderFromChat}
+          <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => setChatOpen(false)} onConvId={setOpenConvId} flash={flash} onViewProfile={openPublicProfile} orders={mergedOrders} onOpenOrder={openOrderFromChat} onOpenProduct={openProductFromChat} onStartOrder={startOrderFromChat}
             /* BUG REAL corregido: chat.context (el producto pendiente de
                adjuntar) vivía en selChat, que NUNCA se limpiaba tras enviarlo
                — así que si el chat se desmontaba y volvía a montar (p.ej. al
@@ -2093,14 +2056,6 @@ function AppShell({ sessionUser }) {
           />
           )}
           </ErrorBoundary>
-        </div>
-      )}
-      {/* "Siguiendo" — lista real, capa a pantalla completa igual que el perfil
-          público (misma técnica: position fixed inset:0, con su propia
-          entrada de historial vía el backstack de abajo). */}
-      {showFollowing && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 5250, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
-          <FollowingListScreen user={user} onBack={() => setShowFollowing(false)} onViewProfile={(id) => { setShowFollowing(false); openPublicProfile(id); }} />
         </div>
       )}
       {/* Producto como CAPA (desde perfil público / modo mensajero): encima de todo,
@@ -2357,7 +2312,7 @@ function AppShell({ sessionUser }) {
                 autoOpenVerify={autoOpenVerify} onAutoOpenVerifyDone={() => setAutoOpenVerify(false)}
                 autoOpenEdit={autoOpenEdit} onAutoOpenEditDone={() => setAutoOpenEdit(false)} />;
             })()}
-            {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => window.history.back()} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
+            {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
             {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}
               productView={productView} onProductViewChange={setProductView}
               profileData={profileData} onProfileUpdate={setProfileData}
@@ -2372,7 +2327,7 @@ function AppShell({ sessionUser }) {
             {/* Panel lateral del Perfil (☰): todo el menú que antes estaba apilado */}
             <ProfileMenuDrawer open={profileMenuOpen} onClose={() => setProfileMenuOpen(false)} user={user} isOwner={hasPanel}
               onMessages={openMessages} onOrders={() => setPScr("orders")} onWallet={() => setShowWallet(true)}
-              onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} onFollowing={() => setShowFollowing(true)}
+              onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)}
               onAdmin={() => { setAdminOpenPage(null); setShowAdmin(true); }} messagesBadge={chatUnread} ordersBadge={ordersUnseen} adminBadge={courierApps.length} />
           </>}
         </>

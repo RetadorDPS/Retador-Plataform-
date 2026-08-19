@@ -26,7 +26,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star,
 } from "lucide-react";
-import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, getOrCreateReferralCode, getReferralStats, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow } from "../shared/index.js";
+import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow } from "../shared/index.js";
 
 /* ── TEMA — propio y compacto, como el resto de paneles "premium" de la app ── */
 const S_DARK = {
@@ -265,7 +265,27 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
   const renderSec = (sec) => {
     if (sec.id === "featured") {
       if (!products.length) return null;
-      const feat = products[0];
+      // Destacados = elegidos a mano por el vendedor (interruptor real en Mi
+      // Panel → Productos), NUNCA "el primero de la lista" por defecto.
+      const marked = products.filter(p => p.storeFeatured);
+      if (marked.length >= 2) {
+        return (
+          <div key="feat" style={{ marginBottom:28 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:14 }}>
+              <h2 style={{ fontSize:16, fontWeight:800, color:C.t }}>{sec.label}</h2>
+              <span onClick={() => setTab("productos")} style={{ fontSize:12, color:ac, cursor:"pointer", fontWeight:600 }}>Ver todo →</span>
+            </div>
+            <div style={{ display:"flex", gap:10, overflowX:"auto", paddingBottom:2 }}>
+              {marked.map(p => (
+                <div key={p.id} style={{ flex:"0 0 128px", width:128 }}>{prodCard(p, 90, 26)}</div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+      // Con 0 o 1 destacado marcado, se conserva la tarjeta grande de siempre
+      // (el destacado si hay uno; si no, el producto más reciente).
+      const feat = marked[0] || products[0];
       return (
         <div key="feat" style={{ marginBottom:28 }}>
           <div style={{ display:"flex", justifyContent:"space-between", marginBottom:14 }}>
@@ -573,7 +593,7 @@ function Pedidos({ orders, C, ac }) {
 }
 
 /* ── 3) PRODUCTOS (reutiliza formulario y funciones reales) ─────────────── */
-function ProdsSection({ products, C, ac, onNewProduct, onEditProduct, onArchiveProduct, onUnarchiveProduct, onDeleteProduct, maxProducts }) {
+function ProdsSection({ products, C, ac, onNewProduct, onEditProduct, onArchiveProduct, onUnarchiveProduct, onDeleteProduct, onToggleFeatured, maxProducts }) {
   const [view, setView] = useState("activos");
   const activos = products.filter(p => !p.archived_at);
   const archivados = products.filter(p => p.archived_at);
@@ -581,7 +601,7 @@ function ProdsSection({ products, C, ac, onNewProduct, onEditProduct, onArchiveP
   const limitTxt = maxProducts ? `${activos.length} de ${maxProducts} publicados` : `${activos.length} publicados`;
   return (
     <div>
-      <SHdr title="Productos" sub={limitTxt} btn="Nuevo Producto" onBtn={onNewProduct} ac={ac} C={C}/>
+      <SHdr title="Productos" sub={limitTxt} btn="Publicar" onBtn={onNewProduct} ac={ac} C={C}/>
       <div style={{ display:"flex", gap:6, marginBottom:16, background:C.s1, borderRadius:10, padding:3 }}>
         {[["activos",`Activos (${activos.length})`],["archivados",`Archivados (${archivados.length})`]].map(([id,lb]) => (
           <button key={id} onClick={() => setView(id)} style={{ flex:1, padding:"7px", borderRadius:8, border:"none", cursor:"pointer", fontSize:12, fontWeight:700, background:view===id?ac:"transparent", color:view===id?"#000":C.m }}>{lb}</button>
@@ -590,7 +610,13 @@ function ProdsSection({ products, C, ac, onNewProduct, onEditProduct, onArchiveP
       {shown.length === 0 && <div style={{ padding:"40px", textAlign:"center", color:C.m, fontSize:13 }}>{view==="activos" ? "Aún no has publicado nada." : "No tienes productos archivados."}</div>}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
         {shown.map(prod => (
-          <div key={prod.id} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden", opacity:prod.archived_at?.6:1 }}>
+          <div key={prod.id} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden", opacity:prod.archived_at?.6:1, position:"relative" }}>
+            {!prod.archived_at && (
+              <button onClick={() => onToggleFeatured(prod)} title={prod.storeFeatured ? "Quitar de Destacados" : "Marcar como Destacado"}
+                style={{ position:"absolute", top:7, right:7, zIndex:1, width:24, height:24, borderRadius:7, border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", background: prod.storeFeatured ? ac : "rgba(0,0,0,.45)" }}>
+                <Star size={12} color={prod.storeFeatured ? "#000" : "#fff"} fill={prod.storeFeatured ? "#000" : "none"}/>
+              </button>
+            )}
             <PImg p={prod} h={110} fz={36} C={C}/>
             <div style={{ padding:11 }}>
               <div style={{ fontSize:12, fontWeight:500, marginBottom:2, color:C.t }}>{prod.title}</div>
@@ -1154,22 +1180,15 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
   const [promoOpen, setPromoOpen] = useState(false);
   const [promoTab, setPromoTab] = useState("compartir");
   const [links, setLinks] = useState([""]);
-  const [refCode, setRefCode] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [referrals, setReferrals] = useState([]);
   const [busy, setBusy] = useState(false);
   const REQUIRED = 12;
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [pr, code, refs] = await Promise.all([
-        getMyPlanRequest(user.id), getOrCreateReferralCode(), getReferralStats(),
-      ]);
+      const pr = await getMyPlanRequest(user.id);
       if (!alive) return;
       setPending(pr && pr.status === "pending" ? pr : null);
-      setRefCode(code || "");
-      setReferrals(refs || []);
     })();
     return () => { alive = false; };
   }, [user.id]);
@@ -1178,7 +1197,6 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
   const addLinkRow = () => links.length < REQUIRED && setLinks(p => [...p,""]);
   const removeLinkRow = (i) => setLinks(p => p.filter((_,idx)=>idx!==i));
   const filled = links.filter(l => l.trim().length > 5).length;
-  const realReferrals = referrals.filter(r => r.qualifies).length;
 
   const requestUpgrade = async (planId) => {
     setBusy(true);
@@ -1192,8 +1210,7 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
       // Aquí SIEMPRE se llega ya siendo Pro/Premium (can_customize) — la
       // tarjeta ofrece mantener el plan PROPIO gratis, no "pasar" a otro.
       const plan = myPlan?.id;
-      if (promoTab === "compartir") await requestPlanPromo(plan, "compartir", links.filter(l=>l.trim().length>5));
-      else await requestPlanPromo(plan, "referidos", null);
+      await requestPlanPromo(plan, "compartir", links.filter(l=>l.trim().length>5));
       setPending({ plan, status:"pending" });
       flash?.("✅ Enviado, en revisión");
       onPlanRequested?.();
@@ -1273,24 +1290,14 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
               </div>
             )}
             {promoTab === "referidos" && (
-              <div>
-                <div style={{ fontSize:12, color:C.t, marginBottom:3 }}>Cada persona que entra con tu enlace y <b style={{ color:ac }}>publica o compra de verdad</b> cuenta como referido real.</div>
-                <div style={{ fontSize:11, color:C.m, marginBottom:14 }}>No hace falta un número fijo — mientras traigas gente real y activa, tu plan se mantiene.</div>
-                <div style={{ display:"flex", gap:8, marginBottom:14 }}>
-                  <div style={{ flex:1, padding:"10px 12px", borderRadius:9, background:C.s1, border:`1px solid ${C.b}`, fontSize:11, fontFamily:"monospace", color:ac, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{refCode || "generando…"}</div>
-                  <button onClick={() => { navigator.clipboard?.writeText(refCode); setCopied(true); setTimeout(()=>setCopied(false),1800); }} style={{ padding:"0 16px", borderRadius:9, border:"none", background:copied?C.ok:ac, color:copied?"#fff":"#000", fontSize:12, fontWeight:700, cursor:"pointer" }}>{copied?"✓ Copiado":"Copiar"}</button>
-                </div>
-                <div style={{ fontSize:13, fontWeight:800, marginBottom:8, color:C.t }}>Tus referidos — {realReferrals} reales</div>
-                {referrals.length === 0 && <div style={{ fontSize:12, color:C.m, textAlign:"center", padding:"14px 0" }}>Aún no tienes referidos.</div>}
-                {referrals.map((rf,i) => (
-                  <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 0", borderBottom:i<referrals.length-1?`1px solid ${C.b}`:"none" }}>
-                    <span style={{ fontSize:12, color:C.t }}>{rf.referred_name}</span>
-                    <SBadge s={rf.qualifies ? "entregado" : "pendiente"} C={C}/>
-                  </div>
-                ))}
-                <button onClick={sendPromo} disabled={realReferrals<1 || busy || !!pending} style={{ width:"100%", marginTop:14, padding:10, borderRadius:9, border:"none", cursor:(realReferrals<1||pending)?"default":"pointer", background:(realReferrals<1||pending)?C.s3:ac, color:(realReferrals<1||pending)?C.m:"#000", fontSize:13, fontWeight:800 }}>
-                  {pending ? "🕐 En revisión" : realReferrals<1 ? "Aún sin referidos reales" : "Enviar para revisión"}
-                </button>
+              // Aviso honesto: el enlace/código de referido todavía NO detecta ni
+              // registra de verdad a quien entra por él (register_referral existe
+              // en el backend pero nada del registro real lo llama todavía) — se
+              // deja claro en vez de mostrar un contador que nunca se va a mover.
+              <div style={{ textAlign:"center", padding:"18px 6px" }}>
+                <div style={{ fontSize:26, marginBottom:8 }}>🔧</div>
+                <div style={{ fontSize:13, fontWeight:800, color:C.t, marginBottom:6 }}>Próximamente</div>
+                <div style={{ fontSize:12, color:C.m, lineHeight:1.5 }}>Los enlaces de referido todavía no registran automáticamente quién entra por ellos. Estamos terminando esa conexión — mientras tanto, usa la pestaña "Compartir" para mantener tu plan gratis.</div>
               </div>
             )}
           </div>}
@@ -1336,7 +1343,7 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
     if (sec === "products")   return <ProdsSection products={products} C={C} ac={ac}
       onNewProduct={api.onNewProduct} onEditProduct={api.onEditProduct}
       onArchiveProduct={api.onArchiveProduct} onUnarchiveProduct={api.onUnarchiveProduct}
-      onDeleteProduct={api.onDeleteProduct} maxProducts={myPlan?.max_products}/>;
+      onDeleteProduct={api.onDeleteProduct} onToggleFeatured={api.onToggleFeatured} maxProducts={myPlan?.max_products}/>;
     if (sec === "analytics")  return <Analytics products={products} orders={orders} C={C} ac={ac}/>;
     if (sec === "customers")  return <Clientes orders={orders} C={C} ac={ac}/>;
     if (sec === "design")     return <Diseno cfg={cfg} products={products} onUpdateConfig={api.onUpdateConfig} C={C} ac={ac} flash={notify} profileRealName={profileRealName}/>;

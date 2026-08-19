@@ -43,6 +43,28 @@ export const authSignIn = async (email, password) => ({ user: MOCK_USER });
 export const authSignOut = async () => {};
 export const authGetSession = async () => ({ user: MOCK_USER });
 
+// ── Caché de CORTO plazo (60-90s), SOLO en memoria mientras la app está
+// abierta (nunca localStorage, nunca sobrevive a un recargar) — para "ver el
+// mismo vendedor dos veces seguidas" (entrar a un perfil, salir con Atrás,
+// volver a entrar) no cueste una petición nueva de cada dato cada vez.
+// A propósito, esto NUNCA envuelve nada que decida "¿es Pro?" (eso sigue
+// siendo SIEMPRE fresco: getSellerPlan no pasa por aquí) — solo evita
+// repetir lecturas de solo-consulta que ya se acaban de traer.
+const _shortCache = new Map(); // key -> { at, data }
+const SHORT_CACHE_MS = 75000; // 75s
+async function withShortCache(key, fetcher) {
+  const hit = _shortCache.get(key);
+  if (hit && (Date.now() - hit.at) < SHORT_CACHE_MS) return hit.data;
+  const data = await fetcher();
+  _shortCache.set(key, { at: Date.now(), data });
+  return data;
+}
+// Se usa cuando una escritura real (seguir, dejar reseña) vuelve obsoleto un
+// dato ya cacheado de ESE mismo vendedor — para que la recarga inmediata que
+// ya dispara esa acción (ver reloadViewedReviews/reloadSellerReviews en
+// App.jsx) traiga el dato fresco de verdad, nunca el cacheado de antes.
+function invalidateShortCache(prefix, id) { _shortCache.delete(`${prefix}:${id}`); }
+
 // User functions — leen la tabla `profiles` del backend (nombre/avatar reales).
 // Con caché en memoria para no repetir consultas por el mismo usuario.
 const _profileCache = new Map();
@@ -210,6 +232,10 @@ export const mapProduct = (p) => {
     seller_verified: seller ? !!seller.is_verified : (p.seller_verified ?? false),
     seller_name: p.seller_name || seller?.full_name || undefined,
     seller_avatar_url: seller?.avatar_url || p.seller_avatar_url || null,
+    // "Destacado" del vendedor (gratis, lo activa él mismo en Mi Panel) — decide
+    // si aparece en el carrusel de Destacados de Inicio de SU Tienda. Distinto de
+    // `badge` (etiqueta de texto) y de `promoted` (promoción pagada/admin).
+    storeFeatured: !!p.store_featured,
   };
 };
 // SELECT compartido por toda consulta que arma tarjetas de producto: trae el
@@ -301,13 +327,20 @@ export const deleteProduct = async (id) => {
 // propio dueño); por defecto (false) trae los activos, sin los archivados —
 // un producto archivado no pertenece a "En venta" hasta que se recupera.
 export const getProductsBySeller = async (id, { publicView = false, archived = false } = {}) => {
-  let q = supabase.from("products").select(PRODUCT_SELECT).eq("seller_id", id).neq("status", "deleted");
-  q = archived ? q.not("archived_at", "is", null) : q.is("archived_at", null);
-  q = q.order("created_at", { ascending: false });
-  if (publicView) q = q.or("kind.eq.service,stock.is.null,stock.gt.0");
-  const { data, error } = await q;
-  if (error) { console.error("getProductsBySeller:", error.message); return []; }
-  return (data || []).map(mapProduct);
+  if (!id) return [];
+  // Caché corta SOLO en la vía pública (ver la Tienda de otro vendedor) — la
+  // del propio dueño gestionando "En venta"/"Archivados" siempre fresca.
+  const fetcher = async () => {
+    let q = supabase.from("products").select(PRODUCT_SELECT).eq("seller_id", id).neq("status", "deleted");
+    q = archived ? q.not("archived_at", "is", null) : q.is("archived_at", null);
+    q = q.order("created_at", { ascending: false });
+    if (publicView) q = q.or("kind.eq.service,stock.is.null,stock.gt.0");
+    const { data, error } = await q;
+    if (error) { console.error("getProductsBySeller:", error.message); return []; }
+    return (data || []).map(mapProduct);
+  };
+  if (!publicView) return fetcher();
+  return withShortCache(`pbs:${id}:${archived}`, fetcher);
 };
 // ── ARCHIVAR vs BORRAR — el candado de límite de productos SOLO cuenta los
 // activos (ni deleted ni archivados). Archivar esconde por 30 días fijos (el
@@ -408,21 +441,23 @@ export const submitProductReview = async (productId, userId, rating, comment) =>
 // "Could not find the 'user_id' column of 'seller_reviews'".
 export const getSellerReviews = async (sellerId) => {
   if (!sellerId) return [];
-  try {
-    const { data, error } = await supabase.from("seller_reviews").select("id, reviewer_id, rating, comment, created_at, updated_at").eq("seller_id", sellerId).order("created_at", { ascending: false });
-    if (error) { console.error("getSellerReviews:", error.message); return []; }
-    if (!data || !data.length) return [];
-    const uids = [...new Set(data.map(r => r.reviewer_id))].filter(Boolean);
-    let profMap = {};
-    if (uids.length) {
-      const { data: profs } = await supabase.from("profiles").select("id, full_name, avatar_url").in("id", uids);
-      (profs || []).forEach(p => { profMap[p.id] = p; });
-    }
-    return data.map(r => {
-      const p = profMap[r.reviewer_id];
-      return { id: r.id, reviewerId: r.reviewer_id, rating: r.rating, comment: r.comment || "", createdAt: r.created_at, updatedAt: r.updated_at, name: p?.full_name || "Usuario", avatar: p?.avatar_url || null };
-    });
-  } catch (e) { console.error("getSellerReviews (excepción):", e?.message || e); return []; }
+  return withShortCache(`srv:${sellerId}`, async () => {
+    try {
+      const { data, error } = await supabase.from("seller_reviews").select("id, reviewer_id, rating, comment, created_at, updated_at").eq("seller_id", sellerId).order("created_at", { ascending: false });
+      if (error) { console.error("getSellerReviews:", error.message); return []; }
+      if (!data || !data.length) return [];
+      const uids = [...new Set(data.map(r => r.reviewer_id))].filter(Boolean);
+      let profMap = {};
+      if (uids.length) {
+        const { data: profs } = await supabase.from("profiles").select("id, full_name, avatar_url").in("id", uids);
+        (profs || []).forEach(p => { profMap[p.id] = p; });
+      }
+      return data.map(r => {
+        const p = profMap[r.reviewer_id];
+        return { id: r.id, reviewerId: r.reviewer_id, rating: r.rating, comment: r.comment || "", createdAt: r.created_at, updatedAt: r.updated_at, name: p?.full_name || "Usuario", avatar: p?.avatar_url || null };
+      });
+    } catch (e) { console.error("getSellerReviews (excepción):", e?.message || e); return []; }
+  });
 };
 // Mi valoración LIBRE sobre esa persona (order_id IS NULL) — la que se deja
 // desde su perfil, sin pedido de por medio. Una sola por persona (índice único
@@ -455,6 +490,11 @@ export const submitSellerReview = async (targetId, reviewerId, rating, comment) 
     const { error } = await supabase.from("seller_reviews").insert({ seller_id: targetId, reviewer_id: reviewerId, order_id: null, rating, comment: comment || "" });
     if (error) throw error;
   }
+  // La recarga inmediata que ya dispara esta acción (reloadViewedReviews/
+  // reloadSellerReviews en App.jsx) debe traer el dato fresco, no el
+  // cacheado de antes de dejar la reseña.
+  invalidateShortCache("srv", targetId);
+  invalidateShortCache("sr", targetId);
 };
 // Valoración POR PEDIDO (order_id: el pedido real ya completado) — la que se
 // deja tras entregar/comprar. SIEMPRE un INSERT nuevo, nunca upsert: cada
@@ -478,6 +518,8 @@ export const deleteSellerReview = async (targetId, reviewerId) => {
   if (!targetId || !reviewerId) throw new Error("Sesión no válida");
   const { error } = await supabase.from("seller_reviews").delete().eq("seller_id", targetId).eq("reviewer_id", reviewerId).is("order_id", null);
   if (error) throw error;
+  invalidateShortCache("srv", targetId);
+  invalidateShortCache("sr", targetId);
 };
 
 // ── Encabezado del perfil (calificación del vendedor + estadísticas reales) ──
@@ -485,35 +527,39 @@ export const deleteSellerReview = async (targetId, reviewerId) => {
 // reseñas del vendedor (mismo dato agregado que respalda la pestaña Valoraciones).
 export const getSellerRatingInfo = async (userId) => {
   if (!userId) return null;
-  try {
-    const { data, error } = await supabase.from("profiles").select("seller_rating, seller_reviews_count").eq("id", userId).single();
-    if (error || !data) return null;
-    return {
-      rating: data.seller_rating != null ? Number(data.seller_rating) : null,
-      count: Number(data.seller_reviews_count) || 0,
-    };
-  } catch (e) { return null; }
+  return withShortCache(`sr:${userId}`, async () => {
+    try {
+      const { data, error } = await supabase.from("profiles").select("seller_rating, seller_reviews_count").eq("id", userId).single();
+      if (error || !data) return null;
+      return {
+        rating: data.seller_rating != null ? Number(data.seller_rating) : null,
+        count: Number(data.seller_reviews_count) || 0,
+      };
+    } catch (e) { return null; }
+  });
 };
 // get_profile_header_stats(p_user_id) — ventas/compras/envíos/seguidores reales
 // del encabezado del perfil. Nunca se calculan a mano en el frontend.
 export const getProfileHeaderStats = async (userId) => {
   const empty = { ventas: 0, compras: 0, envios: 0, seguidores: 0, sigoYo: false };
   if (!userId) return empty;
-  try {
-    const { data, error } = await supabase.rpc("get_profile_header_stats", { p_user_id: userId });
-    if (error || !data) return empty;
-    const row = Array.isArray(data) ? (data[0] || {}) : data;
-    return {
-      ventas: Number(row.ventas) || 0,
-      compras: Number(row.compras) || 0,
-      envios: Number(row.envios) || 0,
-      seguidores: Number(row.seguidores ?? row.followers) || 0,
-      // sigo_yo: si el usuario que pide esto YA sigue a p_user_id (real,
-      // calculado en el backend) — antes se perdía aquí y el botón "Seguir"
-      // nunca podía arrancar en el estado correcto.
-      sigoYo: !!row.sigo_yo,
-    };
-  } catch (e) { return empty; }
+  return withShortCache(`hs:${userId}`, async () => {
+    try {
+      const { data, error } = await supabase.rpc("get_profile_header_stats", { p_user_id: userId });
+      if (error || !data) return empty;
+      const row = Array.isArray(data) ? (data[0] || {}) : data;
+      return {
+        ventas: Number(row.ventas) || 0,
+        compras: Number(row.compras) || 0,
+        envios: Number(row.envios) || 0,
+        seguidores: Number(row.seguidores ?? row.followers) || 0,
+        // sigo_yo: si el usuario que pide esto YA sigue a p_user_id (real,
+        // calculado en el backend) — antes se perdía aquí y el botón "Seguir"
+        // nunca podía arrancar en el estado correcto.
+        sigoYo: !!row.sigo_yo,
+      };
+    } catch (e) { return empty; }
+  });
 };
 // Seguir/dejar de seguir a otra persona — escribe/borra la fila real en
 // followers (toggle_follow, RPC ya existente). Devuelve el estado NUEVO real
@@ -521,6 +567,8 @@ export const getProfileHeaderStats = async (userId) => {
 export const toggleFollow = async (targetId) => {
   const { data, error } = await supabase.rpc("toggle_follow", { p_target_id: targetId });
   if (error) { console.error("toggleFollow:", error.message); throw error; }
+  // seguidores/sigo_yo de esa persona ya no son lo que el caché tenía.
+  invalidateShortCache("hs", targetId);
   return !!data;
 };
 
@@ -528,9 +576,11 @@ export const toggleFollow = async (targetId) => {
 // Lectura pública (cualquiera puede ver la tienda de un vendedor Pro real).
 export const getStoreConfig = async (userId) => {
   if (!userId) return null;
-  const { data, error } = await supabase.from("store_config").select("*").eq("user_id", userId).maybeSingle();
-  if (error) { console.error("getStoreConfig:", error.message); return null; }
-  return data || null;
+  return withShortCache(`sc:${userId}`, async () => {
+    const { data, error } = await supabase.from("store_config").select("*").eq("user_id", userId).maybeSingle();
+    if (error) { console.error("getStoreConfig:", error.message); return null; }
+    return data || null;
+  });
 };
 // Única vía de escritura: upsert_store_config (RPC) — crea la fila si no
 // existe y solo pisa los campos presentes en `updates` (fusión real, nunca
@@ -538,6 +588,10 @@ export const getStoreConfig = async (userId) => {
 export const upsertMyStoreConfig = async (updates) => {
   const { data, error } = await supabase.rpc("upsert_store_config", { p_updates: updates });
   if (error) { console.error("upsertMyStoreConfig:", error.message); throw error; }
+  // App.jsx ya refleja `data` de inmediato en su propio estado (setStoreCfg),
+  // pero si el dueño vuelve a ver su Tienda por la vía de "otro vendedor"
+  // (viewProfileId), no debe encontrarse la config vieja cacheada.
+  if (data?.user_id) invalidateShortCache("sc", data.user_id);
   return data;
 };
 

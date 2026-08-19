@@ -240,7 +240,12 @@ export const Avatar = ({ url, avatar, name, size = 40, style, verified = false }
 // dato del id anterior: useSellerDisplay ya lo limpia antes de pedir el nuevo.
 export const AvatarUser = ({ userId, name, size = 40, style, verified }) => {
   const p = useSellerDisplay(userId);
-  return <Avatar url={p.id === userId ? p.avatar : null} name={(p.id === userId && p.name) || name} size={size} style={style} verified={verified != null ? verified : (p.id === userId && p.verified)} />;
+  const resolved = p.id === userId;
+  // Mientras no se confirme el id actual, NUNCA se usa el `name` de respaldo
+  // que pasó quien llama (con frecuencia un genérico tipo "Vendedor") — eso
+  // producía una letra de avatar ("V") que parecía un dato real durante el
+  // instante de carga. En blanco (ícono genérico) hasta que se confirma.
+  return <Avatar url={resolved ? p.avatar : null} name={resolved ? p.name : ""} size={size} style={style} verified={verified != null ? verified : (resolved && p.verified)} />;
 };
 
 // Ilustración de MUESTRA para la selfie de KYC (verificación de perfil y KYC de

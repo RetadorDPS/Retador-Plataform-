@@ -393,6 +393,10 @@ function AppShell({ sessionUser }) {
     if (changes.stock              !== undefined) upd.stock               = Number(changes.stock) || 0;
     if (changes.bulkDiscounts      !== undefined) upd.bulk_discounts      = Array.isArray(changes.bulkDiscounts) ? changes.bulkDiscounts : [];
     if (changes.acceptedCurrencies !== undefined) upd.accepted_currencies = Array.isArray(changes.acceptedCurrencies) ? changes.acceptedCurrencies : [];
+    // "Destacado" (gratis, del propio vendedor) — se ve en el carrusel de
+    // Destacados de Inicio de su Tienda. Se cambia con un toque, sin abrir el
+    // formulario de edición completo (ver interruptor en Mi Panel → Productos).
+    if (changes.storeFeatured   !== undefined) upd.store_featured   = !!changes.storeFeatured;
     // Al editar, una publicación RETIRADA vuelve a quedar visible (approved).
     upd.moderation_status = "approved";
     let data, missing;
@@ -1111,6 +1115,7 @@ function AppShell({ sessionUser }) {
     onUnarchiveProduct: (id) => handleUnarchive(id),
     onDeleteProduct: (id) => confirmDeleteProduct(id),
     onUpdateProduct: (id, changes) => updateProduct(id, changes),
+    onToggleFeatured: (p) => updateProduct(p.id, { storeFeatured: !p.storeFeatured }),
     onUpdateConfig: async (draft) => { const saved = await upsertMyStoreConfig(draft); setStoreCfg(saved); },
     onPlanRequested: () => reloadOwn(),
   };
@@ -1868,7 +1873,16 @@ function AppShell({ sessionUser }) {
 
       {/* Overlays */}
       {showCats   && <CatModal onClose={() => setShowCats(false)} onSelect={cat => { setActiveCat(cat); setShowCats(false); }} active={activeCat} />}
-      {pubOpen    && <PubSheet onClose={() => { setPubOpen(false); setPubPrefillCat(null); }} onPublish={async d => { setPubOpen(false); setPubPrefillCat(null); await handlePublish(d); }} user={user} flash={flash} initialKind={pubOpen === "service" ? "service" : (pubPrefillCat ? "product" : "")} initialCat={pubPrefillCat} />}
+      {/* z-index propio (5400) POR ENCIMA de "Mi Panel" (zIndex:800, capa a
+          pantalla completa aparte) — antes PubSheet usaba su zIndex interno
+          (400, pensado para el contexto normal del mercado) y el formulario
+          se abría de verdad, pero TAPADO detrás de Mi Panel: se podía
+          publicar a ciegas sin ver nada hasta salir de Mi Panel. */}
+      {pubOpen    && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 5400 }}>
+          <PubSheet onClose={() => { setPubOpen(false); setPubPrefillCat(null); }} onPublish={async d => { setPubOpen(false); setPubPrefillCat(null); await handlePublish(d); }} user={user} flash={flash} initialKind={pubOpen === "service" ? "service" : (pubPrefillCat ? "product" : "")} initialCat={pubPrefillCat} />
+        </div>
+      )}
       {showNotif  && <NotifPanel onClose={() => { markNotifRead(null); setShowNotif(false); }} notifs={myNotifs} onRead={markNotifRead} onOpenOrder={(oid) => { setShowNotif(false); markNotifRead(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }} onOpenConversation={(cid) => { setShowNotif(false); markNotifRead(null); openConversationById(cid); }}
         onOpenQueue={(page) => {
           // Si no tiene ningún acceso al panel, no intenta navegar ahí (el panel

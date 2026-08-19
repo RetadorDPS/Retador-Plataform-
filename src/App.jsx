@@ -198,10 +198,26 @@ export default function App() {
 
   useEffect(() => {
     let alive = true;
-    loadSessionUser().then(u => { if (alive) setSessionUser(u); });
+    // CAUSA RAÍZ REAL de la pantalla negra confirmada reproduciendo la app de
+    // verdad en un navegador (con una sesión guardada VENCIDA + red que se
+    // queda colgada sin responder, la condición real de mala señal): antes,
+    // loadSessionUser() (auth.getSession(), que puede disparar un refresh de
+    // token por red si el token guardado venció) no tenía límite de tiempo —
+    // si esa llamada se quedaba colgada, sessionUser se quedaba en undefined
+    // PARA SIEMPRE, y la app nunca sale de <PantallaCargando/> (fondo negro
+    // con un spinner chiquito, fácil de confundir con "la app está rota").
+    // Ahora, si no responde en 8s, se trata como "sin sesión" — la persona ve
+    // la bienvenida y puede volver a intentar, nunca un negro sin salida.
+    const bootSession = () => {
+      Promise.race([
+        loadSessionUser(),
+        new Promise(resolve => setTimeout(() => resolve(undefined), 8000)),
+      ]).then(u => { if (alive) setSessionUser(u === undefined ? null : u); });
+    };
+    bootSession();
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session?.user) { setSessionUser(null); return; }
-      loadSessionUser().then(u => { if (alive) setSessionUser(u); });
+      bootSession();
     });
     return () => { alive = false; sub?.subscription?.unsubscribe?.(); };
   }, []);

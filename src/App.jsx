@@ -1090,11 +1090,17 @@ function AppShell({ sessionUser }) {
   const myRealPlan = realPlans.find(p => p.id === user?.plan) || realPlans.find(p => p.id === "gratis") || null;
   const currentPlanName = myRealPlan?.name || "Gratis";
   // ── TIENDA PRO (integración definitiva) ──────────────────────────────────
-  // Gate real: plans.can_customize (columna real ya existente, la misma que
-  // separa "Free" de "Pro/Premium" en la tabla de planes) — no un id de plan
-  // a mano, así cualquier plan pagado que el admin marque can_customize=true
-  // obtiene la tienda, sin tener que tocar código si el admin agrega otro.
-  const isProStore = !!myRealPlan?.can_customize;
+  // CORRECCIÓN DE RAÍZ (emergencia pre-lanzamiento): decidir "¿es Pro?" NUNCA
+  // debe depender de esperar realPlans (tabla aparte, con su propia carga que
+  // puede llegar tarde o fallar) — esa espera era la causa real tanto del
+  // destello Free-antes-de-Pro como de la pantalla negra que vino después.
+  // profiles.plan (el id del plan) ya llega en la MISMA carga rápida que
+  // siempre ha usado el perfil gratis (user.plan, sincronizado por
+  // refreshSessionProfile) — comparación instantánea, sin esperar nada.
+  // realPlans se sigue cargando aparte, pero SOLO para mostrar detalles
+  // (nombre/precio/límites en Suscripción) — nunca para este gate.
+  const isSellerPlanStore = (planId) => planId === "pro" || planId === "premium";
+  const isProStore = isSellerPlanStore(user?.plan);
   const [storeCfg, setStoreCfg] = useState(null);
   const [storeMode, setStoreMode] = useState("store");
   const [myStoreStats, setMyStoreStats] = useState({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
@@ -1148,22 +1154,17 @@ function AppShell({ sessionUser }) {
     setViewedStoreRating(null);
     setViewedStoreStats({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
     if (!viewProfileId) { setViewedStoreEligible(false); return; }
-    // realPlans aún no cargó (fetch propio, ver getPlans() más arriba): sin la
-    // tabla de planes real, "can_customize" no se puede saber todavía — nos
-    // quedamos en null (neutro) en vez de resolver a false por descarte y
-    // corregir después. Esa resolución prematura era la causa real del
-    // destello "perfil Free" antes del Pro real: este efecto ya se re-ejecuta
-    // solo cuando realPlans llegue (está en las dependencias).
-    if (!realPlans.length) return;
     let alive = true;
     // getSellerPlan (SIN caché) decide el plan real EN ESTE INSTANTE — activar
     // o bajar el plan de otra cuenta debe reflejarse ya mismo, nunca depender
     // del caché de sesión de getUserById (root cause real de "activé Pro y
-    // sigue viéndose Free desde otra cuenta").
+    // sigue viéndose Free desde otra cuenta"). NUNCA depende de realPlans:
+    // el id del plan ya basta (isSellerPlanStore), así este efecto resuelve
+    // tan rápido como el perfil gratis siempre ha cargado, sin nada que
+    // esperar aparte — ver corrección de raíz arriba en isProStore.
     Promise.all([getUserById(viewProfileId), getSellerPlan(viewProfileId)]).then(async ([u, planId]) => {
       if (!alive) return;
-      const plan = realPlans.find(p => p.id === planId);
-      const eligible = !!plan?.can_customize;
+      const eligible = isSellerPlanStore(planId);
       // getUserById devuelve { name, ... } (no "full_name") — antes esto
       // siempre quedaba vacío y la Tienda de otro vendedor caía siempre al
       // "Vendedor" genérico de respaldo en vez de su nombre real.
@@ -1180,7 +1181,7 @@ function AppShell({ sessionUser }) {
       setViewedStoreEligible(true);
     }).catch(() => { if (alive) setViewedStoreEligible(false); });
     return () => { alive = false; };
-  }, [viewProfileId, realPlans]);
+  }, [viewProfileId]);
   // Tras dejar/editar/borrar MI reseña sobre este vendedor, recarga la lista
   // y el promedio reales (el mismo dato que ya vieron todos al entrar).
   const reloadViewedReviews = useCallback(() => {
@@ -1216,15 +1217,12 @@ function AppShell({ sessionUser }) {
     setSellerStoreRating(null);
     setSellerStoreStats({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
     if (!selSeller) { setSellerStoreEligible(false); return; }
-    // Mismo guard que en el efecto de viewProfileId: sin realPlans real
-    // todavía no se puede saber can_customize — se queda en null (neutro)
-    // hasta que la tabla de planes cargue (efecto re-ejecuta solo).
-    if (!realPlans.length) return;
     let alive = true;
+    // Mismo criterio instantáneo que en el efecto de viewProfileId — nunca
+    // depende de realPlans (ver isProStore más arriba).
     Promise.all([getUserById(selSeller), getSellerPlan(selSeller)]).then(async ([u, planId]) => {
       if (!alive) return;
-      const plan = realPlans.find(p => p.id === planId);
-      const eligible = !!plan?.can_customize;
+      const eligible = isSellerPlanStore(planId);
       setSellerStoreName(u?.name || "");
       setSellerStoreVerified(!!u?.verified);
       if (!eligible) { setSellerStoreEligible(false); return; }
@@ -1236,7 +1234,7 @@ function AppShell({ sessionUser }) {
       setSellerStoreEligible(true);
     }).catch(() => { if (alive) setSellerStoreEligible(false); });
     return () => { alive = false; };
-  }, [selSeller, realPlans]);
+  }, [selSeller]);
   const reloadSellerReviews = useCallback(() => {
     if (!selSeller) return;
     Promise.all([getSellerRatingInfo(selSeller), getSellerReviews(selSeller)]).then(([r, revs]) => {

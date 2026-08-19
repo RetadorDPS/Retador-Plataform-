@@ -26,7 +26,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star,
 } from "lucide-react";
-import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, getOrCreateReferralCode, getReferralStats, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser } from "../shared/index.js";
+import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, getOrCreateReferralCode, getReferralStats, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow } from "../shared/index.js";
 
 /* ── TEMA — propio y compacto, como el resto de paneles "premium" de la app ── */
 const S_DARK = {
@@ -211,10 +211,24 @@ function ReviewsList({ ratingInfo, reviews, C, ac, sellerId, viewerId, onReviewC
 }
 
 /* ── STOREFRONT (vista pública — los 4 bloques configurables) ──────────── */
-export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [], isOwner, onDash, onBack, onMenu, onSettings, onChat, onProduct, embedded = false, profileRealName, isVerified = false, sellerId = null, viewerId = null, onReviewChanged }) {
+export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [], isOwner, onDash, onBack, onMenu, onSettings, onChat, onProduct, embedded = false, profileRealName, isVerified = false, sellerId = null, viewerId = null, onReviewChanged, flash }) {
   const C = useSTk();
   const [tab, setTab] = useState("inicio");
   const [selCat, setSelCat] = useState("all");
+  // Punto 2 — Seguir REAL: el estado inicial viene del dato real de la cabecera
+  // (headerStats.sigoYo, ya provisto por get_profile_header_stats). Optimista al
+  // tocar, pero revierte si toggle_follow (la función real) falla.
+  const [following, setFollowing] = useState(!!headerStats?.sigoYo);
+  const [followBusy, setFollowBusy] = useState(false);
+  useEffect(() => { setFollowing(!!headerStats?.sigoYo); }, [headerStats?.sigoYo, sellerId]);
+  const onFollowClick = async () => {
+    if (!viewerId || !sellerId || followBusy) { if (!viewerId) flash?.("Inicia sesión para seguir a este vendedor"); return; }
+    const next = !following;
+    setFollowing(next); setFollowBusy(true);
+    try { const real = await toggleFollow(sellerId); setFollowing(real); }
+    catch (e) { setFollowing(!next); flash?.("⚠️ No se pudo actualizar: " + (e?.message || "error")); }
+    finally { setFollowBusy(false); }
+  };
   const ac = cfg.accent || "#FFC01E", r = toRgb(ac);
   // Regla #2: el nombre por defecto es el nombre REAL del perfil — nunca
   // inventado ni genérico. cfg.name (Diseño → Branding) lo reemplaza si el
@@ -336,7 +350,7 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
           </div>
           {!isOwner && (
             <div style={{ display:"flex", gap:8 }}>
-              <button style={{ flex:1, padding:"9px 0", borderRadius:9, border:"none", cursor:"pointer", fontSize:13, fontWeight:700, background:ac, color:"#000" }}>+ Seguir</button>
+              <button onClick={onFollowClick} disabled={followBusy} style={{ flex:1, padding:"9px 0", borderRadius:9, border: following ? `1px solid rgba(255,255,255,.25)` : "none", cursor: followBusy ? "default" : "pointer", fontSize:13, fontWeight:700, background: following ? "rgba(255,255,255,.08)" : ac, color: following ? "#fff" : "#000", opacity: followBusy ? .7 : 1 }}>{following ? "✓ Siguiendo" : "+ Seguir"}</button>
               <button onClick={onChat} style={{ padding:"9px 14px", borderRadius:9, border:"1px solid rgba(255,255,255,.18)", background:"rgba(255,255,255,.08)", cursor:"pointer", color:"#fff", fontSize:13 }}>💬 Chat</button>
             </div>
           )}
@@ -1287,7 +1301,7 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
 }
 
 /* ── DASHBOARD (panel de gestión Pro — las 9 secciones) ─────────────────── */
-export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api, onStore, onMenu, onBack, onSettings, flash, profileRealName }) {
+export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api, onStore, onMenu, onBack, flash, profileRealName }) {
   const C = useSTk();
   const { isMobile } = useR();
   const [sec, setSec] = useState("overview");
@@ -1332,13 +1346,15 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
     return null;
   };
 
-  // Regla #6: solo se reserva espacio real de la barra inferior cuando esta
-  // pantalla es la raíz del tab Perfil (onMenu presente = nav visible ahí).
-  // En pScr="profile-full" (onBack) la barra ya está oculta por completo.
-  const navVisible = !!onMenu;
+  // "Mi Panel" es SIEMPRE una capa a pantalla completa (position absolute,
+  // fuera del árbol de la barra inferior general — ver integración en
+  // App.jsx), nunca coexiste con esa barra: no hay nada real que reservarle
+  // espacio. Antes esto reservaba NAV_CLEARANCE cuando onMenu estaba presente
+  // (regla heredada de cuando el panel vivía embebido junto a la barra), lo
+  // que dejaba un espacio negro vacío fijo al final — regresión ya corregida.
 
   return (
-    <div style={{ display:"flex", height:"100%", overflow:"hidden", background:C.bg, color:C.t, boxSizing:"border-box", paddingBottom: navVisible ? NAV_CLEARANCE : 0 }}>
+    <div style={{ display:"flex", height:"100%", overflow:"hidden", background:C.bg, color:C.t, boxSizing:"border-box" }}>
       <Toast msg={toast?.msg} type={toast?.type} C={C}/>
       <div style={{ width:col?50:200, background:C.s1, borderRight:`1px solid ${C.b}`, display:"flex", flexDirection:"column", flexShrink:0, transition:"width .25s ease", overflow:"hidden" }}>
         <div style={{ padding:col?"13px 0":"13px 14px", borderBottom:`1px solid ${C.b}`, display:"flex", alignItems:"center", justifyContent:col?"center":"space-between" }}>
@@ -1369,14 +1385,17 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
         {/* Acceso SIEMPRE disponible al resto de la app, en TODAS las secciones
             del panel — nunca una pantalla donde el dueño quede atrapado sin
             ☰, sin Atrás y sin Configuración de la app. */}
-        {(onMenu || onBack || onSettings) && (
-          <div style={{ padding:"9px 22px", borderBottom:`1px solid ${C.b}`, display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
+        {(onMenu || onBack) && (
+          <div style={{ padding:"9px 22px", borderBottom:`1px solid ${C.b}`, display:"flex", alignItems:"center", flexShrink:0 }}>
             {onMenu
+              // ☰ Menú ya da acceso a Configuración (ProfileMenuDrawer) — el ⚙️
+              // que vivía aquí navegaba pScr="settings" en la pantalla de abajo,
+              // invisible detrás de esta capa a pantalla completa: nunca abría
+              // nada de verdad. Se quita en vez de arreglarlo, por ser redundante.
               ? <button onClick={onMenu} style={{ background:"none", border:`1px solid ${C.b}`, borderRadius:6, height:30, padding:"0 12px", cursor:"pointer", display:"flex", alignItems:"center", gap:7, color:C.t, fontSize:12, fontWeight:700 }}><span style={{ fontSize:15, lineHeight:1 }}>☰</span> Menú</button>
               : onBack
                 ? <button onClick={onBack} style={{ background:"none", border:"none", cursor:"pointer", padding:0, display:"flex", alignItems:"center", gap:6, color:C.m, fontSize:12, fontWeight:600 }}><ChevronLeft size={15}/> Atrás</button>
-                : <span/>}
-            {onSettings && <button onClick={onSettings} aria-label="Configuración" style={{ background:"none", border:`1px solid ${C.b}`, borderRadius:6, width:30, height:30, cursor:"pointer", color:C.m, display:"flex", alignItems:"center", justifyContent:"center" }}><SettingsIcon size={14}/></button>}
+                : null}
           </div>
         )}
         {!isDesign && <div style={{ padding:"14px 22px", flex:1 }}>{renderSec()}</div>}

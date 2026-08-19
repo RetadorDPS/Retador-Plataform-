@@ -1,6 +1,28 @@
 import { Component, useEffect, useState } from "react";
 import { G, useAt } from "./theme.jsx";
-import { getUserById } from "./backend.js";
+import { getSellerDisplay } from "./backend.js";
+
+// Identidad A MOSTRAR de un vendedor (nombre/foto/verificado/plan, con la
+// marca de su Tienda Pro si la tiene) — UNA sola fuente real que cualquier
+// pantalla puede usar. Al cambiar `id`, limpia YA (antes de pedir el dato
+// nuevo, con loading:true) — nunca debe verse el dato del perfil anterior
+// mientras carga el siguiente, ni por un instante. Mientras loading=true,
+// quien la use debe mostrar un estado neutro (esqueleto), nunca un relleno
+// que parezca un dato real.
+export function useSellerDisplay(id) {
+  const [state, setState] = useState({ id: null, name: null, avatar: null, verified: false, planId: null, loading: false });
+  useEffect(() => {
+    if (!id) { setState({ id: null, name: null, avatar: null, verified: false, planId: null, loading: false }); return; }
+    let alive = true;
+    setState({ id, name: null, avatar: null, verified: false, planId: null, loading: true });
+    getSellerDisplay(id).then((d) => {
+      if (!alive) return;
+      setState({ id, name: d?.name || null, avatar: d?.avatar || null, verified: !!d?.verified, planId: d?.planId || null, loading: false });
+    }).catch(() => { if (alive) setState((s) => (s.id === id ? { ...s, loading: false } : s)); });
+    return () => { alive = false; };
+  }, [id]);
+  return state;
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CSS GLOBAL
@@ -210,13 +232,15 @@ export const Avatar = ({ url, avatar, name, size = 40, style, verified = false }
     <VerifiedBadge size={tick} style={{ position: "absolute", right: -2, bottom: -2 }} />
   </div>;
 };
-// Igual que Avatar, pero resuelve la foto, el nombre y el ✓ REALES de una persona por
-// su id (tabla profiles, con caché). Úsalo donde solo tienes el id: vendedor del
-// producto, partes de un pedido, chat, resultados. `verified` explícito tiene prioridad.
+// Igual que Avatar, pero resuelve la foto, el nombre y el ✓ REALES de una persona
+// por su id — vía useSellerDisplay (UNA sola fuente: foto/nombre de su Tienda si
+// la tiene, si no su foto/nombre real de perfil). Úsalo donde solo tienes el id:
+// vendedor del producto, partes de un pedido, chat, resultados. `verified`
+// explícito tiene prioridad. Mientras carga (o cambia de userId), no muestra el
+// dato del id anterior: useSellerDisplay ya lo limpia antes de pedir el nuevo.
 export const AvatarUser = ({ userId, name, size = 40, style, verified }) => {
-  const [p, setP] = useState(null);
-  useEffect(() => { let a = true; if (userId) getUserById(userId).then(x => { if (a) setP(x); }).catch(() => {}); return () => { a = false; }; }, [userId]);
-  return <Avatar url={p?.avatar || null} name={p?.name || name} size={size} style={style} verified={verified != null ? verified : !!p?.verified} />;
+  const p = useSellerDisplay(userId);
+  return <Avatar url={p.id === userId ? p.avatar : null} name={(p.id === userId && p.name) || name} size={size} style={style} verified={verified != null ? verified : (p.id === userId && p.verified)} />;
 };
 
 // Ilustración de MUESTRA para la selfie de KYC (verificación de perfil y KYC de

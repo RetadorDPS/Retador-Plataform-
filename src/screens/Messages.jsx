@@ -1,5 +1,15 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { Avatar, AvatarUser, G, Ic, ORDER_FLOW, PullIndicator, Spin, getMyConversations, getSB, getUserName, getProductById, isBlockedPair, isBlockSendError, toggleBlockUser, editMessage, deleteMessage, uploadVoiceNote, voiceNoteSignedUrl, setReaction, getReactionsForMessages, loadMessages, markRead, markDelivered, money, pushBackHandler, sendMessage, supabase, trackEvent, useAt, useR, usePullToRefresh } from "../shared/index.js";
+import { Avatar, AvatarUser, G, Ic, ORDER_FLOW, PullIndicator, Spin, getMyConversations, getSB, getSellerDisplay, useSellerDisplay, getProductById, isBlockedPair, isBlockSendError, toggleBlockUser, editMessage, deleteMessage, uploadVoiceNote, voiceNoteSignedUrl, setReaction, getReactionsForMessages, loadMessages, markRead, markDelivered, money, pushBackHandler, sendMessage, supabase, trackEvent, useAt, useR, usePullToRefresh } from "../shared/index.js";
+
+// Nombre a MOSTRAR de un vendedor por id, para texto (no solo el avatar) —
+// misma fuente única (useSellerDisplay) que AvatarUser, con el mismo criterio:
+// mientras no se confirme el id actual, se cae al nombre por props (nunca un
+// nombre viejo de otro id). Evita el mismo "dos fuentes" que ya se corrigió
+// en la cabecera del chat, en cualquier lista que muestre nombre de vendedor.
+function ConvName({ id, fallback }) {
+  const p = useSellerDisplay(id);
+  return (p.id === id && p.name) || fallback || "Usuario";
+}
 
 // Fondo del chat: textura de identidad RETADOR — sutil pero SÍ perceptible (un
 // patrón de puntos en diagonal), teñida con el color de chat elegido (antes
@@ -570,7 +580,7 @@ function ForwardPickerModal({ user, count = 1, onClose, onConfirm, CARD, B, T1, 
               : convs.map(c => (
                   <div key={c.id} onClick={() => toggle(c.otherId)} className="cd" style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 6px", borderRadius: 12, cursor: "pointer" }}>
                     <AvatarUser userId={c.otherId} name={c.name} size={38} />
-                    <p style={{ flex: 1, fontSize: 13, fontWeight: 600, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</p>
+                    <p style={{ flex: 1, fontSize: 13, fontWeight: 600, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><ConvName id={c.otherId} fallback={c.name} /></p>
                     <div style={{ width: 20, height: 20, borderRadius: "50%", border: `2px solid ${picked[c.otherId] ? G : B}`, background: picked[c.otherId] ? G : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#000", fontWeight: 800, flexShrink: 0 }}>{picked[c.otherId] ? "✓" : ""}</div>
                   </div>
                 ))}
@@ -668,7 +678,7 @@ export function MessagesScreen({ user, onBack, onChat, chatOpen = false }) {
                       <AvatarUser userId={c.otherId} name={c.name} size={50} verified={c.otherVerified} />
                       <div style={{ flex: 1, minWidth: 0, borderBottom: `1px solid ${B}`, paddingBottom: 11 }}>
                         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 3 }}>
-                          <p style={{ fontSize: 14, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</p>
+                          <p style={{ fontSize: 14, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><ConvName id={c.otherId} fallback={c.name} /></p>
                           <p style={{ fontSize: 11, color: unread ? G : T3, fontWeight: unread ? 700 : 500, flexShrink: 0, whiteSpace: "nowrap" }}>{shortTime(c.lastTime)}</p>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1097,13 +1107,16 @@ export function ChatScreen({ chat, user, onBack, flash, onViewProfile, orders = 
     }, 60);
   }, []);
 
-  // Nombre real de la otra persona (profiles.full_name) — SIEMPRE se resuelve
-  // por id, sin importar qué nombre haya llegado por props (podía ser un texto
-  // escrito a mano en un formulario, o un genérico tipo "Vendedor"/"Comprador").
-  // Antes solo se buscaba si NO había llegado ningún nombre, así que un nombre
-  // erróneo pasado por props se quedaba pegado para siempre.
+  // Nombre a MOSTRAR de la otra persona — SIEMPRE se resuelve por id, sin
+  // importar qué nombre haya llegado por props (podía ser un texto escrito a
+  // mano en un formulario, o un genérico tipo "Vendedor"/"Comprador"). Usa
+  // getSellerDisplay (la MISMA fuente única que AvatarUser, más abajo): si
+  // tiene Tienda Pro con nombre propio, ese; si no, su nombre real de perfil.
+  // Antes usaba getUserName (siempre el nombre real de perfil, ignorando la
+  // marca de la Tienda) — esa era la causa de ver "Daniel Pérez Silva" aquí
+  // y "Retador Marketplace" en la cabecera de su Tienda para la misma persona.
   useEffect(() => {
-    if (chat.otherId) getUserName(chat.otherId).then(n => n && setOtherName(n)).catch(() => {});
+    if (chat.otherId) getSellerDisplay(chat.otherId).then(d => d?.name && setOtherName(d.name)).catch(() => {});
   }, [chat.otherId]);
 
   // Estado de bloqueo REAL (mutuo): consulta best-effort al abrir el chat, para

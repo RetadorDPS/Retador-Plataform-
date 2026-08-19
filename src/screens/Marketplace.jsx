@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getUserName, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -1966,12 +1966,21 @@ export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewPr
   }, [viewerOpen]);
 
   useEffect(() => {
+    // Limpieza síncrona al cambiar de producto/vendedor — antes se quedaba
+    // viendo el nombre/estadísticas del vendedor ANTERIOR mientras cargaban
+    // las del nuevo (mismo tipo de dato viejo pegado que en los perfiles).
+    setSellerName(null); setSellerStats(null); setSellerRating(null);
     if (!p.seller_id) { setSellerName("Vendedor"); return; }
-    getUserName(p.seller_id).then(n => setSellerName(n || p.seller_name || "Vendedor"));
-    getProfileHeaderStats(p.seller_id).then(setSellerStats).catch(() => {});
-    getSellerRatingInfo(p.seller_id).then(setSellerRating).catch(() => {});
+    let alive = true;
+    // getSellerDisplay: MISMA fuente única que el resto de la app (Mensajes,
+    // Tienda) — antes usaba getUserName (siempre el nombre real de perfil,
+    // ignorando la marca de la Tienda si el vendedor tiene una).
+    getSellerDisplay(p.seller_id).then(d => { if (alive) setSellerName(d?.name || p.seller_name || "Vendedor"); }).catch(() => { if (alive) setSellerName(p.seller_name || "Vendedor"); });
+    getProfileHeaderStats(p.seller_id).then(s => { if (alive) setSellerStats(s); }).catch(() => {});
+    getSellerRatingInfo(p.seller_id).then(r => { if (alive) setSellerRating(r); }).catch(() => {});
     // Track view
     if (user?.id) trackEvent(user.id, p.id, "view").catch(() => {});
+    return () => { alive = false; };
   }, [p.seller_id]);
 
   // Stock REAL disponible (descuenta lo comprometido en pedidos vivos). Solo

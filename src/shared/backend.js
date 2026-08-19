@@ -81,6 +81,32 @@ export const getSellerPlan = async (userId) => {
     return data.plan || "gratis";
   } catch (e) { return null; }
 };
+// ── Identidad A MOSTRAR de un vendedor — UNA sola fuente real ───────────────
+// Nombre/foto "de cara al público": si la cuenta tiene Tienda Pro con nombre/
+// logo propios (store_config), esos son su identidad real en TODA la app —
+// mensajes, tarjeta de producto, Tienda — nunca un nombre en un lado y otro
+// distinto en otro. Una sola consulta real (embed por la relación 1:1 ya
+// existente store_config.user_id → profiles.id), no dos peticiones sueltas.
+// ⚠️ NO usar esto en contextos de verificación/entrega (KYC, mensajero, admin
+// revisando identidad real) — ahí sigue getUserById, la identidad legal real
+// sin la marca de la tienda. Esto es solo para mostrar quién es alguien.
+export const getSellerDisplay = async (id) => {
+  if (!id) return null;
+  try {
+    const { data, error } = await supabase.from("profiles")
+      .select("id, full_name, avatar_url, is_verified, plan, store_config(name, logo_url)")
+      .eq("id", id).single();
+    if (error || !data) return null;
+    const sc = data.store_config || null;
+    return {
+      id: data.id,
+      name: (sc?.name || data.full_name || "Usuario"),
+      avatar: (sc?.logo_url || data.avatar_url || null),
+      verified: !!data.is_verified,
+      planId: data.plan || "gratis",
+    };
+  } catch (e) { return null; }
+};
 export const getUserName = async (id) => {
   const p = await getUserById(id);
   // null (nunca un genérico como "Vendedor"): quien llama decide su propio
@@ -471,7 +497,7 @@ export const getSellerRatingInfo = async (userId) => {
 // get_profile_header_stats(p_user_id) — ventas/compras/envíos/seguidores reales
 // del encabezado del perfil. Nunca se calculan a mano en el frontend.
 export const getProfileHeaderStats = async (userId) => {
-  const empty = { ventas: 0, compras: 0, envios: 0, seguidores: 0 };
+  const empty = { ventas: 0, compras: 0, envios: 0, seguidores: 0, sigoYo: false };
   if (!userId) return empty;
   try {
     const { data, error } = await supabase.rpc("get_profile_header_stats", { p_user_id: userId });
@@ -482,8 +508,20 @@ export const getProfileHeaderStats = async (userId) => {
       compras: Number(row.compras) || 0,
       envios: Number(row.envios) || 0,
       seguidores: Number(row.seguidores ?? row.followers) || 0,
+      // sigo_yo: si el usuario que pide esto YA sigue a p_user_id (real,
+      // calculado en el backend) — antes se perdía aquí y el botón "Seguir"
+      // nunca podía arrancar en el estado correcto.
+      sigoYo: !!row.sigo_yo,
     };
   } catch (e) { return empty; }
+};
+// Seguir/dejar de seguir a otra persona — escribe/borra la fila real en
+// followers (toggle_follow, RPC ya existente). Devuelve el estado NUEVO real
+// (true = ahora la sigues), nunca se calcula a mano en el frontend.
+export const toggleFollow = async (targetId) => {
+  const { data, error } = await supabase.rpc("toggle_follow", { p_target_id: targetId });
+  if (error) { console.error("toggleFollow:", error.message); throw error; }
+  return !!data;
 };
 
 // ── TIENDA PRO (store_config) — Fase 2 (reintegración definitiva) ────────────

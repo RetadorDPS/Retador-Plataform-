@@ -1116,7 +1116,10 @@ function AppShell({ sessionUser }) {
   };
   // Perfiles de OTROS vendedores: si su plan real tiene can_customize, se les
   // muestra su Tienda en vez del perfil simple — mismo gate que para mí mismo.
-  const [viewedStoreEligible, setViewedStoreEligible] = useState(false);
+  // null = todavía no se sabe quién es este vendedor (cargando) — NUNCA se usa
+  // "false" como valor por defecto, porque eso renderizaría el perfil Free como
+  // si ya fuera un dato confirmado. Ver limpieza síncrona dentro del efecto.
+  const [viewedStoreEligible, setViewedStoreEligible] = useState(null);
   const [viewedStoreCfg, setViewedStoreCfg] = useState(null);
   const [viewedStoreStats, setViewedStoreStats] = useState({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
   const [viewedStoreRating, setViewedStoreRating] = useState(null);
@@ -1125,6 +1128,18 @@ function AppShell({ sessionUser }) {
   const [viewedStoreName, setViewedStoreName] = useState("");
   const [viewedStoreVerified, setViewedStoreVerified] = useState(false);
   useEffect(() => {
+    // Limpieza SÍNCRONA antes de pedir cualquier dato nuevo: mientras no se
+    // confirme quién es este vendedor, no debe quedar visible ni un rastro del
+    // vendedor anterior (nombre, insignia, tienda) — así se evita el "Perfil B
+    // muestra por un instante los datos del Perfil A" reportado.
+    setViewedStoreEligible(null);
+    setViewedStoreCfg(null);
+    setViewedStoreName("");
+    setViewedStoreVerified(false);
+    setViewedStoreProducts([]);
+    setViewedStoreReviews([]);
+    setViewedStoreRating(null);
+    setViewedStoreStats({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
     if (!viewProfileId) { setViewedStoreEligible(false); return; }
     let alive = true;
     // getSellerPlan (SIN caché) decide el plan real EN ESTE INSTANTE — activar
@@ -1135,18 +1150,20 @@ function AppShell({ sessionUser }) {
       if (!alive) return;
       const plan = realPlans.find(p => p.id === planId);
       const eligible = !!plan?.can_customize;
-      setViewedStoreEligible(eligible);
       // getUserById devuelve { name, ... } (no "full_name") — antes esto
       // siempre quedaba vacío y la Tienda de otro vendedor caía siempre al
       // "Vendedor" genérico de respaldo en vez de su nombre real.
       setViewedStoreName(u?.name || "");
       setViewedStoreVerified(!!u?.verified);
-      if (!eligible) return;
+      if (!eligible) { setViewedStoreEligible(false); return; }
       const [c, s, r, prods, revs] = await Promise.all([
         getStoreConfig(viewProfileId), getProfileHeaderStats(viewProfileId), getSellerRatingInfo(viewProfileId), getProductsBySeller(viewProfileId), getSellerReviews(viewProfileId),
       ]);
       if (!alive) return;
       setViewedStoreCfg(c || {}); setViewedStoreStats(s); setViewedStoreRating(r); setViewedStoreProducts((prods || []).filter(p => p.kind !== "service")); setViewedStoreReviews(revs || []);
+      // Recién AHORA hay datos reales completos de la Tienda — antes de esto
+      // "eligible" se queda en null (neutro), nunca en true con datos a medias.
+      setViewedStoreEligible(true);
     }).catch(() => { if (alive) setViewedStoreEligible(false); });
     return () => { alive = false; };
   }, [viewProfileId, realPlans]);
@@ -1163,7 +1180,8 @@ function AppShell({ sessionUser }) {
   // "sellerProfile") — antes solo la vía de viewProfileId mostraba la Tienda
   // Pro; esta se había quedado mostrando siempre el perfil Free plano, sin
   // insignias de confianza ni el resto de la cabecera de Tienda.
-  const [sellerStoreEligible, setSellerStoreEligible] = useState(false);
+  // null = todavía no se sabe (cargando), mismo criterio que viewedStoreEligible.
+  const [sellerStoreEligible, setSellerStoreEligible] = useState(null);
   const [sellerStoreCfg, setSellerStoreCfg] = useState(null);
   const [sellerStoreStats, setSellerStoreStats] = useState({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
   const [sellerStoreRating, setSellerStoreRating] = useState(null);
@@ -1172,21 +1190,32 @@ function AppShell({ sessionUser }) {
   const [sellerStoreName, setSellerStoreName] = useState("");
   const [sellerStoreVerified, setSellerStoreVerified] = useState(false);
   useEffect(() => {
+    // Misma limpieza síncrona que en el efecto de viewProfileId — evita que al
+    // pasar de un vendedor a otro por esta vía (desde el detalle de un producto)
+    // se vea un instante los datos del vendedor anterior.
+    setSellerStoreEligible(null);
+    setSellerStoreCfg(null);
+    setSellerStoreName("");
+    setSellerStoreVerified(false);
+    setSellerStoreProducts([]);
+    setSellerStoreReviews([]);
+    setSellerStoreRating(null);
+    setSellerStoreStats({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
     if (!selSeller) { setSellerStoreEligible(false); return; }
     let alive = true;
     Promise.all([getUserById(selSeller), getSellerPlan(selSeller)]).then(async ([u, planId]) => {
       if (!alive) return;
       const plan = realPlans.find(p => p.id === planId);
       const eligible = !!plan?.can_customize;
-      setSellerStoreEligible(eligible);
       setSellerStoreName(u?.name || "");
       setSellerStoreVerified(!!u?.verified);
-      if (!eligible) return;
+      if (!eligible) { setSellerStoreEligible(false); return; }
       const [c, s, r, prods, revs] = await Promise.all([
         getStoreConfig(selSeller), getProfileHeaderStats(selSeller), getSellerRatingInfo(selSeller), getProductsBySeller(selSeller), getSellerReviews(selSeller),
       ]);
       if (!alive) return;
       setSellerStoreCfg(c || {}); setSellerStoreStats(s); setSellerStoreRating(r); setSellerStoreProducts((prods || []).filter(p => p.kind !== "service")); setSellerStoreReviews(revs || []);
+      setSellerStoreEligible(true);
     }).catch(() => { if (alive) setSellerStoreEligible(false); });
     return () => { alive = false; };
   }, [selSeller, realPlans]);
@@ -1989,7 +2018,11 @@ function AppShell({ sessionUser }) {
           {/* Una excepción en el perfil ya no puede dejar la pantalla EN BLANCO:
               queda acotada aquí, con el error visible y opción de volver. */}
           <ErrorBoundary title="No se pudo mostrar este perfil" onClose={() => setViewProfileId(null)}>
-          {viewedStoreEligible ? (
+          {viewedStoreEligible === null ? (
+            // Estado neutro mientras se confirma el vendedor real: nada de datos
+            // de relleno ni del perfil anterior — mejor medio segundo en blanco.
+            null
+          ) : viewedStoreEligible ? (
             <StoreFront
               cfg={viewedStoreCfg || {}}
               products={viewedStoreProducts.filter(p => !p.archived_at)}
@@ -2005,6 +2038,7 @@ function AppShell({ sessionUser }) {
               onBack={() => setViewProfileId(null)}
               onChat={() => { const id = viewProfileId; setViewProfileId(null); requestChat(id, viewedStoreName || "Vendedor"); }}
               onProduct={p => setViewProdOverlay(p)}
+              flash={flash}
             />
           ) : (
           <FreeProfileScreen
@@ -2049,7 +2083,7 @@ function AppShell({ sessionUser }) {
           inferior general de siempre — esto no la toca. */}
       {isProStore && storeMode === "dash" && (
         <div style={{ position:"absolute", top:0, left:0, right:0, bottom:0, zIndex:800, overflow:"hidden", isolation:"isolate" }}>
-          <StoreDashboard user={user} cfg={storeCfg || {}} products={myStoreProducts} orders={myStoreOrders} plans={realPlans} myPlan={myRealPlan} api={storeApi} onStore={() => setStoreMode("store")} onMenu={() => setProfileMenuOpen(true)} onSettings={() => setPScr("settings")} profileRealName={profileData?.name || user?.name} flash={flash} />
+          <StoreDashboard user={user} cfg={storeCfg || {}} products={myStoreProducts} orders={myStoreOrders} plans={realPlans} myPlan={myRealPlan} api={storeApi} onStore={() => setStoreMode("store")} onMenu={() => setProfileMenuOpen(true)} profileRealName={profileData?.name || user?.name} flash={flash} />
         </div>
       )}
       {showAdmin  && <OmniPanel onClose={() => setShowAdmin(false)} theme={appTk} zoom={densZoom} data={{
@@ -2167,7 +2201,7 @@ function AppShell({ sessionUser }) {
               />
             )}
             {mScr === "sellerProfile" && selSeller && (
-              sellerStoreEligible ? (
+              sellerStoreEligible === null ? null : sellerStoreEligible ? (
                 <StoreFront
                   cfg={sellerStoreCfg || {}}
                   products={sellerStoreProducts.filter(p => !p.archived_at)}
@@ -2183,6 +2217,7 @@ function AppShell({ sessionUser }) {
                   onBack={() => setMScr(selProd ? "product" : "home")}
                   onChat={() => requestChat(selSeller, sellerStoreName || "Vendedor")}
                   onProduct={p => { setSelProd(p); setProdBackTo("sellerProfile"); setMScr("product"); }}
+                  flash={flash}
                 />
               ) : (
                 <FreeProfileScreen

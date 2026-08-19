@@ -523,6 +523,33 @@ export const toggleFollow = async (targetId) => {
   if (error) { console.error("toggleFollow:", error.message); throw error; }
   return !!data;
 };
+// Lista real de personas que sigo — misma tabla real (followers) que ya usa
+// toggle_follow/get_profile_header_stats, nunca un dato aparte. followers no
+// tiene relación declarada hacia profiles (sin FK), así que se resuelve en
+// dos pasos: primero los ids seguidos, luego su identidad real (misma
+// prioridad que getSellerDisplay: nombre/foto de su Tienda si tiene).
+export const getFollowingList = async (userId) => {
+  if (!userId) return [];
+  try {
+    const { data: rows, error } = await supabase.from("followers")
+      .select("followed_id, created_at").eq("follower_id", userId)
+      .order("created_at", { ascending: false });
+    if (error || !rows?.length) return [];
+    const ids = rows.map(r => r.followed_id);
+    const { data: profs, error: e2 } = await supabase.from("profiles")
+      .select("id, full_name, avatar_url, is_verified, plan, store_config(name, logo_url)")
+      .in("id", ids);
+    if (e2 || !profs) return [];
+    const byId = new Map(profs.map(p => [p.id, p]));
+    // Conserva el orden real (más reciente primero) de la tabla followers.
+    return ids.map(id => {
+      const p = byId.get(id);
+      if (!p) return null;
+      const sc = p.store_config || null;
+      return { id: p.id, name: sc?.name || p.full_name || "Usuario", avatar: sc?.logo_url || p.avatar_url || null, verified: !!p.is_verified };
+    }).filter(Boolean);
+  } catch (e) { console.error("getFollowingList:", e?.message || e); return []; }
+};
 
 // ── TIENDA PRO (store_config) — Fase 2 (reintegración definitiva) ────────────
 // Lectura pública (cualquiera puede ver la tienda de un vendedor Pro real).

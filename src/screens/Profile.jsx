@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2, Archive, ArchiveRestore } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink, toggleFollow, getFollowingList } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -69,12 +69,13 @@ function FxTirita() {
 // "Configuración" se quitó de este menú: consolidada en un solo lugar real
 // (el engranaje arriba a la derecha del Perfil) — dos entradas a la misma
 // pantalla eran ruido, y el dueño pidió dejar solo una.
-export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, onOrders, onWallet, onTools, onCourier, onAdmin, messagesBadge = 0, ordersBadge = 0, adminBadge = 0 }) {
+export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, onOrders, onWallet, onTools, onCourier, onAdmin, onFollowing, messagesBadge = 0, ordersBadge = 0, adminBadge = 0 }) {
   const { BG, S, B, T1, T2, T3, isDark } = useAt();
   const items = [
     { ic: "msg",    label: "Mensajes",                sub: "Chats y conversaciones",              action: onMessages, color: G,         badge: messagesBadge },
     { ic: "pkg",    label: "Mis pedidos",             sub: "Compras y ventas",                    action: onOrders,   color: "#60A5FA",  badge: ordersBadge },
     { ic: "wallet", label: "Mi billetera",            sub: "Enviar, recibir, pagar y convertir",  action: onWallet,   color: "#22C55E" },
+    { ic: "user",   label: "Siguiendo",               sub: "Vendedores que sigues",               action: onFollowing, color: "#F472B6" },
     { ic: "tools",  label: "Herramientas",            sub: "Importador inteligente y más",        action: onTools,    color: "#6EE7B7" },
     { ic: "moto",   label: "Modo Mensajero",          sub: "Gana dinero repartiendo pedidos",     action: onCourier,  color: "#6366F1" },
     ...(isOwner ? [{ ic: "shield", label: "Panel de administración", sub: "Control total de la plataforma", action: onAdmin, color: "#F5A623", badge: adminBadge }] : []),
@@ -108,6 +109,65 @@ export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, on
         <div style={{ flexShrink: 0, padding: "10px 12px calc(12px + env(safe-area-inset-bottom,0px))", borderTop: `1px solid ${B}` }}>
           <FxTirita />
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SIGUIENDO — lista real de personas que sigo (tabla followers, misma fuente
+// que toggle_follow y el contador "seguidores"), con foto/nombre reales
+// (getFollowingList → misma identidad que getSellerDisplay) y "Dejar de
+// seguir" ahí mismo. Accesible desde el ☰ Menú, igual para Free y Pro.
+// ═════════════════════════════════════════════════════════════════════════════
+export function FollowingListScreen({ user, onBack, onViewProfile }) {
+  const { BG, S, B, T1, T2, T3, isDark } = useAt();
+  const [list, setList] = useState(null); // null = cargando
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = useCallback(() => {
+    if (!user?.id) { setList([]); return; }
+    getFollowingList(user.id).then(setList).catch(() => setList([]));
+  }, [user?.id]);
+  useEffect(() => { reload(); }, [reload]);
+
+  const unfollow = async (id) => {
+    if (busyId) return;
+    setBusyId(id);
+    try {
+      const stillFollowing = await toggleFollow(id);
+      // toggle_follow siempre devuelve el estado REAL nuevo: si por lo que
+      // sea sigue en true (llamada repetida, condición de carrera), no se
+      // quita de la lista con un dato que no es real.
+      if (!stillFollowing) setList(prev => (prev || []).filter(p => p.id !== id));
+    } catch (e) { /* deja la fila — el estado real no cambió */ }
+    setBusyId(null);
+  };
+
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", background: BG }}>
+      <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, padding: "11px 16px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c={T2} s={20} /></button>
+        <p style={{ fontSize: 14.5, fontWeight: 800, color: T1 }}>Siguiendo</p>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: "4px 10px 24px" }}>
+        {list === null ? (
+          <div style={{ padding: 30, textAlign: "center", color: T2, fontSize: 12.5 }}>Cargando…</div>
+        ) : list.length === 0 ? (
+          <div style={{ padding: "50px 24px", textAlign: "center" }}>
+            <p style={{ fontSize: 13, color: T2, lineHeight: 1.6 }}>Todavía no sigues a nadie. Sigue a un vendedor desde su perfil o su Tienda para verlo aquí.</p>
+          </div>
+        ) : list.map(p => (
+          <div key={p.id} className="lr" style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 10px", borderRadius: 10 }}>
+            <div onClick={() => onViewProfile?.(p.id)} style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0, cursor: onViewProfile ? "pointer" : "default" }}>
+              <Avatar url={p.avatar} name={p.name} size={44} verified={p.verified} />
+              <p style={{ fontSize: 13.5, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</p>
+            </div>
+            <button onClick={() => unfollow(p.id)} disabled={busyId === p.id} style={{ flexShrink: 0, background: "none", border: `1px solid ${B}`, borderRadius: 8, padding: "7px 12px", color: T2, fontSize: 11.5, fontWeight: 700, cursor: busyId === p.id ? "default" : "pointer", opacity: busyId === p.id ? .6 : 1 }}>
+              {busyId === p.id ? "…" : "Dejar de seguir"}
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -890,7 +950,12 @@ export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, em
   const isOwner = isOwnerProp !== undefined ? isOwnerProp : FP_MOCK_IS_OWNER;
 
   const [tab,          setTab]          = useState("productos");
+  // Seguir REAL — antes era un toggle puramente local (setFollowing(!following)
+  // sin llamar nunca a la función real): el estado inicial ahora viene del dato
+  // real de la cabecera (headerStats.sigoYo, mismo backend que la Tienda Pro),
+  // y el clic dispara toggle_follow de verdad (ver onFollowClick más abajo).
   const [following,    setFollowing]    = useState(false);
+  const [followBusy,   setFollowBusy]   = useState(false);
   const [showAvatarView, setShowAvatarView] = useState(false);
   const [showPicker,   setShowPicker]   = useState(false);
   // Editor UNIFICADO: "Editar perfil" y "Acerca de" ya no son dos flujos
@@ -1083,9 +1148,20 @@ export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, em
     if (!aboutTargetId) return;
     let alive = true;
     getSellerRatingInfo(aboutTargetId).then(r => { if (alive) setSellerRatingInfo(r); }).catch(() => {});
-    getProfileHeaderStats(aboutTargetId).then(s => { if (alive) setHeaderStats(s); }).catch(() => {});
+    getProfileHeaderStats(aboutTargetId).then(s => { if (alive) { setHeaderStats(s); setFollowing(!!s.sigoYo); } }).catch(() => {});
     return () => { alive = false; };
   }, [aboutTargetId, reviewsNonce]);
+  // Seguir REAL: llama a toggle_follow (la RPC real) con el id del vendedor
+  // que se está viendo — optimista al tocar, revierte si falla.
+  const onFollowClick = async () => {
+    if (!user?.id) { toast_("Inicia sesión para seguir a este vendedor", true); return; }
+    if (!sellerId || followBusy) return;
+    const next = !following;
+    setFollowing(next); setFollowBusy(true);
+    try { const real = await toggleFollow(sellerId); setFollowing(real); }
+    catch (e) { setFollowing(!next); toast_("⚠️ No se pudo actualizar: " + (e?.message || "error"), true); }
+    finally { setFollowBusy(false); }
+  };
 
   function toast_(msg, isError = false) {
     // Igual que el aviso global: un error largo necesita tiempo para leerse.
@@ -1437,13 +1513,14 @@ export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, em
           {!isOwner && (
             <div style={{ marginBottom:12 }}>
               <div style={{ display:"flex", gap:8 }}>
-                <button onClick={() => setFollowing(!following)} style={{
+                <button onClick={onFollowClick} disabled={followBusy} style={{
                   flex:1, background: following ? FP_C.surfaceTop : FP_C.accent,
                   border:`1px solid ${following ? FP_C.border : FP_C.accent}`,
-                  borderRadius:8, height:38, cursor:"pointer",
+                  borderRadius:8, height:38, cursor: followBusy ? "default" : "pointer",
                   color: following ? FP_C.textPrimary : "#fff",
                   fontSize:13, fontWeight:700, fontFamily:FP_FH,
                   display:"flex", alignItems:"center", justifyContent:"center", gap:6, transition:"all 0.2s",
+                  opacity: followBusy ? .7 : 1,
                 }}>
                   {following
                     ? <><FP_Icon d={FP_Icons.check} size={14} color={FP_C.textPrimary}/> Siguiendo</>

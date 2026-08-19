@@ -47,7 +47,7 @@ import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProduct
 import OmniPanel from "./screens/AdminPanel.jsx";
 import { SubastasScreen } from "./screens/Auctions.jsx";
 import { SettingsScreen } from "./screens/Settings.jsx";
-import { FreeProfileScreen, ProfileMenuDrawer } from "./screens/Profile.jsx";
+import { FreeProfileScreen, ProfileMenuDrawer, FollowingListScreen } from "./screens/Profile.jsx";
 import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
@@ -428,6 +428,12 @@ function AppShell({ sessionUser }) {
     if (!viewProfileId) return;
     return pushBackHandler(() => setViewProfileId(null));
   }, [viewProfileId]);
+  // "Siguiendo" es la misma clase de capa (posición fija encima de todo) —
+  // mismo mecanismo de una-capa-un-atrás.
+  useEffect(() => {
+    if (!showFollowing) return;
+    return pushBackHandler(() => setShowFollowing(false));
+  }, [showFollowing]);
 
   // Overlays
   const [showCats,   setShowCats]   = useState(false);
@@ -475,6 +481,7 @@ function AppShell({ sessionUser }) {
   const [toolApp, setToolApp] = useState(false);
   const [showCourier, setShowCourier] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false); // panel lateral del Perfil (☰)
+  const [showFollowing, setShowFollowing] = useState(false); // lista real de "Siguiendo" (☰ → Siguiendo)
   // RETIRADO: el registro local de mensajeros (retador_couriers en localStorage)
   // ya NO es vía de aprobación. La única vía real es courier_applications en el
   // backend + review_courier_application del admin (que pone role='courier').
@@ -1141,6 +1148,13 @@ function AppShell({ sessionUser }) {
     setViewedStoreRating(null);
     setViewedStoreStats({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
     if (!viewProfileId) { setViewedStoreEligible(false); return; }
+    // realPlans aún no cargó (fetch propio, ver getPlans() más arriba): sin la
+    // tabla de planes real, "can_customize" no se puede saber todavía — nos
+    // quedamos en null (neutro) en vez de resolver a false por descarte y
+    // corregir después. Esa resolución prematura era la causa real del
+    // destello "perfil Free" antes del Pro real: este efecto ya se re-ejecuta
+    // solo cuando realPlans llegue (está en las dependencias).
+    if (!realPlans.length) return;
     let alive = true;
     // getSellerPlan (SIN caché) decide el plan real EN ESTE INSTANTE — activar
     // o bajar el plan de otra cuenta debe reflejarse ya mismo, nunca depender
@@ -1202,6 +1216,10 @@ function AppShell({ sessionUser }) {
     setSellerStoreRating(null);
     setSellerStoreStats({ ventas: 0, compras: 0, envios: 0, seguidores: 0 });
     if (!selSeller) { setSellerStoreEligible(false); return; }
+    // Mismo guard que en el efecto de viewProfileId: sin realPlans real
+    // todavía no se puede saber can_customize — se queda en null (neutro)
+    // hasta que la tabla de planes cargue (efecto re-ejecuta solo).
+    if (!realPlans.length) return;
     let alive = true;
     Promise.all([getUserById(selSeller), getSellerPlan(selSeller)]).then(async ([u, planId]) => {
       if (!alive) return;
@@ -1878,10 +1896,15 @@ function AppShell({ sessionUser }) {
           setAdminOpenPage(page); setShowAdmin(true);
         }} />}
       {/* Chat: capa OPACA a pantalla completa (inset 0 cubre TODO el viewport,
-          estándar) — nada del producto/pantalla de atrás puede asomar. */}
+          estándar) — nada del producto/pantalla de atrás puede asomar.
+          onBack usa window.history.back() (NUNCA un setState con destino fijo):
+          así la flecha de la pantalla dispara el MISMO popstate/onPop real que
+          ya maneja el botón físico, en vez de "adivinar" a dónde volver —
+          root cause real de "la flecha de atrás manda a Perfil en vez de a
+          donde estaba antes". */}
       {chatOpen && selChat && (
         <div style={{ position: "fixed", inset: 0, zIndex: 5100, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
-          <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => setChatOpen(false)} onConvId={setOpenConvId} flash={flash} onViewProfile={openPublicProfile} orders={mergedOrders} onOpenOrder={openOrderFromChat} onOpenProduct={openProductFromChat} onStartOrder={startOrderFromChat}
+          <ChatScreen key={selChat.id || selChat.otherId} chat={selChat} user={user} onBack={() => window.history.back()} onConvId={setOpenConvId} flash={flash} onViewProfile={openPublicProfile} orders={mergedOrders} onOpenOrder={openOrderFromChat} onOpenProduct={openProductFromChat} onStartOrder={startOrderFromChat}
             /* BUG REAL corregido: chat.context (el producto pendiente de
                adjuntar) vivía en selChat, que NUNCA se limpiaba tras enviarlo
                — así que si el chat se desmontaba y volvía a montar (p.ej. al
@@ -2056,6 +2079,14 @@ function AppShell({ sessionUser }) {
           />
           )}
           </ErrorBoundary>
+        </div>
+      )}
+      {/* "Siguiendo" — lista real, capa a pantalla completa igual que el perfil
+          público (misma técnica: position fixed inset:0, con su propia
+          entrada de historial vía el backstack de abajo). */}
+      {showFollowing && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 5250, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+          <FollowingListScreen user={user} onBack={() => setShowFollowing(false)} onViewProfile={(id) => { setShowFollowing(false); openPublicProfile(id); }} />
         </div>
       )}
       {/* Producto como CAPA (desde perfil público / modo mensajero): encima de todo,
@@ -2312,7 +2343,7 @@ function AppShell({ sessionUser }) {
                 autoOpenVerify={autoOpenVerify} onAutoOpenVerifyDone={() => setAutoOpenVerify(false)}
                 autoOpenEdit={autoOpenEdit} onAutoOpenEditDone={() => setAutoOpenEdit(false)} />;
             })()}
-            {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
+            {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => window.history.back()} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
             {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}
               productView={productView} onProductViewChange={setProductView}
               profileData={profileData} onProfileUpdate={setProfileData}
@@ -2327,7 +2358,7 @@ function AppShell({ sessionUser }) {
             {/* Panel lateral del Perfil (☰): todo el menú que antes estaba apilado */}
             <ProfileMenuDrawer open={profileMenuOpen} onClose={() => setProfileMenuOpen(false)} user={user} isOwner={hasPanel}
               onMessages={openMessages} onOrders={() => setPScr("orders")} onWallet={() => setShowWallet(true)}
-              onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)}
+              onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} onFollowing={() => setShowFollowing(true)}
               onAdmin={() => { setAdminOpenPage(null); setShowAdmin(true); }} messagesBadge={chatUnread} ordersBadge={ordersUnseen} adminBadge={courierApps.length} />
           </>}
         </>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -621,30 +621,90 @@ const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;4
 //    formato/posición-CTA, multi-pantalla y biblioteca. Anclas y render compartido
 //    viven en src/shared/liveBlocks.jsx. CategoryManager (Búsqueda) se conserva.
 
-function CategoryManager(){
-  const {cats, subcats, addCat, removeCat, renameCat, addSub, removeSub, renameSub, reorderCats} = useCatalog();
+function CategoryManager({ toast }){
+  // Ronda 6, punto G: esto ANTES solo tocaba estado local + localStorage
+  // (useCatalog) — parecía funcionar pero nunca escribía en el backend real:
+  // cada admin veía SU PROPIO catálogo inventado, nadie más lo veía, y se
+  // perdía al borrar el caché. Ahora cada acción llama de verdad a Supabase
+  // (admin_upsert_category / admin_delete_category / …) y refetch() trae el
+  // dato real de vuelta — lo que se guarda aquí es lo que ve TODO el mundo.
+  const {cats, subcats, refetch} = useCatalog();
   const [sel,setSel]=useState(null);
   const [newCat,setNewCat]=useState('');
   const [newColor,setNewColor]=useState('#A78BFA');
   const [newSub,setNewSub]=useState('');
   const [edit,setEdit]=useState(null);       // {kind:'cat'|'sub', id, sub, value}
-  const [confirm,setConfirm]=useState(null);  // {kind, id, sub, name}
+  const [confirm,setConfirm]=useState(null); // {kind, id, sub, name, impact:null|n}
+  const [busy,setBusy]=useState(false);
   const dragFrom=useRef(null);
   const [dragOver,setDragOver]=useState(null);
   const SW=['#A78BFA','#60A5FA','#E879F9','#4ADE80','#FBBF24','#F87171','#F472B6','#38BDF8','#2DD4BF','#FB7185','#22C55E','#F59E0B','#8B5CF6','#FB923C','#34D399','#94A3B8'];
   const inpStyle={background:'var(--bg)',border:'1px solid var(--bd)',borderRadius:8,padding:'9px 11px',color:'var(--tx)',fontSize:12.5,outline:'none',minWidth:0};
   const iconBtn={background:'none',border:'none',cursor:'pointer',fontSize:13,color:'var(--tx2)',flexShrink:0,padding:'0 2px'};
-  const moveBtn={background:'none',border:'none',cursor:'pointer',color:'var(--tx2)',fontSize:9,lineHeight:1,padding:0};
+  const emsg = e => e?.message || 'No se pudo (sin mensaje del backend)';
   const startEdit=(kind,id,sub)=>setEdit({kind,id,sub,value:kind==='cat'?(cats.find(c=>c.id===id)?.name||''):sub});
-  const commitEdit=()=>{ if(!edit)return; const v=(edit.value||'').trim(); if(v){ if(edit.kind==='cat')renameCat(edit.id,v); else renameSub(edit.id,edit.sub,v);} setEdit(null); };
+  const commitEdit=async()=>{
+    if(!edit)return; const v=(edit.value||'').trim(); const e=edit; setEdit(null);
+    if(!v)return;
+    try{
+      if(e.kind==='cat') await adminUpsertCategory(e.id, v);
+      else await adminUpsertSubcategory(e.id, v, e.sub);
+      await refetch();
+    }catch(err){ toast?.('⚠️ '+emsg(err)); }
+  };
+  const slugify = (name) => (name||'').toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi,'-').replace(/^-|-$/g,'') || ('cat'+Date.now());
+  const doAddCat = async () => {
+    const name = newCat.trim(); if(!name || busy) return;
+    const id = slugify(name);
+    if (cats.some(c=>c.id===id)) { toast?.('⚠️ Ya existe una categoría con ese nombre'); return; }
+    setBusy(true);
+    try { await adminUpsertCategory(id, name, newColor); await refetch(); setNewCat(''); }
+    catch(err){ toast?.('⚠️ '+emsg(err)); }
+    setBusy(false);
+  };
+  const doAddSub = async (catId) => {
+    const name = newSub.trim(); if(!name || busy) return;
+    setBusy(true);
+    try { await adminUpsertSubcategory(catId, name); await refetch(); setNewSub(''); }
+    catch(err){ toast?.('⚠️ '+emsg(err)); }
+    setBusy(false);
+  };
+  // Antes de mostrar "¿eliminar?" pregunta al backend cuántos productos reales
+  // usan esta categoría/subcategoría — si hay alguno, el diálogo pide elegir a
+  // dónde reasignarlos (nunca borra a ciegas dejando productos huérfanos).
+  const askDelete = async (kind, id, sub, name) => {
+    setConfirm({ kind, id, sub, name, impact: null, reassignTo: '' });
+    const n = kind==='cat' ? await adminCategoryImpact(id) : await adminSubcategoryImpact(id, sub);
+    setConfirm(c => c && c.kind===kind && c.id===id && c.sub===sub ? { ...c, impact: n } : c);
+  };
+  const doDelete = async () => {
+    if (!confirm || busy) return;
+    const { kind, id, sub, impact, reassignTo } = confirm;
+    if (impact > 0 && !reassignTo) return; // el botón ya queda deshabilitado, doble resguardo
+    setBusy(true);
+    try {
+      if (kind==='cat') await adminDeleteCategory(id, impact>0 ? reassignTo : null);
+      else await adminDeleteSubcategory(id, sub, impact>0 ? reassignTo : null);
+      await refetch();
+      if (kind==='cat' && sel===id) setSel(null);
+      setConfirm(null);
+    } catch(err){ toast?.('⚠️ '+emsg(err)); }
+    setBusy(false);
+  };
+  const doReorder = async (from, to) => {
+    if (from==null || to==null || from===to) return;
+    const ids = cats.map(c=>c.id); const [m] = ids.splice(from,1); ids.splice(to,0,m);
+    try { await adminReorderCategories(ids); await refetch(); }
+    catch(err){ toast?.('⚠️ '+emsg(err)); }
+  };
   return (
     <div style={{maxWidth:440,margin:'0 auto',width:'100%'}}>
       <div style={{fontSize:13,fontWeight:800,color:'var(--tx)',marginBottom:5}}>Categorías de la plataforma</div>
-      <div style={{fontSize:11,color:'var(--tx2)',marginBottom:14,lineHeight:1.5}}>Arrastra (⠿) para ordenar. Toca una para editar sus subcategorías. Todo se refleja en la tienda, la búsqueda y al publicar.</div>
+      <div style={{fontSize:11,color:'var(--tx2)',marginBottom:14,lineHeight:1.5}}>Arrastra (⠿) para ordenar. Toca una para editar sus subcategorías. Todo se refleja en la tienda, la búsqueda y al publicar — de verdad, para todo el mundo.</div>
       <div style={{background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:11,padding:12,marginBottom:14}}>
         <div style={{display:'flex',gap:8,marginBottom:9}}>
-          <input value={newCat} onChange={e=>setNewCat(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&newCat.trim()){addCat(newCat.trim(),newColor);setNewCat('');}}} placeholder="Nueva categoría" style={{...inpStyle,flex:1}}/>
-          <button className="btn btp sm" onClick={()=>{if(newCat.trim()){addCat(newCat.trim(),newColor);setNewCat('');}}}>Agregar</button>
+          <input value={newCat} onChange={e=>setNewCat(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')doAddCat();}} placeholder="Nueva categoría" style={{...inpStyle,flex:1}}/>
+          <button className="btn btp sm" disabled={busy} onClick={doAddCat}>Agregar</button>
         </div>
         <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>{SW.map(c=><div key={c} onClick={()=>setNewColor(c)} style={{width:20,height:20,borderRadius:'50%',background:c,cursor:'pointer',border:newColor===c?'2px solid var(--tx)':'2px solid transparent'}}/>)}</div>
       </div>
@@ -656,7 +716,7 @@ function CategoryManager(){
             <div key={c.id} draggable={!edit}
               onDragStart={()=>{dragFrom.current=idx;}}
               onDragOver={e=>{e.preventDefault();setDragOver(idx);}}
-              onDrop={()=>{ if(dragFrom.current!=null)reorderCats(dragFrom.current,idx); dragFrom.current=null; setDragOver(null); }}
+              onDrop={()=>{ doReorder(dragFrom.current, idx); dragFrom.current=null; setDragOver(null); }}
               onDragEnd={()=>{dragFrom.current=null;setDragOver(null);}}
               style={{background:'var(--bg2)',border:`1px solid ${dragOver===idx?'var(--ac)':'var(--bd)'}`,borderRadius:11,overflow:'hidden',transition:'border .15s'}}>
               <div style={{display:'flex',alignItems:'center',gap:9,padding:'10px 12px'}}>
@@ -666,7 +726,7 @@ function CategoryManager(){
                   ? <input autoFocus value={edit.value} onChange={e=>setEdit({...edit,value:e.target.value})} onKeyDown={e=>{if(e.key==='Enter')commitEdit();if(e.key==='Escape')setEdit(null);}} onBlur={commitEdit} style={{...inpStyle,flex:1}}/>
                   : <span onClick={()=>setSel(isSel?null:c.id)} style={{flex:1,fontSize:13,fontWeight:600,color:'var(--tx)',cursor:'pointer',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',minWidth:0}}>{c.name} <span style={{fontSize:10,color:'var(--tx3)',fontWeight:500}}>· {subs.length} sub</span></span>}
                 <button onClick={()=>startEdit('cat',c.id)} title="Renombrar" style={iconBtn}>✎</button>
-                <button onClick={()=>setConfirm({kind:'cat',id:c.id,name:c.name})} title="Eliminar" style={{...iconBtn,color:'var(--rd)'}}>✕</button>
+                <button onClick={()=>askDelete('cat',c.id,null,c.name)} title="Eliminar" style={{...iconBtn,color:'var(--rd)'}}>✕</button>
                 <span onClick={()=>setSel(isSel?null:c.id)} style={{cursor:'pointer',color:'var(--tx3)',fontSize:13,flexShrink:0,transform:isSel?'rotate(90deg)':'none',transition:'transform .2s'}}>›</span>
               </div>
               {isSel&&(
@@ -681,13 +741,13 @@ function CategoryManager(){
                         : <span key={s} style={{display:'inline-flex',alignItems:'center',gap:6,background:'var(--bg3)',border:'1px solid var(--bd)',borderRadius:50,padding:'5px 10px',fontSize:11,color:'var(--tx2)'}}>
                             {s}
                             <span onClick={()=>startEdit('sub',c.id,s)} style={{cursor:'pointer',color:'var(--tx3)'}}>✎</span>
-                            <span onClick={()=>setConfirm({kind:'sub',id:c.id,sub:s,name:s})} style={{cursor:'pointer',color:'var(--rd)',fontWeight:800}}>×</span>
+                            <span onClick={()=>askDelete('sub',c.id,s,s)} style={{cursor:'pointer',color:'var(--rd)',fontWeight:800}}>×</span>
                           </span>;
                     })}
                   </div>
                   <div style={{display:'flex',gap:7}}>
-                    <input value={isSel?newSub:''} onChange={e=>setNewSub(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&newSub.trim()){addSub(c.id,newSub.trim());setNewSub('');}}} placeholder="+ subcategoría" style={{...inpStyle,flex:1,fontSize:11,padding:'7px 9px'}}/>
-                    <button className="btn btg sm" onClick={()=>{if(newSub.trim()){addSub(c.id,newSub.trim());setNewSub('');}}}>Añadir</button>
+                    <input value={isSel?newSub:''} onChange={e=>setNewSub(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')doAddSub(c.id);}} placeholder="+ subcategoría" style={{...inpStyle,flex:1,fontSize:11,padding:'7px 9px'}}/>
+                    <button className="btn btg sm" disabled={busy} onClick={()=>doAddSub(c.id)}>Añadir</button>
                   </div>
                 </div>
               )}
@@ -699,10 +759,22 @@ function CategoryManager(){
         <div onClick={()=>setConfirm(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:900,padding:20}}>
           <div onClick={e=>e.stopPropagation()} style={{background:'var(--bg1)',border:'1px solid var(--bd2)',borderRadius:14,padding:20,maxWidth:320,width:'100%',boxShadow:'0 20px 60px rgba(0,0,0,.5)'}}>
             <div style={{fontSize:14,fontWeight:800,color:'var(--tx)',marginBottom:8}}>¿Eliminar {confirm.kind==='cat'?'categoría':'subcategoría'}?</div>
-            <div style={{fontSize:12,color:'var(--tx2)',lineHeight:1.5,marginBottom:16}}>Vas a eliminar <b style={{color:'var(--tx)'}}>{confirm.name}</b>{confirm.kind==='cat'?' y todas sus subcategorías':''}. Esto se quita de toda la plataforma.</div>
+            {confirm.impact===null ? (
+              <div style={{fontSize:12,color:'var(--tx3)',marginBottom:16}}>Revisando productos reales…</div>
+            ) : confirm.impact>0 ? (<>
+              <div style={{fontSize:12,color:'var(--tx2)',lineHeight:1.5,marginBottom:10}}><b style={{color:'var(--tx)'}}>{confirm.name}</b> tiene <b style={{color:'var(--yw)'}}>{confirm.impact} producto{confirm.impact===1?'':'s'} real{confirm.impact===1?'':'es'}</b>. Elige a dónde se mueven antes de borrar:</div>
+              <select value={confirm.reassignTo} onChange={e=>setConfirm(c=>({...c,reassignTo:e.target.value}))} style={{...inpStyle,width:'100%',marginBottom:16}}>
+                <option value="">Elige {confirm.kind==='cat'?'categoría':'subcategoría'} destino…</option>
+                {confirm.kind==='cat'
+                  ? cats.filter(c=>c.id!==confirm.id).map(c=><option key={c.id} value={c.id}>{c.name}</option>)
+                  : (subcats[confirm.id]||[]).filter(s=>s!==confirm.sub).map(s=><option key={s} value={s}>{s}</option>)}
+              </select>
+            </>) : (
+              <div style={{fontSize:12,color:'var(--tx2)',lineHeight:1.5,marginBottom:16}}>Vas a eliminar <b style={{color:'var(--tx)'}}>{confirm.name}</b>{confirm.kind==='cat'?' y todas sus subcategorías':''}. Sin productos reales afectados.</div>
+            )}
             <div style={{display:'flex',gap:9}}>
               <button className="btn btg" style={{flex:1,justifyContent:'center'}} onClick={()=>setConfirm(null)}>Cancelar</button>
-              <button className="btn" style={{flex:1,justifyContent:'center',background:'var(--rd)',color:'#fff'}} onClick={()=>{ if(confirm.kind==='cat'){removeCat(confirm.id); if(sel===confirm.id)setSel(null);} else removeSub(confirm.id,confirm.sub); setConfirm(null); }}>Eliminar</button>
+              <button className="btn" disabled={busy || confirm.impact===null || (confirm.impact>0 && !confirm.reassignTo)} style={{flex:1,justifyContent:'center',background:'var(--rd)',color:'#fff',opacity:(busy||confirm.impact===null||(confirm.impact>0&&!confirm.reassignTo))?.5:1}} onClick={doDelete}>Eliminar</button>
             </div>
           </div>
         </div>
@@ -1248,7 +1320,7 @@ function EditorVisual({ toast, cfg = {}, onCfg, onHomeCfg, roHome }) {
         <div className="mo" onClick={() => setShowCats(false)} style={{ alignItems: "flex-start" }}>
           <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--bd2)", borderRadius: 16, padding: "16px 16px 20px", maxWidth: 480, width: "100%", margin: "36px auto 20px", position: "relative", maxHeight: "calc(100% - 56px)", overflowY: "auto" }}>
             <button onClick={() => setShowCats(false)} style={{ position: "absolute", top: 12, right: 14, background: "none", border: "none", color: "var(--tx2)", fontSize: 20, cursor: "pointer", zIndex: 2 }}>×</button>
-            <CategoryManager />
+            <CategoryManager toast={toast} />
           </div>
         </div>
       )}
@@ -1890,10 +1962,14 @@ function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, onOpenC
   const lvl = (k) => access[k] || 'none';
   const canUsers = lvl('users') !== 'none', canVerif = lvl('verif') !== 'none', canPlans = lvl('plans') !== 'none';
   const mngUsers = lvl('users') === 'manage', mngVerif = lvl('verif') === 'manage', mngPlans = lvl('plans') === 'manage';
+  // "Compartir" (Pro gratis, via=compartir) vive en la MISMA tabla plan_requests
+  // y se resuelve con el MISMO admin_review_plan — reutiliza el permiso 'plans'.
+  const canShares = canPlans, mngShares = mngPlans;
   const TABS = [
     canUsers && { k:'all',   label:'👥 Todos' },
     canVerif && { k:'verif', label:'🪪 Verificaciones' },
     canPlans && { k:'plans', label:'⭐ Planes' },
+    canShares && { k:'shares', label:'📤 Compartir' },
   ].filter(Boolean);
   const [tab, setTab] = useState((TABS.find(t=>t.k===initialTab)||TABS[0]||{k:'all'}).k);
   useEffect(()=>{ if(TABS.some(t=>t.k===initialTab)) setTab(initialTab); }, [initialTab]);
@@ -1912,19 +1988,22 @@ function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, onOpenC
   // Colas pendientes (verificaciones y planes) + nombres/perfiles
   const [verifs,setVerifs]=useState(null);
   const [plans,setPlans]=useState(null);
+  const [shares,setShares]=useState(null);
   const [names,setNames]=useState({});
   const loadVerifs=useCallback(()=>{ if(!canVerif){ setVerifs([]); return; } adminListVerifications({status:'pending',from:0,to:49}).then(async d=>{ setVerifs(d); const m=await getProfilesByIds(d.map(v=>v.user_id)).catch(()=>({})); setNames(p=>({...p,...m})); }).catch(()=>setVerifs([])); },[canVerif]);
   const loadPlans=useCallback(()=>{ if(!canPlans){ setPlans([]); return; } adminListPlanRequests({status:'pending',from:0,to:49}).then(async d=>{ setPlans(d); const m=await getProfilesByIds(d.map(r=>r.user_id)).catch(()=>({})); setNames(p=>({...p,...m})); }).catch(()=>setPlans([])); },[canPlans]);
+  const loadShares=useCallback(()=>{ if(!canShares){ setShares([]); return; } adminListPlanRequests({status:'pending',from:0,to:49,via:'compartir'}).then(async d=>{ setShares(d); const m=await getProfilesByIds(d.map(r=>r.user_id)).catch(()=>({})); setNames(p=>({...p,...m})); }).catch(()=>setShares([])); },[canShares]);
   useEffect(()=>{ loadVerifs(); },[loadVerifs]);
   useEffect(()=>{ loadPlans(); },[loadPlans]);
+  useEffect(()=>{ loadShares(); },[loadShares]);
   // Realtime: las colas se refrescan cuando alguien (del staff) resuelve algo.
   useEffect(()=>{
     const ch=supabase.channel(`usershub-${Date.now()}`)
       .on("postgres_changes",{event:"*",schema:"public",table:"verifications"},()=>loadVerifs())
-      .on("postgres_changes",{event:"*",schema:"public",table:"plan_requests"},()=>loadPlans())
+      .on("postgres_changes",{event:"*",schema:"public",table:"plan_requests"},()=>{ loadPlans(); loadShares(); })
       .subscribe();
     return ()=>{ try{Promise.resolve(supabase.removeChannel(ch)).catch(()=>{});}catch(e){} };
-  },[loadVerifs,loadPlans]);
+  },[loadVerifs,loadPlans,loadShares]);
 
   // Chip 🛡️ Equipo
   const [staffIds,setStaffIds]=useState(()=>new Set());
@@ -1948,11 +2027,11 @@ function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, onOpenC
     setSel(u); setSelVerif(undefined); setSelPlan(plan); setSelCount(null); setZoom(null);
     adminGetProfileById(u.id).then(p=>{ if(p) setSel(s=> s&&s.id===u.id ? {...s,...p} : s); }).catch(()=>{});
     getMyVerification(u.id).then(v=>setSelVerif(v||null)).catch(()=>setSelVerif(null));
-    if(!plan && canPlans){ const pr=(plans||[]).find(r=>r.user_id===u.id); if(pr) setSelPlan(pr); }
+    if(!plan && canPlans){ const pr=(plans||[]).find(r=>r.user_id===u.id) || (shares||[]).find(r=>r.user_id===u.id); if(pr) setSelPlan(pr); }
     const c=await getSellerProductCount(u.id).catch(()=>0); setSelCount(c);
   };
   const closeSheet = () => { setSel(null); setSelVerif(undefined); setSelPlan(null); };
-  const afterChange = () => { loadVerifs(); loadPlans(); onResolved && onResolved(); };
+  const afterChange = () => { loadVerifs(); loadPlans(); loadShares(); onResolved && onResolved(); };
 
   const approveVerif = async (v) => { setBusy('v'); try{ await adminReviewVerification(v.id,true); toast('✓ Perfil verificado'); setSel(s=>s?{...s,is_verified:true}:s); setSelVerif({...v,status:'approved'}); afterChange(); }catch(e){ toast('⚠️ '+emsg(e)); } setBusy(null); };
   const rejectVerif = async () => { const v=rejectFor; const why=reason.trim(); setRejectFor(null); setBusy('v'); try{ await adminReviewVerification(v.id,false,why||null); toast('🚫 Solicitud de verificación de perfil rechazada'); setSelVerif({...v,status:'rejected',reject_reason:why}); afterChange(); }catch(e){ toast('⚠️ '+emsg(e)); } setBusy(null); };
@@ -1993,7 +2072,7 @@ function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, onOpenC
       <div className="ch"><span className="ct">Usuarios</span></div>
       <div className="tabs" style={{ maxWidth:360, marginBottom:10 }}>
         {TABS.map(t=>{
-          const cnt = t.k==='verif' ? (verifs?verifs.length:null) : t.k==='plans' ? (plans?plans.length:null) : null;
+          const cnt = t.k==='verif' ? (verifs?verifs.length:null) : t.k==='plans' ? (plans?plans.length:null) : t.k==='shares' ? (shares?shares.length:null) : null;
           return <div key={t.k} className={`tab ${tab===t.k?'on':''}`} onClick={()=>setTab(t.k)} style={{display:'flex',alignItems:'center',gap:5,justifyContent:'center'}}>
             {t.label}{cnt>0 && <span style={{minWidth:16,height:16,borderRadius:999,background:G,color:'#000',fontSize:9.5,fontWeight:800,display:'inline-flex',alignItems:'center',justifyContent:'center',padding:'0 4px'}}>{cnt}</span>}
           </div>;
@@ -2059,6 +2138,23 @@ function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, onOpenC
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:12.5,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{pr?.full_name||'Usuario'}</div>
                 <div style={{fontSize:11,color:'var(--tx3)'}}>quiere <b style={{color:'var(--ac)',textTransform:'capitalize'}}>{r.plan}</b> · {r.created_at?new Date(r.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}):''}</div>
+              </div>
+              <span style={{fontSize:16,color:'var(--tx3)',flexShrink:0}}>›</span>
+            </div>
+          ); })}
+      </>}
+
+      {/* ── Pestaña COMPARTIR pendientes (Pro gratis, via=compartir) ── */}
+      {tab==='shares' && <>
+        <div style={{ fontSize:11, color:'var(--tx3)', margin:'0 0 10px' }}>Enlaces reales que la persona pegó para mantener su plan gratis. Toca una para revisarlos y aprobar o rechazar.</div>
+        {shares===null ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>Cargando…</div>
+          : shares.length===0 ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'22px 6px'}}>Sin solicitudes pendientes.</div>
+          : shares.map(r=>{ const pr=names[r.user_id]; const n=(r.evidence_urls||[]).length; return (
+            <div key={r.id} onClick={()=>openSheet({ id:r.user_id, full_name:pr?.full_name, avatar_url:pr?.avatar_url }, r)} className="reprow" style={{display:'flex',alignItems:'center',gap:10,padding:'10px 8px',margin:'0 -8px',borderRadius:9,cursor:'pointer',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
+              <Avatar url={avatarUrlOf(pr?.avatar_url)} name={pr?.full_name||'Usuario'} size={36} />
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12.5,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{pr?.full_name||'Usuario'}</div>
+                <div style={{fontSize:11,color:'var(--tx3)'}}>{n} enlace{n===1?'':'s'} · {r.created_at?new Date(r.created_at).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}):''}</div>
               </div>
               <span style={{fontSize:16,color:'var(--tx3)',flexShrink:0}}>›</span>
             </div>
@@ -2153,17 +2249,31 @@ function UsersHub({ toast, meId, access = {}, onResolved, onViewProfile, onOpenC
                   : <div style={{ fontSize:12, color:'var(--tx3)' }}>Sin solicitud de verificación de perfil. El ✓ se otorga solo cuando la persona envía sus documentos.</div>}
           </div>}
 
-          {/* Bloque PLAN pendiente */}
+          {/* Bloque PLAN pendiente — vía pago (confirmar cobro) vs vía "compartir"
+              (Pro gratis: no hay pago, hay que revisar los enlaces reales). */}
           {canPlans && selPlan && <div style={{ background:'var(--bg2)', border:'1px solid var(--bd)', borderRadius:12, padding:'12px', marginBottom:12 }}>
-            <div style={{ fontSize:12, fontWeight:800, color:'var(--tx)', marginBottom:8 }}>⭐ Solicitud de plan</div>
-            <div style={{ fontSize:12, color:'var(--tx2)', marginBottom:10 }}>Pide el plan <b style={{ color:'var(--ac)', textTransform:'capitalize' }}>{selPlan.plan}</b>. Confirma el pago y aprueba: el plan cambia de verdad.</div>
+            {selPlan.via === 'compartir' ? (<>
+              <div style={{ fontSize:12, fontWeight:800, color:'var(--tx)', marginBottom:8 }}>📤 Pro gratis — Compartir</div>
+              <div style={{ fontSize:12, color:'var(--tx2)', marginBottom:10 }}>Pide mantener el plan <b style={{ color:'var(--ac)', textTransform:'capitalize' }}>{selPlan.plan}</b> gratis compartiendo. Revisa cada enlace real antes de decidir — nunca hay pago de por medio.</div>
+              <div style={{ marginBottom:10 }}>
+                {(selPlan.evidence_urls||[]).length === 0
+                  ? <div style={{ fontSize:11.5, color:'var(--tx3)' }}>Sin enlaces adjuntos.</div>
+                  : (selPlan.evidence_urls||[]).map((u,i) => (
+                      <a key={i} href={u} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}
+                        style={{ display:'block', fontSize:11.5, color:'var(--ac)', wordBreak:'break-all', padding:'4px 0', borderBottom: i<selPlan.evidence_urls.length-1 ? '1px solid var(--bd)' : 'none' }}>{i+1}. {u}</a>
+                    ))}
+              </div>
+            </>) : (<>
+              <div style={{ fontSize:12, fontWeight:800, color:'var(--tx)', marginBottom:8 }}>⭐ Solicitud de plan</div>
+              <div style={{ fontSize:12, color:'var(--tx2)', marginBottom:10 }}>Pide el plan <b style={{ color:'var(--ac)', textTransform:'capitalize' }}>{selPlan.plan}</b>. Confirma el pago y aprueba: el plan cambia de verdad.</div>
+            </>)}
             {mngPlans
               ? <div style={{ display:'flex', gap:8 }}>
                   <button className="btn bts" style={{ flex:1 }} disabled={busy==='p'} onClick={()=>decidePlan(true)}>✅ Aprobar</button>
                   <button className="btn btd" style={{ flex:1 }} disabled={busy==='p'} onClick={()=>decidePlan(false)}>🚫 Rechazar</button>
                 </div>
               : <div style={{ textAlign:'center', fontSize:11, color:'var(--tx3)' }}>👁 Solo lectura</div>}
-            {onOpenChat && <button className="btn sm" style={{ width:'100%', marginTop:8 }} disabled={busy==='m'} onClick={()=>sendReqMessage(sel, `Solicitud de plan: ${selPlan.plan.charAt(0).toUpperCase()+selPlan.plan.slice(1)}`, 'Confirma el pago y coordinemos por aquí')}>💬 Mensaje</button>}
+            {onOpenChat && <button className="btn sm" style={{ width:'100%', marginTop:8 }} disabled={busy==='m'} onClick={()=>sendReqMessage(sel, `Solicitud de plan: ${selPlan.plan.charAt(0).toUpperCase()+selPlan.plan.slice(1)}`, selPlan.via==='compartir' ? 'Sobre tus enlaces compartidos' : 'Confirma el pago y coordinemos por aquí')}>💬 Mensaje</button>}
           </div>}
 
           {/* Acción de cuenta: suspender / reactivar */}

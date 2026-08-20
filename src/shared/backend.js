@@ -571,6 +571,24 @@ export const toggleFollow = async (targetId) => {
   invalidateShortCache("hs", targetId);
   return !!data;
 };
+// Lista real de a quién sigo (tabla followers, follower_id = yo). followed_id
+// referencia auth.users (no profiles) así que NO hay embed PostgREST posible
+// (profiles!followed_id) — dos pasos, mismo patrón ya usado en getUserOrders/
+// getSellerReviews: primero los ids, después su nombre/foto real en profiles.
+export const getMyFollowing = async (userId) => {
+  if (!userId) return [];
+  const { data, error } = await supabase.from("followers").select("followed_id, created_at").eq("follower_id", userId).order("created_at", { ascending: false });
+  if (error) { console.error("getMyFollowing:", error.message); return []; }
+  if (!data || !data.length) return [];
+  const ids = data.map(r => r.followed_id);
+  const { data: profs, error: e2 } = await supabase.from("profiles").select("id, full_name, avatar_url, is_verified, plan").in("id", ids);
+  if (e2) { console.error("getMyFollowing (perfiles):", e2.message); return []; }
+  const byId = {}; (profs || []).forEach(p => { byId[p.id] = p; });
+  return data.filter(r => byId[r.followed_id]).map(r => {
+    const p = byId[r.followed_id];
+    return { id: p.id, name: p.full_name || "Usuario", avatar: p.avatar_url || null, verified: !!p.is_verified, plan: p.plan || "gratis", since: r.created_at };
+  });
+};
 
 // ── TIENDA PRO (store_config) — Fase 2 (reintegración definitiva) ────────────
 // Lectura pública (cualquiera puede ver la tienda de un vendedor Pro real).
@@ -1336,6 +1354,46 @@ export const adminSetPromoted = async (productId, promoted) => {
   if (error) { console.error("adminSetPromoted:", error.message); throw error; }
   return data;
 };
+// ── Admin: categorías/subcategorías de PRODUCTOS REALES (tablas categories/
+// subcategories) — antes CategoryManager solo tocaba estado local + localStorage
+// (useCatalog en catalog.jsx), nunca escribía en el backend: cada admin veía
+// SU PROPIO catálogo inventado, nadie más lo veía, y no sobrevivía a borrar el
+// caché del navegador. Estas funciones sí escriben de verdad, vía RPC.
+export const adminCategoryImpact = async (catId) => {
+  const { data, error } = await supabase.rpc("admin_category_impact", { p_id: catId });
+  if (error) { console.error("adminCategoryImpact:", error.message); return 0; }
+  return Number(data) || 0;
+};
+export const adminSubcategoryImpact = async (catId, name) => {
+  const { data, error } = await supabase.rpc("admin_subcategory_impact", { p_category_id: catId, p_name: name });
+  if (error) { console.error("adminSubcategoryImpact:", error.message); return 0; }
+  return Number(data) || 0;
+};
+export const adminUpsertCategory = async (id, name, color) => {
+  const { data, error } = await supabase.rpc("admin_upsert_category", { p_id: id, p_name: name, p_color: color || null });
+  if (error) { console.error("adminUpsertCategory:", error.message); throw error; }
+  return data;
+};
+// p_reassign_to: OBLIGATORIO si la categoría tiene productos reales (el backend
+// lo exige y rechaza el borrado si falta) — ver admin_category_impact para
+// preguntar antes de mostrar el diálogo de reasignar/confirmar.
+export const adminDeleteCategory = async (id, reassignTo = null) => {
+  const { error } = await supabase.rpc("admin_delete_category", { p_id: id, p_reassign_to: reassignTo });
+  if (error) { console.error("adminDeleteCategory:", error.message); throw error; }
+};
+export const adminUpsertSubcategory = async (catId, name, oldName = null) => {
+  const { data, error } = await supabase.rpc("admin_upsert_subcategory", { p_category_id: catId, p_name: name, p_old_name: oldName });
+  if (error) { console.error("adminUpsertSubcategory:", error.message); throw error; }
+  return data;
+};
+export const adminDeleteSubcategory = async (catId, name, reassignTo = null) => {
+  const { error } = await supabase.rpc("admin_delete_subcategory", { p_category_id: catId, p_name: name, p_reassign_to: reassignTo });
+  if (error) { console.error("adminDeleteSubcategory:", error.message); throw error; }
+};
+export const adminReorderCategories = async (ids) => {
+  const { error } = await supabase.rpc("admin_reorder_categories", { p_ids: ids });
+  if (error) { console.error("adminReorderCategories:", error.message); throw error; }
+};
 // Admin: lista real de productos destacados (promoted=true).
 export const adminListPromoted = async () => {
   const { data, error } = await supabase.from("products")
@@ -1479,9 +1537,10 @@ export const submitPlanRequest = async (userId, plan) => {
   if (error) { console.error("submitPlanRequest:", error.message); throw error; }
   return data;
 };
-export const adminListPlanRequests = async ({ status = "pending", from = 0, to = 49 } = {}) => {
+export const adminListPlanRequests = async ({ status = "pending", from = 0, to = 49, via = null } = {}) => {
   let q = supabase.from("plan_requests").select("*").order("created_at", { ascending: false }).range(from, to);
   if (status && status !== "all") q = q.eq("status", status);
+  if (via) q = q.eq("via", via);
   const { data, error } = await q;
   if (error) { console.error("adminListPlanRequests:", error.message); return []; }
   return data || [];

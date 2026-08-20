@@ -610,17 +610,21 @@ function ProdsSection({ products, C, ac, onNewProduct, onEditProduct, onArchiveP
       {shown.length === 0 && <div style={{ padding:"40px", textAlign:"center", color:C.m, fontSize:13 }}>{view==="activos" ? "Aún no has publicado nada." : "No tienes productos archivados."}</div>}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
         {shown.map(prod => (
-          <div key={prod.id} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden", opacity:prod.archived_at?.6:1, position:"relative" }}>
-            {!prod.archived_at && (
-              <button onClick={() => onToggleFeatured(prod)} title={prod.storeFeatured ? "Quitar de Destacados" : "Marcar como Destacado"}
-                style={{ position:"absolute", top:7, right:7, zIndex:1, width:24, height:24, borderRadius:7, border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", background: prod.storeFeatured ? ac : "rgba(0,0,0,.45)" }}>
-                <Star size={12} color={prod.storeFeatured ? "#000" : "#fff"} fill={prod.storeFeatured ? "#000" : "none"}/>
-              </button>
-            )}
+          <div key={prod.id} style={{ borderRadius:13, background:C.s2, border: prod.storeFeatured ? `1.5px solid ${ac}` : `1px solid ${C.b}`, overflow:"hidden", opacity:prod.archived_at?.6:1, position:"relative" }}>
             <PImg p={prod} h={110} fz={36} C={C}/>
             <div style={{ padding:11 }}>
               <div style={{ fontSize:12, fontWeight:500, marginBottom:2, color:C.t }}>{prod.title}</div>
               <div style={{ fontSize:10, color:C.m, marginBottom:8 }}>{prod.subcat || "Sin categoría"}</div>
+              {/* Interruptor de "Destacado" — se movió de un ícono flotando sobre la
+                  foto (fácil de perder según la imagen) a esta fila de texto clara,
+                  siempre visible, con etiqueta. */}
+              {!prod.archived_at && (
+                <button onClick={() => onToggleFeatured(prod)} className="p"
+                  style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:5, padding:"6px 0", marginBottom:8, borderRadius:8, border: prod.storeFeatured ? "none" : `1px solid ${C.b}`, cursor:"pointer", background: prod.storeFeatured ? ac : "transparent", color: prod.storeFeatured ? "#000" : C.m, fontSize:11, fontWeight:700 }}>
+                  <Star size={12} color={prod.storeFeatured ? "#000" : C.m} fill={prod.storeFeatured ? "#000" : "none"}/>
+                  {prod.storeFeatured ? "Destacado" : "Marcar como Destacado"}
+                </button>
+              )}
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <span style={{ fontSize:14, fontWeight:800, color:C.t }}>{money(prod.price, prod.currency)}</span>
                 <div style={{ display:"flex", gap:5 }}>
@@ -1043,11 +1047,19 @@ function Promos({ cfg, products, onUpdateProduct, C, ac }) {
     setCode(""); setDisc("");
   };
   // Real: marca/desmarca oferta escribiendo products.orig_price de verdad.
-  const toggleSale = (prod) => {
-    onUpdateProduct(prod.id, prod.orig_price != null
-      ? { origPrice: null }
-      : { origPrice: prod.price, price: Math.round(prod.price * 0.85 * 100) / 100 });
+  // NUNCA se calcula un % solo — el precio de oferta lo escribe el vendedor
+  // (bug real corregido: antes bajaba el precio 15% automático sin pedirlo).
+  const [saleDraft, setSaleDraft] = useState({}); // {[prodId]: texto del input}
+  const activateSale = (prod) => {
+    const v = Number(saleDraft[prod.id]);
+    if (!v || v <= 0 || v >= Number(prod.price)) return;
+    onUpdateProduct(prod.id, { origPrice: prod.price, price: v });
+    setSaleDraft(p => { const n = { ...p }; delete n[prod.id]; return n; });
   };
+  // Al quitar la oferta, el precio vuelve al original — antes se quedaba
+  // rebajado para siempre (orig_price se borraba pero price nunca se
+  // restauraba), otro bug real corregido junto con el de arriba.
+  const removeSale = (prod) => onUpdateProduct(prod.id, { price: prod.orig_price, origPrice: null });
   return (
     <div>
       <SHdr title="Promociones" sub="Descuentos y ofertas activas" ac={ac} C={C}/>
@@ -1074,10 +1086,24 @@ function Promos({ cfg, products, onUpdateProduct, C, ac }) {
         <div style={{ fontSize:14, fontWeight:800, marginBottom:14, color:C.t }}>Productos en oferta</div>
         {active.length === 0 && <div style={{ textAlign:"center", padding:"14px 0", color:C.m, fontSize:12 }}>Aún no tienes productos publicados.</div>}
         {active.map(prod => (
-          <div key={prod.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderBottom:`1px solid ${C.b}` }}>
-            <div style={{ width:36, height:36, borderRadius:8, overflow:"hidden", flexShrink:0 }}><PImg p={prod} h={36} fz={18} C={C}/></div>
-            <div style={{ flex:1, minWidth:0, overflow:"hidden" }}><div style={{ fontSize:12, fontWeight:500, color:C.t, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{prod.title}</div><div style={{ fontSize:10, color:C.m }}>{money(prod.price, prod.currency)}{prod.orig_price!=null && <span style={{ color:C.ok }}> ← {money(prod.orig_price, prod.currency)}</span>}</div></div>
-            <Toggle on={prod.orig_price != null} onChange={() => toggleSale(prod)} C={C}/>
+          <div key={prod.id} style={{ padding:"10px 0", borderBottom:`1px solid ${C.b}` }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ width:36, height:36, borderRadius:8, overflow:"hidden", flexShrink:0 }}><PImg p={prod} h={36} fz={18} C={C}/></div>
+              <div style={{ flex:1, minWidth:0, overflow:"hidden" }}><div style={{ fontSize:12, fontWeight:500, color:C.t, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{prod.title}</div><div style={{ fontSize:10, color:C.m }}>{money(prod.price, prod.currency)}{prod.orig_price!=null && <span style={{ color:C.ok }}> ← {money(prod.orig_price, prod.currency)}</span>}</div></div>
+              {prod.orig_price != null
+                ? <button onClick={() => removeSale(prod)} style={{ padding:"7px 12px", borderRadius:8, border:`1px solid ${C.b}`, background:"transparent", color:C.m, fontSize:11.5, fontWeight:700, cursor:"pointer", flexShrink:0 }}>Quitar oferta</button>
+                : <Toggle on={false} onChange={() => setSaleDraft(p => p[prod.id] != null ? (() => { const n = { ...p }; delete n[prod.id]; return n; })() : { ...p, [prod.id]: "" })} C={C}/>}
+            </div>
+            {/* El vendedor escribe ÉL MISMO el precio de oferta — nunca un % calculado solo. */}
+            {prod.orig_price == null && saleDraft[prod.id] != null && (
+              <div style={{ display:"flex", gap:8, alignItems:"center", marginTop:8, paddingLeft:46 }}>
+                <span style={{ fontSize:11, color:C.m }}>Precio de oferta:</span>
+                <input type="number" min="0.01" step="0.01" value={saleDraft[prod.id]} onChange={e => setSaleDraft(p => ({ ...p, [prod.id]: e.target.value }))}
+                  placeholder={`menos de ${money(prod.price, prod.currency)}`} style={{ ...inpStyle(C), flex:1, padding:"6px 9px", fontSize:12 }}/>
+                <button onClick={() => activateSale(prod)} disabled={!saleDraft[prod.id] || Number(saleDraft[prod.id]) <= 0 || Number(saleDraft[prod.id]) >= Number(prod.price)}
+                  style={{ padding:"7px 12px", borderRadius:8, border:"none", background:ac, color:"#000", fontSize:11.5, fontWeight:700, cursor:"pointer", opacity:(!saleDraft[prod.id]||Number(saleDraft[prod.id])<=0||Number(saleDraft[prod.id])>=Number(prod.price))?.5:1, flexShrink:0 }}>Activar</button>
+              </div>
+            )}
           </div>
         ))}
       </Card>

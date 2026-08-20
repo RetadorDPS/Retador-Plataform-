@@ -38,7 +38,7 @@ import {
   CATS, SUBCATS, CatalogContext, CatalogProvider, useCatalog, CatIcon,
   useCSS, Ic, Spin, Logo,
   getPageLayout, liveSlot, LiveBlock, LiveSlot,
-  useScrollDir, consumeBack, pushBackHandler, shouldIgnorePop, ErrorBoundary } from "./shared/index.js";
+  useScrollDir, consumeBack, pushBackHandler, shouldIgnorePop, ErrorBoundary, ProfileSkeleton } from "./shared/index.js";
 import WalletApp from "./screens/Wallet.jsx";
 import ProductToolsApp from "./screens/ProductTools.jsx";
 import { LocalDelivery, IntlShipping } from "./screens/Delivery.jsx";
@@ -47,7 +47,7 @@ import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProduct
 import OmniPanel from "./screens/AdminPanel.jsx";
 import { SubastasScreen } from "./screens/Auctions.jsx";
 import { SettingsScreen } from "./screens/Settings.jsx";
-import { FreeProfileScreen, ProfileMenuDrawer } from "./screens/Profile.jsx";
+import { FreeProfileScreen, ProfileMenuDrawer, FollowingListScreen } from "./screens/Profile.jsx";
 import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
@@ -478,6 +478,7 @@ function AppShell({ sessionUser }) {
   const [showTools, setShowTools] = useState(false);
   const [toolApp, setToolApp] = useState(false);
   const [showCourier, setShowCourier] = useState(false);
+  const [showFollowing, setShowFollowing] = useState(false); // pantalla "Siguiendo" (☰ → Siguiendo)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false); // panel lateral del Perfil (☰)
   // RETIRADO: el registro local de mensajeros (retador_couriers en localStorage)
   // ya NO es vía de aprobación. La única vía real es courier_applications en el
@@ -1247,9 +1248,9 @@ function AppShell({ sessionUser }) {
   // (Va DESPUÉS de declarar todos los estados de navegación que lee, incl. selOrderId.)
   // Estado de navegación actual (pantallas + modales) y su "firma" para comparar.
   const navSnap = { tab, mScr, pScr, eScr, selProd, selSeller, selOrderId, prodBackTo,
-    plusMenu, showCourier, toolApp, showTools, showAdmin, showWallet, chatOpen, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
+    plusMenu, showCourier, toolApp, showTools, showAdmin, showWallet, showFollowing, chatOpen, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
   const navSig = [tab, mScr, pScr, eScr, (selProd && selProd.id) || selProd || 0, selSeller || 0, selOrderId || 0, prodBackTo || 0,
-    !!plusMenu, !!showCourier, !!toolApp, !!showTools, !!showAdmin, !!showWallet, !!chatOpen, !!showNotif, !!showCats, !!pubOpen, !!buyModal, !!confirmCfg, !!editProd].join("|");
+    !!plusMenu, !!showCourier, !!toolApp, !!showTools, !!showAdmin, !!showWallet, !!showFollowing, !!chatOpen, !!showNotif, !!showCats, !!pubOpen, !!buyModal, !!confirmCfg, !!editProd].join("|");
 
   const stackRef = useRef([]);      // [{sig, snap}] una entrada por cada paso hacia adelante
   const lastRef = useRef(null);     // {sig, snap} del estado actual
@@ -1260,7 +1261,7 @@ function AppShell({ sessionUser }) {
     setTab(sn.tab); setMScr(sn.mScr); setPScr(sn.pScr); setEScr(sn.eScr);
     setSelProd(sn.selProd); setSelSeller(sn.selSeller); setSelOrderId(sn.selOrderId); setProdBackTo(sn.prodBackTo);
     setPlusMenu(sn.plusMenu); setShowCourier(sn.showCourier); setToolApp(sn.toolApp); setShowTools(sn.showTools);
-    setShowAdmin(sn.showAdmin); setShowWallet(sn.showWallet); setChatOpen(sn.chatOpen); setShowNotif(sn.showNotif);
+    setShowAdmin(sn.showAdmin); setShowWallet(sn.showWallet); setShowFollowing(sn.showFollowing); setChatOpen(sn.chatOpen); setShowNotif(sn.showNotif);
     setShowCats(sn.showCats); setPubOpen(sn.pubOpen); setBuyModal(sn.buyModal); setConfirmCfg(sn.confirmCfg); setEditProd(sn.editProd);
   };
 
@@ -1937,6 +1938,11 @@ function AppShell({ sessionUser }) {
           </SectionGate>
         </div>;
       })()}
+      {showFollowing && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 4000, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+          <FollowingListScreen user={user} onBack={() => setShowFollowing(false)} onViewProfile={(id) => { setShowFollowing(false); openPublicProfile(id); }} />
+        </div>
+      )}
       {showTools && (() => {
         const isPremium = isOwner || ["pro", "premium"].includes(user?.plan);
         const dark = effectiveTheme === "dark";
@@ -2033,9 +2039,12 @@ function AppShell({ sessionUser }) {
               queda acotada aquí, con el error visible y opción de volver. */}
           <ErrorBoundary title="No se pudo mostrar este perfil" onClose={() => setViewProfileId(null)}>
           {viewedStoreEligible === null ? (
-            // Estado neutro mientras se confirma el vendedor real: nada de datos
-            // de relleno ni del perfil anterior — mejor medio segundo en blanco.
-            null
+            // Mientras se confirma el vendedor real: NUNCA datos de relleno ni
+            // del perfil anterior, pero TAMPOCO pantalla en blanco/negra sin
+            // explicación — un esqueleto neutro (gris, con pulso) dice "cargando"
+            // sin fingir ser un dato real. Decisión de esta ronda: aceptar 1-2s
+            // de esqueleto en vez de medio segundo en blanco.
+            <ProfileSkeleton />
           ) : viewedStoreEligible ? (
             <StoreFront
               cfg={viewedStoreCfg || {}}
@@ -2215,7 +2224,7 @@ function AppShell({ sessionUser }) {
               />
             )}
             {mScr === "sellerProfile" && selSeller && (
-              sellerStoreEligible === null ? null : sellerStoreEligible ? (
+              sellerStoreEligible === null ? <ProfileSkeleton /> : sellerStoreEligible ? (
                 <StoreFront
                   cfg={sellerStoreCfg || {}}
                   products={sellerStoreProducts.filter(p => !p.archived_at)}
@@ -2341,7 +2350,7 @@ function AppShell({ sessionUser }) {
             {/* Panel lateral del Perfil (☰): todo el menú que antes estaba apilado */}
             <ProfileMenuDrawer open={profileMenuOpen} onClose={() => setProfileMenuOpen(false)} user={user} isOwner={hasPanel}
               onMessages={openMessages} onOrders={() => setPScr("orders")} onWallet={() => setShowWallet(true)}
-              onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)}
+              onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} onFollowing={() => setShowFollowing(true)}
               onAdmin={() => { setAdminOpenPage(null); setShowAdmin(true); }} messagesBadge={chatUnread} ordersBadge={ordersUnseen} adminBadge={courierApps.length} />
           </>}
         </>

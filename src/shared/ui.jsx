@@ -240,13 +240,46 @@ export const Avatar = ({ url, avatar, name, size = 40, style, verified = false }
 // dato del id anterior: useSellerDisplay ya lo limpia antes de pedir el nuevo.
 export const AvatarUser = ({ userId, name, size = 40, style, verified }) => {
   const p = useSellerDisplay(userId);
-  const resolved = p.id === userId;
-  // Mientras no se confirme el id actual, NUNCA se usa el `name` de respaldo
-  // que pasó quien llama (con frecuencia un genérico tipo "Vendedor") — eso
-  // producía una letra de avatar ("V") que parecía un dato real durante el
-  // instante de carga. En blanco (ícono genérico) hasta que se confirma.
-  return <Avatar url={resolved ? p.avatar : null} name={resolved ? p.name : ""} size={size} style={style} verified={verified != null ? verified : (resolved && p.verified)} />;
+  // CAUSA RAÍZ real del destello (encontrada esta ronda): useSellerDisplay
+  // pone `id` en cuanto EMPIEZA a cargar (antes de tener el dato), así que
+  // "p.id === userId" es cierto casi de inmediato aunque name/avatar sigan
+  // en null — la ronda anterior creía que eso significaba "ya llegó el dato
+  // real" y no era así. Hay que mirar `loading` de verdad. Mientras carga, en
+  // vez de dejar que Avatar aplique su relleno normal (letra + color por
+  // nombre, que con name="" cae siempre en el mismo ícono de persona sobre un
+  // círculo de color — muy vistoso, se notaba MÁS que antes), se muestra un
+  // círculo gris neutro con el mismo pulso (.blk) que el resto de la app usa
+  // para "esto todavía no es un dato real" — nunca algo que se pueda
+  // confundir con una foto o inicial de verdad.
+  const resolved = p.id === userId && !p.loading;
+  if (!resolved) return <div className="blk" style={{ width: size, height: size, borderRadius: "50%", background: "rgba(128,128,128,.22)", flexShrink: 0, ...style }} />;
+  return <Avatar url={p.avatar} name={p.name} size={size} style={style} verified={verified != null ? verified : p.verified} />;
 };
+
+// Bloque gris con el pulso .blk — pieza mínima del esqueleto de carga.
+const _SkelBlk = ({ w, h, r = 8, style }) => <div className="blk" style={{ width: w, height: h, borderRadius: r, background: "rgba(128,128,128,.16)", ...style }} />;
+// Esqueleto de "cargando perfil" — reemplaza la pantalla en blanco que se
+// mostraba mientras se confirma si un vendedor es Pro o Free (nunca negro/
+// vacío sin explicación, pero tampoco un dato de relleno que parezca real:
+// todo en gris neutro con el mismo pulso .blk de toda la app).
+export const ProfileSkeleton = () => (
+  <div style={{ padding: "20px 18px", maxWidth: 480, margin: "0 auto", width: "100%" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 22 }}>
+      <_SkelBlk w={64} h={64} r={999} />
+      <div style={{ flex: 1 }}>
+        <_SkelBlk w="55%" h={14} style={{ marginBottom: 8 }} />
+        <_SkelBlk w="35%" h={11} />
+      </div>
+    </div>
+    <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
+      {[0, 1, 2].map(i => <_SkelBlk key={i} w="100%" h={46} r={12} style={{ flex: 1 }} />)}
+    </div>
+    <_SkelBlk w="100%" h={120} r={16} style={{ marginBottom: 14 }} />
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+      {[0, 1, 2, 3].map(i => <_SkelBlk key={i} w="100%" h={110} r={13} />)}
+    </div>
+  </div>
+);
 
 // Ilustración de MUESTRA para la selfie de KYC (verificación de perfil y KYC de
 // mensajero comparten exactamente la misma imagen): silueta simple sosteniendo

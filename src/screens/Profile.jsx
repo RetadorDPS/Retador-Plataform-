@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2, Archive, ArchiveRestore } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink, getMyFollowing, toggleFollow } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -69,12 +69,13 @@ function FxTirita() {
 // "Configuración" se quitó de este menú: consolidada en un solo lugar real
 // (el engranaje arriba a la derecha del Perfil) — dos entradas a la misma
 // pantalla eran ruido, y el dueño pidió dejar solo una.
-export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, onOrders, onWallet, onTools, onCourier, onAdmin, messagesBadge = 0, ordersBadge = 0, adminBadge = 0 }) {
+export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, onOrders, onWallet, onTools, onCourier, onFollowing, onAdmin, messagesBadge = 0, ordersBadge = 0, adminBadge = 0 }) {
   const { BG, S, B, T1, T2, T3, isDark } = useAt();
   const items = [
     { ic: "msg",    label: "Mensajes",                sub: "Chats y conversaciones",              action: onMessages, color: G,         badge: messagesBadge },
     { ic: "pkg",    label: "Mis pedidos",             sub: "Compras y ventas",                    action: onOrders,   color: "#60A5FA",  badge: ordersBadge },
     { ic: "wallet", label: "Mi billetera",            sub: "Enviar, recibir, pagar y convertir",  action: onWallet,   color: "#22C55E" },
+    { ic: "heart",  label: "Siguiendo",               sub: "Vendedores que sigues",                action: onFollowing, color: "#EC4899" },
     { ic: "tools",  label: "Herramientas",            sub: "Importador inteligente y más",        action: onTools,    color: "#6EE7B7" },
     { ic: "moto",   label: "Modo Mensajero",          sub: "Gana dinero repartiendo pedidos",     action: onCourier,  color: "#6366F1" },
     ...(isOwner ? [{ ic: "shield", label: "Panel de administración", sub: "Control total de la plataforma", action: onAdmin, color: "#F5A623", badge: adminBadge }] : []),
@@ -109,6 +110,62 @@ export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, on
           <FxTirita />
         </div>
       </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SIGUIENDO — lista real de a quién sigue el usuario (tabla followers, vía
+// getMyFollowing). "Dejar de seguir" llama a toggleFollow de verdad y quita la
+// fila al instante (con reversión si la escritura real falla).
+// ═════════════════════════════════════════════════════════════════════════════
+export function FollowingListScreen({ user, onBack, onViewProfile }) {
+  const { S, B, T1, T2, T3, isDark } = useAt();
+  const [rows, setRows] = useState(null); // null = cargando
+  const [busyId, setBusyId] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    if (!user?.id) { setRows([]); return; }
+    getMyFollowing(user.id).then(r => { if (alive) setRows(r); }).catch(() => { if (alive) setRows([]); });
+    return () => { alive = false; };
+  }, [user?.id]);
+  const unfollow = async (id) => {
+    if (busyId) return;
+    setBusyId(id);
+    const prev = rows;
+    setRows(r => r.filter(x => x.id !== id));
+    try { await toggleFollow(id); }
+    catch (e) { setRows(prev); }
+    setBusyId(null);
+  };
+  return (
+    <div style={{ flex: 1, overflowY: "auto", overscrollBehaviorY: "contain" }}>
+      <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, position: "sticky", top: 0, zIndex: 5 }}>
+        <div style={{ padding: "13px 18px", display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c="#666" s={20} /></button>
+          <p style={{ fontSize: 14, fontWeight: 800, color: T1 }}>Siguiendo</p>
+        </div>
+      </div>
+      {rows === null
+        ? <div style={{ textAlign: "center", color: T3, fontSize: 12, padding: "40px 0" }}>Cargando…</div>
+        : rows.length === 0
+          ? <div style={{ padding: "60px 32px", textAlign: "center" }}>
+              <div style={{ fontSize: 46, marginBottom: 14 }}>💛</div>
+              <p style={{ fontSize: 14, fontWeight: 700, color: T1, marginBottom: 7 }}>Aún no sigues a nadie</p>
+              <p style={{ fontSize: 11.5, color: T3, lineHeight: 1.5 }}>Cuando sigas a un vendedor, aparecerá aquí.</p>
+            </div>
+          : <div style={{ padding: "10px 14px 90px" }}>
+              {rows.map(r => (
+                <div key={r.id} onClick={() => onViewProfile?.(r.id)} className="lr" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 6px", borderRadius: 12 }}>
+                  <Avatar url={avatarUrlOf(r.avatar)} name={r.name} size={44} verified={r.verified} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: T1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</p>
+                    {r.plan && r.plan !== "gratis" && <p style={{ fontSize: 10.5, color: G, fontWeight: 700, marginTop: 1, textTransform: "capitalize" }}>{r.plan}</p>}
+                  </div>
+                  <button onClick={(e) => { e.stopPropagation(); unfollow(r.id); }} disabled={busyId === r.id} className="p" style={{ flexShrink: 0, padding: "7px 12px", borderRadius: 9, border: `1px solid ${B}`, background: "transparent", color: T2, fontSize: 11.5, fontWeight: 700, cursor: "pointer", opacity: busyId === r.id ? .6 : 1 }}>Dejar de seguir</button>
+                </div>
+              ))}
+            </div>}
     </div>
   );
 }

@@ -44,60 +44,37 @@ export const SUBCATS = {
 // ═════════════════════════════════════════════════════════════════════════════
 export const CatalogContext = createContext(null);
 export function CatalogProvider({ children }) {
-  const [cats, setCats] = useState(() => { try { const r = localStorage.getItem("retador_cats"); if (r) return JSON.parse(r); } catch {} return CATS; });
-  const [subcats, setSubcats] = useState(() => { try { const r = localStorage.getItem("retador_subcats"); if (r) return JSON.parse(r); } catch {} return SUBCATS; });
-  // Cargar categorías/subcategorías REALES del backend (lectura pública, sin login).
-  // Las de fábrica quedan como respaldo instantáneo; si falla la carga, se mantienen.
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const [{ data: cs, error: e1 }, { data: ss, error: e2 }] = await Promise.all([
-          supabase.from("categories").select("id,name,color,sort_order").order("sort_order", { ascending: true }),
-          supabase.from("subcategories").select("category_id,name,sort_order").order("sort_order", { ascending: true }),
-        ]);
-        if (e1 || e2) throw (e1 || e2);
-        if (!alive) return;
-        if (cs && cs.length) setCats(cs.map(c => ({ id: c.id, name: c.name, color: c.color })));
-        if (ss && ss.length) {
-          const grouped = {};
-          ss.forEach(s => { (grouped[s.category_id] = grouped[s.category_id] || []).push(s.name); });
-          setSubcats(grouped);
-        }
-      } catch (err) {
-        console.error("Catálogo (categorías):", err?.message || err);
-      }
-    })();
-    return () => { alive = false; };
-  }, []);
-  // Restauración única: devuelve categorías/subcategorías de fábrica borradas por error.
-  useEffect(() => {
+  const [cats, setCats] = useState(CATS);
+  const [subcats, setSubcats] = useState(SUBCATS);
+  // Categorías/subcategorías REALES del backend (lectura pública, sin login) —
+  // fuente única de verdad. Las de fábrica (arriba) son solo el respaldo
+  // instantáneo mientras carga o si la consulta falla; ya NO se guarda nada en
+  // localStorage (eso hacía que cada admin viera SU PROPIO catálogo inventado,
+  // que nadie más veía y que no sobrevivía a borrar el caché — ver Ronda 6,
+  // punto G). refetch() se expone para que el panel de administración pida
+  // los datos frescos justo después de escribir de verdad (crear/editar/
+  // borrar/reordenar), sin esperar a que alguien recargue la página.
+  const fetchReal = async () => {
     try {
-      if (localStorage.getItem("retador_cats_restored_v1")) return;
-      setCats(prev => { const ids = new Set(prev.map(c => c.id)); const miss = CATS.filter(fc => !ids.has(fc.id)); return miss.length ? [...prev, ...miss] : prev; });
-      setSubcats(prev => { const m = { ...prev }; Object.keys(SUBCATS).forEach(k => { if (!m[k] || m[k].length === 0) m[k] = SUBCATS[k]; }); return m; });
-      localStorage.setItem("retador_cats_restored_v1", "1");
-    } catch {}
-  }, []);
-  useEffect(() => { try { localStorage.setItem("retador_cats", JSON.stringify(cats)); } catch {} }, [cats]);
-  useEffect(() => { try { localStorage.setItem("retador_subcats", JSON.stringify(subcats)); } catch {} }, [subcats]);
-  const addCat = (name, color) => {
-    const id = (name || "").toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi, "-").replace(/^-|-$/g, "") || ("cat" + Date.now());
-    if (!name || cats.some(c => c.id === id)) return;
-    setCats(p => [...p, { id, name, color: color || "#94A3B8" }]);
-    setSubcats(p => ({ ...p, [id]: [] }));
+      const [{ data: cs, error: e1 }, { data: ss, error: e2 }] = await Promise.all([
+        supabase.from("categories").select("id,name,color,sort_order").order("sort_order", { ascending: true }),
+        supabase.from("subcategories").select("category_id,name,sort_order").order("sort_order", { ascending: true }),
+      ]);
+      if (e1 || e2) throw (e1 || e2);
+      if (cs && cs.length) setCats(cs.map(c => ({ id: c.id, name: c.name, color: c.color })));
+      if (ss) {
+        const grouped = {};
+        ss.forEach(s => { (grouped[s.category_id] = grouped[s.category_id] || []).push(s.name); });
+        setSubcats(grouped);
+      }
+    } catch (err) {
+      console.error("Catálogo (categorías):", err?.message || err);
+    }
   };
-  const removeCat = (id) => { setCats(p => p.filter(c => c.id !== id)); setSubcats(p => { const n = { ...p }; delete n[id]; return n; }); };
-  const renameCat = (id, name) => setCats(p => p.map(c => c.id === id ? { ...c, name } : c));
-  const setCatColor = (id, color) => setCats(p => p.map(c => c.id === id ? { ...c, color } : c));
-  const addSub = (catId, sub) => { if (!sub) return; setSubcats(p => ({ ...p, [catId]: [...(p[catId] || []), sub] })); };
-  const removeSub = (catId, sub) => setSubcats(p => ({ ...p, [catId]: (p[catId] || []).filter(s => s !== sub) }));
-  const renameSub = (catId, oldSub, newSub) => { if (!newSub || !newSub.trim()) return; setSubcats(p => ({ ...p, [catId]: (p[catId] || []).map(s => s === oldSub ? newSub.trim() : s) })); };
-  const reorderCats = (from, to) => setCats(p => { if (from == null || to == null || from === to) return p; const a = [...p]; const [m] = a.splice(from, 1); a.splice(to, 0, m); return a; });
-  const resetCatalog = () => { setCats(CATS); setSubcats(SUBCATS); };
-  return <CatalogContext.Provider value={{ cats, subcats, addCat, removeCat, renameCat, setCatColor, addSub, removeSub, renameSub, reorderCats, resetCatalog }}>{children}</CatalogContext.Provider>;
+  useEffect(() => { fetchReal(); }, []);
+  return <CatalogContext.Provider value={{ cats, subcats, refetch: fetchReal }}>{children}</CatalogContext.Provider>;
 }
-export const useCatalog = () => useContext(CatalogContext) || { cats: CATS, subcats: SUBCATS, addCat: () => {}, removeCat: () => {}, renameCat: () => {}, setCatColor: () => {}, addSub: () => {}, removeSub: () => {}, renameSub: () => {}, reorderCats: () => {}, resetCatalog: () => {} };
+export const useCatalog = () => useContext(CatalogContext) || { cats: CATS, subcats: SUBCATS, refetch: () => {} };
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ICONOS DE CATEGORÍA

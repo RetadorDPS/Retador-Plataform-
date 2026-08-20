@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 const SUPABASE_URL = "https://qsxtjuhueqdxoduyroli.supabase.co";
 const SUPABASE_KEY = "sb_publishable_VbX-xBAVLKl_SnrkOTxc2w_oTe5-1Va";
 const APP_URL = "https://retadordps.github.io/Retador-Plataform-"; // ⚠️ ajustar si cambia el dominio
-const DEFAULT_IMAGE = `${APP_URL}/icon-512.png`;
+const DEFAULT_IMAGE = `${APP_URL}/icons/icon-512.png`;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, "..", "public", "share");
@@ -81,6 +81,19 @@ async function main() {
   const profDir = path.join(OUT_DIR, "perfil");
   fs.mkdirSync(prodDir, { recursive: true });
   fs.mkdirSync(profDir, { recursive: true });
+
+  // "hazte-pro.html" — página fija (sin datos por id, no depende de Supabase)
+  // del enlace promocional real "Pro gratis por compartir" (ver punto E,
+  // Ronda 8): se genera aquí igual que las demás para no versionar a mano
+  // nada dentro de public/share (todo ese directorio está en .gitignore).
+  const hazteProHtml = pageHtml({
+    title: "Hazte Pro GRATIS en RETADOR 🚀",
+    description: "Publica sin límites, destaca tu tienda y paga $0 — compartiendo cada mes. Así de simple.",
+    image: `${APP_URL}/icons/icon-512.png`,
+    url: `${APP_URL}/share/hazte-pro.html`,
+    redirectTo: `${APP_URL}/?openProPromo=1`,
+  });
+  fs.writeFileSync(path.join(OUT_DIR, "hazte-pro.html"), hazteProHtml);
 
   let products = [];
   try {

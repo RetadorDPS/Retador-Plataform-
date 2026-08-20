@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2, Archive, ArchiveRestore } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink, getMyFollowing, toggleFollow } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink, getMyFollowing, toggleFollow, requestPlanPromo, getPromoSettings, hazteProLink } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -837,6 +837,64 @@ function FP_VerifyModal({ user, isVerified, onClose, onSubmit, C, flash }) {
 }
 // Mapea el nombre del plan (Pro/Premium) al valor del backend (pro/premium).
 const PLAN_KEY = (nameOrId) => { const s = String(nameOrId || "").toLowerCase(); if (s.includes("premium")) return "premium"; if (s.includes("pro")) return "pro"; return null; };
+// Mini-flujo "consíguelo GRATIS compartiendo" dentro de la tarjeta del plan
+// de pago — mismo backend real (request_plan_promo) que usa la pestaña
+// "📤 Compartir" del panel Pro (Store.jsx → Billing), aquí en versión
+// compacta para quien todavía es Gratis.
+function FP_SharePromo({ plan, promoSettings, onSubmitted, flash_, C }) {
+  const [open, setOpen] = useState(false);
+  const [links, setLinks] = useState([""]);
+  const [busy, setBusy] = useState(false);
+  const REQUIRED = promoSettings.share_required || 12;
+  const setLink = (i, v) => setLinks(p => p.map((l, idx) => idx === i ? v : l));
+  const addLinkRow = () => links.length < REQUIRED && setLinks(p => [...p, ""]);
+  const removeLinkRow = (i) => setLinks(p => p.filter((_, idx) => idx !== i));
+  const filled = links.filter(l => l.trim().length > 5).length;
+  const link = hazteProLink();
+  const doShare = async () => {
+    const txt = "Hazte Pro GRATIS en RETADOR compartiendo — mira cómo:";
+    try {
+      if (navigator.share) { await navigator.share({ title: "RETADOR — Pro gratis", text: txt, url: link }); return; }
+      if (navigator.clipboard) { await navigator.clipboard.writeText(link); flash_("🔗 Enlace copiado"); return; }
+      flash_("Compartir no disponible en este dispositivo");
+    } catch (e) { /* el usuario canceló o no se permitió */ }
+  };
+  const send = async () => {
+    setBusy(true);
+    try {
+      await requestPlanPromo(plan.id, "compartir", links.filter(l => l.trim().length > 5));
+      flash_("✅ Enviado, en revisión");
+      onSubmitted?.(plan.id);
+    } catch (e) { flash_("⚠️ " + (e?.message || "No se pudo enviar")); }
+    setBusy(false);
+  };
+  return (
+    <div style={{ marginTop:9, borderRadius:10, border:`1px dashed ${C.accent}66`, overflow:"hidden" }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display:"flex", alignItems:"center", gap:7, padding:"9px 11px", cursor:"pointer" }}>
+        <span style={{ fontSize:13 }}>🎁</span>
+        <span style={{ fontSize:11.5, fontWeight:700, color:C.accent, flex:1 }}>O consíguelo GRATIS compartiendo</span>
+        <span style={{ fontSize:10, color:C.textSecondary }}>{open ? "▲" : "▼"}</span>
+      </div>
+      {open && <div style={{ padding:"0 11px 12px" }}>
+        <div style={{ fontSize:11, color:C.textSecondary, marginBottom:8 }}>Comparte tu enlace {REQUIRED} veces al mes en tus redes y pega aquí cada publicación.</div>
+        <button onClick={doShare} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:6, padding:8, borderRadius:8, border:`1px solid ${C.border}`, background:C.surfaceTop, color:C.textPrimary, fontSize:11.5, fontWeight:700, cursor:"pointer", marginBottom:10 }}>🔗 Copiar mi enlace / compartir</button>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+          <span style={{ fontSize:10.5, color:C.textSecondary }}>{filled} de {REQUIRED} enlaces</span>
+        </div>
+        <div style={{ maxHeight:140, overflowY:"auto", marginBottom:8 }}>
+          {links.map((l, i) => (
+            <div key={i} style={{ display:"flex", gap:5, marginBottom:5 }}>
+              <input style={{ flex:1, background:C.surfaceTop, border:`1px solid ${C.border}`, borderRadius:7, padding:"6px 9px", color:C.textPrimary, fontSize:11.5, outline:"none" }} placeholder={`Enlace #${i+1}`} value={l} onChange={e => setLink(i, e.target.value)}/>
+              {links.length > 1 && <button onClick={() => removeLinkRow(i)} style={{ width:26, borderRadius:7, border:`1px solid ${C.border}`, background:"transparent", color:C.textSecondary, cursor:"pointer" }}>✕</button>}
+            </div>
+          ))}
+        </div>
+        {links.length < REQUIRED && <button onClick={addLinkRow} style={{ width:"100%", padding:7, borderRadius:7, border:`1px dashed ${C.border}`, background:"transparent", color:C.textSecondary, fontSize:11, cursor:"pointer", marginBottom:8 }}>+ Agregar otro enlace</button>}
+        <button onClick={send} disabled={filled < REQUIRED || busy} style={{ width:"100%", padding:9, borderRadius:8, border:"none", cursor:filled < REQUIRED ? "default" : "pointer", background:filled < REQUIRED ? C.surfaceTop : C.accent, color:filled < REQUIRED ? C.textSecondary : "#fff", fontSize:12, fontWeight:800 }}>{busy ? "Enviando…" : filled < REQUIRED ? `Faltan ${REQUIRED-filled} enlaces` : "Enviar para revisión"}</button>
+      </div>}
+    </div>
+  );
+}
 function FP_PlansModal({ user, plans = [], current, currentPlanId, onClose, C, flash, onPlanChanged }) {
   const [pending, setPending] = useState(null);   // { plan } de la solicitud pendiente
   const [loading, setLoading] = useState(true);
@@ -848,6 +906,12 @@ function FP_PlansModal({ user, plans = [], current, currentPlanId, onClose, C, f
     getMyPlanRequest(user.id).then(r => { if (alive) { setPending(r && r.status === "pending" ? r : null); setLoading(false); } }).catch(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [user?.id]);
+  // "Pro gratis por compartir" (promo_settings) — decide si se muestra la
+  // opción GRATIS junto al plan de pago (ver punto D, Ronda 8). Nunca se
+  // confía en un valor fijo: se lee en vivo, igual que hace request_plan_promo
+  // del lado del backend antes de aceptar la solicitud.
+  const [promoSettings, setPromoSettings] = useState({ share_enabled: false, share_required: 12 });
+  useEffect(() => { getPromoSettings().then(setPromoSettings); }, []);
 
   const curPlan = plans.find(pl => pl.id === currentPlanId);
   const curPrice = Number(curPlan?.price ?? 0);
@@ -897,6 +961,13 @@ function FP_PlansModal({ user, plans = [], current, currentPlanId, onClose, C, f
                   ? <button disabled style={{ width:"100%", height:38, marginTop:11, borderRadius:9, background:C.surfaceTop, border:`1px solid ${C.border}`, color:C.textSecondary, fontSize:12.5, fontWeight:700, cursor:"default" }}>🕐 Solicitud enviada</button>
                   : <button disabled={!!pending || busy || loading} onClick={()=>request(p)} style={{ width:"100%", height:38, marginTop:11, borderRadius:9, background: (pending || busy) ? C.surfaceTop : C.accent, border:"none", color: (pending || busy) ? C.textSecondary : "#fff", fontSize:12.5, fontWeight:800, cursor: (pending || busy) ? "default" : "pointer", opacity: (pending || busy) ? .7 : 1 }}>{busy ? "Enviando…" : `Solicitar plan ${p.name}`}</button>
               )}
+              {/* Punto D — junto al plan de pago, la alternativa real de
+                  conseguirlo GRATIS compartiendo (solo si el admin la activó
+                  y no hay ya una solicitud pendiente de cualquier tipo). */}
+              {requestable && !isPendingThis && !pending && promoSettings.share_enabled && (
+                <FP_SharePromo plan={p} promoSettings={promoSettings} flash_={flash_}
+                  onSubmitted={(planId) => setPending({ plan: planId, status:"pending" })} C={C}/>
+              )}
               {downgradable && (
                 <button disabled={busy || loading} onClick={()=>downgrade(p)} style={{ width:"100%", height:38, marginTop:11, borderRadius:9, background:"none", border:`1px solid ${C.border}`, color:C.textPrimary, fontSize:12.5, fontWeight:700, cursor: busy ? "default" : "pointer", opacity: busy ? .7 : 1 }}>{busy ? "Cambiando…" : `Cambiar a ${p.name}`}</button>
               )}
@@ -939,7 +1010,7 @@ function FP_ReportModal({ targetName, onClose, onSubmit, C }) {
     </div>
   );
 }
-export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, embedded = false, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, currentPlan = "Gratis", currentPlanId = "gratis", plans = [], maxProducts = null, onPlanChanged, myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct, archivedProducts = [], onArchiveProduct, onUnarchiveProduct, onDeleteArchivedProduct, autoOpenVerify = false, onAutoOpenVerifyDone, autoOpenEdit = false, onAutoOpenEditDone }) {
+export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, embedded = false, user, initialProfile = {}, sellerId = null, onProfileUpdate, isOwner: isOwnerProp, onChat, onReport, onVerify, isVerified, currentPlan = "Gratis", currentPlanId = "gratis", plans = [], maxProducts = null, onPlanChanged, myDebt = 0, commissionActive = true, userProducts = [], onProduct, onDeleteProduct, onEditProduct, onPromoteProduct, archivedProducts = [], onArchiveProduct, onUnarchiveProduct, onDeleteArchivedProduct, autoOpenVerify = false, onAutoOpenVerifyDone, autoOpenEdit = false, onAutoOpenEditDone, autoOpenPlans = false, onAutoOpenPlansDone }) {
   // ⭐ Destacar: visible solo si el admin tiene la función encendida (config en vivo).
   const promoOn = usePlatformCfg().promoActive === true;
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
@@ -967,6 +1038,10 @@ export function FreeProfileScreen({ onBack, onMenu = null, onSettings = null, em
   // ya existen de verdad (KYC real y editor unificado).
   useEffect(() => { if (autoOpenVerify) { setShowVerify(true); onAutoOpenVerifyDone?.(); } }, [autoOpenVerify]);
   useEffect(() => { if (autoOpenEdit) { setEditing(true); onAutoOpenEditDone?.(); } }, [autoOpenEdit]);
+  // Entrada directa desde el enlace de "hazte Pro gratis" compartido (ver
+  // Ronda 8, punto E): abre el mismo modal de Planes real, ya con la
+  // solicitud de Pro a la vista — no un flujo aparte inventado.
+  useEffect(() => { if (autoOpenPlans) { setShowPlans(true); onAutoOpenPlansDone?.(); } }, [autoOpenPlans]);
 
   // ÚNICA identidad pública: el nombre real (profiles.full_name). Ya no existe
   // "usuario"/@handle — era un valor inventado en el frontend (pedazo del correo)

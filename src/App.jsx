@@ -17,7 +17,7 @@ import {
   MOCK_PRODUCTS, MOCK_USER,
   authSignUp, authSignIn, authSignOut, authGetSession,
   getUserById, getUserName, updateUserName, getSellerPlan,
-  mapProduct, loadProducts, loadServices, getFeed, saveProduct, deleteProduct, getProductsBySeller, uploadImage, DEMO_PRODUCT,
+  mapProduct, loadProducts, loadServices, getFeed, saveProduct, deleteProduct, getProductsBySeller, uploadImage,
   archiveProduct, unarchiveProduct, deleteProductHard, sweepExpiredArchives,
   sendMessage, loadMessages, markRead, markDelivered, getMyConversations,
   toggleFavorite, getMyFavorites, getPlatformStats, getPlatformConfig, setPlatformConfig, setPlatformBlocks, myPermissions, promoteProduct,
@@ -665,8 +665,7 @@ function AppShell({ sessionUser }) {
       loadProducts().catch(() => []),
       loadServices().catch(() => []),
     ]);
-    // DEMO_PRODUCT: tarjeta de ejemplo "llena" al frente (quitar cuando ya no se necesite).
-    setProducts([DEMO_PRODUCT, ...list]);
+    setProducts(list);
     setLoading(false);
     setServices(svcs);
   }, []);
@@ -1095,6 +1094,18 @@ function AppShell({ sessionUser }) {
   // flujos: enlazan al único lugar real donde ya existen (Perfil).
   const [autoOpenVerify, setAutoOpenVerify] = useState(false);
   const [autoOpenEdit, setAutoOpenEdit] = useState(false);
+  // "?openProPromo=1": enlace real de la página de vista previa "hazte Pro
+  // gratis" (public/share/hazte-pro.html) — mismo mecanismo de query param
+  // que openConv/openProduct/openProfile, ver el efecto de abajo.
+  const [autoOpenPlans, setAutoOpenPlans] = useState(false);
+  useEffect(() => {
+    if (!user?.id) return;
+    let wantsPlans = false;
+    try { wantsPlans = new URLSearchParams(window.location.search).get("openProPromo") === "1"; } catch (e) {}
+    if (!wantsPlans) return;
+    try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
+    setTab("perfil"); setPScr("profile-full"); setAutoOpenPlans(true);
+  }, [user?.id]);
   // Equipo y permisos: miembros con secciones delegadas
   const [teamMembers, setTeamMembers] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_team') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('retador_team', JSON.stringify(teamMembers)); } catch {} }, [teamMembers]);
@@ -2364,7 +2375,8 @@ function AppShell({ sessionUser }) {
               }
               return <FreeProfileScreen onBack={() => setPScr("main")} onSettings={() => setPScr("settings")} user={user} initialProfile={profileData} onProfileUpdate={setProfileData} onVerify={() => reloadOwn()} isVerified={!!user?.verified || verifiedUsers.includes(me)} currentPlan={currentPlanName} currentPlanId={user?.plan || "gratis"} plans={realPlans} maxProducts={myRealPlan?.max_products ?? null} onPlanChanged={(planId) => setUser(prev => prev ? { ...prev, plan: planId } : prev)} myDebt={myDebt} commissionActive={adminCfg.commissionActive !== false} userProducts={ownListings} archivedProducts={ownArchived} onProduct={p => { setSelProd(p); setProdBackTo("profile-full"); setTab("market"); setMScr("product"); }} onDeleteProduct={confirmDeleteProduct} onArchiveProduct={confirmArchiveProduct} onUnarchiveProduct={handleUnarchive} onDeleteArchivedProduct={confirmDeleteProduct} onEditProduct={(p) => setEditProd(p)} onPromoteProduct={(p) => promoteFlow(p.id)}
                 autoOpenVerify={autoOpenVerify} onAutoOpenVerifyDone={() => setAutoOpenVerify(false)}
-                autoOpenEdit={autoOpenEdit} onAutoOpenEditDone={() => setAutoOpenEdit(false)} />;
+                autoOpenEdit={autoOpenEdit} onAutoOpenEditDone={() => setAutoOpenEdit(false)}
+                autoOpenPlans={autoOpenPlans} onAutoOpenPlansDone={() => setAutoOpenPlans(false)} />;
             })()}
             {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
             {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}

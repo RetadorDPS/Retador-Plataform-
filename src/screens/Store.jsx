@@ -24,9 +24,9 @@ import { AreaChart, Area, BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Ce
 import {
   ShoppingCart, TrendingUp, Package, BarChart2, Settings as SettingsIcon, Palette, Tag, CreditCard,
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
-  Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star,
+  Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy,
 } from "lucide-react";
-import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf } from "../shared/index.js";
+import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink } from "../shared/index.js";
 
 /* ── TEMA — propio y compacto, como el resto de paneles "premium" de la app ── */
 const S_DARK = {
@@ -238,6 +238,20 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
   // inventado ni genérico. cfg.name (Diseño → Branding) lo reemplaza si el
   // vendedor lo cambió.
   const storeName = cfg.name || profileRealName || "Vendedor";
+  // Compartir perfil de la Tienda Pro — mismo enlace de vista previa y mismo
+  // comportamiento (solo enlace, nunca foto+enlace juntos) que ya tiene el
+  // perfil Free (ver doShareProfile en Profile.jsx); se perdió en la
+  // integración de la Tienda Pro y aquí se recupera con el mecanismo real.
+  const doShareProfile = async () => {
+    if (!sellerId) return;
+    const link = shareLink("profile", sellerId);
+    const txt = `${storeName} — en RETADOR`;
+    try {
+      if (navigator.share) { await navigator.share({ title: storeName, text: txt, url: link }); return; }
+      if (navigator.clipboard) { await navigator.clipboard.writeText(link); flash?.("🔗 Enlace copiado"); return; }
+      flash?.("Compartir no disponible en este dispositivo");
+    } catch (e) { /* el usuario canceló o no se permitió */ }
+  };
   const cats = useMemo(() => deriveCategories(products), [products]);
   const hero = cfg.banner_url
     ? (isGradientBanner(cfg.banner_url) ? { background: cfg.banner_url } : { backgroundImage:`url(${cfg.banner_url})`, backgroundSize:"cover", backgroundPosition:"center" })
@@ -348,6 +362,7 @@ export function StoreFront({ cfg, products, headerStats, ratingInfo, reviews = [
         {!onMenu && !embedded && <button onClick={onBack} style={{ position:"absolute", top:14, left:14, background:"rgba(0,0,0,0.45)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, padding:"6px 10px", color:"#fff", fontSize:11, cursor:"pointer", zIndex:2, display:"flex", alignItems:"center", gap:4 }}><ChevronLeft size={13}/> Volver</button>}
         {isOwner && (
           <div style={{ position:"absolute", top:14, right:14, zIndex:2, display:"flex", alignItems:"center", gap:6 }}>
+            <button onClick={doShareProfile} aria-label="Compartir perfil" style={{ background:"rgba(0,0,0,0.45)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, width:28, height:28, color:"#fff", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Share2 size={13}/></button>
             {onSettings && <button onClick={onSettings} aria-label="Configuración" style={{ background:"rgba(0,0,0,0.45)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, width:28, height:28, color:"#fff", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><SettingsIcon size={13}/></button>}
             <button onClick={onDash} style={{ background:`linear-gradient(135deg,#3730a3,${ac})`, border:"none", borderRadius:20, padding:"6px 14px", color:"#fff", fontSize:11, fontWeight:800, cursor:"pointer" }}>⚡ Mi Panel</button>
           </div>
@@ -607,44 +622,55 @@ function ProdsSection({ products, C, ac, onNewProduct, onEditProduct, onArchiveP
     <div>
       <SHdr title="Productos" sub={limitTxt} btn="Publicar" onBtn={onNewProduct} ac={ac} C={C}/>
       <div style={{ display:"flex", gap:6, marginBottom:16, background:C.s1, borderRadius:10, padding:3 }}>
-        {[["activos",`Activos (${activos.length})`],["archivados",`Archivados (${archivados.length})`]].map(([id,lb]) => (
+        {[["activos",`Activos (${activos.length})`],["archivados",`Archivados (${archivados.length})`],["destacados","⭐ Destacados"]].map(([id,lb]) => (
           <button key={id} onClick={() => setView(id)} style={{ flex:1, padding:"7px", borderRadius:8, border:"none", cursor:"pointer", fontSize:12, fontWeight:700, background:view===id?ac:"transparent", color:view===id?"#000":C.m }}>{lb}</button>
         ))}
       </div>
-      {shown.length === 0 && <div style={{ padding:"40px", textAlign:"center", color:C.m, fontSize:13 }}>{view==="activos" ? "Aún no has publicado nada." : "No tienes productos archivados."}</div>}
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-        {shown.map(prod => (
-          <div key={prod.id} style={{ borderRadius:13, background:C.s2, border: prod.storeFeatured ? `1.5px solid ${ac}` : `1px solid ${C.b}`, overflow:"hidden", opacity:prod.archived_at?.6:1, position:"relative" }}>
-            <PImg p={prod} h={110} fz={36} C={C}/>
-            <div style={{ padding:11 }}>
-              <div style={{ fontSize:12, fontWeight:500, marginBottom:2, color:C.t }}>{prod.title}</div>
-              <div style={{ fontSize:10, color:C.m, marginBottom:8 }}>{prod.subcat || "Sin categoría"}</div>
-              {/* Interruptor de "Destacado" — se movió de un ícono flotando sobre la
-                  foto (fácil de perder según la imagen) a esta fila de texto clara,
-                  siempre visible, con etiqueta. */}
-              {!prod.archived_at && (
-                <button onClick={() => onToggleFeatured(prod)} className="p"
-                  style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:5, padding:"6px 0", marginBottom:8, borderRadius:8, border: prod.storeFeatured ? "none" : `1px solid ${C.b}`, cursor:"pointer", background: prod.storeFeatured ? ac : "transparent", color: prod.storeFeatured ? "#000" : C.m, fontSize:11, fontWeight:700 }}>
-                  <Star size={12} color={prod.storeFeatured ? "#000" : C.m} fill={prod.storeFeatured ? "#000" : "none"}/>
-                  {prod.storeFeatured ? "Destacado" : "Marcar como Destacado"}
-                </button>
-              )}
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <span style={{ fontSize:14, fontWeight:800, color:C.t }}>{money(prod.price, prod.currency)}</span>
-                <div style={{ display:"flex", gap:5 }}>
-                  {!prod.archived_at ? (<>
-                    <button onClick={() => onEditProduct(prod)} style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Edit2 size={11} color={ac}/></button>
-                    <button onClick={() => onArchiveProduct(prod.id)} title="Archivar" style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Package size={11} color={C.m}/></button>
-                  </>) : (
-                    <button onClick={() => onUnarchiveProduct(prod.id)} title="Recuperar" style={{ width:26, height:26, borderRadius:6, background:`${ac}22`, border:`1px solid ${ac}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Upload size={11} color={ac}/></button>
-                  )}
-                  <button onClick={() => onDeleteProduct(prod.id)} style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Trash2 size={11} color={C.err}/></button>
+      {view === "destacados" ? (
+        <div>
+          {/* Mensaje fijo y discreto, SIEMPRE visible en esta pestaña. */}
+          <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 12px", marginBottom:14, borderRadius:10, background:`${ac}14`, border:`1px solid ${ac}44` }}>
+            <Star size={14} color={ac} fill={ac}/>
+            <span style={{ fontSize:11.5, color:C.t, lineHeight:1.4 }}>Estos productos se verán en la sección de Destacados de tu tienda.</span>
+          </div>
+          {products.length === 0 && <div style={{ padding:"40px", textAlign:"center", color:C.m, fontSize:13 }}>Aún no has publicado nada.</div>}
+          {products.map(prod => (
+            <div key={prod.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 8px", marginBottom:6, borderRadius:11, background:C.s2, border: prod.storeFeatured ? `1.5px solid ${ac}` : `1px solid ${C.b}`, opacity:prod.archived_at?.6:1 }}>
+              <div style={{ width:42, height:42, borderRadius:8, overflow:"hidden", flexShrink:0 }}><PImg p={prod} h={42} fz={16} C={C}/></div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:12, fontWeight:600, color:C.t, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{prod.title}</div>
+                <div style={{ fontSize:10, color:C.m }}>{money(prod.price, prod.currency)}{prod.archived_at ? " · Archivado" : ""}</div>
+              </div>
+              <Toggle on={!!prod.storeFeatured} onChange={() => onToggleFeatured(prod)} C={C}/>
+            </div>
+          ))}
+        </div>
+      ) : (<>
+        {shown.length === 0 && <div style={{ padding:"40px", textAlign:"center", color:C.m, fontSize:13 }}>{view==="activos" ? "Aún no has publicado nada." : "No tienes productos archivados."}</div>}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+          {shown.map(prod => (
+            <div key={prod.id} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden", opacity:prod.archived_at?.6:1, position:"relative" }}>
+              <PImg p={prod} h={110} fz={36} C={C}/>
+              <div style={{ padding:11 }}>
+                <div style={{ fontSize:12, fontWeight:500, marginBottom:2, color:C.t }}>{prod.title}</div>
+                <div style={{ fontSize:10, color:C.m, marginBottom:8 }}>{prod.subcat || "Sin categoría"}</div>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <span style={{ fontSize:14, fontWeight:800, color:C.t }}>{money(prod.price, prod.currency)}</span>
+                  <div style={{ display:"flex", gap:5 }}>
+                    {!prod.archived_at ? (<>
+                      <button onClick={() => onEditProduct(prod)} style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Edit2 size={11} color={ac}/></button>
+                      <button onClick={() => onArchiveProduct(prod.id)} title="Archivar" style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Package size={11} color={C.m}/></button>
+                    </>) : (
+                      <button onClick={() => onUnarchiveProduct(prod.id)} title="Recuperar" style={{ width:26, height:26, borderRadius:6, background:`${ac}22`, border:`1px solid ${ac}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Upload size={11} color={ac}/></button>
+                    )}
+                    <button onClick={() => onDeleteProduct(prod.id)} style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Trash2 size={11} color={C.err}/></button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </>)}
     </div>
   );
 }
@@ -1211,7 +1237,22 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
   const [promoTab, setPromoTab] = useState("compartir");
   const [links, setLinks] = useState([""]);
   const [busy, setBusy] = useState(false);
-  const REQUIRED = 12;
+  // Ajustes reales de "Pro gratis por compartir" (promo_settings) — nunca un
+  // 12 fijo: si el admin cambia "Enlaces requeridos por mes" (punto F), esto
+  // se refleja aquí de inmediato, igual que ya lo exige request_plan_promo
+  // del lado del backend.
+  const [promoSettings, setPromoSettings] = useState({ share_enabled: false, share_required: 12 });
+  useEffect(() => { getPromoSettings().then(setPromoSettings); }, []);
+  const REQUIRED = promoSettings.share_required || 12;
+  const promoLink = hazteProLink();
+  const doSharePromo = async () => {
+    const txt = "Mantén tu plan Pro gratis en RETADOR compartiendo — mira cómo:";
+    try {
+      if (navigator.share) { await navigator.share({ title: "RETADOR — Pro gratis", text: txt, url: promoLink }); return; }
+      if (navigator.clipboard) { await navigator.clipboard.writeText(promoLink); flash?.("🔗 Enlace copiado"); return; }
+      flash?.("Compartir no disponible en este dispositivo");
+    } catch (e) { /* el usuario canceló o no se permitió */ }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -1283,15 +1324,15 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
           nunca myPlan.id==="gratis" (eso nunca puede ser cierto aquí: quien
           está en el plan gratis no ve la Tienda ni este panel en absoluto,
           así que ese gate dejaba la tarjeta dormida para siempre). */}
-      {Number(myPlan?.price) > 0 && (
+      {Number(myPlan?.price) > 0 && promoSettings.share_enabled && (
         <div style={{ borderRadius:14, border:`1px dashed rgba(${toRgb(ac)},0.4)`, background:C.s2, marginBottom:20, overflow:"hidden" }}>
           <div onClick={() => setPromoOpen(o=>!o)} style={{ display:"flex", alignItems:"center", gap:8, padding:"12px 16px", cursor:"pointer" }}>
             <span style={{ fontSize:15 }}>🎁</span>
-            <div style={{ fontSize:13, fontWeight:800, flex:1, color:C.t }}>¿Prefieres no pagar? Consigue {myPlan?.name || "tu plan"} gratis</div>
+            <div style={{ fontSize:13, fontWeight:800, flex:1, color:C.t }}>Mantén tu plan {myPlan?.name || ""} activo compartiendo</div>
             <ChevronDown size={15} color={C.m} style={{ transform:promoOpen?"rotate(180deg)":"none", transition:"transform .2s" }}/>
           </div>
           {promoOpen && <div style={{ padding:"0 16px 16px" }}>
-            <div style={{ fontSize:11, color:C.m, marginBottom:14 }}>Dos formas de mantener tu plan activo sin tarjeta — se revisan cada mes.</div>
+            <div style={{ fontSize:11, color:C.m, marginBottom:14 }}>Pega aquí los enlaces de lo que has compartido este mes — dos formas, se revisan cada mes.</div>
             <div style={{ display:"flex", gap:6, marginBottom:16, background:C.s1, borderRadius:10, padding:3 }}>
               {[["compartir","📤 Compartir"],["referidos","🔗 Referidos"]].map(([id,lb]) => (
                 <button key={id} onClick={() => setPromoTab(id)} style={{ flex:1, padding:7, borderRadius:8, border:"none", cursor:"pointer", fontSize:12, fontWeight:700, background:promoTab===id?ac:"transparent", color:promoTab===id?"#000":C.m }}>{lb}</button>
@@ -1299,10 +1340,11 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
             </div>
             {promoTab === "compartir" && (
               <div>
-                <div style={{ fontSize:12, color:C.t, marginBottom:3 }}>Comparte RETADOR o tus publicaciones <b style={{ color:ac }}>{REQUIRED} veces al mes</b> en tus redes.</div>
+                <div style={{ fontSize:12, color:C.t, marginBottom:3 }}>Comparte tu enlace <b style={{ color:ac }}>{REQUIRED} veces al mes</b> en tus redes.</div>
                 <div style={{ fontSize:11, color:C.m, marginBottom:12 }}>Pega aquí el enlace real de cada publicación — el equipo lo revisa.</div>
+                <button onClick={doSharePromo} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:6, padding:8, borderRadius:8, border:`1px solid ${C.b}`, background:C.s3, color:C.t, fontSize:12, fontWeight:700, cursor:"pointer", marginBottom:12 }}><Copy size={13}/> Copiar mi enlace / compartir</button>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-                  <span style={{ fontSize:11, color:C.m }}>{filled} de {REQUIRED} enlaces</span>
+                  <span style={{ fontSize:11, color:C.m }}>Llevas {filled} de {REQUIRED} enlaces</span>
                   <div style={{ width:100, height:5, borderRadius:3, background:C.s3 }}><div style={{ height:"100%", borderRadius:3, background:filled>=REQUIRED?C.ok:ac, width:`${Math.min(100,(filled/REQUIRED)*100)}%` }}/></div>
                 </div>
                 <div style={{ maxHeight:170, overflowY:"auto", marginBottom:10 }}>

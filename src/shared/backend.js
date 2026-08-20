@@ -13,6 +13,11 @@ import { supabase } from "./supabase.js";
 // adentro de la app (App.jsx lee "?openProduct="/"?openProfile=" al arrancar).
 const APP_BASE_URL = "https://retadordps.github.io/Retador-Plataform-";
 export const shareLink = (type, id) => `${APP_BASE_URL}/share/${type === "profile" ? "perfil" : "producto"}/${encodeURIComponent(id)}.html`;
+// Enlace fijo (mismo patrón, sin id) de la página "hazte Pro gratis"
+// (public/share/hazte-pro.html) — el que cualquier usuario copia/comparte
+// desde Suscripción y el mismo que se pega como evidencia en "Compartir"
+// (ver request_plan_promo / panel admin 📤 Compartir).
+export const hazteProLink = () => `${APP_BASE_URL}/share/hazte-pro.html`;
 // ⚠️ Compartir SOLO manda { title, text, url: shareLink(...) } — a propósito
 // NUNCA adjunta la foto como archivo (navigator.share con `files`). Se probó
 // (foto+enlace juntos) y se REVIRTIÓ: Facebook, al recibir foto+enlace para
@@ -228,7 +233,7 @@ export const mapProduct = (p) => {
     // de pago (eso lo acuerdan comprador y vendedor entre ellos).
     acceptedCurrencies: Array.isArray(p.accepted_currencies) ? p.accepted_currencies : [],
     // Vendedor embebido — `??` conserva seller_verified si ya venía literal en
-    // el objeto (caso del DEMO_PRODUCT, que no tiene fila real que unir).
+    // el objeto (fila sin vendedor real que unir).
     seller_verified: seller ? !!seller.is_verified : (p.seller_verified ?? false),
     seller_name: p.seller_name || seller?.full_name || undefined,
     seller_avatar_url: seller?.avatar_url || p.seller_avatar_url || null,
@@ -289,34 +294,6 @@ export const loadServices = async () => {
   if (error) { console.error("loadServices:", error.message); return []; }
   return (data || []).map(mapProduct);
 };
-// ── PRODUCTO DEMO (temporal) ─────────────────────────────────────────────────
-// Tarjeta "llena" de ejemplo para ver el diseño AliExpress con todos los datos.
-// Es SOLO del lado cliente (no toca el backend). Para quitarlo: borra esta
-// constante y la línea `[DEMO_PRODUCT, ...list]` en App.jsx (buscar DEMO_PRODUCT).
-// El id "demo-retador-card" lo hace fácil de reconocer y eliminar.
-export const DEMO_PRODUCT = mapProduct({
-  id: "demo-retador-card",
-  seller_id: "demo",
-  title: "Audífonos inalámbricos Bluetooth 5.3 con cancelación de ruido y estuche de carga rápida",
-  description: "Producto de demostración RETADOR. Bórralo cuando quieras.",
-  price: 42.99,
-  orig_price: 89.99,          // → -52% (chip rojo + precio tachado)
-  currency: "USD",
-  images: ["https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=600"],
-  cat: null,
-  sold_count: 1280,           // "1280 vendidos"
-  rating: 4.8,                // "⭐ 4.8 (342)"
-  reviews: 342,
-  promoted: true,             // chip "Destacado"
-  featured: true,
-  seller_verified: true,      // chip "✓ Verificado"
-  stock: 3,                   // "¡Últimas 3!"
-  country: "China",           // banderita 🇨🇳
-  status: "active",
-  moderation_status: "approved",
-  created_at: new Date().toISOString(),
-  _demo: true,
-});
 export const getFeed = async (ctx) => loadProducts();
 export const saveProduct = async (data, userId) => ({ ...data, id: Date.now(), seller_id: userId, seller_name: MOCK_USER.name });
 // Elimina de verdad contra el backend (soft-delete: status='deleted'). El RLS
@@ -621,6 +598,19 @@ export const upsertMyStoreConfig = async (updates) => {
   return data;
 };
 
+// Ajustes reales de "Pro gratis por compartir" (tabla promo_settings, fila
+// única id=1) — activar/desactivar y cuántos enlaces se piden al mes. El
+// propio request_plan_promo los lee del lado del backend antes de aceptar
+// una solicitud (nunca se confía en lo que mande el frontend).
+export const getPromoSettings = async () => {
+  const { data, error } = await supabase.from("promo_settings").select("share_enabled, share_required").eq("id", 1).maybeSingle();
+  if (error) { console.error("getPromoSettings:", error.message); return { share_enabled: false, share_required: 12 }; }
+  return data || { share_enabled: false, share_required: 12 };
+};
+export const adminUpdatePromoSettings = async (shareEnabled, shareRequired) => {
+  const { error } = await supabase.rpc("admin_update_promo_settings", { p_share_enabled: !!shareEnabled, p_share_required: Number(shareRequired) || 12 });
+  if (error) { console.error("adminUpdatePromoSettings:", error.message); throw error; }
+};
 // ── PRO GRATIS: compartir o referidos reales ──────────────────────────────
 // request_plan_promo valida en el backend (mínimo real de enlaces para
 // compartir, al menos un referido real calificado para referidos) antes de

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -2384,6 +2384,33 @@ function Economia({toast, data={}, ro}){
   const setPlan=(i,k,v)=>setPl(arr=>arr.map((p,j)=>j===i?{...p,[k]:v}:p));
   const savePlans=()=>{ if (ro) { toast('Solo lectura — sin permiso para modificar'); return; } data.onCfg && data.onCfg({ plans: pl.map(p=>({...p, price:Number(p.price)||0, promoPrice:Number(p.promoPrice)||0})) }); toast('Planes guardados'); };
 
+  // ── "Pro gratis por compartir" (promo_settings, punto F) — interruptor real
+  // + enlaces requeridos por mes. request_plan_promo (backend) ya lee esta
+  // misma fila: lo que se guarda aquí tiene efecto real de inmediato, no es
+  // solo cosmético.
+  const [promoS, setPromoS] = useState(null);        // fila real de promo_settings
+  const [promoReqDraft, setPromoReqDraft] = useState('12');
+  const [savingPromoS, setSavingPromoS] = useState(false);
+  const loadPromoS = useCallback(()=>{ getPromoSettings().then(s=>{ setPromoS(s); setPromoReqDraft(String(s.share_required ?? 12)); }); },[]);
+  useEffect(()=>{ loadPromoS(); },[loadPromoS]);
+  const togglePromoS = async () => {
+    if (ro || !promoS) { if (ro) toast('Solo lectura — sin permiso para modificar'); return; }
+    const next = !promoS.share_enabled;
+    setSavingPromoS(true);
+    try { await adminUpdatePromoSettings(next, Number(promoReqDraft)||12); setPromoS(s=>({...s, share_enabled: next})); toast(next ? 'Pro gratis por compartir: activado' : 'Pro gratis por compartir: desactivado'); }
+    catch (e) { toast('⚠️ ' + (e?.message || 'No se pudo guardar')); }
+    setSavingPromoS(false);
+  };
+  const savePromoRequired = async () => {
+    if (ro || !promoS) { if (ro) toast('Solo lectura — sin permiso para modificar'); return; }
+    const n = parseInt(promoReqDraft, 10);
+    if (Number.isNaN(n) || n < 1) { toast('⚠️ Número de enlaces inválido'); return; }
+    setSavingPromoS(true);
+    try { await adminUpdatePromoSettings(promoS.share_enabled, n); setPromoS(s=>({...s, share_required:n})); toast('Enlaces requeridos por mes guardado'); }
+    catch (e) { toast('⚠️ ' + (e?.message || 'No se pudo guardar')); }
+    setSavingPromoS(false);
+  };
+
   // ── Límite REAL de productos por plan (tabla plans, la que hace cumplir de
   // verdad el candado enforce_product_limit al publicar) — es un dato aparte
   // de cfg.plans de arriba (que es solo el texto/precio de marketing).
@@ -2721,6 +2748,36 @@ function Economia({toast, data={}, ro}){
       {!ro && <div style={{display:'flex',justifyContent:'flex-end',marginTop:4}}>
         <button className="btn btp" onClick={savePlans} style={{fontWeight:800,padding:'9px 22px'}}>Guardar planes</button>
       </div>}
+    </div>
+
+    {/* ── PRO GRATIS POR COMPARTIR (punto F) ── */}
+    <div className="card cp mb16">
+      <div className="ch" style={{marginBottom:6}}><span className="ct">🎁 Pro gratis por compartir</span></div>
+      <div style={{fontSize:11,color:'var(--tx3)',marginBottom:14}}>Deja que cualquier usuario mantenga o consiga su plan de pago gratis compartiendo enlaces en vez de pagar — se revisa cada mes en la pestaña "📤 Compartir".</div>
+      {promoS === null ? (
+        <div style={{fontSize:12,color:'var(--tx3)'}}>Cargando…</div>
+      ) : <>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'4px 0 14px'}}>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:13,fontWeight:700,color:'var(--tx)'}}>Activar Pro gratis por compartir</div>
+            <div style={{fontSize:10.5,color:'var(--tx3)',marginTop:2}}>Apagado: nadie ve esta opción, solo los planes normales de pago.</div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:9,flexShrink:0}}>
+            <span style={{fontSize:11,fontWeight:800,color:promoS.share_enabled?'var(--gn)':'var(--rd)'}}>{promoS.share_enabled?'Activado':'Desactivado'}</span>
+            {!ro && <button disabled={savingPromoS} onClick={togglePromoS} style={{fontWeight:800,fontSize:12,padding:'8px 14px',borderRadius:10,cursor:savingPromoS?'default':'pointer',border:`1px solid ${promoS.share_enabled?'var(--rd)':'var(--gn)'}`,color:promoS.share_enabled?'var(--rd)':'var(--gn)',background:'transparent',opacity:savingPromoS?.6:1}}>{promoS.share_enabled?'Apagar':'Encender'}</button>}
+          </div>
+        </div>
+        <div style={{borderTop:'1px solid var(--bd)',paddingTop:12,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+          <div style={{minWidth:0,flex:1}}>
+            <div style={{fontSize:13,fontWeight:700,color:'var(--tx)'}}>Enlaces requeridos por mes</div>
+            <div style={{fontSize:10.5,color:'var(--tx3)',marginTop:2}}>Cuántos enlaces reales debe pegar cada mes quien elige esta opción.</div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:8,flexShrink:0}}>
+            <input type="number" min={1} value={promoReqDraft} disabled={ro} readOnly={ro} onChange={e=>setPromoReqDraft(e.target.value)} style={{width:64,background:'var(--bg2)',border:'1px solid var(--bd2)',borderRadius:8,padding:'8px 10px',color:'var(--tx)',fontSize:14,fontWeight:700,outline:'none',fontFamily:'var(--mo)',opacity:ro?.6:1}}/>
+            {!ro && <button disabled={savingPromoS} onClick={savePromoRequired} className="btn btp" style={{fontWeight:800,padding:'8px 16px',opacity:savingPromoS?.6:1}}>Guardar</button>}
+          </div>
+        </div>
+      </>}
     </div>
 
     {/* ── LÍMITE REAL DE PRODUCTOS POR PLAN ── */}

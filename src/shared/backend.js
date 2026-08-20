@@ -257,6 +257,12 @@ export const getProductById = async (id) => {
 // AGOTADOS (stock=0) tampoco: en cuanto el stock llega a 0 el producto deja de
 // traerse aquí — invisible al instante en feed/búsqueda (mismo listado para
 // ambos), sin plazo de gracia. Vuelve a aparecer solo si el dueño lo repone.
+// Tope de seguridad — NO es la paginación completa que merece un catálogo
+// grande (eso necesita "cargar más" real en la Tienda, tocando cómo el resto
+// de la pantalla filtra/cuenta productos — se deja para cuando el catálogo de
+// verdad lo necesite), pero evita que un catálogo que crezca sin límite pida
+// miles de filas de un jalón. Hoy (18 productos reales) no cambia nada.
+const FEED_LIMIT = 100;
 export const loadProducts = async () => {
   const { data, error } = await supabase
     .from("products")
@@ -265,7 +271,8 @@ export const loadProducts = async () => {
     .eq("moderation_status", "approved")
     .or("kind.eq.product,kind.is.null")
     .or("stock.is.null,stock.gt.0")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(FEED_LIMIT);
   if (error) { console.error("loadProducts:", error.message); return []; }
   return (data || []).map(mapProduct);
 };
@@ -277,7 +284,8 @@ export const loadServices = async () => {
     .eq("status", "active")
     .eq("moderation_status", "approved")
     .eq("kind", "service")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(FEED_LIMIT);
   if (error) { console.error("loadServices:", error.message); return []; }
   return (data || []).map(mapProduct);
 };
@@ -696,6 +704,19 @@ const compressImage = (file, maxSide = 1280, quality = 0.82) => new Promise((res
   };
   reader.readAsDataURL(file);
 });
+// Convención de nombre: junto a la foto de tamaño completo (....jpg) se sube
+// EN SILENCIO una miniatura mucho más chica (....-thumb.jpg, mismo nombre +
+// sufijo) — así ninguna otra parte del código (form.images, reordenar,
+// quitar fotos, editar) necesita cambiar nada: siguen viendo la MISMA URL de
+// siempre. Las tarjetas de lista (thumbUrlOf) piden la miniatura por
+// convención y, si no existe (fotos de ANTES de este cambio), el <img> cae
+// solo a la foto completa de siempre (onError) — cero fotos rotas.
+export const thumbUrlOf = (url) => {
+  if (!url || typeof url !== "string") return url;
+  const m = /^(.*)\.(jpe?g|png|webp)(\?.*)?$/i.exec(url);
+  if (!m) return url;
+  return `${m[1]}-thumb.${m[2]}${m[3] || ""}`;
+};
 export const uploadImage = async (file, userId) => {
   // Comprime en el teléfono y sube al bucket público "product-images".
   // Devuelve el enlace público PERSISTENTE que se guarda en products.images.
@@ -706,6 +727,16 @@ export const uploadImage = async (file, userId) => {
     cacheControl: "3600", upsert: false, contentType: "image/jpeg",
   });
   if (error) throw error;
+  // Miniatura para tarjetas de lista (Tienda, Mi Panel, favoritos…) — la foto
+  // completa (arriba) solo debe cargarse en el detalle del producto. Si esto
+  // falla por lo que sea, NUNCA rompe la publicación: la foto real ya subió.
+  try {
+    const thumbBlob = await compressImage(file, 360, 0.7);
+    const thumbPath = path.replace(/\.jpg$/, "-thumb.jpg");
+    await supabase.storage.from("product-images").upload(thumbPath, thumbBlob, {
+      cacheControl: "3600", upsert: false, contentType: "image/jpeg",
+    });
+  } catch (e) { console.error("miniatura (no crítico):", e?.message || e); }
   const { data } = supabase.storage.from("product-images").getPublicUrl(path);
   return data.publicUrl;
 };

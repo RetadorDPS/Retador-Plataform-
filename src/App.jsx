@@ -2,7 +2,7 @@
 // RETADOR MARKETPLACE — Demo Version
 // Versión de demostración con datos simulados para visualización
 // ═════════════════════════════════════════════════════════════════════════════
-import { useState, useEffect, useRef, useMemo, createContext, useContext, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, createContext, useContext, useCallback, lazy, Suspense } from "react";
 import { User, Palette, Bell, Shield, MessageCircle, Truck, Gavel, CreditCard, BarChart2, Globe, HardDrive, HelpCircle, Info, ChevronRight, ArrowLeft, Check, Plus, Edit2, Camera, Lock, LogOut, MapPin, Clock, Download, FileText, Award, ShoppingBag, Package, AlertCircle, CheckCircle2, Zap, TrendingUp, Database, Mail, Phone, Fingerprint, Star, Volume2, Smartphone, Calendar, Activity, Send, ArrowDownLeft, ArrowUpRight, PlusCircle, Eye, EyeOff, ShieldCheck, Search, X, Users, QrCode, Landmark, Wallet, Home, History, UserCircle2, Copy, Share2, Loader2, Banknote, Building2, Trash2, KeyRound, BadgeCheck, Receipt, ArrowLeftRight } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -39,13 +39,24 @@ import {
   useCSS, Ic, Spin, Logo,
   getPageLayout, liveSlot, LiveBlock, LiveSlot,
   useScrollDir, consumeBack, pushBackHandler, shouldIgnorePop, ErrorBoundary, ProfileSkeleton } from "./shared/index.js";
-import WalletApp from "./screens/Wallet.jsx";
-import ProductToolsApp from "./screens/ProductTools.jsx";
 import { LocalDelivery, IntlShipping } from "./screens/Delivery.jsx";
-import { CourierFlow } from "./screens/Courier.jsx";
 import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProductModal, ProductDetail, PubSheet, EnviosMenu, BottomNav, ServicesScreen } from "./screens/Marketplace.jsx";
-import OmniPanel from "./screens/AdminPanel.jsx";
-import { SubastasScreen } from "./screens/Auctions.jsx";
+// Carga bajo demanda (code splitting real) — estas pantallas son grandes y
+// SOLO se montan detrás de un interruptor/pestaña que casi nadie toca en los
+// primeros segundos (Billetera, Herramientas, Modo Mensajero, Subastas, y el
+// Panel de administración, el más grande de todos) — que ya no viajen dentro
+// del paquete inicial que descarga TODO el mundo solo para ver la Tienda es
+// el cambio de más impacto sobre CUÁNTO hay que descargar. Cada una se usa
+// exactamente igual que antes; solo cambia CUÁNDO se descarga su código.
+const OmniPanel = lazy(() => import("./screens/AdminPanel.jsx"));
+const WalletApp = lazy(() => import("./screens/Wallet.jsx"));
+const ProductToolsApp = lazy(() => import("./screens/ProductTools.jsx"));
+const CourierFlow = lazy(() => import("./screens/Courier.jsx").then(m => ({ default: m.CourierFlow })));
+const SubastasScreen = lazy(() => import("./screens/Auctions.jsx").then(m => ({ default: m.SubastasScreen })));
+// Relleno neutro mientras se descarga el código de una pantalla cargada bajo
+// demanda (solo la primera vez que se abre en la sesión — después ya está en
+// caché). Nunca pantalla en blanco/negra sin explicación.
+const LazyFallback = () => <div style={{ position: "fixed", inset: 0, zIndex: 4000, background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center" }}><Spin size={32} /></div>;
 import { SettingsScreen } from "./screens/Settings.jsx";
 import { FreeProfileScreen, ProfileMenuDrawer, FollowingListScreen } from "./screens/Profile.jsx";
 import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
@@ -349,6 +360,11 @@ function GuestDeepLinkPreview({ deepLink, onChangeDeepLink, onExit, onRequestAut
 function AppShell({ sessionUser }) {
   useCSS();
   const rsp = useResponsive();
+  // Categorías reales (backend, vía CatalogProvider) — para hacer coincidir la
+  // categoría de un producto importado (Herramientas → Importador) con una
+  // categoría real de verdad, sin localStorage (retador_cats ya no existe: ver
+  // Ronda 6, categorías de productos reales).
+  const { cats: realCatsList } = useCatalog();
 
   // Estado inicial configurado directamente - sin login, solo visual
   const [scr,       setScr]       = useState("main");
@@ -641,12 +657,18 @@ function AppShell({ sessionUser }) {
   // recarga los datos SIN navegar/recargar la página (así el scroll no salta).
   const reloadFeed = useCallback(async () => {
     setLoading(true);
-    try {
-      const list = await loadProducts();
-      // DEMO_PRODUCT: tarjeta de ejemplo "llena" al frente (quitar cuando ya no se necesite).
-      setProducts([DEMO_PRODUCT, ...list]);
-    } finally { setLoading(false); }
-    try { setServices(await loadServices()); } catch (e) {}
+    // Productos y servicios son dos peticiones independientes (no una depende
+    // de la otra) — antes se esperaban una detrás de la otra sin necesidad;
+    // ahora salen juntas, así que servicios ya no le agrega tiempo de espera
+    // extra a ver los productos (que sigue resolviendo primero de todas formas).
+    const [list, svcs] = await Promise.all([
+      loadProducts().catch(() => []),
+      loadServices().catch(() => []),
+    ]);
+    // DEMO_PRODUCT: tarjeta de ejemplo "llena" al frente (quitar cuando ya no se necesite).
+    setProducts([DEMO_PRODUCT, ...list]);
+    setLoading(false);
+    setServices(svcs);
   }, []);
   useEffect(() => { reloadFeed(); }, []);
   // MIS publicaciones (productos + servicios, INCLUIDAS las retiradas): el dueño las
@@ -1933,8 +1955,10 @@ function AppShell({ sessionUser }) {
         const walletRates = { base: "USD", updatedAt: Date.now(), rates: { USD: 1, EUR: +(usdCup / eurCup).toFixed(4), CUP: usdCup } };
         return <div style={{ position: "fixed", inset: 0, zIndex: 4000, overflow: "hidden", background: effectiveTheme === "dark" ? "#0a0a0a" : "#f1f5f9" }}>
           <SectionGate enabled={sections.wallet} dark={effectiveTheme === "dark"} onClose={() => setShowWallet(false)}>
-            <WalletApp user={meUser} contacts={contacts} orders={payable} rates={walletRates} dark={effectiveTheme === "dark"} onClose={() => setShowWallet(false)}
-              onOrderPaid={(orderId) => setOrders(prev => prev.map(o => o.id === orderId ? { ...o, paidViaWallet: true, status: o.status === "pendiente" || o.stepIdx === 0 ? (o.flow?.[1]?.key || o.status) : o.status } : o))} />
+            <Suspense fallback={<LazyFallback />}>
+              <WalletApp user={meUser} contacts={contacts} orders={payable} rates={walletRates} dark={effectiveTheme === "dark"} onClose={() => setShowWallet(false)}
+                onOrderPaid={(orderId) => setOrders(prev => prev.map(o => o.id === orderId ? { ...o, paidViaWallet: true, status: o.status === "pendiente" || o.stepIdx === 0 ? (o.flow?.[1]?.key || o.status) : o.status } : o))} />
+            </Suspense>
           </SectionGate>
         </div>;
       })()}
@@ -1950,8 +1974,7 @@ function AppShell({ sessionUser }) {
           if (!prod) return;
           const parts = String(prod.category || "").split("/").map(s => s.trim());
           const catName = parts[0] || "", subName = parts[1] || "";
-          let realCats = []; try { realCats = JSON.parse(localStorage.getItem("retador_cats") || "[]"); } catch {}
-          const found = realCats.find(c => (c.name || "").toLowerCase() === catName.toLowerCase());
+          const found = realCatsList.find(c => (c.name || "").toLowerCase() === catName.toLowerCase());
           const imgs = (prod.userImages && prod.userImages.length) ? prod.userImages : (prod.images || []);
           handlePublish({
             title: prod.title || "Producto importado",
@@ -1965,7 +1988,7 @@ function AppShell({ sessionUser }) {
         };
         if (toolApp) {
           return <div style={{ position: "fixed", top: 0, left: 0, zIndex: 4000, width: `calc(100vw / ${densZoom})`, height: `calc(100dvh / ${densZoom})`, overflowY: "auto", WebkitOverflowScrolling: "touch", background: "#07070A" }}>
-            <ProductToolsApp onClose={() => setToolApp(false)} onPublish={onPublish} canUse={isPremium} />
+            <Suspense fallback={<LazyFallback />}><ProductToolsApp onClose={() => setToolApp(false)} onPublish={onPublish} canUse={isPremium} /></Suspense>
           </div>;
         }
         const bg = dark ? "#0a0a0a" : "#f1f5f9", card = dark ? "#141417" : "#ffffff", t1 = dark ? "#f0f0f2" : "#0f172a", t2 = dark ? "#9494a0" : "#64748b", bd = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)";
@@ -2024,14 +2047,14 @@ function AppShell({ sessionUser }) {
         const myRecord = (user?.role === "courier")
           ? { userName: meName, name: meName, status: "approved" }
           : null;
-        return <CourierFlow myRecord={myRecord} user={user} flash={flash} dark={effectiveTheme === "dark"} onClose={() => setShowCourier(false)}
+        return <Suspense fallback={<LazyFallback />}><CourierFlow myRecord={myRecord} user={user} flash={flash} dark={effectiveTheme === "dark"} onClose={() => setShowCourier(false)}
           meName={meName} meId={user?.id} orders={orders} localBase={adminCfg.localBase || 150}
           onAccept={(id, fee) => { acceptDelivery(id, fee); }}
           onStage={courierStage}
           onViewProfile={openPublicProfile}
           onChat={openChat}
           onCancel={(id) => { cancelDelivery(id); flash("Entrega liberada · disponible de nuevo"); }}
-          onReport={(rep) => { addReport(rep); flash("Reporte enviado al equipo de RETADOR"); }} />;
+          onReport={(rep) => { addReport(rep); flash("Reporte enviado al equipo de RETADOR"); }} /></Suspense>;
       })()}
       {viewProfileId && (
         <div style={{ position: "fixed", inset: 0, zIndex: 5200, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
@@ -2109,7 +2132,13 @@ function AppShell({ sessionUser }) {
           <StoreDashboard user={user} cfg={storeCfg || {}} products={myStoreProducts} orders={myStoreOrders} plans={realPlans} myPlan={myRealPlan} api={storeApi} onStore={() => setStoreMode("store")} onMenu={() => setProfileMenuOpen(true)} profileRealName={profileData?.name || user?.name} flash={flash} />
         </div>
       )}
-      {showAdmin  && <OmniPanel onClose={() => setShowAdmin(false)} theme={appTk} zoom={densZoom} data={{
+      {/* OmniPanel (Panel de administración) se carga bajo demanda (React.lazy) —
+          es, con enorme diferencia, el archivo más grande de toda la app
+          (~3600 líneas) y NUNCA lo necesita nadie que no sea admin/staff, así
+          que ya no viaja dentro del paquete inicial que descarga TODO el
+          mundo solo para ver la Tienda. Mientras se descarga (solo la
+          primera vez que alguien abre el panel), un spinner simple. */}
+      {showAdmin  && <Suspense fallback={<LazyFallback />}><OmniPanel onClose={() => setShowAdmin(false)} theme={appTk} zoom={densZoom} data={{
         meId: user?.id,
         // Página con la que abrir esta vez (p.ej. al tocar una notificación de
         // nueva solicitud de plan/verificación/mensajero). null = la de siempre.
@@ -2164,7 +2193,7 @@ function AppShell({ sessionUser }) {
         verifications, onVerifyAction: (id, action) => { setVerifications(prev => prev.map(v => { if (v.id === id) { if (action === 'approved' && v.userName) setVerifiedUsers(u => u.includes(v.userName) ? u : [...u, v.userName]); return { ...v, state: action }; } return v; })); },
         payments, onMarkPaid: (sellerName, amount) => setPayments(prev => [{ id: 'pay_' + Date.now(), sellerName, amount, at: Date.now() }, ...prev]),
         plans: adminCfg.plans, verifiedUsers, userPlans,
-      }} />}
+      }} /></Suspense>}
       {buyModal   && <BuyModal product={buyModal} user={user} onClose={() => setBuyModal(null)} flash={flash} onSuccess={(order) => { setBuyModal(null); const eo = addOrder(order); if (eo) { setSelOrderId(eo.id); setTab("perfil"); setPScr("order-detail"); } }} />}
 
       {/* Pantallas */}
@@ -2296,7 +2325,9 @@ function AppShell({ sessionUser }) {
           {tab === "subastas" && (
             <SectionGate enabled={sections.auctions} dark={isDarkTheme}>
               <AuctionScheduleGate schedule={adminCfg.auctionSchedule} dark={isDarkTheme}>
-                <SubastasScreen forceCreate={subOpenCreate} onForceCreateDone={() => setSubOpenCreate(false)} onNav={navTo} sellerName={profileData?.name || user?.name || "Usuario"} />
+                <Suspense fallback={<LazyFallback />}>
+                  <SubastasScreen forceCreate={subOpenCreate} onForceCreateDone={() => setSubOpenCreate(false)} onNav={navTo} sellerName={profileData?.name || user?.name || "Usuario"} />
+                </Suspense>
               </AuctionScheduleGate>
             </SectionGate>
           )}

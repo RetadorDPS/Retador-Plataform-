@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -1411,6 +1411,11 @@ const flagOf = (o) => { if (!o) return null; const k = String(o).trim().toLowerC
 function PCard({ p, onClick, isFav, onFav, view = "grid" }) {
   const { S, B, T1, T2, T3, ts } = useAt();
   const img = p.img || p.image || (p.images && p.images[0]) || "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400";
+  // Miniatura (bastante más chica) para la tarjeta de lista — la foto de
+  // tamaño completo solo debe pedirse en el detalle del producto. Si la foto
+  // es de antes de este cambio (sin miniatura subida), onError cae sola a la
+  // foto completa de siempre — nunca una foto rota.
+  const thumbImg = thumbUrlOf(img);
   const hasDisc = p.orig_price && parseFloat(p.orig_price) > parseFloat(p.price || 0);
   const disc = hasDisc ? Math.round((1 - parseFloat(p.price) / parseFloat(p.orig_price)) * 100) : 0;
   const rating = Number(p.rating) || 0;
@@ -1453,9 +1458,13 @@ function PCard({ p, onClick, isFav, onFav, view = "grid" }) {
   return (
     <div className="cd" onClick={onClick} style={{ background: S, borderRadius: 16, overflow: "hidden", border: `1px solid ${B}`, breakInside: "avoid", marginBottom: view === "muro" ? 12 : 0 }}>
       <div style={{ position: "relative", ...(view === "muro" ? {} : { aspectRatio: "1 / 1" }), background: "#161616", overflow: "hidden", borderRadius: "16px 16px 0 0" }}>
-        <img src={img} alt={p.title}
+        {/* loading="lazy": el navegador solo descarga la foto cuando la tarjeta
+            se acerca a la pantalla — antes las ~18+ fotos de la Tienda se
+            pedían TODAS de una vez al entrar, aunque la mayoría quedara fuera
+            de la vista. Nunca cambia qué se ve, solo CUÁNDO se pide. */}
+        <img src={thumbImg} alt={p.title} loading="lazy" decoding="async"
           style={{ width: "100%", ...(view === "muro" ? { height: "auto", display: "block" } : { height: "100%", objectFit: "cover" }), transition: "transform .3s" }}
-          onError={e => { e.target.src = "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400"; }} />
+          onError={e => { if (e.target.src !== img) e.target.src = img; else e.target.src = "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400"; }} />
         {flag && <div style={{ position: "absolute", bottom: 7, left: 7, fontSize: 14, filter: "drop-shadow(0 1px 2px rgba(0,0,0,.6))" }}>{flag}</div>}
         <button className="p" onClick={e => { e.stopPropagation(); onFav(p.id); }} style={{ position: "absolute", top: 6, right: 6, width: 27, height: 27, background: "rgba(0,0,0,.55)", backdropFilter: "blur(8px)", border: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill={isFav ? G : "none"} stroke={isFav ? G : "#bbb"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>

@@ -26,7 +26,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star,
 } from "lucide-react";
-import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow } from "../shared/index.js";
+import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf } from "../shared/index.js";
 
 /* ── TEMA — propio y compacto, como el resto de paneles "premium" de la app ── */
 const S_DARK = {
@@ -86,9 +86,13 @@ const SHdr = ({ title, sub, btn, onBtn, ac, C }) => (
   </div>
 );
 function inpStyle(C) { return { width:"100%", padding:"9px 12px", borderRadius:8, border:`1px solid ${C.b}`, background:C.s3, color:C.t, fontSize:12, outline:"none" }; }
+// Miniatura (bastante más chica) en vez de la foto completa — la foto de
+// tamaño completo solo debe pedirse en el detalle del producto. Fotos de
+// antes de este cambio (sin miniatura subida): onError cae sola a la foto
+// completa de siempre, nunca una foto rota.
 const PImg = ({ p, h, fz, C }) => (
   <div style={{ height:h||130, background:p.g || `linear-gradient(140deg,${C.s3},${C.d})`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", position:"relative", flexShrink:0, width:"100%" }}>
-    {p.image ? <img src={p.image} style={{ width:"100%", height:"100%", objectFit:"cover" }}/> : <span style={{ fontSize:fz||40, opacity:.55 }}>📦</span>}
+    {p.image ? <img src={thumbUrlOf(p.image)} loading="lazy" decoding="async" style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e => { if (e.target.src !== p.image) e.target.src = p.image; }}/> : <span style={{ fontSize:fz||40, opacity:.55 }}>📦</span>}
   </div>
 );
 const Toggle = ({ on, onChange, C }) => (

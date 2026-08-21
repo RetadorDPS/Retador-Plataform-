@@ -2219,7 +2219,6 @@ function AppShell({ sessionUser }) {
                 scrollKeeper={marketScrollRef}
                 view={productView}
                 loading={loading} products={marketVisible} filter={filter} setFilter={setFilter}
-                platformStats={platformStats}
                 myProvince={myProvince}
                 onGoToRegion={() => { setTab("perfil"); setPScr("settings"); }}
                 search={search} setSearch={setSearch} activeCat={activeCat} setActiveCat={cat => { setActiveCat(cat); }}

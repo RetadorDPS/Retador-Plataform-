@@ -1224,7 +1224,7 @@ function useRegionReminder(myProvince) {
   return { show, dismiss };
 }
 
-export function MarketHome({ loading, products, filter, setFilter, myProvince = null, onGoToRegion = null, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, messagesBadge = 0, onServices, onNav, hidden = false, scrollKeeper = null, view = "grid", onRefresh = null, platformStats = null }) {
+export function MarketHome({ loading, products, filter, setFilter, myProvince = null, onGoToRegion = null, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, messagesBadge = 0, onServices, onNav, hidden = false, scrollKeeper = null, view = "grid", onRefresh = null }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { cats } = useCatalog();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
@@ -1268,19 +1268,6 @@ export function MarketHome({ loading, products, filter, setFilter, myProvince = 
     const t = setTimeout(() => setHeaderAnimating(false), 320);
     return () => clearTimeout(t);
   }, [hidden]);
-
-  // Punto 6 (auditoría de velocidad): mientras el listado real todavía está
-  // cargando, mostrar "0 disponibles" da la sensación de que no hay nada. En
-  // la vista SIN filtro/búsqueda/categoría (la que se ve al entrar), se usa
-  // de entrada el conteo real pero LIVIANO que ya trae get_platform_stats
-  // (un solo count(*), ya se pide al montar la app, en App.jsx) — apenas el
-  // listado completo termina de cargar, se muestra siempre el número real de
-  // `products` (que puede diferir un poco: platformStats cuenta todo lo
-  // activo, el listado real filtra por moderación/stock/tipo). No toca nada
-  // más: con filtro, búsqueda o categoría activos, o ya cargado, es el mismo
-  // products.length de siempre.
-  const isDefaultView = filter === "TODOS" && !search && !activeCat;
-  const visibleCount = (loading && isDefaultView && platformStats?.products != null) ? platformStats.products : products.length;
 
   return (
     <div ref={feedRef} {...ptr.handlers} onScroll={e => { if (scrollKeeper) scrollKeeper.current = e.currentTarget.scrollTop; }} style={{ flex: 1, overflowY: "auto", overscrollBehaviorY: "contain" }}>
@@ -1380,7 +1367,7 @@ export function MarketHome({ loading, products, filter, setFilter, myProvince = 
             <h2 style={{ fontSize: 17 * ts, fontWeight: 800, color: T1 }}>
               {activeCat ? cats.find(c => c.id === activeCat)?.name : "Todos los productos"}
             </h2>
-            <p style={{ color: T2, fontSize: 11 * ts, marginTop: 2 }}>{visibleCount} disponibles</p>
+            <p style={{ color: T2, fontSize: 11 * ts, marginTop: 2 }}>{products.length} disponibles · ordenados por relevancia</p>
           </div>
           {activeCat && <button className="p" onClick={() => setActiveCat(null)} style={{ fontSize: 10, color: G, fontWeight: 700, background: "none", border: "none", cursor: "pointer" }}>Limpiar ×</button>}
         </div>

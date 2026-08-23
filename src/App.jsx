@@ -43,7 +43,7 @@ import {
   getPageLayout, liveSlot, LiveBlock, LiveSlot,
   useScrollDir, consumeBack, pushBackHandler, shouldIgnorePop, ErrorBoundary, ProfileSkeleton } from "./shared/index.js";
 import { LocalDelivery, IntlShipping } from "./screens/Delivery.jsx";
-import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProductModal, ProductDetail, PubSheet, EnviosMenu, BottomNav, ServicesScreen } from "./screens/Marketplace.jsx";
+import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProductModal, ProductDetail, PubSheet, EnviosMenu, BottomNav } from "./screens/Marketplace.jsx";
 // Carga bajo demanda (code splitting real) — estas pantallas son grandes y
 // SOLO se montan detrás de un interruptor/pestaña que casi nadie toca en los
 // primeros segundos (Billetera, Herramientas, Modo Mensajero, Subastas, y el
@@ -265,7 +265,7 @@ export default function App() {
                             // AppShell, para que arranque ya con los datos reales.
                             loadSessionUser().then(u => { if (u) setSessionUser(u); setOnboardingComplete(true); });
                           }} />
-                        : <AppShell sessionUser={sessionUser} />)
+                        : <AppShell sessionUser={sessionUser} platformStats={platformStats} />)
                     : <RetadorInicio onEnter={() => setEntered(true)} subtitle={homeCfg.subtitle} enterLabel={homeCfg.enterLabel} stats={platformStats} dark={welcomeDark} />)
                 : (deepLink && !guestWantsAuth
                     ? <GuestDeepLinkPreview deepLink={deepLink} onChangeDeepLink={setDeepLink} onExit={() => setDeepLink(null)} onRequestAuth={() => setGuestWantsAuth(true)} />
@@ -360,7 +360,7 @@ function GuestDeepLinkPreview({ deepLink, onChangeDeepLink, onExit, onRequestAut
   );
 }
 
-function AppShell({ sessionUser }) {
+function AppShell({ sessionUser, platformStats = null }) {
   useCSS();
   const rsp = useResponsive();
   // Categorías reales (backend, vía CatalogProvider) — para hacer coincidir la
@@ -2232,6 +2232,7 @@ function AppShell({ sessionUser }) {
                 scrollKeeper={marketScrollRef}
                 view={productView}
                 loading={loading} products={marketVisible} filter={filter} setFilter={setFilter}
+                platformStats={platformStats}
                 myProvince={myProvince}
                 onGoToRegion={() => { setTab("perfil"); setPScr("settings"); }}
                 search={search} setSearch={setSearch} activeCat={activeCat} setActiveCat={cat => { setActiveCat(cat); }}
@@ -2243,28 +2244,20 @@ function AppShell({ sessionUser }) {
                 onPlusMenu={rect => setPlusMenu(rect)}
                 onOpenChats={openMessages}
                 messagesBadge={chatUnread}
-                onServices={() => setMScr("services")}
+                services={services}
+                onServiceContact={(s) => requestChat(s.seller_id, s.seller_name, { type: "service", id: s.id, title: s.title, image: s.image || s.img })}
+                onServiceOpen={s => { setSelProd(s); setMScr("product"); }}
+                onPublishService={() => setPubOpen("service")}
                 onNav={navTo}
                 onRefresh={reloadFeed}
               />
             </div>
-            {mScr === "services" && (
-              <ServicesScreen
-                services={services}
-                loading={loading}
-                onBack={() => setMScr("home")}
-                onContact={(s) => requestChat(s.seller_id, s.seller_name, { type: "service", id: s.id, title: s.title, image: s.image || s.img })}
-                onOpen={(s) => { setSelProd(s); setProdBackTo("services"); setMScr("product"); }}
-                onPublish={() => setPubOpen("service")}
-              />
-            )}
             {mScr === "product" && selProd && (
               <ProductDetail
                 product={selProd} onBack={() => {
                   if (prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); }
                   else if (prodBackTo === "store-main") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("main"); }
                   else if (prodBackTo === "sellerProfile") { setProdBackTo(null); setMScr("sellerProfile"); }
-                  else if (prodBackTo === "services") { setProdBackTo(null); setMScr("services"); }
                   else if (prodBackTo === "chat") { setProdBackTo(null); setMScr("home"); setChatOpen(true); }
                   else setMScr("home");
                 }}
@@ -2475,6 +2468,20 @@ function AppShell({ sessionUser }) {
                   <p style={{ fontSize: 8, fontWeight: 700, color: appTk.isDark ? "#e8e8e8" : appTk.T1 }}>Subastar</p>
                   </div>
                 <p style={{ fontSize: 8, color: appTk.isDark ? "#3a3a3a" : appTk.T2, marginTop: 1 }}>Subasta en vivo</p>
+              </div>
+            </button>
+            <button className="p" style={{ width: "100%", background: "none", border: "none", padding: "11px 14px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+              onClick={() => { setPlusMenu(null); setPubOpen("service"); }}
+              onMouseEnter={e => e.currentTarget.style.background = appTk.isDark ? "#0a1a16" : "#10B98114"}
+              onMouseLeave={e => e.currentTarget.style.background = "none"}>
+              <div style={{ width: 29, height: 29, borderRadius: 10, background: "#10B98118", border: "1px solid #10B98130", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                </svg>
+              </div>
+              <div style={{ textAlign: "left" }}>
+                <p style={{ fontSize: 8, fontWeight: 700, color: appTk.isDark ? "#e8e8e8" : appTk.T1 }}>Ofrecer un servicio</p>
+                <p style={{ fontSize: 8, color: appTk.isDark ? "#3a3a3a" : appTk.T2, marginTop: 1 }}>Sin comisión ni pedido</p>
               </div>
             </button>
           </div>

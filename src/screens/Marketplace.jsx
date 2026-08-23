@@ -1224,8 +1224,15 @@ function useRegionReminder(myProvince) {
   return { show, dismiss };
 }
 
-export function MarketHome({ loading, products, filter, setFilter, myProvince = null, onGoToRegion = null, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, messagesBadge = 0, onServices, onNav, hidden = false, scrollKeeper = null, view = "grid", onRefresh = null }) {
+export function MarketHome({ loading, products, filter, setFilter, myProvince = null, onGoToRegion = null, search, setSearch, activeCat, setActiveCat, onCats, onProduct, user, favorites, onFav, notifCount, onNotif, onPublish, onPlusMenu, onOpenChats, messagesBadge = 0, services = [], onServiceContact, onServiceOpen, onPublishService, onNav, hidden = false, scrollKeeper = null, view = "grid", onRefresh = null, platformStats = null }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
+  // Punto A (ronda "Servicios como pestaña"): Productos/Servicios ya NO
+  // navega a otra pantalla — es un interruptor local que cambia lo que se
+  // muestra aquí mismo, dentro de la MISMA MarketHome que ahora se queda
+  // siempre montada (ver App.jsx). Por eso puede vivir en estado local: al
+  // volver de un producto o servicio, esta pantalla nunca se desmonta, así
+  // que el interruptor se queda tal cual como lo dejó el usuario.
+  const [catalogTab, setCatalogTab] = useState("productos");
   const { cats } = useCatalog();
   const { BG, S, B, CARD, T1, T2, T3, isDark, ts } = useAt();
   const { tokens: dt, mode: dMode } = useDensity();
@@ -1268,6 +1275,28 @@ export function MarketHome({ loading, products, filter, setFilter, myProvince = 
     const t = setTimeout(() => setHeaderAnimating(false), 320);
     return () => clearTimeout(t);
   }, [hidden]);
+
+  // Conteo real desde el primer instante (segundo intento — el primero se
+  // revirtió por una pantalla en blanco reportada en producción). Investigué
+  // a fondo esa vez: reconstruí el commit revertido tal cual y lo probé en un
+  // navegador real (Chromium con Playwright, sesión simulada) — cargó y
+  // funcionó sin ningún error. No encontré ningún defecto real en aquel
+  // código. La explicación más plausible es ajena al código en sí: tras un
+  // despliegue, GitHub Pages reemplaza TODOS los archivos de golpe, así que
+  // si el navegador de alguien ya tenía cargado el índice viejo justo en ese
+  // instante, un pedazo de JS con nombre-hash viejo podía dejar de existir en
+  // el servidor — pantalla en blanco sin relación con esta línea de código en
+  // particular. Ya se agregó una recuperación real para eso (ver
+  // "vite:preloadError" en main.jsx: recarga una vez sola, nunca en bucle).
+  // Con esa causa real cubierta, se reintroduce el conteo con el mismo
+  // criterio de antes: mientras el listado real todavía carga, en la vista
+  // sin filtro/búsqueda/categoría, se usa el conteo liviano de
+  // get_platform_stats en vez de mostrar "0". Servicios no tiene un conteo
+  // público liviano equivalente — se queda con services.length tal cual.
+  const isDefaultView = filter === "TODOS" && !search && !activeCat;
+  const visibleCount = catalogTab === "servicios"
+    ? services.length
+    : (loading && isDefaultView && platformStats?.products != null) ? platformStats.products : products.length;
 
   return (
     <div ref={feedRef} {...ptr.handlers} onScroll={e => { if (scrollKeeper) scrollKeeper.current = e.currentTarget.scrollTop; }} style={{ flex: 1, overflowY: "auto", overscrollBehaviorY: "contain" }}>
@@ -1348,48 +1377,74 @@ export function MarketHome({ loading, products, filter, setFilter, myProvince = 
           + páginas Banners/Promociones. Config global, en vivo. El CTA navega. */}
       <MarketBanners onNav={onNav} />
 
-      {/* Filtros - Ahora con sticky */}
-      <div style={{ position: "sticky", top: hidden ? 0 : 45, zIndex: 50, background: isDark ? BG : "#fff", borderBottom: "none", padding: "12px clamp(18px,3vw,48px)", display: "flex", gap: 7, overflowX: "auto", transition: "top .28s cubic-bezier(.4,0,.2,1)" }}>
-        {[["TODOS", "🏷️", "Todos"], ["OFERTAS", "🔥", "Ofertas"], ["NUEVO", "✨", "Nuevo"], ["RECOMENDADO", "⭐", "Destacado"], ["MAS_VENDIDO", "🏆", "Más vendido"], ["FAVORITOS", "❤️", "Favoritos"]].map(([f, ic, lbl]) => (
-          <button key={f} onClick={() => setFilter(f)} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: filter === f ? G : isDark ? "#0e0e0e" : S, color: filter === f ? "#000" : T3, border: `1.5px solid ${filter === f ? G : B}`, borderRadius: 999, padding: "7px 13px", fontSize: 10 * ts, fontWeight: 700, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>{ic} {lbl}</button>
-        ))}
-        {/* Entrada a SERVICIOS (mundo aparte) */}
-        {onServices && <button onClick={onServices} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: isDark ? "#0e0e0e" : S, color: G, border: `1.5px solid ${G}55`, borderRadius: 999, padding: "7px 13px", fontSize: 10 * ts, fontWeight: 800, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>🛠️ Servicios</button>}
-      </div>
+      {/* Filtros - Ahora con sticky. Son atributos de PRODUCTOS (oferta, nuevo,
+          destacado, vendidos…) — Servicios no tiene hoy ese mismo concepto
+          (nunca lo tuvo: la pantalla vieja de Servicios tampoco filtraba por
+          nada de esto), así que la barra solo aplica en la pestaña Productos. */}
+      {catalogTab === "productos" && (
+        <div style={{ position: "sticky", top: hidden ? 0 : 45, zIndex: 50, background: isDark ? BG : "#fff", borderBottom: "none", padding: "12px clamp(18px,3vw,48px)", display: "flex", gap: 7, overflowX: "auto", transition: "top .28s cubic-bezier(.4,0,.2,1)" }}>
+          {[["TODOS", "🏷️", "Todos"], ["OFERTAS", "🔥", "Ofertas"], ["NUEVO", "✨", "Nuevo"], ["RECOMENDADO", "⭐", "Destacado"], ["MAS_VENDIDO", "🏆", "Más vendido"], ["FAVORITOS", "❤️", "Favoritos"]].map(([f, ic, lbl]) => (
+            <button key={f} onClick={() => setFilter(f)} className={`chip ${isDark ? "" : "chip-light"}`} style={{ flexShrink: 0, background: filter === f ? G : isDark ? "#0e0e0e" : S, color: filter === f ? "#000" : T3, border: `1.5px solid ${filter === f ? G : B}`, borderRadius: 999, padding: "7px 13px", fontSize: 10 * ts, fontWeight: 700, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>{ic} {lbl}</button>
+          ))}
+        </div>
+      )}
 
       {/* Tramo: lo que pusiste entre los Filtros y la Zona de productos */}
       <LiveSlot page="inicio" from="in_f" to="in_p" onNav={onNav} pad="12px 16px 0" />
 
-      {/* Grid de productos */}
+      {/* Grid de productos o servicios, según la pestaña */}
       <div style={{ padding: "0 18px 80px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 12 }}>
-          <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 12, gap: 10 }}>
+          <div style={{ minWidth: 0 }}>
             <h2 style={{ fontSize: 17 * ts, fontWeight: 800, color: T1 }}>
-              {activeCat ? cats.find(c => c.id === activeCat)?.name : "Todos los productos"}
+              {catalogTab === "servicios" ? "Servicios" : (activeCat ? cats.find(c => c.id === activeCat)?.name : "Productos")}
             </h2>
-            <p style={{ color: T2, fontSize: 11 * ts, marginTop: 2 }}>{products.length} disponibles · ordenados por relevancia</p>
+            <p style={{ color: T2, fontSize: 11 * ts, marginTop: 2 }}>{visibleCount} disponibles</p>
           </div>
-          {activeCat && <button className="p" onClick={() => setActiveCat(null)} style={{ fontSize: 10, color: G, fontWeight: 700, background: "none", border: "none", cursor: "pointer" }}>Limpiar ×</button>}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            {catalogTab === "productos" && activeCat && <button className="p" onClick={() => setActiveCat(null)} style={{ fontSize: 10, color: G, fontWeight: 700, background: "none", border: "none", cursor: "pointer" }}>Limpiar ×</button>}
+            {/* Interruptor Productos/Servicios — punto A: ya no navega a otra
+                pantalla, solo cambia qué se muestra aquí mismo. */}
+            <div style={{ display: "flex", background: isDark ? "#0e0e0e" : S, border: `1px solid ${B}`, borderRadius: 999, padding: 3, flexShrink: 0 }}>
+              {[["productos", "Productos"], ["servicios", "Servicios"]].map(([k, lbl]) => (
+                <button key={k} onClick={() => setCatalogTab(k)} className="p" style={{ flexShrink: 0, background: catalogTab === k ? G : "transparent", color: catalogTab === k ? "#000" : T3, border: "none", borderRadius: 999, padding: "6px 12px", fontSize: 10.5 * ts, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>{lbl}</button>
+              ))}
+            </div>
+          </div>
         </div>
-        {loading
-          ? <div style={{ display: "flex", justifyContent: "center", padding: "40px 0" }}><Spin size={28} /></div>
-          : products.length === 0
-            ? <div style={{ textAlign: "center", padding: "40px 0", color: "#232323" }}>
-                <div style={{ fontSize: 36, marginBottom: 10 }}>{filter === "FAVORITOS" ? "❤️" : "🔍"}</div>
-                <p style={{ fontSize: 12 }}>{filter === "FAVORITOS" ? "Aún no tienes favoritos" : "No se encontraron productos"}</p>
-              </div>
-            : view === "muro"
-              ? <div style={{ columnCount: densityCols(dMode, isDesktop, isTablet), columnGap: dt.grid.gap }}>
-                  {feedRows(products, feedAds).map(it => it.t === "p"
-                    ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
-                    : <div key={it.key} style={{ breakInside: "avoid", columnSpan: "all", margin: "6px 0" }}><BlockView m={it.m} onNav={onNav} /></div>)}
+        {catalogTab === "servicios" ? (
+          loading
+            ? <div style={{ display: "flex", justifyContent: "center", padding: "40px 0" }}><Spin size={28} /></div>
+            : services.length === 0
+              ? <div style={{ textAlign: "center", padding: "40px 20px", color: T3 }}>
+                  <div style={{ fontSize: 36, marginBottom: 10 }}>🛠️</div>
+                  <p style={{ fontSize: 13, color: T2, fontWeight: 600 }}>Aún no hay servicios publicados</p>
+                  <p style={{ fontSize: 11, marginTop: 4, marginBottom: 14 }}>¿Ofreces un servicio? Publícalo y aparecerá aquí.</p>
+                  {onPublishService && <button className="p" onClick={onPublishService} style={{ background: `${G}18`, color: G, border: `1px solid ${G}40`, borderRadius: 999, padding: "9px 16px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>+ Ofrecer un servicio</button>}
                 </div>
-              : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
-                  {feedRows(products, feedAds).map(it => it.t === "p"
-                    ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
-                    : <div key={it.key} style={{ gridColumn: "1 / -1" }}><BlockView m={it.m} onNav={onNav} /></div>)}
+              : <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 2)}, 1fr)`, gap: 12 }}>
+                  {services.map(s => <ServiceCard key={s.id} s={s} onContact={onServiceContact} onOpen={onServiceOpen} />)}
                 </div>
-        }
+        ) : (
+          loading
+            ? <div style={{ display: "flex", justifyContent: "center", padding: "40px 0" }}><Spin size={28} /></div>
+            : products.length === 0
+              ? <div style={{ textAlign: "center", padding: "40px 0", color: "#232323" }}>
+                  <div style={{ fontSize: 36, marginBottom: 10 }}>{filter === "FAVORITOS" ? "❤️" : "🔍"}</div>
+                  <p style={{ fontSize: 12 }}>{filter === "FAVORITOS" ? "Aún no tienes favoritos" : "No se encontraron productos"}</p>
+                </div>
+              : view === "muro"
+                ? <div style={{ columnCount: densityCols(dMode, isDesktop, isTablet), columnGap: dt.grid.gap }}>
+                    {feedRows(products, feedAds).map(it => it.t === "p"
+                      ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
+                      : <div key={it.key} style={{ breakInside: "avoid", columnSpan: "all", margin: "6px 0" }}><BlockView m={it.m} onNav={onNav} /></div>)}
+                  </div>
+                : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
+                    {feedRows(products, feedAds).map(it => it.t === "p"
+                      ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
+                      : <div key={it.key} style={{ gridColumn: "1 / -1" }}><BlockView m={it.m} onNav={onNav} /></div>)}
+                  </div>
+        )}
       </div>
 
       {/* Tramo: lo que pusiste después de los Productos */}
@@ -3025,37 +3080,6 @@ function ServiceCard({ s, onContact, onOpen }) {
             : <span style={{ fontSize: 10 * ts, color: T3 }}>Precio a consultar</span>}
           <button className="p" onClick={(e) => { e.stopPropagation(); onContact(s); }} style={{ background: G, color: "#000", border: "none", borderRadius: 999, padding: "7px 12px", fontSize: 10.5 * ts, fontWeight: 800, whiteSpace: "nowrap", flexShrink: 0 }}>💬 Contactar</button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-export function ServicesScreen({ services = [], loading = false, onBack, onContact, onOpen, onPublish }) {
-  const { BG, S, B, T1, T2, T3, isDark } = useAt();
-  const { cols } = useR();
-  const ncols = Math.max(cols, 2);
-  return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: BG }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${B}`, flexShrink: 0 }}>
-        {onBack && <button className="p" onClick={onBack} style={{ background: isDark ? "#111" : "#f0f0f0", border: `1px solid ${B}`, borderRadius: "50%", width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", color: T1 }}><Ic n="back" c={T1} s={16} /></button>}
-        <div style={{ flex: 1 }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 900, color: T1 }}>🛠️ Servicios</h2>
-          <p style={{ margin: 0, fontSize: 10, color: T3, marginTop: 1 }}>Contacta directo con quien ofrece el servicio</p>
-        </div>
-        {onPublish && <button className="p" onClick={onPublish} style={{ background: `${G}18`, color: G, border: `1px solid ${G}40`, borderRadius: 999, padding: "7px 12px", fontSize: 11, fontWeight: 800 }}>+ Ofrecer</button>}
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 100px" }}>
-        {loading
-          ? <div style={{ textAlign: "center", color: T3, fontSize: 12, padding: "40px 0" }}>Cargando servicios…</div>
-          : services.length === 0
-            ? <div style={{ textAlign: "center", color: T3, padding: "48px 20px" }}>
-                <div style={{ fontSize: 40, marginBottom: 10 }}>🛠️</div>
-                <p style={{ fontSize: 13, color: T2, fontWeight: 600 }}>Aún no hay servicios publicados</p>
-                <p style={{ fontSize: 11, marginTop: 4 }}>¿Ofreces un servicio? Publícalo y aparecerá aquí.</p>
-              </div>
-            : <div style={{ display: "grid", gridTemplateColumns: `repeat(${ncols}, 1fr)`, gap: 12 }}>
-                {services.map(s => <ServiceCard key={s.id} s={s} onContact={onContact} onOpen={onOpen} />)}
-              </div>}
       </div>
     </div>
   );

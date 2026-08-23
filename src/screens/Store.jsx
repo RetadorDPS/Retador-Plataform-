@@ -19,14 +19,19 @@
 //   pantalla en su raíz (pScr="main"): NAV_CLEARANCE reserva su espacio real
 //   para que ningún botón quede atrapado debajo de ella.
 // ═══════════════════════════════════════════════════════════════════════════
-import { useState, useEffect, useMemo, useRef } from "react";
-import { AreaChart, Area, BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import {
   ShoppingCart, TrendingUp, Package, BarChart2, Settings as SettingsIcon, Palette, Tag, CreditCard,
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy,
 } from "lucide-react";
 import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink } from "../shared/index.js";
+// recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
+// se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
+// nunca de entrada para todos (la mayoría son compradores que ni la ven).
+const RevenueAreaChart = lazy(() => import("./StoreCharts.jsx").then(m => ({ default: m.RevenueAreaChart })));
+const CategoryBarChart = lazy(() => import("./StoreCharts.jsx").then(m => ({ default: m.CategoryBarChart })));
+const ChartFallback = ({ height }) => <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: 11, opacity: .5 }}>Cargando gráfica…</span></div>;
 
 /* ── TEMA — propio y compacto, como el resto de paneles "premium" de la app ── */
 const S_DARK = {
@@ -527,14 +532,9 @@ function Overview({ cfg, products, orders, C, ac }) {
       <Card C={C} style={{ marginBottom:20 }}>
         <div style={{ fontSize:14, fontWeight:800, marginBottom:4, color:C.t }}>Ingresos · Últimos 7 días</div>
         <div style={{ fontSize:11, color:C.m, marginBottom:14 }}>Basado en tus pedidos reales</div>
-        <ResponsiveContainer width="100%" height={140}>
-          <AreaChart data={week} margin={{ top:5, right:0, left:-30, bottom:0 }}>
-            <defs><linearGradient id="ovg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={ac} stopOpacity={.25}/><stop offset="100%" stopColor={ac} stopOpacity={0}/></linearGradient></defs>
-            <XAxis dataKey="d" tick={{ fill:C.m, fontSize:10 }} axisLine={false} tickLine={false}/>
-            <Tooltip contentStyle={{ background:C.s3, border:`1px solid ${C.b}`, borderRadius:8, color:C.t, fontSize:11 }} formatter={v=>[money(v,"USD"),"Ingresos"]} labelStyle={{ color:C.m }}/>
-            <Area type="monotone" dataKey="v" stroke={ac} strokeWidth={2} fill="url(#ovg)"/>
-          </AreaChart>
-        </ResponsiveContainer>
+        <Suspense fallback={<ChartFallback height={140}/>}>
+          <RevenueAreaChart data={week} ac={ac} C={C} gradientId="ovg" height={140}/>
+        </Suspense>
       </Card>
       <Card C={C} style={{ padding:0, marginBottom:20 }}>
         <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.b}` }}><div style={{ fontSize:14, fontWeight:800, color:C.t }}>Pedidos recientes</div></div>
@@ -747,27 +747,18 @@ function Analytics({ products, orders, C, ac }) {
             )}
           </div>
         </div>
-        <ResponsiveContainer width="100%" height={150}>
-          <AreaChart data={chartData} margin={{ top:5, right:0, left:-30, bottom:0 }}>
-            <defs><linearGradient id="ang" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={ac} stopOpacity={0.25}/><stop offset="100%" stopColor={ac} stopOpacity={0}/></linearGradient></defs>
-            <XAxis dataKey="d" tick={{ fill:C.m, fontSize:10 }} axisLine={false} tickLine={false}/>
-            <Tooltip contentStyle={{ background:C.s3, border:`1px solid ${C.b}`, borderRadius:8, color:C.t, fontSize:11 }} formatter={v=>[money(v,"USD"),"Ingresos"]} labelStyle={{ color:C.m }}/>
-            <Area type="monotone" dataKey="v" stroke={ac} strokeWidth={2} fill="url(#ang)"/>
-          </AreaChart>
-        </ResponsiveContainer>
+        <Suspense fallback={<ChartFallback height={150}/>}>
+          <RevenueAreaChart data={chartData} ac={ac} C={C} gradientId="ang" height={150}/>
+        </Suspense>
       </Card>
       <Card C={C} style={{ marginBottom:16 }}>
         <div style={{ fontSize:14, fontWeight:800, marginBottom:4, color:C.t }}>Ventas por Categoría</div>
         <div style={{ fontSize:11, color:C.m, marginBottom:14 }}>Basado en pedidos reales, por subcategoría</div>
         {catData.length === 0
           ? <div style={{ textAlign:"center", padding:"20px", color:C.m, fontSize:12 }}>Publica productos para ver estadísticas por categoría.</div>
-          : <ResponsiveContainer width="100%" height={150}>
-              <BarChart data={catData} margin={{ top:5, right:10, left:10, bottom:30 }}>
-                <XAxis dataKey="name" tick={{ fill:C.m, fontSize:9 }} axisLine={false} tickLine={false} interval={0} angle={-15} textAnchor="end"/>
-                <Tooltip contentStyle={{ background:C.s3, border:`1px solid ${C.b}`, borderRadius:8, color:C.t, fontSize:11 }} formatter={v=>[money(v,"USD"),"Ingresos"]} labelStyle={{ color:C.m }}/>
-                <Bar dataKey="v" radius={[4,4,0,0]}>{catData.map((_,i) => <Cell key={i} fill={COLORS[i%COLORS.length]} opacity={0.85}/>)}</Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          : <Suspense fallback={<ChartFallback height={150}/>}>
+              <CategoryBarChart data={catData} colors={COLORS} C={C} height={150}/>
+            </Suspense>
         }
       </Card>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>

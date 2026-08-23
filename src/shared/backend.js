@@ -248,6 +248,15 @@ export const mapProduct = (p) => {
 // products_seller_id_fkey) — nunca una segunda consulta aparte para saber si
 // el vendedor está verificado.
 const PRODUCT_SELECT = "*, seller:profiles!seller_id(is_verified, full_name, avatar_url)";
+// SELECT liviano SOLO para el feed público (loadProducts/loadServices): trae
+// nada más las columnas que la tarjeta de lista, la búsqueda y los filtros/
+// orden realmente leen (confirmado revisando cada uso real en Marketplace.jsx
+// y App.jsx) — nunca descripción larga completa+dirección de recogida+métodos
+// de pago+envío+descuentos por cantidad, que solo hacen falta en el DETALLE.
+// El detalle (ProductDetail) ya no depende de que el feed traiga todo: al
+// abrirse pide el producto completo aparte con getProductById (ver ahí). Si
+// se necesita otro campo nuevo en una tarjeta/filtro, agregarlo aquí también.
+const FEED_SELECT = "id, seller_id, title, description, images, cat, subcat, price, orig_price, currency, origin, stock, sold_count, rating, reviews_count, province, location, badge, kind, promoted, created_at, store_featured, seller:profiles!seller_id(is_verified, full_name, avatar_url)";
 // Un solo producto por id (para leer la dirección de recogida en el detalle del
 // mensajero cuando el producto no está cargado en memoria).
 export const getProductById = async (id) => {
@@ -271,7 +280,7 @@ const FEED_LIMIT = 100;
 export const loadProducts = async () => {
   const { data, error } = await supabase
     .from("products")
-    .select(PRODUCT_SELECT)
+    .select(FEED_SELECT)
     .eq("status", "active")
     .eq("moderation_status", "approved")
     .or("kind.eq.product,kind.is.null")
@@ -285,7 +294,7 @@ export const loadProducts = async () => {
 export const loadServices = async () => {
   const { data, error } = await supabase
     .from("products")
-    .select(PRODUCT_SELECT)
+    .select(FEED_SELECT)
     .eq("status", "active")
     .eq("moderation_status", "approved")
     .eq("kind", "service")
@@ -721,7 +730,11 @@ export const uploadImage = async (file, userId) => {
   // completa (arriba) solo debe cargarse en el detalle del producto. Si esto
   // falla por lo que sea, NUNCA rompe la publicación: la foto real ya subió.
   try {
-    const thumbBlob = await compressImage(file, 360, 0.7);
+    // 700px/0.82: antes 360px/0.70 se veía borroso en tarjetas de 2 columnas
+    // en teléfonos de densidad de píxeles alta (necesitan bastante más que
+    // 360px reales para verse nítidas) — verificado y confirmado en la
+    // auditoría de velocidad (v164/v165), corregido ahora con calma.
+    const thumbBlob = await compressImage(file, 700, 0.82);
     const thumbPath = path.replace(/\.jpg$/, "-thumb.jpg");
     await supabase.storage.from("product-images").upload(thumbPath, thumbBlob, {
       cacheControl: "3600", upsert: false, contentType: "image/jpeg",

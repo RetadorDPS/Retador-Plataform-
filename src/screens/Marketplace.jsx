@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -1941,10 +1941,23 @@ function CurrencyEquivalents({ product }) {
   );
 }
 
-export function ProductDetail({ product: p, onBack, onDelivery, onChat, onViewProfile, onBuy, onFav, isFav, flash, requireAuth, user, canChat, onDelete, onEdit }) {
+export function ProductDetail({ product: initialProduct, onBack, onDelivery, onChat, onViewProfile, onBuy, onFav, isFav, flash, requireAuth, user, canChat, onDelete, onEdit }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { S, B, T1, T2, T3, isDark, ts } = useAt();
   const { cats } = useCatalog();
+  // El feed del Marketplace ahora trae solo las columnas livianas de la
+  // tarjeta (ver FEED_SELECT en backend.js) — aquí, al abrir el detalle, se
+  // completa con los datos reales que faltan (descripción larga, dirección
+  // de recogida, métodos de pago, envío, descuentos por cantidad…). Se
+  // muestra `initialProduct` de inmediato (sin esperar) y se reemplaza en
+  // cuanto llega lo completo — nunca una pantalla en blanco mientras carga.
+  const [p, setP] = useState(initialProduct);
+  useEffect(() => {
+    setP(initialProduct);
+    let alive = true;
+    getProductById(initialProduct.id).then(full => { if (alive && full) setP(prev => ({ ...prev, ...full })); }).catch(() => {});
+    return () => { alive = false; };
+  }, [initialProduct.id]);
   const [sellerName,  setSellerName]  = useState(null);
   // Ventas del vendedor: MISMA fuente que el encabezado de su perfil
   // (get_profile_header_stats), nunca un cálculo aparte que pueda

@@ -4,7 +4,10 @@
 // ═════════════════════════════════════════════════════════════════════════════
 import { useState, useEffect, useRef, useMemo, createContext, useContext, useCallback, lazy, Suspense } from "react";
 import { User, Palette, Bell, Shield, MessageCircle, Truck, Gavel, CreditCard, BarChart2, Globe, HardDrive, HelpCircle, Info, ChevronRight, ArrowLeft, Check, Plus, Edit2, Camera, Lock, LogOut, MapPin, Clock, Download, FileText, Award, ShoppingBag, Package, AlertCircle, CheckCircle2, Zap, TrendingUp, Database, Mail, Phone, Fingerprint, Star, Volume2, Smartphone, Calendar, Activity, Send, ArrowDownLeft, ArrowUpRight, PlusCircle, Eye, EyeOff, ShieldCheck, Search, X, Users, QrCode, Landmark, Wallet, Home, History, UserCircle2, Copy, Share2, Loader2, Banknote, Building2, Trash2, KeyRound, BadgeCheck, Receipt, ArrowLeftRight } from "lucide-react";
-import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+// (recharts se quita de aquí: nunca se usaba en App.jsx — import muerto que
+// metía la librería de gráficas en el paquete principal para TODOS, sin que
+// nadie la usara desde este archivo. Ver StoreCharts.jsx para dónde vive de
+// verdad, cargada solo cuando hace falta.)
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CIMIENTOS COMPARTIDOS — conexión Supabase, backend, tema, catálogo y UI base.
@@ -2213,7 +2216,17 @@ function AppShell({ sessionUser }) {
       <div onScrollCapture={handleNavScroll} style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <>
           {tab === "market" && <SectionGate enabled={sections.marketplace} dark={isDarkTheme}>
-            {mScr === "home" && (
+            {/* MarketHome se queda SIEMPRE montada mientras se está en la
+                pestaña Marketplace (oculta con display:none, nunca destruida)
+                — antes se desmontaba/remontaba por completo al entrar a un
+                producto y volver, recreando TODAS las fotos de la grilla de
+                cero: el navegador tenía que decodificarlas otra vez, y
+                mientras tanto se veía el fondo oscuro de cada tarjeta — un
+                "flash negro" que se sentía como una recarga completa, aunque
+                nunca hubo ninguna petición de red de por medio (reloadFeed
+                solo corre una vez, al montar la app). Con display:none el
+                scroll tampoco se pierde: el navegador lo conserva solo. */}
+            <div style={{ display: mScr === "home" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
               <MarketHome
                 hidden={navHidden}
                 scrollKeeper={marketScrollRef}
@@ -2234,7 +2247,7 @@ function AppShell({ sessionUser }) {
                 onNav={navTo}
                 onRefresh={reloadFeed}
               />
-            )}
+            </div>
             {mScr === "services" && (
               <ServicesScreen
                 services={services}

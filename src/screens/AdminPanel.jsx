@@ -3497,7 +3497,7 @@ const CATALOGO_PRO_PUBLISH_LABEL = 'Publicar en Catálogo Pro';
 
 function CatalogQuotaBar() {
   const [quota, setQuota] = useState(undefined); // undefined=cargando · null=error
-  useEffect(() => { catalogProQuotaStatus().then(setQuota).catch(() => setQuota(null)); }, []);
+  useEffect(() => { catalogProQuotaStatus().then(setQuota).catch(e => { console.error('catalogProQuotaStatus:', e); setQuota(null); }); }, []);
   if (quota === undefined) return <div style={{ fontSize: 11, color: 'var(--tx3)', marginBottom: 12 }}>Cargando cuota de CJ…</div>;
   if (quota === null) return <div style={{ fontSize: 11, color: 'var(--rd)', marginBottom: 12 }}>No se pudo leer la cuota de CJ.</div>;
   const pct = Math.min(100, quota.percent_used || 0);
@@ -3537,6 +3537,19 @@ function RegionChecklist({ selected, onToggle, disabled }) {
   );
 }
 
+// Imagen con fallback real: si la URL falla en el navegador del que la ve
+// (bloqueada por una extensión, un adblock, o simplemente caída), muestra un
+// ícono visible en vez de desaparecer sin dejar rastro — así un problema de
+// imagen se nota, no se confunde con "no hay imagen en los datos".
+function CatalogImg({ src, width = 48, height = width, radius = 8, iconSize, style }) {
+  const [broken, setBroken] = useState(false);
+  const box = { width, height, borderRadius: radius, flexShrink: 0, ...style };
+  if (!src || broken) {
+    return <div style={{ ...box, background: 'var(--bg2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: iconSize || 20 }}>📦</div>;
+  }
+  return <img src={src} alt="" referrerPolicy="no-referrer" style={{ ...box, objectFit: 'cover' }} onError={() => { console.error('CatalogImg: no cargó', src); setBroken(true); }} />;
+}
+
 function CatalogSearchTab({ toast, ro, onOpenPreview }) {
   const [keyWord, setKeyWord] = useState('');
   const [country, setCountry] = useState('US');
@@ -3548,7 +3561,7 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
     if (!keyWord.trim()) { toast('Escribe algo para buscar'); return; }
     setLoading(true); setPage(p);
     try { setResults(await catalogProSearch(keyWord.trim(), p, country)); }
-    catch (e) { toast('⚠️ ' + (e.message || 'No se pudo buscar en CJ')); setResults(null); }
+    catch (e) { console.error('catalogProSearch:', e); toast('⚠️ ' + (e.message || 'No se pudo buscar en CJ')); setResults(null); }
     setLoading(false);
   };
 
@@ -3574,9 +3587,7 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
           <div className="g3">
             {(results.products || []).map(p => (
               <div key={p.id} className="mc" style={{ cursor: 'pointer', padding: 0, overflow: 'hidden' }} onClick={() => onOpenPreview(p.id)}>
-                <div style={{ height: 120, background: 'var(--bg2)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                  {p.bigImage ? <img src={p.bigImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} /> : '📦'}
-                </div>
+                <CatalogImg src={p.bigImage} width="100%" height={120} radius={0} iconSize={32} />
                 <div style={{ padding: '10px 12px' }}>
                   <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--tx2)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginBottom: 4 }}>{p.nameEn}</div>
                   <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>${p.sellPrice}</div>
@@ -3633,7 +3644,7 @@ function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
       <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a resultados</button>
       <div className="card cp mb16">
         <div style={{ display: 'flex', gap: 12 }}>
-          {data.images?.[0] && <img src={data.images[0]} alt="" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} onError={e => { e.target.style.display = 'none'; }} />}
+          <CatalogImg src={data.images?.[0]} width={64} height={64} radius={8} iconSize={26} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{data.title}</div>
             <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>{data.category} · rango CJ: ${data.sellPriceRange} · {data.listedNum ?? 0} listados</div>
@@ -3645,7 +3656,7 @@ function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
       <div className="card">
         <div className="tw">
           <table>
-            <thead><tr><th></th><th>SKU / atributos</th><th>Precio CJ</th><th>Stock</th><th>Peso</th></tr></thead>
+            <thead><tr><th></th><th></th><th>SKU / atributos</th><th>Precio CJ</th><th>Stock</th><th>Peso</th></tr></thead>
             <tbody>
               {data.variants.map(v => {
                 const on = selected.includes(v.sku);
@@ -3653,6 +3664,7 @@ function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
                   <tr key={v.sku} onClick={() => !ro && toggle(v.sku)} style={{ cursor: ro ? 'default' : 'pointer', background: on ? 'var(--ag)' : undefined }}>
                     <td><span style={{ width: 16, height: 16, borderRadius: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 900,
                       background: on ? 'var(--ac)' : 'transparent', border: `1.5px solid ${on ? 'var(--ac)' : 'var(--bd2)'}`, color: '#fff' }}>{on ? '✓' : ''}</span></td>
+                    <td><CatalogImg src={v.image} width={32} height={32} radius={6} iconSize={14} /></td>
                     <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{v.attrs}</td>
                     <td>{money(v.price)}</td>
                     <td>{v.stock == null ? <span style={{ color: 'var(--tx3)' }}>sin verificar</span> : v.stock}</td>
@@ -3765,9 +3777,11 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
 }
 
 function CatalogStagingTab({ toast, ro }) {
-  const [rows, setRows] = useState(undefined);
+  const [rows, setRows] = useState(undefined); // undefined=cargando · null=error
   const [openId, setOpenId] = useState(null);
-  const load = useCallback(() => { catalogProListStaging().then(setRows).catch(() => setRows([])); }, []);
+  const load = useCallback(() => {
+    catalogProListStaging().then(setRows).catch(e => { console.error('catalogProListStaging:', e); setRows(null); });
+  }, []);
   useEffect(() => { load(); }, [load]);
 
   const pending = (rows || []).filter(r => r.status !== 'publicado');
@@ -3780,42 +3794,92 @@ function CatalogStagingTab({ toast, ro }) {
       <div className="ssub">Productos importados pendientes de revisar y publicar.</div>
       {rows === undefined
         ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Cargando…</div>
-        : pending.length === 0
-          ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>No hay productos pendientes — busca e importa alguno.</div>
-          : pending.map(p => (
-            <div key={p.id} className="mc" style={{ cursor: 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }} onClick={() => setOpenId(p.id)}>
-              {p.images?.[0] && <img src={p.images[0]} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} onError={e => { e.target.style.display = 'none'; }} />}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{p.title}</div>
-                <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>{(p.pricing || []).length} variante(s) · costo desde {money(p.cost_product)}</div>
+        : rows === null
+          ? <div style={{ textAlign: 'center', color: 'var(--rd)', fontSize: 12, padding: '24px 6px' }}>⚠️ No se pudo cargar staging — revisa la consola del navegador.</div>
+          : pending.length === 0
+            ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>No hay productos pendientes — busca e importa alguno.</div>
+            : pending.map(p => (
+              <div key={p.id} className="mc" style={{ cursor: 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }} onClick={() => setOpenId(p.id)}>
+                <CatalogImg src={p.images?.[0]} width={48} height={48} radius={8} iconSize={20} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{p.title}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>{(p.pricing || []).length} variante(s) · costo desde {money(p.cost_product)}</div>
+                </div>
+                <span style={{ fontSize: 12, color: 'var(--tx3)' }}>Revisar →</span>
               </div>
-              <span style={{ fontSize: 12, color: 'var(--tx3)' }}>Revisar →</span>
-            </div>
-          ))}
+            ))}
+    </>
+  );
+}
+
+// Mismo detalle que Staging, en solo lectura — para revisar el costeo por
+// variante de un producto YA publicado, sin poder editarlo (eso solo se
+// hace antes de publicar, en Staging).
+function CatalogPublishedDetail({ product, onBack }) {
+  const rows = (product.pricing || []).map(p => ({ ...p, costBase: Number(p.cost_base_total ?? p.cost_product) || 0 }));
+  return (
+    <>
+      <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a Publicado</button>
+      <div className="card cp mb16">
+        <div style={{ display: 'flex', gap: 12 }}>
+          <CatalogImg src={product.images?.[0]} width={64} height={64} radius={8} iconSize={26} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{product.title}</div>
+            <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>{product.category} · {rows.length} variante(s) · {(product.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
+          </div>
+        </div>
+      </div>
+      <div className="card">
+        <div className="tw">
+          <table>
+            <thead><tr><th>Variante</th><th>Costo real</th><th>Margen</th><th>Precio recomendado</th><th>Ganancia</th></tr></thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id}>
+                  <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{r.variant_sku}</td>
+                  <td style={{ background: 'var(--bg2)', color: 'var(--tx2)', fontWeight: 700 }}>{money(r.costBase)}</td>
+                  <td>{r.margin_pct}% {Number(r.margin_fixed) ? `+ ${money(r.margin_fixed)}` : ''}</td>
+                  <td style={{ color: 'var(--gn)', fontWeight: 800 }}>{money(r.recommended_price)}</td>
+                  <td style={{ color: 'var(--gn)', fontWeight: 700 }}>{money(r.profit_estimate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </>
   );
 }
 
 function CatalogPublishedTab() {
-  const [rows, setRows] = useState(undefined);
-  useEffect(() => { catalogProListPublished().then(setRows).catch(() => setRows([])); }, []);
+  const [rows, setRows] = useState(undefined); // undefined=cargando · null=error
+  const [openId, setOpenId] = useState(null);
+  useEffect(() => {
+    catalogProListPublished().then(setRows).catch(e => { console.error('catalogProListPublished:', e); setRows(null); });
+  }, []);
+
+  const open = (rows || []).find(r => r.id === openId);
+  if (open) return <CatalogPublishedDetail product={open} onBack={() => setOpenId(null)} />;
+
   return (
     <>
-      <div className="ssub">Catálogo ya publicado — solo referencia; se edita desde Staging antes de publicar.</div>
+      <div className="ssub">Catálogo ya publicado — toca uno para ver su costeo por variante (solo lectura; se edita desde Staging antes de publicar).</div>
       {rows === undefined
         ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Cargando…</div>
-        : rows.length === 0
-          ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Todavía no hay nada publicado.</div>
-          : rows.map(p => (
-            <div key={p.id} className="mc" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
-              {p.images?.[0] && <img src={p.images[0]} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} onError={e => { e.target.style.display = 'none'; }} />}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{p.title}</div>
-                <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>{(p.pricing || []).length} variante(s) · desde {money(p.recommended_price)} · {(p.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
+        : rows === null
+          ? <div style={{ textAlign: 'center', color: 'var(--rd)', fontSize: 12, padding: '24px 6px' }}>⚠️ No se pudo cargar el catálogo publicado — revisa la consola del navegador.</div>
+          : rows.length === 0
+            ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Todavía no hay nada publicado.</div>
+            : rows.map(p => (
+              <div key={p.id} className="mc" style={{ cursor: 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }} onClick={() => setOpenId(p.id)}>
+                <CatalogImg src={p.images?.[0]} width={48} height={48} radius={8} iconSize={20} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{p.title}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>{(p.pricing || []).length} variante(s) · desde {money(p.recommended_price)} · {(p.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
+                </div>
+                <span className="bdg bg">{p.status}</span>
               </div>
-              <span className="bdg bg">{p.status}</span>
-            </div>
-          ))}
+            ))}
     </>
   );
 }

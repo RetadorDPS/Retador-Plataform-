@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -3483,6 +3483,367 @@ function HomeScreenEditor({ cfg = {}, onCfg, ro, toast }) {
   );
 }
 
+/* ── 🛒 CATÁLOGO PRO — catálogo interno de dropshipping (CJdropshipping) ─────
+   Fase 1: fulfillment manual. El admin busca en CJ, revisa costo real/margen
+   POR VARIANTE (catalog_pro_variant_pricing) y publica para que usuarios
+   Pro/Premium agreguen productos a su tienda sin acceso directo a CJ. Las
+   llamadas que hablan de verdad con CJ viven en Edge Functions (ver
+   src/shared/backend.js); esta pantalla solo las invoca y muestra resultados
+   reales — nunca datos simulados. */
+
+// Texto del botón de publicar — una sola constante (el nombre definitivo del
+// módulo todavía no está decidido; cambiarlo aquí basta para todo el panel).
+const CATALOGO_PRO_PUBLISH_LABEL = 'Publicar en Catálogo Pro';
+
+function CatalogQuotaBar() {
+  const [quota, setQuota] = useState(undefined); // undefined=cargando · null=error
+  useEffect(() => { catalogProQuotaStatus().then(setQuota).catch(() => setQuota(null)); }, []);
+  if (quota === undefined) return <div style={{ fontSize: 11, color: 'var(--tx3)', marginBottom: 12 }}>Cargando cuota de CJ…</div>;
+  if (quota === null) return <div style={{ fontSize: 11, color: 'var(--rd)', marginBottom: 12 }}>No se pudo leer la cuota de CJ.</div>;
+  const pct = Math.min(100, quota.percent_used || 0);
+  const color = pct >= 90 ? 'var(--rd)' : pct >= 70 ? 'var(--yw)' : 'var(--gn)';
+  return (
+    <div className="card cp mb16">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+        <span className="ct">Cuota diaria de CJdropshipping</span>
+        <span style={{ fontSize: 12, fontWeight: 800, color }}>{quota.used_today.toLocaleString('es-ES')} / {quota.total_daily.toLocaleString('es-ES')} puntos usados hoy</span>
+      </div>
+      <div style={{ height: 6, borderRadius: 6, background: 'var(--bg2)', overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: color, transition: 'width .3s' }} />
+      </div>
+      <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 6 }}>{quota.remaining.toLocaleString('es-ES')} puntos restantes hoy ({pct}%)</div>
+    </div>
+  );
+}
+
+// Mercados de venta (sellable_regions) — manual y SIN relación con el país de
+// stock de CJ: un producto verificado en US puede marcarse vendible en Cuba.
+function RegionChecklist({ selected, onToggle, disabled }) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {CJ_COUNTRIES.map(c => {
+        const on = selected.includes(c.code);
+        return (
+          <button key={c.code} type="button" disabled={disabled} onClick={() => onToggle(c.code)}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, cursor: disabled ? 'not-allowed' : 'pointer',
+              background: on ? 'var(--ag)' : 'var(--bg2)', border: `1px solid ${on ? 'var(--ac)' : 'var(--bd2)'}`, color: 'var(--tx)', fontSize: 11.5, fontWeight: 600, opacity: disabled ? .6 : 1 }}>
+            <span style={{ width: 14, height: 14, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 900,
+              background: on ? 'var(--ac)' : 'transparent', border: `1.5px solid ${on ? 'var(--ac)' : 'var(--bd2)'}`, color: '#fff', flexShrink: 0 }}>{on ? '✓' : ''}</span>
+            {c.code} · {c.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function CatalogSearchTab({ toast, ro, onOpenPreview }) {
+  const [keyWord, setKeyWord] = useState('');
+  const [country, setCountry] = useState('US');
+  const [page, setPage] = useState(1);
+  const [results, setResults] = useState(null); // null = sin buscar todavía
+  const [loading, setLoading] = useState(false);
+
+  const doSearch = async (p = 1) => {
+    if (!keyWord.trim()) { toast('Escribe algo para buscar'); return; }
+    setLoading(true); setPage(p);
+    try { setResults(await catalogProSearch(keyWord.trim(), p, country)); }
+    catch (e) { toast('⚠️ ' + (e.message || 'No se pudo buscar en CJ')); setResults(null); }
+    setLoading(false);
+  };
+
+  return (
+    <>
+      <CatalogQuotaBar />
+      <div className="card cp mb16">
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input className="inp" style={{ flex: '2 1 220px' }} value={keyWord} disabled={ro} onChange={e => setKeyWord(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') doSearch(1); }} placeholder="Buscar producto en CJ (ej. phone case)…" />
+          <select className="inp" style={{ flex: '1 1 160px' }} value={country} disabled={ro} onChange={e => setCountry(e.target.value)}>
+            {CJ_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.code} · {c.label}</option>)}
+          </select>
+          <button className="btn btp" disabled={ro || loading} onClick={() => doSearch(1)}>{loading ? <span className="spin">↻</span> : '🔎'} Buscar</button>
+        </div>
+      </div>
+
+      {loading && <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Buscando en CJ…</div>}
+
+      {!loading && results && (
+        <>
+          <div className="ssub">{(results.totalRecords || 0).toLocaleString('es-ES')} resultados reales · página {page} de {results.totalPages || 1}{results.source === 'cache' ? ' · desde caché (20 min)' : ''}</div>
+          <div className="g3">
+            {(results.products || []).map(p => (
+              <div key={p.id} className="mc" style={{ cursor: 'pointer', padding: 0, overflow: 'hidden' }} onClick={() => onOpenPreview(p.id)}>
+                <div style={{ height: 120, background: 'var(--bg2)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                  {p.bigImage ? <img src={p.bigImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} /> : '📦'}
+                </div>
+                <div style={{ padding: '10px 12px' }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--tx2)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginBottom: 4 }}>{p.nameEn}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>${p.sellPrice}</div>
+                  <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+                    <span className="bdg bx">👁 {p.listedNum ?? 0} listados</span>
+                    {p.verifiedWarehouse ? <span className="bdg bg">✔ stock verificado</span> : null}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {(results.products || []).length === 0 && <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Sin resultados para esa búsqueda en {country}.</div>}
+          {results.totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
+              <button className="btn sm" disabled={page <= 1 || loading} onClick={() => doSearch(page - 1)} style={{ opacity: page <= 1 ? .4 : 1 }}>‹ Anterior</button>
+              <span style={{ fontSize: 11, color: 'var(--tx3)' }}>Página {page} de {results.totalPages}</span>
+              <button className="btn sm" disabled={page >= results.totalPages || loading} onClick={() => doSearch(page + 1)} style={{ opacity: page >= results.totalPages ? .4 : 1 }}>Siguiente ›</button>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
+  const [data, setData] = useState(undefined); // undefined = cargando
+  const [selected, setSelected] = useState([]);
+  const [importing, setImporting] = useState(false);
+
+  useEffect(() => {
+    setData(undefined); setSelected([]);
+    catalogProPreview(pid).then(setData).catch(e => { toast('⚠️ ' + (e.message || 'No se pudo cargar el preview')); setData(null); });
+  }, [pid]);
+
+  const toggle = sku => setSelected(s => s.includes(sku) ? s.filter(x => x !== sku) : s.concat(sku));
+
+  const doImport = async () => {
+    if (selected.length === 0) { toast('Elige al menos una variante'); return; }
+    setImporting(true);
+    try {
+      await catalogProImport(pid, selected);
+      toast(`✅ Producto importado con ${selected.length} variante(s) — revísalo en Staging`);
+      onImported();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo importar')); }
+    setImporting(false);
+  };
+
+  if (data === undefined) return <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '40px 6px' }}>Cargando variantes reales de CJ (puede tardar ~20-30s con muchas variantes: se piden una por una para que CJ no falle)…</div>;
+  if (data === null) return <div style={{ textAlign: 'center', padding: '40px 6px' }}><button className="btn btg" onClick={onBack}>‹ Volver a la búsqueda</button></div>;
+
+  return (
+    <>
+      <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a resultados</button>
+      <div className="card cp mb16">
+        <div style={{ display: 'flex', gap: 12 }}>
+          {data.images?.[0] && <img src={data.images[0]} alt="" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} onError={e => { e.target.style.display = 'none'; }} />}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{data.title}</div>
+            <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>{data.category} · rango CJ: ${data.sellPriceRange} · {data.listedNum ?? 0} listados</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="ssub">{data.variants.length} variantes reales — elige cuáles importar</div>
+      <div className="card">
+        <div className="tw">
+          <table>
+            <thead><tr><th></th><th>SKU / atributos</th><th>Precio CJ</th><th>Stock</th><th>Peso</th></tr></thead>
+            <tbody>
+              {data.variants.map(v => {
+                const on = selected.includes(v.sku);
+                return (
+                  <tr key={v.sku} onClick={() => !ro && toggle(v.sku)} style={{ cursor: ro ? 'default' : 'pointer', background: on ? 'var(--ag)' : undefined }}>
+                    <td><span style={{ width: 16, height: 16, borderRadius: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 900,
+                      background: on ? 'var(--ac)' : 'transparent', border: `1.5px solid ${on ? 'var(--ac)' : 'var(--bd2)'}`, color: '#fff' }}>{on ? '✓' : ''}</span></td>
+                    <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{v.attrs}</td>
+                    <td>{money(v.price)}</td>
+                    <td>{v.stock == null ? <span style={{ color: 'var(--tx3)' }}>sin verificar</span> : v.stock}</td>
+                    <td>{v.weightGrams ? `${v.weightGrams} g` : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {!ro && <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+        <button className="btn btp" disabled={importing || selected.length === 0} onClick={doImport}>
+          {importing ? <span className="spin">↻</span> : '📥'} Importar {selected.length ? `${selected.length} seleccionada(s)` : 'seleccionadas'}
+        </button>
+      </div>}
+    </>
+  );
+}
+
+function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
+  const [edits, setEdits] = useState({}); // { [pricingId]: {margin_pct, margin_fixed} }
+  const [regions, setRegions] = useState(product.sellable_regions || []);
+  const [saving, setSaving] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+
+  const rows = (product.pricing || []).map(p => {
+    const draft = edits[p.id] || {};
+    const marginPct = draft.margin_pct ?? p.margin_pct ?? 0;
+    const marginFixed = draft.margin_fixed ?? p.margin_fixed ?? 0;
+    const costBase = Number(p.cost_base_total ?? p.cost_product) || 0;
+    const recommended = Math.round((costBase * (1 + Number(marginPct) / 100) + Number(marginFixed)) * 100) / 100;
+    const profit = Math.round((recommended - costBase) * 100) / 100;
+    return { ...p, marginPct, marginFixed, costBase, recommended, profit, dirty: draft.margin_pct !== undefined || draft.margin_fixed !== undefined };
+  });
+  const anyDirty = rows.some(r => r.dirty);
+  const regionsDirty = JSON.stringify([...regions].sort()) !== JSON.stringify([...(product.sellable_regions || [])].sort());
+
+  const setDraft = (id, patch) => setEdits(e => ({ ...e, [id]: { ...e[id], ...patch } }));
+  const toggleRegion = code => setRegions(r => r.includes(code) ? r.filter(x => x !== code) : r.concat(code));
+
+  const saveAll = async () => {
+    setSaving(true);
+    try {
+      for (const r of rows) {
+        if (!r.dirty) continue;
+        await catalogProUpdateVariantPricing(r.id, { margin_pct: Number(r.marginPct), margin_fixed: Number(r.marginFixed), recommended_price: r.recommended, profit_estimate: r.profit });
+      }
+      if (regionsDirty) await catalogProUpdateStagingRegions(product.id, regions);
+      toast('✅ Cambios guardados');
+      setEdits({});
+      onPublished();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo guardar')); }
+    setSaving(false);
+  };
+
+  const doPublish = async () => {
+    if (anyDirty || regionsDirty) { toast('Guarda los cambios antes de publicar'); return; }
+    setPublishing(true);
+    try {
+      await catalogProPublish(product.id);
+      toast(`✅ ${CATALOGO_PRO_PUBLISH_LABEL}: listo`);
+      onPublished();
+      onBack();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo publicar')); }
+    setPublishing(false);
+  };
+
+  return (
+    <>
+      <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a Staging</button>
+      <div className="card cp mb16">
+        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{product.title}</div>
+        <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>{product.category} · {rows.length} variante(s) · {product.listed_num ?? 0} listados en CJ</div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="tw">
+          <table>
+            <thead><tr><th>Variante</th><th>Costo real</th><th>Margen %</th><th>Margen fijo</th><th>Precio recomendado</th><th>Ganancia</th></tr></thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id}>
+                  <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{r.variant_sku}</td>
+                  <td style={{ background: 'var(--bg2)', color: 'var(--tx2)', fontWeight: 700 }}>{money(r.costBase)}</td>
+                  <td><input type="number" className="inp" style={{ width: 70 }} value={r.marginPct} disabled={ro} onChange={e => setDraft(r.id, { margin_pct: e.target.value })} /></td>
+                  <td><input type="number" className="inp" style={{ width: 70 }} value={r.marginFixed} disabled={ro} onChange={e => setDraft(r.id, { margin_fixed: e.target.value })} /></td>
+                  <td style={{ color: 'var(--gn)', fontWeight: 800 }}>{money(r.recommended)}</td>
+                  <td style={{ color: 'var(--gn)', fontWeight: 700 }}>{money(r.profit)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card cp mb16">
+        <div className="ch"><span className="ct">Mercados de venta</span></div>
+        <div style={{ fontSize: 11, color: 'var(--tx3)', marginBottom: 10 }}>Independiente del país donde CJ tiene el stock — decide tú en dónde se puede vender este producto.</div>
+        <RegionChecklist selected={regions} onToggle={toggleRegion} disabled={ro} />
+      </div>
+
+      {!ro && <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        <button className="btn btg" disabled={saving || (!anyDirty && !regionsDirty)} onClick={saveAll}>{saving ? <span className="spin">↻</span> : '💾'} Guardar cambios</button>
+        <button className="btn bts" disabled={publishing || rows.length === 0} onClick={doPublish}>{publishing ? <span className="spin">↻</span> : '🚀'} {CATALOGO_PRO_PUBLISH_LABEL}</button>
+      </div>}
+    </>
+  );
+}
+
+function CatalogStagingTab({ toast, ro }) {
+  const [rows, setRows] = useState(undefined);
+  const [openId, setOpenId] = useState(null);
+  const load = useCallback(() => { catalogProListStaging().then(setRows).catch(() => setRows([])); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const pending = (rows || []).filter(r => r.status !== 'publicado');
+  const open = pending.find(r => r.id === openId);
+
+  if (open) return <CatalogStagingDetail product={open} toast={toast} ro={ro} onBack={() => setOpenId(null)} onPublished={load} />;
+
+  return (
+    <>
+      <div className="ssub">Productos importados pendientes de revisar y publicar.</div>
+      {rows === undefined
+        ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Cargando…</div>
+        : pending.length === 0
+          ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>No hay productos pendientes — busca e importa alguno.</div>
+          : pending.map(p => (
+            <div key={p.id} className="mc" style={{ cursor: 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }} onClick={() => setOpenId(p.id)}>
+              {p.images?.[0] && <img src={p.images[0]} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} onError={e => { e.target.style.display = 'none'; }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{p.title}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>{(p.pricing || []).length} variante(s) · costo desde {money(p.cost_product)}</div>
+              </div>
+              <span style={{ fontSize: 12, color: 'var(--tx3)' }}>Revisar →</span>
+            </div>
+          ))}
+    </>
+  );
+}
+
+function CatalogPublishedTab() {
+  const [rows, setRows] = useState(undefined);
+  useEffect(() => { catalogProListPublished().then(setRows).catch(() => setRows([])); }, []);
+  return (
+    <>
+      <div className="ssub">Catálogo ya publicado — solo referencia; se edita desde Staging antes de publicar.</div>
+      {rows === undefined
+        ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Cargando…</div>
+        : rows.length === 0
+          ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Todavía no hay nada publicado.</div>
+          : rows.map(p => (
+            <div key={p.id} className="mc" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
+              {p.images?.[0] && <img src={p.images[0]} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} onError={e => { e.target.style.display = 'none'; }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{p.title}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>{(p.pricing || []).length} variante(s) · desde {money(p.recommended_price)} · {(p.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
+              </div>
+              <span className="bdg bg">{p.status}</span>
+            </div>
+          ))}
+    </>
+  );
+}
+
+function CatalogoPro({ toast, ro }) {
+  const [tab, setTab] = useState('buscar');
+  const [previewPid, setPreviewPid] = useState(null);
+
+  return (
+    <>
+      <div className="stit">Catálogo Pro</div>
+      <div className="ssub">Catálogo interno de dropshipping (CJdropshipping) para Pro/Premium — fase 1, fulfillment manual.</div>
+      {ro && <div style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 10, background: 'var(--bg2)', border: '1px solid var(--bd2)', fontSize: 12, fontWeight: 700, color: 'var(--tx2)' }}>👁 Solo lectura — sin permiso para importar ni publicar.</div>}
+
+      <div className="tabs" style={{ maxWidth: 420 }}>
+        {[['buscar', 'Buscar'], ['staging', 'Staging'], ['publicado', 'Publicado']].map(([k, l]) =>
+          <div key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => { setTab(k); setPreviewPid(null); }}>{l}</div>)}
+      </div>
+
+      {tab === 'buscar' && (previewPid
+        ? <CatalogPreviewScreen pid={previewPid} toast={toast} ro={ro} onBack={() => setPreviewPid(null)} onImported={() => { setPreviewPid(null); setTab('staging'); }} />
+        : <CatalogSearchTab toast={toast} ro={ro} onOpenPreview={setPreviewPid} />)}
+      {tab === 'staging' && <CatalogStagingTab toast={toast} ro={ro} />}
+      {tab === 'publicado' && <CatalogPublishedTab />}
+    </>
+  );
+}
+
 /* ── NAV + APP ──────────────────────────────────────────────────────────────── */
 // CIERRE DEL PANEL: solo secciones REALES arriba; lo que aún no existe va en
 // "Próximamente" con pantalla honesta (sin fingir tablas ni datos).
@@ -3500,11 +3861,12 @@ const SECTIONS=[
   { key:'verifications', page:'verif',    group:'Plataforma', icon:'🪪', label:'Verificaciones', menuHidden:true },
   { key:'plans',         page:'plans',    group:'Plataforma', icon:'⭐', label:'Planes', menuHidden:true },
   { key:'editor',        page:'editor',   group:'Plataforma', icon:'◐', label:'Editor Visual' },
+  { key:'catalogpro',    page:'catalogpro', group:'Plataforma', icon:'🛒', label:'Catálogo Pro' },
   { key:'economy',       page:'eco',      group:'Control',    icon:'◇', label:'Economía' },
   { key:'system',        page:'sys',      group:'Control',    icon:'◉', label:'Sistema' },
 ];
 const PAGE_TO_PERM=Object.fromEntries(SECTIONS.map(s=>[s.page,s.key]));
-const TITLES={overview:'Resumen General',ops:'Órdenes',modq:'Moderación',delivery:'Delivery local',users:'Usuarios',verif:'Verificaciones',plans:'Planes',editor:'Editor Visual de Plataforma',eco:'Economía',sys:'Sistema',team:'Equipo y permisos'};
+const TITLES={overview:'Resumen General',ops:'Órdenes',modq:'Moderación',delivery:'Delivery local',users:'Usuarios',verif:'Verificaciones',plans:'Planes',editor:'Editor Visual de Plataforma',catalogpro:'Catálogo Pro',eco:'Economía',sys:'Sistema',team:'Equipo y permisos'};
 // Catalogo para la pantalla de permisos del equipo (las 10 llaves).
 const PERM_CATALOG=SECTIONS.map(s=>({key:s.key,label:s.label,icon:s.icon}));
 
@@ -3658,6 +4020,7 @@ function OmniRoot({ onClose, theme = {}, zoom = 1, data = {} }){
                     <EditorVisual toast={add} cfg={data.cfg} onCfg={()=>add('👁 Solo lectura — no puedes publicar')} onHomeCfg={()=>add('👁 Solo lectura — no puedes publicar')} roHome={true}/>
                   </fieldset>
                 : <EditorVisual toast={add} cfg={data.cfg} onCfg={data.onPublishBlocks} onHomeCfg={data.onCfg} roHome={false}/>)}
+              {page==='catalogpro'&&<CatalogoPro toast={add} ro={curRO}/>}
               {page==='eco'&&<Economia toast={add} data={data} ro={curRO}/>}
               {page==='sys'&&<Sistema toast={add} data={data}/>}
               {page==='team'&&<TeamScreen toast={add} meId={data.meId} onViewProfile={data.onViewProfile}/>}

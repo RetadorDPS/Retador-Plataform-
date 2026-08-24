@@ -1928,3 +1928,94 @@ export const isBlocked = isBlockedPair;
 // Devuelve el cliente de Supabase (lo usa el chat para el realtime por canal).
 export const getSB = async () => supabase;
 export const convKey = (id1, id2) => [id1, id2].sort().join("_");
+
+// ── CATÁLOGO PRO (dropshipping interno vía CJdropshipping) ──────────────────
+// Las llamadas que hablan de verdad con CJ viven en Edge Functions (cj-search,
+// cj-quota-status, cj-import-preview, cj-import-product) porque hacen pedidos
+// HTTP externos que pueden tardar varios segundos (hasta ~30s con productos de
+// muchas variantes) — no algo que una función de Postgres pueda hacer bien.
+// supabase.functions.invoke(...) adjunta el JWT de la sesión solo, igual que
+// ya hace supabase.from()/.rpc() en el resto de este archivo. Las tablas
+// propias (staging, precios por variante, catálogo publicado) se leen/editan
+// directo por RLS, real y ya probada con cuentas de cada plan.
+
+// Países reales con almacén propio de CJ (confirmado con /globalWarehouseList).
+// Lista fija — el admin puede ampliarla más adelante si CJ suma almacenes.
+export const CJ_COUNTRIES = [
+  { code: "US", label: "Estados Unidos" },
+  { code: "CN", label: "China" },
+  { code: "MX", label: "México" },
+  { code: "CA", label: "Canadá" },
+  { code: "GB", label: "Reino Unido" },
+  { code: "DE", label: "Alemania" },
+  { code: "FR", label: "Francia" },
+  { code: "AU", label: "Australia" },
+  { code: "ES", label: "España" },
+  { code: "JP", label: "Japón" },
+];
+
+export const catalogProSearch = async (keyWord, page = 1, countryCode = "US") => {
+  const { data, error } = await supabase.functions.invoke("cj-search", { body: { keyWord, page, countryCode } });
+  if (error) { console.error("catalogProSearch:", error.message); throw error; }
+  if (data?.error) throw new Error(data.error);
+  return data;
+};
+
+export const catalogProQuotaStatus = async () => {
+  const { data, error } = await supabase.functions.invoke("cj-quota-status", { body: {} });
+  if (error) { console.error("catalogProQuotaStatus:", error.message); throw error; }
+  if (data?.error) throw new Error(data.error);
+  return data;
+};
+
+export const catalogProPreview = async (pid) => {
+  const { data, error } = await supabase.functions.invoke("cj-import-preview", { body: { pid } });
+  if (error) { console.error("catalogProPreview:", error.message); throw error; }
+  if (data?.error) throw new Error(data.error);
+  return data;
+};
+
+export const catalogProImport = async (pid, variantSkus) => {
+  const { data, error } = await supabase.functions.invoke("cj-import-product", { body: { pid, variant_skus: variantSkus } });
+  if (error) { console.error("catalogProImport:", error.message); throw error; }
+  if (data?.error) throw new Error(data.error);
+  return data;
+};
+
+// Staging: cada producto trae ya embebidas sus filas de costeo por variante
+// (catalog_pro_variant_pricing, ligadas por staging_id vía la relación real).
+export const catalogProListStaging = async () => {
+  const { data, error } = await supabase.from("catalog_pro_staging")
+    .select("*, pricing:catalog_pro_variant_pricing(*)")
+    .order("created_at", { ascending: false });
+  if (error) { console.error("catalogProListStaging:", error.message); return []; }
+  return data || [];
+};
+
+export const catalogProUpdateVariantPricing = async (id, patch) => {
+  const { data, error } = await supabase.from("catalog_pro_variant_pricing").update(patch).eq("id", id).select().single();
+  if (error) { console.error("catalogProUpdateVariantPricing:", error.message); throw error; }
+  return data;
+};
+
+export const catalogProUpdateStagingRegions = async (id, sellableRegions) => {
+  const { data, error } = await supabase.from("catalog_pro_staging").update({ sellable_regions: sellableRegions }).eq("id", id).select().single();
+  if (error) { console.error("catalogProUpdateStagingRegions:", error.message); throw error; }
+  return data;
+};
+
+// Copia el producto de staging → catalog_pro_products (+ sus filas de precio
+// por variante) en una sola operación atómica del lado del servidor.
+export const catalogProPublish = async (stagingId) => {
+  const { data, error } = await supabase.rpc("admin_publish_catalog_pro_product", { p_staging_id: stagingId });
+  if (error) { console.error("catalogProPublish:", error.message); throw error; }
+  return data;
+};
+
+export const catalogProListPublished = async () => {
+  const { data, error } = await supabase.from("catalog_pro_products")
+    .select("*, pricing:catalog_pro_variant_pricing(*)")
+    .order("published_at", { ascending: false });
+  if (error) { console.error("catalogProListPublished:", error.message); return []; }
+  return data || [];
+};

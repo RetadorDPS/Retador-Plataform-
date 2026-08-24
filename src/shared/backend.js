@@ -303,6 +303,75 @@ export const loadServices = async () => {
   if (error) { console.error("loadServices:", error.message); return []; }
   return (data || []).map(mapProduct);
 };
+// ── Paginación real por bloques (Tienda) ─────────────────────────────────────
+// loadProducts/loadServices de arriba se dejan TAL CUAL (las sigue usando
+// Búsqueda avanzada y el resto de filtros de la Tienda — Ofertas/Nuevo/Más
+// vendido/Favoritos — que operan sobre ese mismo listado ya cargado; tocarlas
+// hoy arriesgaba romper algo que ya funciona bien, sin necesidad real). Estas
+// funciones nuevas son SOLO para la grilla principal de la Tienda (vista por
+// defecto de Productos, y toda la de Servicios), pensadas para cuando el
+// catálogo de dropshipping tenga cientos o miles de filas: en vez de traer
+// todo de un jalón, traen un bloque chico por vez (ver useMarketFeed en
+// Marketplace.jsx, que llama a esto cada vez que el usuario se acerca al
+// final del scroll).
+export const PAGE_SIZE = 24;
+const productPageQuery = () => supabase.from("products").select(FEED_SELECT).eq("status", "active").eq("moderation_status", "approved").or("kind.eq.product,kind.is.null").or("stock.is.null,stock.gt.0").order("created_at", { ascending: false });
+const servicePageQuery = () => supabase.from("products").select(FEED_SELECT).eq("status", "active").eq("moderation_status", "approved").eq("kind", "service").order("created_at", { ascending: false });
+// Un bloque de PRODUCTOS, respetando "mi región primero, el resto del país
+// después" (la misma regla de siempre, ver App.jsx marketVisible) SIN
+// reordenar nunca lo que ya se mostró: avanza con DOS cursores independientes
+// — uno para "mi provincia" (mineOffset) y otro para "el resto" (restOffset).
+// Se agota primero el de mi provincia; en cuanto un bloque trae menos de lo
+// pedido de mi provincia, el resto del bloque (y todos los siguientes) se
+// completa con el resto del país — así la Tienda nunca se queda vacía aunque
+// mi provincia tenga pocos productos. Sin región elegida (province=null), es
+// un único orden simple por fecha, sin ningún cursor especial.
+export const loadProductsPage = async ({ province = null, mineOffset = 0, restOffset = 0, mineDone: alreadyDone = false, limit = PAGE_SIZE }) => {
+  if (!province) {
+    const { data, error } = await productPageQuery().range(restOffset, restOffset + limit - 1);
+    if (error) { console.error("loadProductsPage:", error.message); return { items: [], mineOffset, restOffset, mineDone: true, hasMore: false }; }
+    const items = (data || []).map(mapProduct);
+    return { items, mineOffset, restOffset: restOffset + items.length, mineDone: true, hasMore: items.length === limit };
+  }
+  // Mi provincia ya se agotó en un bloque anterior: se salta esa subconsulta
+  // (que de todas formas volvería vacía) y se va directo al resto del país.
+  if (alreadyDone) {
+    const { data, error } = await productPageQuery().or(`province.neq.${province},province.is.null`).range(restOffset, restOffset + limit - 1);
+    if (error) { console.error("loadProductsPage (resto del país):", error.message); return { items: [], mineOffset, restOffset, mineDone: true, hasMore: false }; }
+    const items = (data || []).map(mapProduct);
+    return { items, mineOffset, restOffset: restOffset + items.length, mineDone: true, hasMore: items.length === limit };
+  }
+  let items = [];
+  let newMineOffset = mineOffset;
+  let newRestOffset = restOffset;
+  let mineDone = false;
+  const { data: mineData, error: mineErr } = await productPageQuery().eq("province", province).range(mineOffset, mineOffset + limit - 1);
+  if (mineErr) { console.error("loadProductsPage (mi región):", mineErr.message); return { items: [], mineOffset, restOffset, mineDone: true, hasMore: false }; }
+  const mine = (mineData || []).map(mapProduct);
+  items = items.concat(mine);
+  newMineOffset = mineOffset + mine.length;
+  mineDone = mine.length < limit; // trajo menos de lo pedido → ya no queda más de mi provincia
+  if (items.length < limit) {
+    const need = limit - items.length;
+    const { data: restData, error: restErr } = await productPageQuery().or(`province.neq.${province},province.is.null`).range(restOffset, restOffset + need - 1);
+    if (restErr) { console.error("loadProductsPage (resto del país):", restErr.message); }
+    else {
+      const rest = (restData || []).map(mapProduct);
+      items = items.concat(rest);
+      newRestOffset = restOffset + rest.length;
+    }
+  }
+  return { items, mineOffset: newMineOffset, restOffset: newRestOffset, mineDone, hasMore: items.length === limit };
+};
+// Un bloque de SERVICIOS: no tiene prioridad por región (los servicios nunca
+// la tuvieron, ver marketVisible — solo aplica a productos), así que es
+// paginación simple por fecha con un solo cursor.
+export const loadServicesPage = async ({ offset = 0, limit = PAGE_SIZE }) => {
+  const { data, error } = await servicePageQuery().range(offset, offset + limit - 1);
+  if (error) { console.error("loadServicesPage:", error.message); return { items: [], offset, hasMore: false }; }
+  const items = (data || []).map(mapProduct);
+  return { items, offset: offset + items.length, hasMore: items.length === limit };
+};
 export const getFeed = async (ctx) => loadProducts();
 export const saveProduct = async (data, userId) => ({ ...data, id: Date.now(), seller_id: userId, seller_name: MOCK_USER.name });
 // Elimina de verdad contra el backend (soft-delete: status='deleted'). El RLS

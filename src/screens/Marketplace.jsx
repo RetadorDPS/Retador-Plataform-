@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -1245,11 +1245,6 @@ export function MarketHome({ loading, products, filter, setFilter, myProvince = 
   useEffect(() => {
     if (feedRef.current && scrollKeeper && scrollKeeper.current > 0) feedRef.current.scrollTop = scrollKeeper.current;
   }, []);
-  // Pull-to-refresh REAL: sin él, deslizar hacia abajo en el tope disparaba el
-  // pull-to-refresh NATIVO del navegador (recarga completa de la página, con
-  // pérdida total del scroll). Este solo vuelve a pedir los productos.
-  const ptr = usePullToRefresh(feedRef, onRefresh, { disabled: !onRefresh });
-
   // Pista nueva del dueño sobre la "rayita" al minimizar: aparece justo en el
   // borde de ESTA franja (el header con blur, junto al logo y los botones
   // +/notificaciones/mensajes). Causa real más probable: este header tenía
@@ -1276,30 +1271,124 @@ export function MarketHome({ loading, products, filter, setFilter, myProvince = 
     return () => clearTimeout(t);
   }, [hidden]);
 
-  // Conteo real desde el primer instante (segundo intento — el primero se
-  // revirtió por una pantalla en blanco reportada en producción). Investigué
-  // a fondo esa vez: reconstruí el commit revertido tal cual y lo probé en un
-  // navegador real (Chromium con Playwright, sesión simulada) — cargó y
-  // funcionó sin ningún error. No encontré ningún defecto real en aquel
-  // código. La explicación más plausible es ajena al código en sí: tras un
-  // despliegue, GitHub Pages reemplaza TODOS los archivos de golpe, así que
-  // si el navegador de alguien ya tenía cargado el índice viejo justo en ese
-  // instante, un pedazo de JS con nombre-hash viejo podía dejar de existir en
-  // el servidor — pantalla en blanco sin relación con esta línea de código en
-  // particular. Ya se agregó una recuperación real para eso (ver
-  // "vite:preloadError" en main.jsx: recarga una vez sola, nunca en bucle).
-  // Con esa causa real cubierta, se reintroduce el conteo con el mismo
-  // criterio de antes: mientras el listado real todavía carga, en la vista
-  // sin filtro/búsqueda/categoría, se usa el conteo liviano de
-  // get_platform_stats en vez de mostrar "0". Servicios no tiene un conteo
-  // público liviano equivalente — se queda con services.length tal cual.
   const isDefaultView = filter === "TODOS" && !search && !activeCat;
+
+  // ── Paginación real por bloques (Productos vista por defecto y Servicios) ──
+  // Antes loadProducts/loadServices traían TODO de un jalón (con un tope de
+  // seguridad de 100 filas) — pensado para un catálogo chico. Antes de sumar
+  // un catálogo grande de dropshipping (cientos o miles de productos), la
+  // Tienda necesita cargar por bloques. Se deja `products`/`services` (los
+  // props de arriba, ya filtrados/ordenados por marketVisible en App.jsx)
+  // TAL CUAL para Ofertas/Nuevo/Destacado/Más vendido/Favoritos/búsqueda —
+  // esos filtros siguen funcionando exactamente igual que hoy, sin tocarlos.
+  // Solo la vista por defecto de Productos (sin filtro/búsqueda/categoría) y
+  // toda la de Servicios —las dos que de verdad van a crecer con el catálogo
+  // grande— pasan a pedirse aquí, por bloques, directo al backend.
+  const [pFeed, setPFeed] = useState({ items: [], mineOffset: 0, restOffset: 0, mineDone: false, hasMore: true });
+  const [pFeedLoading, setPFeedLoading] = useState(true);
+  const [pFeedLoadingMore, setPFeedLoadingMore] = useState(false);
+  const pFeedRef = useRef(pFeed);
+  useEffect(() => { pFeedRef.current = pFeed; }, [pFeed]);
+  const pLoadingMoreRef = useRef(false);
+
+  const [sFeed, setSFeed] = useState({ items: [], offset: 0, hasMore: true });
+  const [sFeedLoading, setSFeedLoading] = useState(true);
+  const [sFeedLoadingMore, setSFeedLoadingMore] = useState(false);
+  const sFeedRef = useRef(sFeed);
+  useEffect(() => { sFeedRef.current = sFeed; }, [sFeed]);
+  const sLoadingMoreRef = useRef(false);
+
+  // Primer bloque de Productos: al montar, y de nuevo si la región realmente
+  // cambia (para que "mi región primero" arranque bien calculado desde cero;
+  // MarketHome ya no se desmonta, así que esto no se repite en cada visita).
+  const fetchFirstProductPage = useCallback(async () => {
+    setPFeedLoading(true);
+    const page = await loadProductsPage({ province: myProvince, limit: PAGE_SIZE });
+    setPFeed({ items: page.items, mineOffset: page.mineOffset, restOffset: page.restOffset, mineDone: page.mineDone, hasMore: page.hasMore });
+    setPFeedLoading(false);
+  }, [myProvince]);
+  useEffect(() => { fetchFirstProductPage(); }, [fetchFirstProductPage]);
+
+  // Siguiente bloque de Productos — se agrega DETRÁS del anterior, nunca lo
+  // reordena (por eso no hay ningún salto visual al cargar más mientras se
+  // desplaza). Protegido contra pedidos duplicados con una referencia (no
+  // estado) para que un scroll rápido no dispare dos veces el mismo bloque.
+  const fetchMoreProducts = useCallback(async () => {
+    if (pLoadingMoreRef.current || pFeedLoading || !pFeedRef.current.hasMore) return;
+    pLoadingMoreRef.current = true;
+    setPFeedLoadingMore(true);
+    const cur = pFeedRef.current;
+    const page = await loadProductsPage({ province: myProvince, mineOffset: cur.mineOffset, restOffset: cur.restOffset, mineDone: cur.mineDone, limit: PAGE_SIZE });
+    setPFeed(prev => ({ items: [...prev.items, ...page.items], mineOffset: page.mineOffset, restOffset: page.restOffset, mineDone: page.mineDone, hasMore: page.hasMore }));
+    setPFeedLoadingMore(false);
+    pLoadingMoreRef.current = false;
+  }, [myProvince, pFeedLoading]);
+
+  // Servicios no tiene prioridad por región (nunca la tuvo, ver marketVisible
+  // en App.jsx — solo aplica a productos): paginación simple por fecha.
+  const fetchFirstServicePage = useCallback(async () => {
+    setSFeedLoading(true);
+    const page = await loadServicesPage({ limit: PAGE_SIZE });
+    setSFeed({ items: page.items, offset: page.offset, hasMore: page.hasMore });
+    setSFeedLoading(false);
+  }, []);
+  useEffect(() => { fetchFirstServicePage(); }, [fetchFirstServicePage]);
+
+  const fetchMoreServices = useCallback(async () => {
+    if (sLoadingMoreRef.current || sFeedLoading || !sFeedRef.current.hasMore) return;
+    sLoadingMoreRef.current = true;
+    setSFeedLoadingMore(true);
+    const cur = sFeedRef.current;
+    const page = await loadServicesPage({ offset: cur.offset, limit: PAGE_SIZE });
+    setSFeed(prev => ({ items: [...prev.items, ...page.items], offset: page.offset, hasMore: page.hasMore }));
+    setSFeedLoadingMore(false);
+    sLoadingMoreRef.current = false;
+  }, [sFeedLoading]);
+
+  // Al soltar "tirar para refrescar": recarga lo de siempre (onRefresh, del
+  // padre) Y reinicia los dos bloques paginados desde cero, a la vez.
+  const doRefresh = useCallback(async () => {
+    await Promise.all([onRefresh?.(), fetchFirstProductPage(), fetchFirstServicePage()]);
+  }, [onRefresh, fetchFirstProductPage, fetchFirstServicePage]);
+  // Pull-to-refresh REAL: sin él, deslizar hacia abajo en el tope disparaba el
+  // pull-to-refresh NATIVO del navegador (recarga completa de la página, con
+  // pérdida total del scroll). Este vuelve a pedir productos/servicios de verdad.
+  const ptr = usePullToRefresh(feedRef, doRefresh, { disabled: !onRefresh });
+
+  // Lo que de verdad se muestra en la grilla: el bloque paginado en la vista
+  // por defecto de Productos y siempre en Servicios; en cualquier otro filtro/
+  // búsqueda/categoría de Productos, el listado de siempre (prop `products`,
+  // ya filtrado por marketVisible en App.jsx) — sin ningún cambio ahí.
+  const gridProducts = isDefaultView ? pFeed.items : products;
+  const gridLoading = isDefaultView ? pFeedLoading : loading;
+  const gridLoadingMore = isDefaultView ? pFeedLoadingMore : false;
+
+  // Conteo real desde el primer instante (ver historial: un intento anterior
+  // se revirtió por una pantalla en blanco reportada en producción; investigado
+  // a fondo, ver "vite:preloadError" en main.jsx). En la vista por defecto de
+  // Productos se usa siempre el conteo liviano real de get_platform_stats —
+  // ahora YA NO solo "mientras carga": con paginación real, products.length ya
+  // no es el total del catálogo (es solo lo que se ha traído hasta el scroll
+  // actual), así que el total de verdad tiene que salir de ahí, siempre.
+  // Con un filtro/búsqueda/categoría activos, sigue siendo la cuenta real de lo
+  // que ese filtro encontró (como siempre). Servicios no tiene un conteo
+  // público liviano equivalente — se queda con lo cargado hasta ahora.
   const visibleCount = catalogTab === "servicios"
-    ? services.length
-    : (loading && isDefaultView && platformStats?.products != null) ? platformStats.products : products.length;
+    ? sFeed.items.length
+    : isDefaultView
+      ? (platformStats?.products != null ? platformStats.products : pFeed.items.length)
+      : products.length;
 
   return (
-    <div ref={feedRef} {...ptr.handlers} onScroll={e => { if (scrollKeeper) scrollKeeper.current = e.currentTarget.scrollTop; }} style={{ flex: 1, overflowY: "auto", overscrollBehaviorY: "contain" }}>
+    <div ref={feedRef} {...ptr.handlers} onScroll={e => {
+      const el = e.currentTarget;
+      if (scrollKeeper) scrollKeeper.current = el.scrollTop;
+      // A ~700px del final (antes de que se vea el hueco) se pide el siguiente
+      // bloque — así ya está listo cuando el usuario realmente llega abajo.
+      if (el.scrollHeight - el.scrollTop - el.clientHeight > 700) return;
+      if (catalogTab === "productos") { if (isDefaultView) fetchMoreProducts(); }
+      else fetchMoreServices();
+    }} style={{ flex: 1, overflowY: "auto", overscrollBehaviorY: "contain" }}>
       <PullIndicator pull={ptr.pull} refreshing={ptr.refreshing} />
       {/* Tramo: lo que pusiste ANTES del Encabezado (arriba del todo) */}
       <LiveSlot page="inicio" from={null} to="in_h" onNav={onNav} pad="12px 16px 0" />
@@ -1413,37 +1502,45 @@ export function MarketHome({ loading, products, filter, setFilter, myProvince = 
           </div>
         </div>
         {catalogTab === "servicios" ? (
-          loading
+          sFeedLoading
             ? <div style={{ display: "flex", justifyContent: "center", padding: "40px 0" }}><Spin size={28} /></div>
-            : services.length === 0
+            : sFeed.items.length === 0
               ? <div style={{ textAlign: "center", padding: "40px 20px", color: T3 }}>
                   <div style={{ fontSize: 36, marginBottom: 10 }}>🛠️</div>
                   <p style={{ fontSize: 13, color: T2, fontWeight: 600 }}>Aún no hay servicios publicados</p>
                   <p style={{ fontSize: 11, marginTop: 4, marginBottom: 14 }}>¿Ofreces un servicio? Publícalo y aparecerá aquí.</p>
                   {onPublishService && <button className="p" onClick={onPublishService} style={{ background: `${G}18`, color: G, border: `1px solid ${G}40`, borderRadius: 999, padding: "9px 16px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>+ Ofrecer un servicio</button>}
                 </div>
-              : <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 2)}, 1fr)`, gap: 12 }}>
-                  {services.map(s => <ServiceCard key={s.id} s={s} onContact={onServiceContact} onOpen={onServiceOpen} />)}
-                </div>
+              : <>
+                  <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 2)}, 1fr)`, gap: 12 }}>
+                    {sFeed.items.map(s => <ServiceCard key={s.id} s={s} onContact={onServiceContact} onOpen={onServiceOpen} />)}
+                  </div>
+                  {/* Bloque siguiente cargando (scroll infinito) — nunca pantalla en blanco. */}
+                  {sFeedLoadingMore && <div style={{ display: "flex", justifyContent: "center", padding: "18px 0" }}><Spin size={20} /></div>}
+                </>
         ) : (
-          loading
+          gridLoading
             ? <div style={{ display: "flex", justifyContent: "center", padding: "40px 0" }}><Spin size={28} /></div>
-            : products.length === 0
+            : gridProducts.length === 0
               ? <div style={{ textAlign: "center", padding: "40px 0", color: "#232323" }}>
                   <div style={{ fontSize: 36, marginBottom: 10 }}>{filter === "FAVORITOS" ? "❤️" : "🔍"}</div>
                   <p style={{ fontSize: 12 }}>{filter === "FAVORITOS" ? "Aún no tienes favoritos" : "No se encontraron productos"}</p>
                 </div>
-              : view === "muro"
-                ? <div style={{ columnCount: densityCols(dMode, isDesktop, isTablet), columnGap: dt.grid.gap }}>
-                    {feedRows(products, feedAds).map(it => it.t === "p"
-                      ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
-                      : <div key={it.key} style={{ breakInside: "avoid", columnSpan: "all", margin: "6px 0" }}><BlockView m={it.m} onNav={onNav} /></div>)}
-                  </div>
-                : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
-                    {feedRows(products, feedAds).map(it => it.t === "p"
-                      ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
-                      : <div key={it.key} style={{ gridColumn: "1 / -1" }}><BlockView m={it.m} onNav={onNav} /></div>)}
-                  </div>
+              : <>
+                  {view === "muro"
+                    ? <div style={{ columnCount: densityCols(dMode, isDesktop, isTablet), columnGap: dt.grid.gap }}>
+                        {feedRows(gridProducts, feedAds).map(it => it.t === "p"
+                          ? <PCard key={it.p.id} p={it.p} view="muro" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
+                          : <div key={it.key} style={{ breakInside: "avoid", columnSpan: "all", margin: "6px 0" }}><BlockView m={it.m} onNav={onNav} /></div>)}
+                      </div>
+                    : <div className="dx" style={{ display: "grid", gridTemplateColumns: `repeat(${densityCols(dMode, isDesktop, isTablet)}, 1fr)`, gap: dt.grid.gap }}>
+                        {feedRows(gridProducts, feedAds).map(it => it.t === "p"
+                          ? <PCard key={it.p.id} p={it.p} view="grid" onClick={() => onProduct(it.p)} isFav={favorites.has(it.p.id)} onFav={onFav} />
+                          : <div key={it.key} style={{ gridColumn: "1 / -1" }}><BlockView m={it.m} onNav={onNav} /></div>)}
+                      </div>}
+                  {/* Bloque siguiente cargando (scroll infinito, solo vista por defecto) — nunca pantalla en blanco. */}
+                  {gridLoadingMore && <div style={{ display: "flex", justifyContent: "center", padding: "18px 0" }}><Spin size={20} /></div>}
+                </>
         )}
       </div>
 

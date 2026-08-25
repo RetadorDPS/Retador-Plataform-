@@ -23,9 +23,9 @@ import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import {
   ShoppingCart, TrendingUp, Package, BarChart2, Settings as SettingsIcon, Palette, Tag, CreditCard,
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
-  Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy,
+  Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy, ShoppingBag,
 } from "lucide-react";
-import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink } from "../shared/index.js";
+import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProSellerAdd } from "../shared/index.js";
 // recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
 // se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
 // nunca de entrada para todos (la mayoría son compradores que ni la ven).
@@ -1370,6 +1370,115 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
   );
 }
 
+/* ── CATÁLOGO PRO (vendedor) — arranque de Fase 3 ─────────────────────────
+   El vendedor ve SOLO "tu costo" (recommended_price = lo que RETADOR le
+   cobra), NUNCA el costo real de CJ, el costo de envío ni el margen de
+   RETADOR (esas columnas ni siquiera son legibles por su plan — quedaron
+   cerradas por RLS a solo admin). Él define su propio precio de venta y ve
+   su ganancia en vivo antes de confirmar. */
+const SUGGESTED_MARGIN = 1.4; // +40% sobre "tu costo", solo una sugerencia editable
+
+function CatalogoProSeller({ C, ac, onAdded }) {
+  const [rows, setRows] = useState(undefined); // undefined=cargando · null=error
+  const [adding, setAdding] = useState(null);
+  const load = () => { catalogProSellerCatalog().then(setRows).catch(() => setRows(null)); };
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div>
+      <SHdr title="Catálogo" sub="Productos ya importados y revisados por RETADOR — listos para vender" ac={ac} C={C}/>
+      {rows === undefined && <div style={{ padding:40, textAlign:"center", color:C.m, fontSize:13 }}>Cargando…</div>}
+      {rows === null && <div style={{ padding:40, textAlign:"center", color:C.err, fontSize:13 }}>No se pudo cargar el catálogo.</div>}
+      {rows && rows.length === 0 && <div style={{ padding:40, textAlign:"center", color:C.m, fontSize:13 }}>Todavía no hay productos publicados en el catálogo.</div>}
+      {rows && rows.length > 0 && (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+          {rows.map(p => {
+            const cost = Number(p.recommended_price) || 0;
+            const suggested = Math.round(cost * SUGGESTED_MARGIN * 100) / 100;
+            const profit = Math.round((suggested - cost) * 100) / 100;
+            return (
+              <div key={p.id} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden" }}>
+                <div style={{ height:110, background:`linear-gradient(140deg,${C.s3},${C.d})`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
+                  {p.images?.[0]
+                    ? <img src={p.images[0]} loading="lazy" decoding="async" referrerPolicy="no-referrer" style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e => { e.target.style.display = "none"; }}/>
+                    : <span style={{ fontSize:36, opacity:.5 }}>📦</span>}
+                </div>
+                <div style={{ padding:11 }}>
+                  <div style={{ fontSize:12, fontWeight:600, color:C.t, marginBottom:9, lineHeight:1.35, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{p.title}</div>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                    <span style={{ fontSize:10, color:C.m }}>Tu costo</span>
+                    <span style={{ fontSize:12, fontWeight:700, color:C.t }}>{money(cost, "USD")}</span>
+                  </div>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:10 }}>
+                    <span style={{ fontSize:10, color:C.m }}>Venta sugerida</span>
+                    <span style={{ fontSize:12, fontWeight:700, color:C.ok }}>{money(suggested, "USD")} <span style={{ color:C.m, fontWeight:500 }}>(+{money(profit, "USD")})</span></span>
+                  </div>
+                  <button onClick={() => setAdding(p)} style={{ width:"100%", padding:8, borderRadius:8, border:"none", background:ac, color:"#000", fontSize:11.5, fontWeight:800, cursor:"pointer" }}>Añadir a mi tienda</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {adding && (
+        <AddCatalogModal product={adding} C={C} ac={ac} onClose={() => setAdding(null)}
+          onAdded={() => { setAdding(null); load(); onAdded?.(); }}/>
+      )}
+    </div>
+  );
+}
+
+// Mini-calculador: "tu costo" fijo (no editable) → precio de venta editable
+// (precargado con el sugerido) → ganancia en vivo. Nunca deja vender por
+// debajo del costo — el backend lo vuelve a validar de todos modos.
+function AddCatalogModal({ product, C, ac, onClose, onAdded }) {
+  const cost = Number(product.recommended_price) || 0;
+  const suggested = Math.round(cost * SUGGESTED_MARGIN * 100) / 100;
+  const [price, setPrice] = useState(String(suggested));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const priceNum = Number(price) || 0;
+  const profit = Math.round((priceNum - cost) * 100) / 100;
+
+  const confirm = async () => {
+    if (!priceNum || priceNum < cost) { setErr(`Tu precio de venta no puede ser menor a tu costo (${money(cost, "USD")})`); return; }
+    setBusy(true); setErr("");
+    try { await catalogProSellerAdd(product.id, priceNum); onAdded(); }
+    catch (e) { setErr(e?.message || "No se pudo agregar a tu tienda"); }
+    setBusy(false);
+  };
+
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000, padding:20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background:C.s1, border:`1px solid ${C.b}`, borderRadius:16, padding:20, maxWidth:360, width:"100%" }}>
+        <div style={{ fontSize:14, fontWeight:800, color:C.t, marginBottom:4 }}>Añadir a mi tienda</div>
+        <div style={{ fontSize:11.5, color:C.m, marginBottom:16, lineHeight:1.4 }}>{product.title}</div>
+
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:C.s3, marginBottom:10 }}>
+          <span style={{ fontSize:12, color:C.m }}>Tu costo</span>
+          <span style={{ fontSize:15, fontWeight:800, color:C.t }}>{money(cost, "USD")}</span>
+        </div>
+
+        <div style={{ marginBottom:10 }}>
+          <div style={{ fontSize:10.5, fontWeight:700, color:C.m, textTransform:"uppercase", letterSpacing:.4, marginBottom:6 }}>Tu precio de venta</div>
+          <input type="number" step="0.01" min={cost} value={price} onChange={e => { setPrice(e.target.value); setErr(""); }} style={inpStyle(C)}/>
+        </div>
+
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:`${C.ok}18`, marginBottom:err ? 10 : 16 }}>
+          <span style={{ fontSize:12, color:C.ok, fontWeight:700 }}>Tu ganancia</span>
+          <span style={{ fontSize:15, fontWeight:800, color:C.ok }}>{money(Math.max(0, profit), "USD")}</span>
+        </div>
+        {err && <div style={{ fontSize:11.5, color:C.err, marginBottom:14 }}>{err}</div>}
+
+        <div style={{ display:"flex", gap:9 }}>
+          <button onClick={onClose} disabled={busy} style={{ flex:1, padding:10, borderRadius:9, border:`1px solid ${C.b}`, background:"transparent", color:C.m, fontSize:12, fontWeight:700, cursor:"pointer" }}>Cancelar</button>
+          <button onClick={confirm} disabled={busy || priceNum <= 0} style={{ flex:1, padding:10, borderRadius:9, border:"none", background:ac, color:"#000", fontSize:12, fontWeight:800, cursor:"pointer", opacity:(busy || priceNum <= 0) ? .6 : 1 }}>{busy ? "Agregando…" : "Confirmar"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── DASHBOARD (panel de gestión Pro — las 9 secciones) ─────────────────── */
 export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api, onStore, onMenu, onBack, flash, profileRealName }) {
   const C = useSTk();
@@ -1388,6 +1497,7 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
     { id:"overview", label:"Resumen", icon:LayoutDashboard },
     { id:"orders", label:"Pedidos", icon:ShoppingCart },
     { id:"products", label:"Productos", icon:Package },
+    { id:"catalog", label:"Catálogo", icon:ShoppingBag },
     { id:"analytics", label:"Estadísticas", icon:BarChart2 },
     { id:"customers", label:"Clientes", icon:Users },
     { id:"design", label:"Diseño", icon:Palette },
@@ -1407,6 +1517,7 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
       onNewProduct={api.onNewProduct} onEditProduct={api.onEditProduct}
       onArchiveProduct={api.onArchiveProduct} onUnarchiveProduct={api.onUnarchiveProduct}
       onDeleteProduct={api.onDeleteProduct} onToggleFeatured={api.onToggleFeatured} maxProducts={myPlan?.max_products}/>;
+    if (sec === "catalog")    return <CatalogoProSeller C={C} ac={ac} onAdded={api.onCatalogAdded}/>;
     if (sec === "analytics")  return <Analytics products={products} orders={orders} C={C} ac={ac}/>;
     if (sec === "customers")  return <Clientes orders={orders} C={C} ac={ac}/>;
     if (sec === "design")     return <Diseno cfg={cfg} products={products} onUpdateConfig={api.onUpdateConfig} C={C} ac={ac} flash={notify} profileRealName={profileRealName}/>;

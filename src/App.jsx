@@ -1155,6 +1155,7 @@ function AppShell({ sessionUser, platformStats = null }) {
     onToggleFeatured: (p) => updateProduct(p.id, { storeFeatured: !p.storeFeatured }),
     onUpdateConfig: async (draft) => { const saved = await upsertMyStoreConfig(draft); setStoreCfg(saved); },
     onPlanRequested: () => reloadOwn(),
+    onCatalogAdded: () => reloadOwn(),
   };
   // Perfiles de OTROS vendedores: si su plan real tiene can_customize, se les
   // muestra su Tienda en vez del perfil simple — mismo gate que para mí mismo.

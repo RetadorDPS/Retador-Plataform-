@@ -2029,3 +2029,40 @@ export const catalogProListPublished = async () => {
   if (error) { console.error("catalogProListPublished:", error.message); return []; }
   return data || [];
 };
+
+// Borra un producto de Staging (y en cascada sus filas de costeo por
+// variante — on delete cascade real, confirmado contra el esquema).
+export const catalogProDeleteStaging = async (id) => {
+  const { error } = await supabase.from("catalog_pro_staging").delete().eq("id", id);
+  if (error) { console.error("catalogProDeleteStaging:", error.message); throw error; }
+};
+
+// "Despublicar": nunca un borrado real — un vendedor pudo haber agregado ya
+// este producto a su tienda (source_catalog_id), borrarlo de verdad
+// rompería esa trazabilidad. Se archiva: desaparece del catálogo del
+// vendedor (que solo lista status='activo') sin tocar lo ya agregado.
+export const catalogProArchivePublished = async (id) => {
+  const { error } = await supabase.from("catalog_pro_products").update({ status: "archived" }).eq("id", id);
+  if (error) { console.error("catalogProArchivePublished:", error.message); throw error; }
+};
+
+// ── Catálogo Pro visto por el VENDEDOR (Pro/Premium) — SOLO columnas
+// seguras: nunca costo real de CJ, costo de envío ni margen de RETADOR.
+// recommended_price es "tu costo" (lo que RETADOR le cobra al vendedor).
+export const catalogProSellerCatalog = async () => {
+  const { data, error } = await supabase.from("catalog_pro_products")
+    .select("id, title, description, images, category, recommended_price, why_it_sells, published_at")
+    .eq("status", "activo")
+    .order("published_at", { ascending: false });
+  if (error) { console.error("catalogProSellerCatalog:", error.message); return []; }
+  return data || [];
+};
+
+// Crea la copia real en `products` con el precio de venta que el vendedor
+// eligió (nunca recommended_price directo) — el backend valida el plan y
+// que no venda por debajo de su costo.
+export const catalogProSellerAdd = async (catalogId, salePrice) => {
+  const { data, error } = await supabase.rpc("seller_add_catalog_pro_product", { p_catalog_id: catalogId, p_sale_price: salePrice });
+  if (error) { console.error("catalogProSellerAdd:", error.message); throw error; }
+  return data;
+};

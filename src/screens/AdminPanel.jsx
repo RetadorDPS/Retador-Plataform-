@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -3574,6 +3574,23 @@ function extractCjPidCandidates(raw) {
   return { candidatos: [...new Set(candidatos)], respaldo };
 }
 
+// Confirmación simple reutilizable (Eliminar Staging / Despublicar) — mismo
+// lenguaje visual que el modal de categorías, sin todo su estado extra.
+function SimpleConfirm({ title, msg, confirmLabel = 'Eliminar', color = 'var(--rd)', busy, onCancel, onConfirm }) {
+  return (
+    <div onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 900, padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg1)', border: '1px solid var(--bd2)', borderRadius: 14, padding: 20, maxWidth: 320, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)', marginBottom: 8 }}>{title}</div>
+        <div style={{ fontSize: 12, color: 'var(--tx2)', lineHeight: 1.5, marginBottom: 16 }}>{msg}</div>
+        <div style={{ display: 'flex', gap: 9 }}>
+          <button className="btn btg" style={{ flex: 1, justifyContent: 'center' }} disabled={busy} onClick={onCancel}>Cancelar</button>
+          <button className="btn" disabled={busy} style={{ flex: 1, justifyContent: 'center', background: color, color: '#fff', opacity: busy ? .5 : 1 }} onClick={onConfirm}>{busy ? <span className="spin">↻</span> : confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CatalogSearchTab({ toast, ro, onOpenPreview }) {
   const [keyWord, setKeyWord] = useState('');
   const [country, setCountry] = useState('US');
@@ -3646,11 +3663,13 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
               <div key={p.id} className="mc" style={{ cursor: 'pointer', padding: 0, overflow: 'hidden' }} onClick={() => onOpenPreview(p.id)}>
                 <CatalogImg src={p.bigImage} width="100%" height={120} radius={0} iconSize={32} />
                 <div style={{ padding: '10px 12px' }}>
-                  <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--tx2)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginBottom: 4 }}>{p.nameEn}</div>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--tx2)', lineHeight: 1.4, marginBottom: 5 }}>{p.nameEn}</div>
                   <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>${p.sellPrice}</div>
                   <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
-                    <span className="bdg bx">👁 {p.listedNum ?? 0} listados</span>
-                    {p.verifiedWarehouse ? <span className="bdg bg">✔ stock verificado</span> : null}
+                    <span className="bdg bx">👁 {p.listedNum ?? 0} vendedor(es)</span>
+                    {p.verifiedWarehouse
+                      ? <span className="bdg bg">✅ Stock verificado en {CJ_COUNTRIES.find(c => c.code === country)?.label || country}</span>
+                      : <span className="bdg bx">⏳ Stock sin verificar en {CJ_COUNTRIES.find(c => c.code === country)?.label || country}</span>}
                   </div>
                 </div>
               </div>
@@ -4041,13 +4060,34 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
 function CatalogStagingTab({ toast, ro }) {
   const [rows, setRows] = useState(undefined); // undefined=cargando · null=error
   const [openId, setOpenId] = useState(null);
+  const [toDelete, setToDelete] = useState(null); // producto a confirmar borrado
+  const [deleting, setDeleting] = useState(false);
   const load = useCallback(() => {
     catalogProListStaging().then(setRows).catch(e => { console.error('catalogProListStaging:', e); setRows(null); });
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // El atrás del sistema retrocede AL LISTADO (no cierra el panel completo) —
+  // ver el mismo patrón ya usado para overlays (visor de fotos, perfil).
+  useEffect(() => {
+    if (!openId) return;
+    return pushBackHandler(() => setOpenId(null));
+  }, [openId]);
+
   const pending = (rows || []).filter(r => r.status !== 'publicado');
   const open = pending.find(r => r.id === openId);
+
+  const doDelete = async () => {
+    if (!toDelete) return;
+    setDeleting(true);
+    try {
+      await catalogProDeleteStaging(toDelete.id);
+      toast(`✅ Eliminado: ${toDelete.title}`);
+      setToDelete(null);
+      load();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo eliminar')); }
+    setDeleting(false);
+  };
 
   if (open) return <CatalogStagingDetail product={open} toast={toast} ro={ro} onBack={() => setOpenId(null)} onPublished={load} />;
 
@@ -4067,9 +4107,14 @@ function CatalogStagingTab({ toast, ro }) {
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{p.title}</div>
                   <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>{(p.pricing || []).length} variante(s) · costo desde {money(p.cost_product)}</div>
                 </div>
+                {!ro && <button className="btn sm" style={{ background: 'transparent', color: 'var(--rd)', border: '1px solid var(--rd)' }} onClick={e => { e.stopPropagation(); setToDelete(p); }}>🗑</button>}
                 <span style={{ fontSize: 12, color: 'var(--tx3)' }}>Revisar →</span>
               </div>
             ))}
+      {toDelete && (
+        <SimpleConfirm title="¿Eliminar de Staging?" busy={deleting} onCancel={() => setToDelete(null)} onConfirm={doDelete}
+          msg={<>Vas a eliminar <b style={{ color: 'var(--tx)' }}>{toDelete.title}</b> y todo su costeo por variante. Esta acción no se puede deshacer.</>} />
+      )}
     </>
   );
 }
@@ -4159,15 +4204,35 @@ function CatalogPublishedDetail({ product, onBack }) {
   );
 }
 
-function CatalogPublishedTab() {
+function CatalogPublishedTab({ toast }) {
   const [rows, setRows] = useState(undefined); // undefined=cargando · null=error
   const [openId, setOpenId] = useState(null);
-  useEffect(() => {
+  const [toArchive, setToArchive] = useState(null);
+  const [archiving, setArchiving] = useState(false);
+  const load = useCallback(() => {
     catalogProListPublished().then(setRows).catch(e => { console.error('catalogProListPublished:', e); setRows(null); });
   }, []);
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!openId) return;
+    return pushBackHandler(() => setOpenId(null));
+  }, [openId]);
 
   const open = (rows || []).find(r => r.id === openId);
   if (open) return <CatalogPublishedDetail product={open} onBack={() => setOpenId(null)} />;
+
+  const doArchive = async () => {
+    if (!toArchive) return;
+    setArchiving(true);
+    try {
+      await catalogProArchivePublished(toArchive.id);
+      toast(`✅ Despublicado: ${toArchive.title}`);
+      setToArchive(null);
+      load();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo despublicar')); }
+    setArchiving(false);
+  };
 
   return (
     <>
@@ -4179,15 +4244,20 @@ function CatalogPublishedTab() {
           : rows.length === 0
             ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Todavía no hay nada publicado.</div>
             : rows.map(p => (
-              <div key={p.id} className="mc" style={{ cursor: 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }} onClick={() => setOpenId(p.id)}>
+              <div key={p.id} className="mc" style={{ cursor: 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12, opacity: p.status === 'archived' ? .55 : 1 }} onClick={() => setOpenId(p.id)}>
                 <CatalogImg src={p.images?.[0]} width={48} height={48} radius={8} iconSize={20} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{p.title}</div>
                   <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>{(p.pricing || []).length} variante(s) · desde {money(p.recommended_price)} · {(p.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
                 </div>
+                {p.status !== 'archived' && <button className="btn sm" style={{ background: 'transparent', color: 'var(--rd)', border: '1px solid var(--rd)' }} onClick={e => { e.stopPropagation(); setToArchive(p); }}>Despublicar</button>}
                 <span className="bdg bg">{p.status}</span>
               </div>
             ))}
+      {toArchive && (
+        <SimpleConfirm title="¿Despublicar producto?" confirmLabel="Despublicar" color="var(--rd)" busy={archiving} onCancel={() => setToArchive(null)} onConfirm={doArchive}
+          msg={<>Vas a despublicar <b style={{ color: 'var(--tx)' }}>{toArchive.title}</b> — desaparece del catálogo de vendedores Pro/Premium. No se borra (por si algún vendedor ya lo agregó a su tienda) y lo puedes reactivar desde Supabase si hace falta.</>} />
+      )}
     </>
   );
 }
@@ -4195,6 +4265,11 @@ function CatalogPublishedTab() {
 function CatalogoPro({ toast, ro }) {
   const [tab, setTab] = useState('buscar');
   const [previewPid, setPreviewPid] = useState(null);
+
+  useEffect(() => {
+    if (!previewPid) return;
+    return pushBackHandler(() => setPreviewPid(null));
+  }, [previewPid]);
 
   return (
     <>
@@ -4211,7 +4286,7 @@ function CatalogoPro({ toast, ro }) {
         ? <CatalogPreviewScreen pid={previewPid} toast={toast} ro={ro} onBack={() => setPreviewPid(null)} onImported={() => { setPreviewPid(null); setTab('staging'); }} />
         : <CatalogSearchTab toast={toast} ro={ro} onOpenPreview={setPreviewPid} />)}
       {tab === 'staging' && <CatalogStagingTab toast={toast} ro={ro} />}
-      {tab === 'publicado' && <CatalogPublishedTab />}
+      {tab === 'publicado' && <CatalogPublishedTab toast={toast} />}
     </>
   );
 }

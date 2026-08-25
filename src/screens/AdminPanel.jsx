@@ -3550,18 +3550,28 @@ function CatalogImg({ src, width = 48, height = width, radius = 8, iconSize, sty
   return <img src={src} alt="" referrerPolicy="no-referrer" style={{ ...box, objectFit: 'cover' }} onError={() => { console.error('CatalogImg: no cargó', src); setBroken(true); }} />;
 }
 
-// URL real de un producto de CJ: .../product/{slug}-p-{id}.html — el {id}
-// (un entero largo tipo snowflake, ej. 1446033730216005632) es el MISMO
-// identificador que ya usamos como pid en cj-import-preview (confirmado:
-// es el mismo valor que trae listV2 en su campo "id"). También se acepta
-// un ?pid=... suelto por si acaso pegan otro formato de enlace/parámetro.
-function extractCjPidFromUrl(raw) {
+// CJ usa MÁS de un formato real de enlace de producto — confirmados los dos:
+//   · Escritorio: .../product/{slug}-p-{id}.html  (id = snowflake largo,
+//     ej. 1446033730216005632 — el MISMO valor que usamos como pid)
+//   · Móvil:      m.cjdropshipping.com/product/details/{id}  (sin "-p-" en
+//     absoluto — este formato es el que rompía la extracción anterior)
+// "candidatos": el/los pid que el patrón -p-/details//?pid= identifica
+// directo (se usan sin verificar, son patrones ya confirmados reales).
+// "respaldo": cualquier otro número largo suelto en la URL — estos SÍ se
+// validan de verdad contra cj-import-preview antes de usarse, uno por uno,
+// para no mandar al admin a un preview con un pid inventado.
+function extractCjPidCandidates(raw) {
   const s = String(raw || '').trim();
-  if (!s) return null;
-  let m = s.match(/-p-(\d{6,20})(?:\.html)?/i);
-  if (m) return m[1];
-  m = s.match(/[?&]pid=([A-Za-z0-9-]{6,40})/i);
-  return m ? m[1] : null;
+  if (!s) return { candidatos: [], respaldo: [] };
+  const candidatos = [];
+  for (const m of s.matchAll(/-p-(\d{5,25})/gi)) candidatos.push(m[1]);
+  for (const m of s.matchAll(/\/product\/details\/(\d{5,25})/gi)) candidatos.push(m[1]);
+  for (const m of s.matchAll(/[?&]pid=([A-Za-z0-9-]{6,40})/gi)) candidatos.push(m[1]);
+  const yaEncontrados = new Set(candidatos);
+  const respaldo = [...new Set(s.match(/\d{9,25}/g) || [])]
+    .filter(n => !yaEncontrados.has(n))
+    .sort((a, b) => b.length - a.length);
+  return { candidatos: [...new Set(candidatos)], respaldo };
 }
 
 function CatalogSearchTab({ toast, ro, onOpenPreview }) {
@@ -3571,6 +3581,7 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
   const [results, setResults] = useState(null); // null = sin buscar todavía
   const [loading, setLoading] = useState(false);
   const [linkInput, setLinkInput] = useState('');
+  const [checkingLink, setCheckingLink] = useState(false);
 
   const doSearch = async (p = 1) => {
     if (!keyWord.trim()) { toast('Escribe algo para buscar'); return; }
@@ -3580,10 +3591,25 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
     setLoading(false);
   };
 
-  const doImportFromLink = () => {
-    const pid = extractCjPidFromUrl(linkInput);
-    if (!pid) { toast('⚠️ No se pudo identificar el producto en ese enlace'); return; }
-    onOpenPreview(pid);
+  const doImportFromLink = async () => {
+    const { candidatos, respaldo } = extractCjPidCandidates(linkInput);
+    if (candidatos.length > 0) { onOpenPreview(candidatos[0]); return; }
+    if (respaldo.length === 0) { toast('⚠️ No se pudo identificar el producto en ese enlace'); return; }
+    // Ningún patrón conocido (-p-, /product/details/, ?pid=) hizo match —
+    // como último recurso, probamos los números largos sueltos de la URL
+    // uno por uno contra cj-import-preview real, y usamos el primero que
+    // de verdad exista como producto. Nunca se manda un pid sin confirmar.
+    setCheckingLink(true);
+    let encontrado = null;
+    for (const candidato of respaldo.slice(0, 3)) {
+      try {
+        const data = await catalogProPreview(candidato);
+        if (data && !data.error && data.pid) { encontrado = candidato; break; }
+      } catch (_e) { /* seguir con el siguiente candidato */ }
+    }
+    setCheckingLink(false);
+    if (encontrado) onOpenPreview(encontrado);
+    else toast('⚠️ No se pudo identificar el producto en ese enlace');
   };
 
   return (
@@ -3605,8 +3631,8 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input className="inp" style={{ flex: '1 1 260px' }} value={linkInput} disabled={ro} onChange={e => setLinkInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') doImportFromLink(); }} placeholder="Pegar enlace de producto CJ (cjdropshipping.com/product/...)…" />
-          <button className="btn btg" disabled={ro || !linkInput.trim()} onClick={doImportFromLink}>🔗 Ver producto</button>
+            onKeyDown={e => { if (e.key === 'Enter') doImportFromLink(); }} placeholder="Pegar enlace de producto CJ (cjdropshipping.com/product/... o m.cjdropshipping.com/...)…" />
+          <button className="btn btg" disabled={ro || checkingLink || !linkInput.trim()} onClick={doImportFromLink}>{checkingLink ? <span className="spin">↻</span> : '🔗'} Ver producto</button>
         </div>
       </div>
 
@@ -3644,24 +3670,100 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
   );
 }
 
+// ── Selector de variantes agrupado (tipo tienda real) ────────────────────
+// CJ no manda un nombre de tipo por atributo (confirmado con productos
+// reales — ver comentario largo en cj-import-preview): lo único real que
+// llega es variantKey partido en piezas. El backend ya infiere las
+// etiquetas (color/talla/modelo/atributo_N) y las manda en `attributes`
+// por variante — acá solo se agrupan para armar los chips.
+const ATTR_LABEL_ES = { color: 'Color', talla: 'Talla', modelo: 'Modelo' };
+function attrLabelText(label) {
+  if (ATTR_LABEL_ES[label]) return ATTR_LABEL_ES[label];
+  const m = /^atributo_(\d+)$/.exec(label || '');
+  return m ? `Atributo ${m[1]}` : (label || '');
+}
+function groupVariantAttributes(variants) {
+  const labels = [];
+  const valuesByLabel = {};
+  for (const v of variants || []) {
+    for (const [label, value] of Object.entries(v.attributes || {})) {
+      if (!valuesByLabel[label]) { valuesByLabel[label] = []; labels.push(label); }
+      if (!valuesByLabel[label].includes(value)) valuesByLabel[label].push(value);
+    }
+  }
+  return { labels, valuesByLabel };
+}
+function resolveVariant(variants, selectedAttrs) {
+  const entries = Object.entries(selectedAttrs || {});
+  return (variants || []).find(v => entries.every(([label, value]) => (v.attributes || {})[label] === value)) || null;
+}
+// HTML de CJ → texto plano, de forma segura (DOMParser nunca ejecuta
+// scripts ni inserta nada en el documento real) — evita el riesgo de
+// pintar HTML de un tercero sin sanear.
+function htmlToPlainText(html) {
+  if (!html) return '';
+  try {
+    const doc = new DOMParser().parseFromString(String(html), 'text/html');
+    doc.querySelectorAll('script,style').forEach(el => el.remove());
+    return (doc.body?.textContent || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  } catch { return String(html).replace(/<[^>]*>/g, ' ').trim(); }
+}
+
+function VariantAttributeSelector({ variants, selectedAttrs, onChange, disabled }) {
+  const { labels, valuesByLabel } = useMemo(() => groupVariantAttributes(variants), [variants]);
+  if (labels.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {labels.map(label => (
+        <div key={label}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--tx3)', marginBottom: 7, textTransform: 'uppercase', letterSpacing: .5 }}>{attrLabelText(label)}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {valuesByLabel[label].map(value => {
+              const isOn = selectedAttrs[label] === value;
+              const candidate = { ...selectedAttrs, [label]: value };
+              const exists = variants.some(v => Object.entries(candidate).every(([l, val]) => (v.attributes || {})[l] === val));
+              return (
+                <button key={value} type="button" disabled={disabled || !exists} onClick={() => onChange(candidate)}
+                  style={{
+                    padding: '7px 13px', borderRadius: 9, fontSize: 12, fontWeight: 700,
+                    cursor: (disabled || !exists) ? 'not-allowed' : 'pointer',
+                    background: isOn ? 'var(--ac)' : 'var(--bg2)',
+                    color: isOn ? '#000' : (exists ? 'var(--tx)' : 'var(--tx3)'),
+                    border: `1px solid ${isOn ? 'var(--ac)' : 'var(--bd2)'}`,
+                    opacity: exists ? 1 : .4, textDecoration: exists ? 'none' : 'line-through',
+                  }}>{value}</button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
   const [data, setData] = useState(undefined); // undefined = cargando
-  const [selected, setSelected] = useState([]);
+  const [chosenSkus, setChosenSkus] = useState([]);
+  const [selectedAttrs, setSelectedAttrs] = useState({});
   const [importing, setImporting] = useState(false);
 
   useEffect(() => {
-    setData(undefined); setSelected([]);
-    catalogProPreview(pid).then(setData).catch(e => { toast('⚠️ ' + (e.message || 'No se pudo cargar el preview')); setData(null); });
+    setData(undefined); setChosenSkus([]); setSelectedAttrs({});
+    catalogProPreview(pid).then(d => {
+      setData(d);
+      if (d?.variants?.length) setSelectedAttrs(d.variants[0].attributes || {});
+    }).catch(e => { toast('⚠️ ' + (e.message || 'No se pudo cargar el preview')); setData(null); });
   }, [pid]);
 
-  const toggle = sku => setSelected(s => s.includes(sku) ? s.filter(x => x !== sku) : s.concat(sku));
+  const activeVariant = useMemo(() => (data ? resolveVariant(data.variants, selectedAttrs) : null), [data, selectedAttrs]);
+  const toggleChosen = sku => setChosenSkus(s => s.includes(sku) ? s.filter(x => x !== sku) : s.concat(sku));
 
   const doImport = async () => {
-    if (selected.length === 0) { toast('Elige al menos una variante'); return; }
+    if (chosenSkus.length === 0) { toast('Elige al menos una variante'); return; }
     setImporting(true);
     try {
-      await catalogProImport(pid, selected);
-      toast(`✅ Producto importado con ${selected.length} variante(s) — revísalo en Staging`);
+      await catalogProImport(pid, chosenSkus);
+      toast(`✅ Producto importado con ${chosenSkus.length} variante(s) — revísalo en Staging`);
       onImported();
     } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo importar')); }
     setImporting(false);
@@ -3675,42 +3777,53 @@ function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
       <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a resultados</button>
       <div className="card cp mb16">
         <div style={{ display: 'flex', gap: 12 }}>
-          <CatalogImg src={data.images?.[0]} width={64} height={64} radius={8} iconSize={26} />
+          <CatalogImg src={activeVariant?.image || data.images?.[0]} width={64} height={64} radius={8} iconSize={26} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{data.title}</div>
-            <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>{data.category} · rango CJ: ${data.sellPriceRange} · {data.listedNum ?? 0} listados</div>
+            <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>{data.category} · {data.variants.length} variantes reales · {data.listedNum ?? 0} listados</div>
           </div>
         </div>
       </div>
 
-      <div className="ssub">{data.variants.length} variantes reales — elige cuáles importar</div>
-      <div className="card">
-        <div className="tw">
-          <table>
-            <thead><tr><th></th><th></th><th>SKU / atributos</th><th>Precio CJ</th><th>Stock</th><th>Peso</th></tr></thead>
-            <tbody>
-              {data.variants.map(v => {
-                const on = selected.includes(v.sku);
-                return (
-                  <tr key={v.sku} onClick={() => !ro && toggle(v.sku)} style={{ cursor: ro ? 'default' : 'pointer', background: on ? 'var(--ag)' : undefined }}>
-                    <td><span style={{ width: 16, height: 16, borderRadius: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 900,
-                      background: on ? 'var(--ac)' : 'transparent', border: `1.5px solid ${on ? 'var(--ac)' : 'var(--bd2)'}`, color: '#fff' }}>{on ? '✓' : ''}</span></td>
-                    <td><CatalogImg src={v.image} width={32} height={32} radius={6} iconSize={14} /></td>
-                    <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{v.attrs}</td>
-                    <td>{money(v.price)}</td>
-                    <td>{v.stock == null ? <span style={{ color: 'var(--tx3)' }}>sin verificar</span> : v.stock}</td>
-                    <td>{v.weightGrams ? `${v.weightGrams} g` : '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+      <div className="card cp mb16">
+        <VariantAttributeSelector variants={data.variants} selectedAttrs={selectedAttrs} onChange={setSelectedAttrs} disabled={ro} />
+        {activeVariant && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--bd)' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--tx)' }}>{money(activeVariant.price)}</div>
+              <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>
+                {activeVariant.stock == null ? 'Stock sin verificar' : `${activeVariant.stock.toLocaleString('es-ES')} en stock`}
+                {activeVariant.weightGrams ? ` · ${activeVariant.weightGrams} g` : ''}
+              </div>
+            </div>
+            {!ro && (
+              <button className={`btn sm ${chosenSkus.includes(activeVariant.sku) ? 'bts' : 'btg'}`} onClick={() => toggleChosen(activeVariant.sku)}>
+                {chosenSkus.includes(activeVariant.sku) ? '✓ Incluida' : '+ Incluir'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {!ro && <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
-        <button className="btn btp" disabled={importing || selected.length === 0} onClick={doImport}>
-          {importing ? <span className="spin">↻</span> : '📥'} Importar {selected.length ? `${selected.length} seleccionada(s)` : 'seleccionadas'}
+      {chosenSkus.length > 0 && (
+        <div className="card cp mb16">
+          <div className="ct">Variantes elegidas para importar ({chosenSkus.length})</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {chosenSkus.map(sku => {
+              const v = data.variants.find(x => x.sku === sku);
+              return (
+                <span key={sku} className="bdg bb" style={{ cursor: 'pointer' }} onClick={() => toggleChosen(sku)} title="Quitar">
+                  {v ? Object.values(v.attributes || {}).join(' · ') || sku : sku} ✕
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {!ro && <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn btp" disabled={importing || chosenSkus.length === 0} onClick={doImport}>
+          {importing ? <span className="spin">↻</span> : '📥'} Importar {chosenSkus.length ? `${chosenSkus.length} seleccionada(s)` : 'seleccionadas'}
         </button>
       </div>}
     </>
@@ -3915,34 +4028,87 @@ function CatalogStagingTab({ toast, ro }) {
   );
 }
 
+// La pantalla que vería un comprador real si un vendedor Pro hubiera
+// agregado este producto a su tienda: galería completa, nombre, precio de
+// VENTA (nunca el costo), selector de variantes agrupado, descripción
+// completa. CERO datos de CJ, costos o márgenes visibles — a propósito.
+function StorePreviewScreen({ product }) {
+  const images = (product.images || []).filter(Boolean);
+  const [mainIdx, setMainIdx] = useState(0);
+  const pricing = product.pricing || [];
+  const [selectedAttrs, setSelectedAttrs] = useState(() => pricing[0]?.attributes || {});
+  const activeVariant = useMemo(() => resolveVariant(pricing, selectedAttrs), [pricing, selectedAttrs]);
+  const descriptionText = useMemo(() => htmlToPlainText(product.description), [product.description]);
+  const priceToShow = activeVariant?.recommended_price ?? product.recommended_price;
+  const mainImage = images[mainIdx] || activeVariant?.image;
+
+  return (
+    <div style={{ maxWidth: 420, margin: '0 auto' }}>
+      <CatalogImg src={mainImage} width="100%" height={320} radius={16} iconSize={54} />
+      {images.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 8, overflowX: 'auto', paddingBottom: 2 }}>
+          {images.map((url, i) => (
+            <img key={i} src={url} alt="" referrerPolicy="no-referrer" onClick={() => setMainIdx(i)}
+              style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
+                border: i === mainIdx ? `2px solid ${G}` : '2px solid transparent' }}
+              onError={e => { e.target.style.display = 'none'; }} />
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: 18 }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--tx)', lineHeight: 1.35 }}>{product.title}</div>
+        <div style={{ fontSize: 24, fontWeight: 900, color: G, margin: '8px 0 18px' }}>{money(priceToShow)}</div>
+        <VariantAttributeSelector variants={pricing} selectedAttrs={selectedAttrs} onChange={setSelectedAttrs} disabled={false} />
+        {descriptionText && (
+          <div style={{ marginTop: 22 }}>
+            <div className="ct" style={{ marginBottom: 8 }}>Descripción</div>
+            <div style={{ fontSize: 12.5, color: 'var(--tx2)', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{descriptionText}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Mismo detalle que Staging, en solo lectura — para revisar el costeo por
 // variante de un producto YA publicado, sin poder editarlo (eso solo se
-// hace antes de publicar, en Staging).
+// hace antes de publicar, en Staging). Trae una sub-pestaña "Vista de
+// tienda" con exactamente lo que vería un comprador (StorePreviewScreen).
 function CatalogPublishedDetail({ product, onBack }) {
+  const [view, setView] = useState('costeo');
   const rows = (product.pricing || []).map(p => ({ ...p, costBase: Number(p.cost_base_total ?? p.cost_product) || 0 }));
   return (
     <>
       <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a Publicado</button>
-      <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} />
-      <div className="ssub" style={{ marginTop: -4 }}>{rows.length} variante(s) · {(product.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
-      <div className="card">
-        <div className="tw">
-          <table>
-            <thead><tr><th>Variante</th><th>Costo real</th><th>Margen</th><th>Precio recomendado</th><th>Ganancia</th></tr></thead>
-            <tbody>
-              {rows.map(r => (
-                <tr key={r.id}>
-                  <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{r.variant_sku}</td>
-                  <td style={{ background: 'var(--bg2)', color: 'var(--tx2)', fontWeight: 700 }}>{money(r.costBase)}</td>
-                  <td>{r.margin_pct}% {Number(r.margin_fixed) ? `+ ${money(r.margin_fixed)}` : ''}</td>
-                  <td style={{ color: 'var(--gn)', fontWeight: 800 }}>{money(r.recommended_price)}</td>
-                  <td style={{ color: 'var(--gn)', fontWeight: 700 }}>{money(r.profit_estimate)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div className="tabs" style={{ maxWidth: 320 }}>
+        {[['costeo', 'Costeo (interno)'], ['tienda', 'Vista de tienda']].map(([k, l]) =>
+          <div key={k} className={`tab ${view === k ? 'on' : ''}`} onClick={() => setView(k)}>{l}</div>)}
       </div>
+
+      {view === 'tienda' ? <StorePreviewScreen product={product} /> : (
+        <>
+          <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} />
+          <div className="ssub" style={{ marginTop: -4 }}>{rows.length} variante(s) · {(product.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
+          <div className="card">
+            <div className="tw">
+              <table>
+                <thead><tr><th>Variante</th><th>Costo real</th><th>Margen</th><th>Precio recomendado</th><th>Ganancia</th></tr></thead>
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.id}>
+                      <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{Object.values(r.attributes || {}).join(' · ') || r.variant_sku}</td>
+                      <td style={{ background: 'var(--bg2)', color: 'var(--tx2)', fontWeight: 700 }}>{money(r.costBase)}</td>
+                      <td>{r.margin_pct}% {Number(r.margin_fixed) ? `+ ${money(r.margin_fixed)}` : ''}</td>
+                      <td style={{ color: 'var(--gn)', fontWeight: 800 }}>{money(r.recommended_price)}</td>
+                      <td style={{ color: 'var(--gn)', fontWeight: 700 }}>{money(r.profit_estimate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }

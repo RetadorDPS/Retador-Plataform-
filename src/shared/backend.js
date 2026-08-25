@@ -1998,6 +1998,16 @@ export const catalogProUpdateVariantPricing = async (id, patch) => {
   return data;
 };
 
+// Recalcula el flete real (freightCalculate) para una o varias variantes —
+// se usa automático al importar, y aquí queda disponible para reintentar a
+// mano si alguna quedó "no disponible" (CJ no pudo cotizarla la primera vez).
+export const catalogProCalculateShipping = async (pricingIds) => {
+  const { data, error } = await supabase.functions.invoke("cj-calculate-shipping", { body: { pricing_ids: pricingIds } });
+  if (error) { console.error("catalogProCalculateShipping:", error.message); throw error; }
+  if (data?.error) throw new Error(data.error);
+  return data;
+};
+
 export const catalogProUpdateStagingRegions = async (id, sellableRegions) => {
   const { data, error } = await supabase.from("catalog_pro_staging").update({ sellable_regions: sellableRegions }).eq("id", id).select().single();
   if (error) { console.error("catalogProUpdateStagingRegions:", error.message); throw error; }

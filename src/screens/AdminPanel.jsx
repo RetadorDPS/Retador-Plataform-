@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -3855,7 +3855,8 @@ function CatalogProductHero({ title, images, category, whyItSells, pricing }) {
   const profit = hero ? (Number(hero.profit_estimate) || 0) : 0;
   const marginX = hero && costBase > 0 ? price / costBase : 0;
   const categoryChip = String(category || '').split(/[>/]/).map(s => s.trim()).filter(Boolean).pop() || null;
-  const shippingKnown = hero && hero.cost_shipping_to_hub != null;
+  const shippingKnown = hero && hero.shipping_status === 'ok' && hero.cost_shipping_to_hub != null;
+  const shippingFailed = hero && hero.shipping_status === 'no_disponible';
   const whyLines = (whyItSells || '').split('\n').map(l => l.replace(/^[•\-\d.\s]+/, '').trim()).filter(Boolean);
 
   return (
@@ -3890,9 +3891,14 @@ function CatalogProductHero({ title, images, category, whyItSells, pricing }) {
             <div style={{ fontSize: 9.5, color: 'var(--tx3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Tu costo</div>
             <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{hero ? money(hero.cost_product) : '—'}</div>
           </div>
-          <div style={{ background: 'var(--bg2)', borderRadius: 10, padding: '10px 12px' }}>
-            <div style={{ fontSize: 9.5, color: 'var(--tx3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Costo de envío</div>
-            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{shippingKnown ? money(hero.cost_shipping_to_hub) : 'Por calcular'}</div>
+          <div style={{ background: shippingFailed ? 'var(--rdb, rgba(239,68,68,.1))' : 'var(--bg2)', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ fontSize: 9.5, color: shippingFailed ? 'var(--rd)' : 'var(--tx3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Costo de envío</div>
+            <div style={{ fontSize: shippingFailed ? 11.5 : 14, fontWeight: 800, color: shippingFailed ? 'var(--rd)' : 'var(--tx)' }}>
+              {shippingKnown ? money(hero.cost_shipping_to_hub) : shippingFailed ? '⚠️ No disponible' : 'Calculando…'}
+            </div>
+            {hero?.shipping_method && shippingKnown && (
+              <div style={{ fontSize: 9.5, color: 'var(--tx3)', marginTop: 2 }}>{hero.shipping_method} · {hero.shipping_aging} días</div>
+            )}
           </div>
           <div style={{ background: 'var(--gnb)', borderRadius: 10, padding: '10px 12px' }}>
             <div style={{ fontSize: 9.5, color: 'var(--gn)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Tu ganancia</div>
@@ -3909,6 +3915,7 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
   const [regions, setRegions] = useState(product.sellable_regions || []);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [recalcId, setRecalcId] = useState(null); // pricing_id en recálculo, o 'all'
 
   const rows = (product.pricing || []).map(p => {
     const draft = edits[p.id] || {};
@@ -3952,21 +3959,60 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
     setPublishing(false);
   };
 
+  const shippingPendingRows = rows.filter(r => r.shipping_status !== 'ok');
+  const shippingFailedRows = rows.filter(r => r.shipping_status === 'no_disponible');
+
+  const recalcFreight = async (pricingIds, key) => {
+    setRecalcId(key);
+    try {
+      await catalogProCalculateShipping(pricingIds);
+      toast('✅ Flete recalculado');
+      onPublished();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo calcular el flete')); }
+    setRecalcId(null);
+  };
+
   return (
     <>
       <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a Staging</button>
       <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} />
       <div className="ssub" style={{ marginTop: -4 }}>{rows.length} variante(s) · {product.listed_num ?? 0} listados en CJ</div>
 
+      {shippingPendingRows.length > 0 && (
+        <div className="card cp mb16" style={{ borderColor: shippingFailedRows.length ? 'var(--rd)' : 'var(--bd2)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 12, color: shippingFailedRows.length ? 'var(--rd)' : 'var(--tx2)' }}>
+              {shippingFailedRows.length > 0
+                ? `⚠️ Flete no disponible para ${shippingFailedRows.length} variante(s) — requiere revisión manual antes de publicar.`
+                : `⏳ Calculando flete para ${shippingPendingRows.length} variante(s)…`}
+            </div>
+            <button className="btn btg sm" disabled={recalcId === 'all'} onClick={() => recalcFreight(shippingPendingRows.map(r => r.id), 'all')}>
+              {recalcId === 'all' ? <span className="spin">↻</span> : '🔄'} Recalcular flete
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="tw">
           <table>
-            <thead><tr><th>Variante</th><th>Costo real</th><th>Margen %</th><th>Margen fijo</th><th>Precio recomendado</th><th>Ganancia</th></tr></thead>
+            <thead><tr><th>Variante</th><th>Costo real</th><th>Envío</th><th>Margen %</th><th>Margen fijo</th><th>Precio recomendado</th><th>Ganancia</th></tr></thead>
             <tbody>
               {rows.map(r => (
                 <tr key={r.id}>
                   <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{r.variant_sku}</td>
                   <td style={{ background: 'var(--bg2)', color: 'var(--tx2)', fontWeight: 700 }}>{money(r.costBase)}</td>
+                  <td>
+                    {r.shipping_status === 'ok'
+                      ? <span title={r.shipping_method ? `${r.shipping_method} · ${r.shipping_aging} días` : ''}>{money(r.cost_shipping_to_hub)}</span>
+                      : r.shipping_status === 'no_disponible'
+                        ? (
+                          <button className="btn bts sm" disabled={recalcId === r.id} onClick={() => recalcFreight([r.id], r.id)} title="Reintentar cálculo de flete">
+                            {recalcId === r.id ? <span className="spin">↻</span> : '⚠️ No disponible'}
+                          </button>
+                        )
+                        : <span style={{ color: 'var(--tx3)' }}>⏳ pendiente</span>}
+                  </td>
                   <td><input type="number" className="inp" style={{ width: 70 }} value={r.marginPct} disabled={ro} onChange={e => setDraft(r.id, { margin_pct: e.target.value })} /></td>
                   <td><input type="number" className="inp" style={{ width: 70 }} value={r.marginFixed} disabled={ro} onChange={e => setDraft(r.id, { margin_fixed: e.target.value })} /></td>
                   <td style={{ color: 'var(--gn)', fontWeight: 800 }}>{money(r.recommended)}</td>

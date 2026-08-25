@@ -3550,12 +3550,27 @@ function CatalogImg({ src, width = 48, height = width, radius = 8, iconSize, sty
   return <img src={src} alt="" referrerPolicy="no-referrer" style={{ ...box, objectFit: 'cover' }} onError={() => { console.error('CatalogImg: no cargó', src); setBroken(true); }} />;
 }
 
+// URL real de un producto de CJ: .../product/{slug}-p-{id}.html — el {id}
+// (un entero largo tipo snowflake, ej. 1446033730216005632) es el MISMO
+// identificador que ya usamos como pid en cj-import-preview (confirmado:
+// es el mismo valor que trae listV2 en su campo "id"). También se acepta
+// un ?pid=... suelto por si acaso pegan otro formato de enlace/parámetro.
+function extractCjPidFromUrl(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  let m = s.match(/-p-(\d{6,20})(?:\.html)?/i);
+  if (m) return m[1];
+  m = s.match(/[?&]pid=([A-Za-z0-9-]{6,40})/i);
+  return m ? m[1] : null;
+}
+
 function CatalogSearchTab({ toast, ro, onOpenPreview }) {
   const [keyWord, setKeyWord] = useState('');
   const [country, setCountry] = useState('US');
   const [page, setPage] = useState(1);
   const [results, setResults] = useState(null); // null = sin buscar todavía
   const [loading, setLoading] = useState(false);
+  const [linkInput, setLinkInput] = useState('');
 
   const doSearch = async (p = 1) => {
     if (!keyWord.trim()) { toast('Escribe algo para buscar'); return; }
@@ -3563,6 +3578,12 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
     try { setResults(await catalogProSearch(keyWord.trim(), p, country)); }
     catch (e) { console.error('catalogProSearch:', e); toast('⚠️ ' + (e.message || 'No se pudo buscar en CJ')); setResults(null); }
     setLoading(false);
+  };
+
+  const doImportFromLink = () => {
+    const pid = extractCjPidFromUrl(linkInput);
+    if (!pid) { toast('⚠️ No se pudo identificar el producto en ese enlace'); return; }
+    onOpenPreview(pid);
   };
 
   return (
@@ -3576,6 +3597,16 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
             {CJ_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.code} · {c.label}</option>)}
           </select>
           <button className="btn btp" disabled={ro || loading} onClick={() => doSearch(1)}>{loading ? <span className="spin">↻</span> : '🔎'} Buscar</button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0' }}>
+          <div style={{ flex: 1, height: 1, background: 'var(--bd)' }} />
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--tx3)' }}>O PEGAR ENLACE</span>
+          <div style={{ flex: 1, height: 1, background: 'var(--bd)' }} />
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input className="inp" style={{ flex: '1 1 260px' }} value={linkInput} disabled={ro} onChange={e => setLinkInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') doImportFromLink(); }} placeholder="Pegar enlace de producto CJ (cjdropshipping.com/product/...)…" />
+          <button className="btn btg" disabled={ro || !linkInput.trim()} onClick={doImportFromLink}>🔗 Ver producto</button>
         </div>
       </div>
 
@@ -3686,6 +3717,80 @@ function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
   );
 }
 
+// La variante "vitrina" del resumen de ganancia: la más barata entre las
+// elegidas (mismo criterio de "rango" usado en todo el módulo — CJ mismo
+// muestra sus precios como rango, ej. "2.34 -- 2.70"). Si hay más de una
+// variante, el resumen lo aclara.
+function pickHeroVariant(pricing) {
+  if (!Array.isArray(pricing) || pricing.length === 0) return null;
+  return pricing.reduce((best, r) => {
+    const cost = Number(r.cost_product) || 0;
+    const bestCost = best ? (Number(best.cost_product) || 0) : Infinity;
+    return cost < bestCost ? r : best;
+  }, null);
+}
+
+// Tarjeta de presentación estilo Zendrop: imagen grande, chips de ganancia
+// y margen, "por qué se vende" (si ya se generó), y el resumen de ganancia
+// en cuadrícula. Se usa igual en Staging (arriba de la tabla editable) y en
+// Publicado (arriba de la tabla de solo lectura) — mismos datos reales de
+// catalog_pro_variant_pricing, ningún número inventado.
+function CatalogProductHero({ title, images, category, whyItSells, pricing }) {
+  const hero = pickHeroVariant(pricing);
+  const costBase = hero ? (Number(hero.cost_base_total ?? hero.cost_product) || 0) : 0;
+  const price = hero ? (Number(hero.recommended_price) || 0) : 0;
+  const profit = hero ? (Number(hero.profit_estimate) || 0) : 0;
+  const marginX = hero && costBase > 0 ? price / costBase : 0;
+  const categoryChip = String(category || '').split(/[>/]/).map(s => s.trim()).filter(Boolean).pop() || null;
+  const shippingKnown = hero && hero.cost_shipping_to_hub != null;
+  const whyLines = (whyItSells || '').split('\n').map(l => l.replace(/^[•\-\d.\s]+/, '').trim()).filter(Boolean);
+
+  return (
+    <div className="card mb16" style={{ overflow: 'hidden' }}>
+      <CatalogImg src={images?.[0]} width="100%" height={200} radius={0} iconSize={44} />
+      <div style={{ padding: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--tx)', lineHeight: 1.35, marginBottom: 10 }}>{title}</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+          {hero && <span className="bdg bg">💰 {money(profit)} ganancia por venta</span>}
+          {hero && marginX > 0 && <span className="bdg bb">{marginX.toFixed(1)}x margen</span>}
+          {categoryChip && <span className="bdg bx">{categoryChip}</span>}
+        </div>
+
+        {whyLines.length > 0 && (
+          <div style={{ marginBottom: 14, padding: '10px 12px', background: 'var(--bg2)', borderRadius: 10, border: '1px solid var(--bd2)' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--tx3)', letterSpacing: .5, textTransform: 'uppercase', marginBottom: 6 }}>🤖 Por qué se vende</div>
+            {whyLines.map((line, i) => (
+              <div key={i} style={{ fontSize: 12, color: 'var(--tx2)', marginBottom: 3, paddingLeft: 14, position: 'relative' }}>
+                <span style={{ position: 'absolute', left: 0 }}>•</span>{line}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="ct" style={{ marginBottom: 8 }}>Resumen de ganancia{pricing?.length > 1 ? ' (variante más barata)' : ''}</div>
+        <div className="g4" style={{ gap: 8 }}>
+          <div style={{ background: 'var(--bg2)', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ fontSize: 9.5, color: 'var(--tx3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Precio de venta</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{hero ? money(price) : '—'}</div>
+          </div>
+          <div style={{ background: 'var(--bg2)', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ fontSize: 9.5, color: 'var(--tx3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Tu costo</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{hero ? money(hero.cost_product) : '—'}</div>
+          </div>
+          <div style={{ background: 'var(--bg2)', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ fontSize: 9.5, color: 'var(--tx3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Costo de envío</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{shippingKnown ? money(hero.cost_shipping_to_hub) : 'Por calcular'}</div>
+          </div>
+          <div style={{ background: 'var(--gnb)', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ fontSize: 9.5, color: 'var(--gn)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Tu ganancia</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--gn)' }}>{hero ? money(profit) : '—'}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
   const [edits, setEdits] = useState({}); // { [pricingId]: {margin_pct, margin_fixed} }
   const [regions, setRegions] = useState(product.sellable_regions || []);
@@ -3737,10 +3842,8 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
   return (
     <>
       <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a Staging</button>
-      <div className="card cp mb16">
-        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{product.title}</div>
-        <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>{product.category} · {rows.length} variante(s) · {product.listed_num ?? 0} listados en CJ</div>
-      </div>
+      <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} />
+      <div className="ssub" style={{ marginTop: -4 }}>{rows.length} variante(s) · {product.listed_num ?? 0} listados en CJ</div>
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="tw">
@@ -3820,15 +3923,8 @@ function CatalogPublishedDetail({ product, onBack }) {
   return (
     <>
       <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a Publicado</button>
-      <div className="card cp mb16">
-        <div style={{ display: 'flex', gap: 12 }}>
-          <CatalogImg src={product.images?.[0]} width={64} height={64} radius={8} iconSize={26} />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{product.title}</div>
-            <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>{product.category} · {rows.length} variante(s) · {(product.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
-          </div>
-        </div>
-      </div>
+      <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} />
+      <div className="ssub" style={{ marginTop: -4 }}>{rows.length} variante(s) · {(product.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
       <div className="card">
         <div className="tw">
           <table>

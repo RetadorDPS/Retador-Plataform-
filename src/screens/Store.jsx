@@ -25,7 +25,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy, ShoppingBag,
 } from "lucide-react";
-import { useAt, useR, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProSellerAdd } from "../shared/index.js";
+import { useAt, useR, useCatalog, usePlatformCfg, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants } from "../shared/index.js";
 // recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
 // se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
 // nunca de entrada para todos (la mayoría son compradores que ni la ven).
@@ -1370,17 +1370,96 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
   );
 }
 
-/* ── CATÁLOGO PRO (vendedor) — arranque de Fase 3 ─────────────────────────
-   El vendedor ve SOLO "tu costo" (recommended_price = lo que RETADOR le
-   cobra), NUNCA el costo real de CJ, el costo de envío ni el margen de
-   RETADOR (esas columnas ni siquiera son legibles por su plan — quedaron
-   cerradas por RLS a solo admin). Él define su propio precio de venta y ve
-   su ganancia en vivo antes de confirmar. */
+/* ── CATÁLOGO PRO (vendedor) — Mejora B: flujo real de 3 pasos ────────────
+   1) Tarjeta del catálogo (esta lista) — tocarla YA NO agrega directo.
+   2) "Vista a fondo" (CatalogDetailSheet) — galería completa, nombre ya
+      traducido, descripción ya limpia de HTML/CJ, selector de variantes
+      agrupado con "tu costo" por variante, y la calculadora de ganancia.
+      Nunca muestra costo real de CJ, flete real ni margen de RETADOR — solo
+      "tu costo" (recommended_price, lo que RETADOR le cobra al vendedor).
+   3) Al pulsar "Añadir a mi tienda" ahí dentro, se abre el MISMO editor real
+      de productos (EditProductModal, modo "create") precargado con todo —
+      nada se guarda en la tienda hasta que el vendedor pulse "Publicar" en
+      ese editor. */
 const SUGGESTED_MARGIN = 1.4; // +40% sobre "tu costo", solo una sugerencia editable
 
-function CatalogoProSeller({ C, ac, onAdded }) {
+// Mapeo best-effort de la categoría de CJ (texto libre en inglés, ej. "Sports
+// & Outdoors/Cycling/Bicycles") a una categoría/subcategoría REAL de RETADOR.
+// Nunca inventa: si ninguna regla calza, deja la categoría vacía para que el
+// vendedor la elija él mismo en el editor precargado (Mejora A).
+const CJ_CATEGORY_RULES = [
+  { re: /e-?bike|electric.*(bike|bicycle|scooter)/i, cat: "vehiculos", sub: "Eléctricos" },
+  { re: /bicycle|bike|cycling/i, cat: "vehiculos", sub: "Bicicletas" },
+  { re: /motorcycle/i, cat: "vehiculos", sub: "Motos" },
+  { re: /\bcars?\b|automobile|vehicle/i, cat: "vehiculos", sub: "Autos" },
+  { re: /jewelry|necklace|pendant|earring|bracelet|\bring\b/i, cat: "moda", sub: "Joyas" },
+  { re: /\bwatch(es)?\b/i, cat: "moda", sub: "Relojes" },
+  { re: /shoe|sneaker|footwear/i, cat: "moda", sub: "Zapatos" },
+  { re: /handbag|backpack|luggage|\bbags?\b/i, cat: "moda", sub: "Bolsos" },
+  { re: /apparel|clothing|dress|shirt|women'?s|men'?s/i, cat: "moda" },
+  { re: /phone.*case|case.*cover|cases\s*&\s*covers/i, cat: "electronica", sub: "Accesorios tech" },
+  { re: /\bphones?\b|mobile|smartphone/i, cat: "electronica", sub: "Teléfonos" },
+  { re: /laptop|\bpc\b|computer/i, cat: "electronica", sub: "Laptops" },
+  { re: /\btablets?\b/i, cat: "electronica", sub: "Tablets" },
+  { re: /headphone|earbud|earphone/i, cat: "electronica", sub: "Audífonos" },
+  { re: /smart\s*watch/i, cat: "electronica", sub: "Smartwatches" },
+  { re: /charger|power\s*bank|\bcables?\b/i, cat: "electronica", sub: "Cargadores" },
+  { re: /\bcameras?\b/i, cat: "electronica", sub: "Cámaras" },
+  { re: /electronic/i, cat: "electronica" },
+  { re: /furniture|home\s*storage|home\s*office|home\s*improvement|home\s*appliance|garden|decor|kitchen/i, cat: "hogar" },
+  { re: /beauty|makeup|skincare|cosmetic/i, cat: "belleza" },
+  { re: /sport|outdoor|\bgym\b|fitness/i, cat: "deportes" },
+  { re: /\bbaby\b|infant|\btoys?\b/i, cat: "bebes" },
+  { re: /\bpets?\b|\bdogs?\b/i, cat: "mascotas" },
+  { re: /\btools?\b|hardware/i, cat: "herramientas" },
+  { re: /office|school\s*supplies|stationery/i, cat: "educacion" },
+  { re: /\bfoods?\b/i, cat: "alimentos" },
+  { re: /wedding|\bevents?\b|\bparty\b/i, cat: "eventos" },
+  { re: /\bart\b|craft/i, cat: "arte" },
+];
+function mapCjCategoryToRetador(cjCategoryText, cats, subcatsMap) {
+  const text = String(cjCategoryText || "");
+  if (!text.trim() || !Array.isArray(cats) || !cats.length) return { cat: "", subcat: "" };
+  for (const rule of CJ_CATEGORY_RULES) {
+    if (!rule.re.test(text)) continue;
+    if (!cats.find(c => c.id === rule.cat)) continue;
+    const subList = subcatsMap?.[rule.cat] || [];
+    const sub = rule.sub && subList.includes(rule.sub) ? rule.sub : "";
+    return { cat: rule.cat, subcat: sub };
+  }
+  return { cat: "", subcat: "" };
+}
+
+// Mismo patrón de selector agrupado por atributo (color/talla) usado en la
+// vista de tienda del comprador (AdminPanel.jsx → StorePreviewScreen), aquí
+// reimplementado para el lado del vendedor.
+const ATTR_LABEL_ES = { color: "Color", talla: "Talla", modelo: "Modelo" };
+function attrLabelText(label) {
+  if (ATTR_LABEL_ES[label]) return ATTR_LABEL_ES[label];
+  const m = /^atributo_(\d+)$/.exec(label || "");
+  return m ? `Atributo ${m[1]}` : (label || "");
+}
+function groupVariantAttrs(variants) {
+  const labels = []; const valuesByLabel = {};
+  for (const v of variants || []) {
+    for (const [label, value] of Object.entries(v.attributes || {})) {
+      if (!valuesByLabel[label]) { valuesByLabel[label] = []; labels.push(label); }
+      if (!valuesByLabel[label].includes(value)) valuesByLabel[label].push(value);
+    }
+  }
+  return { labels, valuesByLabel };
+}
+function resolveVariantBy(variants, selectedAttrs) {
+  const entries = Object.entries(selectedAttrs || {});
+  return (variants || []).find(v => entries.every(([l, val]) => (v.attributes || {})[l] === val)) || null;
+}
+
+function CatalogoProSeller({ C, ac, onOpenCatalogDraft }) {
   const [rows, setRows] = useState(undefined); // undefined=cargando · null=error
-  const [adding, setAdding] = useState(null);
+  const [viewing, setViewing] = useState(null);
+  const { cats, subcats } = useCatalog();
+  const pCfg = usePlatformCfg();
+  const deliveryLocalEnabled = pCfg.sectionsEnabled?.deliveryLocal !== false;
   const load = () => { catalogProSellerCatalog().then(setRows).catch(() => setRows(null)); };
   useEffect(() => { load(); }, []);
 
@@ -1397,7 +1476,7 @@ function CatalogoProSeller({ C, ac, onAdded }) {
             const suggested = Math.round(cost * SUGGESTED_MARGIN * 100) / 100;
             const profit = Math.round((suggested - cost) * 100) / 100;
             return (
-              <div key={p.id} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden" }}>
+              <div key={p.id} onClick={() => setViewing(p)} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden", cursor:"pointer" }}>
                 <div style={{ height:110, background:`linear-gradient(140deg,${C.s3},${C.d})`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
                   {p.images?.[0]
                     ? <img src={p.images[0]} loading="lazy" decoding="async" referrerPolicy="no-referrer" style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e => { e.target.style.display = "none"; }}/>
@@ -1413,66 +1492,158 @@ function CatalogoProSeller({ C, ac, onAdded }) {
                     <span style={{ fontSize:10, color:C.m }}>Venta sugerida</span>
                     <span style={{ fontSize:12, fontWeight:700, color:C.ok }}>{money(suggested, "USD")} <span style={{ color:C.m, fontWeight:500 }}>(+{money(profit, "USD")})</span></span>
                   </div>
-                  <button onClick={() => setAdding(p)} style={{ width:"100%", padding:8, borderRadius:8, border:"none", background:ac, color:"#000", fontSize:11.5, fontWeight:800, cursor:"pointer" }}>Añadir a mi tienda</button>
+                  <button onClick={e => { e.stopPropagation(); setViewing(p); }} style={{ width:"100%", padding:8, borderRadius:8, border:"none", background:ac, color:"#000", fontSize:11.5, fontWeight:800, cursor:"pointer" }}>Ver producto</button>
                 </div>
               </div>
             );
           })}
         </div>
       )}
-      {adding && (
-        <AddCatalogModal product={adding} C={C} ac={ac} onClose={() => setAdding(null)}
-          onAdded={() => { setAdding(null); load(); onAdded?.(); }}/>
+      {viewing && (
+        <CatalogDetailSheet product={viewing} C={C} ac={ac} cats={cats} subcats={subcats} deliveryLocalEnabled={deliveryLocalEnabled}
+          onClose={() => setViewing(null)}
+          onOpenDraft={(draft) => { setViewing(null); onOpenCatalogDraft?.(draft); }}/>
       )}
     </div>
   );
 }
 
-// Mini-calculador: "tu costo" fijo (no editable) → precio de venta editable
-// (precargado con el sugerido) → ganancia en vivo. Nunca deja vender por
-// debajo del costo — el backend lo vuelve a validar de todos modos.
-function AddCatalogModal({ product, C, ac, onClose, onAdded }) {
-  const cost = Number(product.recommended_price) || 0;
-  const suggested = Math.round(cost * SUGGESTED_MARGIN * 100) / 100;
-  const [price, setPrice] = useState(String(suggested));
+// "Vista a fondo" (paso 2 de la Mejora B): galería completa, descripción ya
+// limpia, selector de variantes agrupado con "tu costo" por variante, y la
+// calculadora de ganancia — visible aquí mismo, no en un paso aparte. Nunca
+// muestra costo real de CJ, flete real ni margen de RETADOR.
+function CatalogDetailSheet({ product, C, ac, cats, subcats, deliveryLocalEnabled, onClose, onOpenDraft }) {
+  const [variants, setVariants] = useState(undefined); // undefined=cargando · null=sin variantes/error
+  const [selectedAttrs, setSelectedAttrs] = useState({});
+  const [imgIndex, setImgIndex] = useState(0);
+  const images = Array.isArray(product.images) ? product.images : [];
+  const flatCost = Number(product.recommended_price) || 0;
+  const [price, setPrice] = useState(String(Math.round(flatCost * SUGGESTED_MARGIN * 100) / 100));
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    setVariants(undefined); setSelectedAttrs({});
+    catalogProProductVariants(product.id).then(rows => {
+      if (!rows || !rows.length) { setVariants(null); return; }
+      // Stock/peso reales viven en catalog_pro_products.variants (sku, stock,
+      // weight); los atributos estructurados (color/talla) y "tu costo" por
+      // variante vienen de la RPC segura — se combinan por sku.
+      const bySku = {}; (product.variants || []).forEach(v => { bySku[v.sku] = v; });
+      const merged = rows.map(r => ({ ...r, stock: bySku[r.variant_sku]?.stock ?? null, weight: bySku[r.variant_sku]?.weight ?? null }));
+      setVariants(merged);
+      if (merged[0]?.attributes) setSelectedAttrs(merged[0].attributes);
+    }).catch(() => setVariants(null));
+  }, [product.id]);
+
+  const { labels, valuesByLabel } = useMemo(() => groupVariantAttrs(variants || []), [variants]);
+  const activeVariant = useMemo(() => (variants ? resolveVariantBy(variants, selectedAttrs) : null), [variants, selectedAttrs]);
+  const cost = Number(activeVariant?.recommended_price) || flatCost;
   const priceNum = Number(price) || 0;
   const profit = Math.round((priceNum - cost) * 100) / 100;
+  const heroImg = activeVariant?.image || images[imgIndex] || images[0];
 
-  const confirm = async () => {
-    if (!priceNum || priceNum < cost) { setErr(`Tu precio de venta no puede ser menor a tu costo (${money(cost, "USD")})`); return; }
-    setBusy(true); setErr("");
-    try { await catalogProSellerAdd(product.id, priceNum); onAdded(); }
-    catch (e) { setErr(e?.message || "No se pudo agregar a tu tienda"); }
+  const addToStore = () => {
+    if (!priceNum || priceNum < cost) { return; }
+    setBusy(true);
+    const mapped = mapCjCategoryToRetador(product.category, cats, subcats);
+    const totalStock = (product.variants || []).reduce((s, v) => s + (Number(v.stock) || 0), 0);
+    // El editor real de RETADOR todavía no tiene selector de variantes
+    // estructurado (color/talla) post-publicación — se deja constancia de las
+    // variantes disponibles en la descripción, y el stock total como la suma
+    // de todas las variantes del catálogo.
+    const variantNote = labels.length
+      ? `\n\nVariantes disponibles: ${labels.map(l => `${attrLabelText(l)} (${(valuesByLabel[l] || []).join(", ")})`).join(" · ")}`
+      : "";
+    onOpenDraft({
+      title: product.title,
+      price: priceNum,
+      description: (product.description || "") + variantNote,
+      images,
+      cat: mapped.cat || null,
+      subcat: mapped.subcat || undefined,
+      kind: "product",
+      stock: totalStock > 0 ? totalStock : 50,
+      currency: "USD",
+      shipModes: { local: deliveryLocalEnabled, persona: false, intl: false },
+      source_catalog_id: product.id,
+      source_type: "catalog_pro",
+    });
     setBusy(false);
   };
 
   return (
-    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000, padding:20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background:C.s1, border:`1px solid ${C.b}`, borderRadius:16, padding:20, maxWidth:360, width:"100%" }}>
-        <div style={{ fontSize:14, fontWeight:800, color:C.t, marginBottom:4 }}>Añadir a mi tienda</div>
-        <div style={{ fontSize:11.5, color:C.m, marginBottom:16, lineHeight:1.4 }}>{product.title}</div>
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.65)", zIndex:2100, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background:C.s1, border:`1px solid ${C.b}`, borderRadius:"18px 18px 0 0", padding:"18px 16px 24px", maxWidth:480, width:"100%", maxHeight:"92vh", overflowY:"auto" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+          <span style={{ fontSize:15, fontWeight:800, color:C.t }}>Vista del producto</span>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:C.m, fontSize:22, cursor:"pointer" }}>×</button>
+        </div>
 
+        {/* Galería completa */}
+        <div style={{ height:220, borderRadius:12, overflow:"hidden", background:`linear-gradient(140deg,${C.s3},${C.d})`, marginBottom:8 }}>
+          {heroImg
+            ? <img src={heroImg} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e => { e.target.style.display = "none"; }}/>
+            : <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", fontSize:44, opacity:.5 }}>📦</div>}
+        </div>
+        {images.length > 1 && (
+          <div style={{ display:"flex", gap:7, overflowX:"auto", marginBottom:16, paddingBottom:2 }}>
+            {images.map((src, i) => (
+              <img key={i} src={src} alt="" onClick={() => setImgIndex(i)} style={{ width:52, height:52, borderRadius:8, objectFit:"cover", flexShrink:0, cursor:"pointer", border:`2px solid ${images[imgIndex] === src ? ac : "transparent"}`, opacity: images[imgIndex] === src ? 1 : .7 }} onError={e => { e.target.style.display = "none"; }}/>
+            ))}
+          </div>
+        )}
+
+        <div style={{ fontSize:15, fontWeight:800, color:C.t, marginBottom:8, lineHeight:1.35 }}>{product.title}</div>
+        {product.why_it_sells && (
+          <div style={{ fontSize:11.5, color:C.ok, background:`${C.ok}14`, borderRadius:10, padding:"9px 11px", marginBottom:12, whiteSpace:"pre-wrap", lineHeight:1.5 }}>{product.why_it_sells}</div>
+        )}
+        {product.description && (
+          <div style={{ fontSize:12, color:C.m, lineHeight:1.55, whiteSpace:"pre-wrap", marginBottom:16, maxHeight:150, overflowY:"auto" }}>{product.description}</div>
+        )}
+
+        {/* Selector de variantes agrupado */}
+        {variants === undefined && <div style={{ fontSize:11.5, color:C.m, marginBottom:14 }}>Cargando variantes…</div>}
+        {labels.length > 0 && (
+          <div style={{ marginBottom:16 }}>
+            {labels.map(label => (
+              <div key={label} style={{ marginBottom:12 }}>
+                <div style={{ fontSize:10.5, fontWeight:700, color:C.m, textTransform:"uppercase", letterSpacing:.4, marginBottom:7 }}>{attrLabelText(label)}</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                  {valuesByLabel[label].map(value => {
+                    const isOn = selectedAttrs[label] === value;
+                    const candidate = { ...selectedAttrs, [label]: value };
+                    const exists = variants.some(v => Object.entries(candidate).every(([l, val]) => (v.attributes || {})[l] === val));
+                    return (
+                      <button key={value} type="button" disabled={!exists} onClick={() => setSelectedAttrs(candidate)}
+                        style={{ padding:"7px 13px", borderRadius:9, fontSize:12, fontWeight:700, cursor:exists ? "pointer" : "not-allowed",
+                          background:isOn ? ac : C.s3, color:isOn ? "#000" : (exists ? C.t : C.m), border:`1px solid ${isOn ? ac : C.b}`, opacity:exists ? 1 : .4 }}>{value}</button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            {activeVariant?.stock != null && <div style={{ fontSize:10.5, color:C.m }}>{activeVariant.stock.toLocaleString("es-ES")} en stock</div>}
+          </div>
+        )}
+
+        {/* Mini-calculadora: tu costo → tu precio de venta → tu ganancia */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:C.s3, marginBottom:10 }}>
-          <span style={{ fontSize:12, color:C.m }}>Tu costo</span>
+          <span style={{ fontSize:12, color:C.m }}>Tu costo{activeVariant ? " (esta variante)" : ""}</span>
           <span style={{ fontSize:15, fontWeight:800, color:C.t }}>{money(cost, "USD")}</span>
         </div>
-
         <div style={{ marginBottom:10 }}>
           <div style={{ fontSize:10.5, fontWeight:700, color:C.m, textTransform:"uppercase", letterSpacing:.4, marginBottom:6 }}>Tu precio de venta</div>
-          <input type="number" step="0.01" min={cost} value={price} onChange={e => { setPrice(e.target.value); setErr(""); }} style={inpStyle(C)}/>
+          <input type="number" step="0.01" min={cost} value={price} onChange={e => setPrice(e.target.value)} style={inpStyle(C)}/>
         </div>
-
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:`${C.ok}18`, marginBottom:err ? 10 : 16 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:`${C.ok}18`, marginBottom:16 }}>
           <span style={{ fontSize:12, color:C.ok, fontWeight:700 }}>Tu ganancia</span>
           <span style={{ fontSize:15, fontWeight:800, color:C.ok }}>{money(Math.max(0, profit), "USD")}</span>
         </div>
-        {err && <div style={{ fontSize:11.5, color:C.err, marginBottom:14 }}>{err}</div>}
+        {priceNum > 0 && priceNum < cost && <div style={{ fontSize:11.5, color:C.err, marginBottom:14 }}>Tu precio de venta no puede ser menor a tu costo ({money(cost, "USD")})</div>}
 
         <div style={{ display:"flex", gap:9 }}>
-          <button onClick={onClose} disabled={busy} style={{ flex:1, padding:10, borderRadius:9, border:`1px solid ${C.b}`, background:"transparent", color:C.m, fontSize:12, fontWeight:700, cursor:"pointer" }}>Cancelar</button>
-          <button onClick={confirm} disabled={busy || priceNum <= 0} style={{ flex:1, padding:10, borderRadius:9, border:"none", background:ac, color:"#000", fontSize:12, fontWeight:800, cursor:"pointer", opacity:(busy || priceNum <= 0) ? .6 : 1 }}>{busy ? "Agregando…" : "Confirmar"}</button>
+          <button onClick={onClose} style={{ flex:1, padding:12, borderRadius:10, border:`1px solid ${C.b}`, background:"transparent", color:C.m, fontSize:13, fontWeight:700, cursor:"pointer" }}>Cancelar</button>
+          <button onClick={addToStore} disabled={busy || !priceNum || priceNum < cost} style={{ flex:1, padding:12, borderRadius:10, border:"none", background:ac, color:"#000", fontSize:13, fontWeight:800, cursor:"pointer", opacity:(busy || !priceNum || priceNum < cost) ? .6 : 1 }}>Añadir a mi tienda</button>
         </div>
       </div>
     </div>
@@ -1517,7 +1688,7 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
       onNewProduct={api.onNewProduct} onEditProduct={api.onEditProduct}
       onArchiveProduct={api.onArchiveProduct} onUnarchiveProduct={api.onUnarchiveProduct}
       onDeleteProduct={api.onDeleteProduct} onToggleFeatured={api.onToggleFeatured} maxProducts={myPlan?.max_products}/>;
-    if (sec === "catalog")    return <CatalogoProSeller C={C} ac={ac} onAdded={api.onCatalogAdded}/>;
+    if (sec === "catalog")    return <CatalogoProSeller C={C} ac={ac} onOpenCatalogDraft={api.onOpenCatalogDraft}/>;
     if (sec === "analytics")  return <Analytics products={products} orders={orders} C={C} ac={ac}/>;
     if (sec === "customers")  return <Clientes orders={orders} C={C} ac={ac}/>;
     if (sec === "design")     return <Diseno cfg={cfg} products={products} onUpdateConfig={api.onUpdateConfig} C={C} ac={ac} flash={notify} profileRealName={profileRealName}/>;

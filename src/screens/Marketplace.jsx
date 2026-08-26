@@ -1647,19 +1647,24 @@ function PCard({ p, onClick, isFav, onFav, view = "grid" }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // PRODUCT DETAIL — carga nombre + trust stats del vendedor
 // ═════════════════════════════════════════════════════════════════════════════
-export function EditProductModal({ product, onClose, onSave, flash, onPromote }) {
+export function EditProductModal({ product, onClose, onSave, onCreate, flash, onPromote, mode = "edit" }) {
   const { T1, T2, T3, B, CARD, BG, isDark, S } = useAt();
+  const isCreate = mode === "create";
   // ⭐ Destacar desde editar: solo si el admin tiene la función encendida y el
   // producto aún no está destacado. (La confirmación con tarifa la maneja App.)
   const pCfg = usePlatformCfg();
-  const canPromote = pCfg.promoActive === true && !product.promoted && product.kind !== "service" && !!onPromote;
+  const canPromote = !isCreate && pCfg.promoActive === true && !product.promoted && product.kind !== "service" && !!onPromote;
   const [title, setTitle] = useState(product.title || "");
   const [price, setPrice] = useState(product.price ?? "");
   const [desc, setDesc]   = useState(product.description || "");
   const initImgs = (product.images && product.images.length) ? product.images : (product.image ? [product.image] : []);
   const [imgs, setImgs]   = useState(initImgs);
-  const cats = (() => { try { return JSON.parse(localStorage.getItem("retador_cats") || "[]"); } catch { return []; } })();
-  const subs = (() => { try { return JSON.parse(localStorage.getItem("retador_subcats") || "{}"); } catch { return {}; } })();
+  // Categorías/subcategorías REALES del backend (antes esto leía
+  // localStorage.retador_cats/retador_subcats, una clave que ya no escribe
+  // nadie desde que las categorías se migraron a Supabase — el selector
+  // quedaba siempre vacío. useCatalog() es la misma fuente que usa el resto
+  // de Marketplace.jsx).
+  const { cats, subcats: subs } = useCatalog();
   const catObj = cats.find(c => c.id === product.cat);
   const [catLabel, setCatLabel] = useState(catObj ? (product.subcat ? `${catObj.name} / ${product.subcat}` : catObj.name) : "");
   const options = []; cats.forEach(c => { const sc = subs[c.id] || []; if (sc.length) sc.forEach(s => options.push(`${c.name} / ${s}`)); else options.push(c.name); });
@@ -1693,9 +1698,10 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
     if (!isService && !shipModes.local && !shipModes.persona && !shipModes.intl) { flash && flash("⚠️ Marca al menos una forma de entrega"); return; }
     if (!isService && shipModes.intl && !Number(shipPrice)) { flash && flash("⚠️ Define el precio del envío internacional"); return; }
     if (isService && !svcCat) { flash && flash("⚠️ Elige una categoría de servicio"); return; }
+    if (isCreate && !isService && (!catLabel || !catLabel.trim())) { flash && flash("⚠️ Elige una categoría"); return; }
     const parts = catLabel.split("/").map(s => s.trim());
     const found = cats.find(c => (c.name || "").toLowerCase() === (parts[0] || "").toLowerCase());
-    onSave({
+    const payload = {
       title: title.trim(), price: Number(price) || 0, description: desc,
       cat: isService ? null : (found ? found.id : product.cat),
       subcat: isService ? svcCat : (parts[1] || undefined),
@@ -1707,7 +1713,9 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
         bulkDiscounts: tiers.filter(t => t.min && t.pct).map(t => ({ min: Number(t.min), pct: Number(t.pct) })),
         acceptedCurrencies,
       }),
-    });
+    };
+    if (isCreate) { onCreate(payload); return; }
+    onSave(payload);
     flash && flash(isService ? "✅ Servicio actualizado" : "✅ Producto actualizado");
   };
   const lbl = { fontSize: 11, fontWeight: 700, color: T2, marginBottom: 5, display: "block" };
@@ -1717,7 +1725,7 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
       <div onClick={e => e.stopPropagation()} style={{ background: BG, width: "100%", maxWidth: 480, borderRadius: "20px 20px 0 0", padding: "18px 16px 28px", maxHeight: "92vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 17, fontWeight: 800, color: T1 }}>{isService ? "Editar servicio" : "Editar producto"}</span>
+            <span style={{ fontSize: 17, fontWeight: 800, color: T1 }}>{isCreate ? "Publicar producto" : (isService ? "Editar servicio" : "Editar producto")}</span>
             <span style={{ fontSize: 10, fontWeight: 800, color: G, background: `${G}18`, border: `1px solid ${G}40`, borderRadius: 999, padding: "2px 8px" }}>{isService ? "🛠️ Servicio" : "📦 Producto"}</span>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T2, fontSize: 22, cursor: "pointer" }}>×</button>
@@ -1872,7 +1880,7 @@ export function EditProductModal({ product, onClose, onSave, flash, onPromote })
 
         <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
           <button onClick={onClose} style={{ flex: 1, height: 46, borderRadius: 12, border: `1px solid ${B}`, background: "transparent", color: T1, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
-          <button onClick={save} style={{ flex: 1, height: 46, borderRadius: 12, border: "none", background: G, color: "#000", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>Guardar cambios</button>
+          <button onClick={save} style={{ flex: 1, height: 46, borderRadius: 12, border: "none", background: G, color: "#000", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>{isCreate ? "Publicar" : "Guardar cambios"}</button>
         </div>
       </div>
     </div>

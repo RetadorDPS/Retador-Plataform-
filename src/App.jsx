@@ -902,7 +902,10 @@ function AppShell({ sessionUser, platformStats = null }) {
       seller_id: user.id,
       kind: isService ? "service" : "product",   // FASE 3: separa origen (obligatorio)
       title: d.title,
-      description: d.desc || null,
+      // PubSheet manda `desc`; EditProductModal (editar Y el editor precargado
+      // del Catálogo Pro, Mejora B) manda `description` — se acepta cualquiera
+      // de los dos nombres.
+      description: d.description || d.desc || null,
       price: Number(d.price) || 0,
       orig_price: (!isService && (d.orig_price ?? d.orig)) ? Number(d.orig_price ?? d.orig) : null,
       currency: d.currency || "USD",
@@ -931,6 +934,9 @@ function AppShell({ sessionUser, platformStats = null }) {
         bulk_discounts: Array.isArray(d.bulkDiscounts) ? d.bulkDiscounts : [],
         accepted_currencies: Array.isArray(d.acceptedCurrencies) ? d.acceptedCurrencies : [],
       }),
+      // Trazabilidad con el Catálogo Pro (Mejora B): si este producto viene del
+      // editor precargado desde un producto del catálogo, queda vinculado.
+      ...(d.source_catalog_id ? { source_catalog_id: d.source_catalog_id, source_type: d.source_type || "catalog_pro" } : {}),
     };
     let data, missing;
     try {
@@ -1155,7 +1161,11 @@ function AppShell({ sessionUser, platformStats = null }) {
     onToggleFeatured: (p) => updateProduct(p.id, { storeFeatured: !p.storeFeatured }),
     onUpdateConfig: async (draft) => { const saved = await upsertMyStoreConfig(draft); setStoreCfg(saved); },
     onPlanRequested: () => reloadOwn(),
-    onCatalogAdded: () => reloadOwn(),
+    // Mejora B — "Añadir a mi tienda" ya NO crea el producto directo: abre el
+    // mismo editor real de siempre (EditProductModal en modo "create"), ya
+    // precargado con todo lo del catálogo. Solo se crea de verdad cuando el
+    // vendedor pulsa "Publicar" ahí dentro (handlePublish, más abajo).
+    onOpenCatalogDraft: (draft) => setEditProd({ ...draft, __isCatalogDraft: true }),
   };
   // Perfiles de OTROS vendedores: si su plan real tiene can_customize, se les
   // muestra su Tienda en vez del perfil simple — mismo gate que para mí mismo.
@@ -1896,7 +1906,12 @@ function AppShell({ sessionUser, platformStats = null }) {
       {/* Tarjeta discreta "Activar avisos" — Web Push real, con la app cerrada */}
       <PushPrompt userId={user?.id} flash={flash} />
 
-      {editProd && <EditProductModal product={editProd} onClose={() => setEditProd(null)} onSave={(changes) => { updateProduct(editProd.id, changes); setEditProd(null); }} flash={flash} onPromote={() => { setEditProd(null); promoteFlow(editProd.id); }} />}
+      {editProd && (editProd.__isCatalogDraft
+        ? <EditProductModal product={editProd} mode="create" onClose={() => setEditProd(null)}
+            onCreate={async (payload) => { setEditProd(null); await handlePublish({ ...payload, source_catalog_id: editProd.source_catalog_id, source_type: "catalog_pro" }); }}
+            flash={flash} />
+        : <EditProductModal product={editProd} onClose={() => setEditProd(null)} onSave={(changes) => { updateProduct(editProd.id, changes); setEditProd(null); }} flash={flash} onPromote={() => { setEditProd(null); promoteFlow(editProd.id); }} />
+      )}
       {confirmCfg && (
         <div onClick={() => setConfirmCfg(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 5300, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div onClick={e => e.stopPropagation()} style={{ background: effectiveTheme === "dark" ? "#161618" : "#fff", borderRadius: 18, padding: "22px 20px", maxWidth: 340, width: "100%", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,.4)" }}>

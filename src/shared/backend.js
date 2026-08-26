@@ -2051,18 +2051,21 @@ export const catalogProArchivePublished = async (id) => {
 // recommended_price es "tu costo" (lo que RETADOR le cobra al vendedor).
 export const catalogProSellerCatalog = async () => {
   const { data, error } = await supabase.from("catalog_pro_products")
-    .select("id, title, description, images, category, recommended_price, why_it_sells, published_at")
+    .select("id, title, title_en, description, images, category, recommended_price, why_it_sells, published_at, variants")
     .eq("status", "activo")
     .order("published_at", { ascending: false });
   if (error) { console.error("catalogProSellerCatalog:", error.message); return []; }
   return data || [];
 };
 
-// Crea la copia real en `products` con el precio de venta que el vendedor
-// eligió (nunca recommended_price directo) — el backend valida el plan y
-// que no venda por debajo de su costo.
-export const catalogProSellerAdd = async (catalogId, salePrice) => {
-  const { data, error } = await supabase.rpc("seller_add_catalog_pro_product", { p_catalog_id: catalogId, p_sale_price: salePrice });
-  if (error) { console.error("catalogProSellerAdd:", error.message); throw error; }
-  return data;
+// Selector de variantes de la "Vista a fondo" (Mejora B): SOLO sku, atributos
+// estructurados (color/talla) e imagen — nunca costo real de CJ, flete ni
+// margen (eso lo sigue leyendo solo staff, vía leer_variant_pricing). El
+// vendedor ya no crea el producto con una sola llamada de RPC (eso saltaba el
+// editor real y publicaba directo); ahora arma el borrador en el cliente y lo
+// crea con el mismo handlePublish de siempre — ver App.jsx.
+export const catalogProProductVariants = async (catalogId) => {
+  const { data, error } = await supabase.rpc("catalog_pro_product_variants", { p_catalog_id: catalogId });
+  if (error) { console.error("catalogProProductVariants:", error.message); throw error; }
+  return data || [];
 };

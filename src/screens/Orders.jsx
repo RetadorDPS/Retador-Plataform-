@@ -85,6 +85,19 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
           </div>
         </div>
 
+        {/* Estado de fulfillment del Catálogo Pro (solo si este pedido es de un
+            producto que viene de ahí) — SIEMPRE el texto público ya sanitizado
+            de order_status_map, nunca el proveedor real ni su ubicación. */}
+        {o.catalogProStatusLabel && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: `${G}12`, border: `1px solid ${G}30`, borderRadius: 13, padding: "11px 13px", marginBottom: 12 }}>
+            <span style={{ fontSize: 16 }}>📦</span>
+            <div>
+              <p style={{ fontSize: 9.5, fontWeight: 700, color: T2, textTransform: "uppercase", letterSpacing: .3 }}>Estado del envío</p>
+              <p style={{ fontSize: 12.5, fontWeight: 800, color: T1, marginTop: 2 }}>{o.catalogProStatusLabel}</p>
+            </div>
+          </div>
+        )}
+
         {/* Entrega + modalidad */}
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           <div style={{ flex: 1, background: card, border: `1px solid ${B}`, borderRadius: 13, padding: "11px 12px" }}>

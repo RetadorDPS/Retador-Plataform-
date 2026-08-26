@@ -1325,6 +1325,17 @@ export const getUserOrders = async (userId) => {
       (profs || []).forEach(p => { if (p?.id) names[p.id] = p.full_name || null; });
     } catch (e) { /* sin nombres: se cae a las columnas del propio pedido */ }
   }
+  // Estado público de fulfillment del Catálogo Pro (si el pedido es de un
+  // producto que viene de ahí) — SOLO el texto ya sanitizado de
+  // order_status_map (nunca "Phoenix"/"CJ"/el proveedor real).
+  const orderIds = (data || []).map(o => o.id);
+  let catalogProStatus = {};
+  if (orderIds.length) {
+    try {
+      const { data: statusRows } = await supabase.from("catalog_pro_order_status_public").select("order_id, status_label, sort_order").in("order_id", orderIds);
+      (statusRows || []).forEach(r => { catalogProStatus[r.order_id] = r; });
+    } catch (e) { /* sin fulfillment de Catálogo Pro para estos pedidos: normal, la mayoría no lo son */ }
+  }
   return (data || []).map(o => {
     const shipMode = o.ship_mode || "local";
     const flow = ORDER_FLOW[shipMode] || ORDER_FLOW.local;
@@ -1373,6 +1384,7 @@ export const getUserOrders = async (userId) => {
       history: [{ key: flow[0].key, label: flow[0].label, at: createdAt, note: "Pedido creado." }],
       createdAt,
       updatedAt: o.updated_at ? new Date(o.updated_at).getTime() : createdAt,
+      catalogProStatusLabel: catalogProStatus[o.id]?.status_label || null,
     };
   });
 };
@@ -2126,6 +2138,29 @@ export const catalogProDeleteStaging = async (id) => {
 export const catalogProArchivePublished = async (id) => {
   const { error } = await supabase.from("catalog_pro_products").update({ status: "archived" }).eq("id", id);
   if (error) { console.error("catalogProArchivePublished:", error.message); throw error; }
+};
+
+// ── Fulfillment real de pedidos del Catálogo Pro (lo que Daniel debe
+// gestionar a mano: pagar/pedir a CJ, seguir el envío hasta el hub y de ahí
+// a Cuba). Cada pedido de un producto source_type='catalog_pro' genera su
+// fila sola (trigger en la base) — esto solo lee/avanza lo ya creado.
+export const catalogProPendingFulfillment = async () => {
+  const { data, error } = await supabase.rpc("catalog_pro_pending_fulfillment");
+  if (error) { console.error("catalogProPendingFulfillment:", error.message); throw error; }
+  return data || [];
+};
+export const catalogProAdvanceFulfillment = async (orderId, newStatus) => {
+  const { data, error } = await supabase.rpc("catalog_pro_advance_fulfillment", { p_order_id: orderId, p_new_status: newStatus });
+  if (error) { console.error("catalogProAdvanceFulfillment:", error.message); throw error; }
+  return data;
+};
+// Los 5 pasos reales del fulfillment (order_confirmed → … → delivered), en
+// orden, con su texto público ya sanitizado — misma tabla que usa la vista
+// que ve el comprador (catalog_pro_order_status_public).
+export const getOrderStatusMap = async () => {
+  const { data, error } = await supabase.from("order_status_map").select("*").order("sort_order", { ascending: true });
+  if (error) { console.error("getOrderStatusMap:", error.message); return []; }
+  return data || [];
 };
 
 // ── Catálogo Pro visto por el VENDEDOR (Pro/Premium) — SOLO columnas

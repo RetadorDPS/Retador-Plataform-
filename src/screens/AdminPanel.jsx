@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -4276,6 +4276,14 @@ function CatalogPublishedTab({ toast }) {
 function CatalogoPro({ toast, ro }) {
   const [tab, setTab] = useState('buscar');
   const [previewPid, setPreviewPid] = useState(null);
+  // Conteo real de pedidos pendientes de gestionar — vive aquí (no solo
+  // dentro de la pestaña) para que se vea como badge en la pestaña misma
+  // aunque el admin esté viendo otra sección del Catálogo Pro.
+  const [pendingCount, setPendingCount] = useState(null);
+  const refreshPendingCount = useCallback(() => {
+    catalogProPendingFulfillment().then(rows => setPendingCount(rows.length)).catch(() => {});
+  }, []);
+  useEffect(() => { refreshPendingCount(); }, [refreshPendingCount]);
 
   useEffect(() => {
     if (!previewPid) return;
@@ -4289,8 +4297,10 @@ function CatalogoPro({ toast, ro }) {
       {ro && <div style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 10, background: 'var(--bg2)', border: '1px solid var(--bd2)', fontSize: 12, fontWeight: 700, color: 'var(--tx2)' }}>👁 Solo lectura — sin permiso para importar ni publicar.</div>}
 
       <div className="tabs" style={{ maxWidth: 420 }}>
-        {[['buscar', 'Buscar'], ['staging', 'Staging'], ['publicado', 'Publicado']].map(([k, l]) =>
-          <div key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => { setTab(k); setPreviewPid(null); }}>{l}</div>)}
+        {[['buscar', 'Buscar'], ['staging', 'Staging'], ['publicado', 'Publicado'], ['pedidos', 'Pedidos por gestionar']].map(([k, l]) =>
+          <div key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => { setTab(k); setPreviewPid(null); }}>
+            {l}{k === 'pedidos' && pendingCount > 0 && <span className="bdg bg" style={{ marginLeft: 6 }}>{pendingCount}</span>}
+          </div>)}
       </div>
 
       {tab === 'buscar' && (previewPid
@@ -4298,6 +4308,78 @@ function CatalogoPro({ toast, ro }) {
         : <CatalogSearchTab toast={toast} ro={ro} onOpenPreview={setPreviewPid} />)}
       {tab === 'staging' && <CatalogStagingTab toast={toast} ro={ro} />}
       {tab === 'publicado' && <CatalogPublishedTab toast={toast} />}
+      {tab === 'pedidos' && <CatalogPendingOrdersTab toast={toast} ro={ro} onChange={refreshPendingCount} />}
+    </>
+  );
+}
+
+// "Pedidos por gestionar" — conecta cada pedido real de un producto del
+// Catálogo Pro con lo que Daniel debe hacer a mano (pagar/pedir a CJ y
+// seguir el envío hasta Cuba). La fila de catalog_pro_fulfillment nace sola
+// (trigger en la base, ver create_order) — esta pantalla solo lee/avanza lo
+// que ya existe. Nunca muestra el precio de venta del vendedor, solo el
+// costo real que Daniel paga.
+function CatalogPendingOrdersTab({ toast, ro, onChange }) {
+  const [rows, setRows] = useState(undefined); // undefined=cargando · null=error
+  const [statusMap, setStatusMap] = useState([]); // [{internal_status, public_label, sort_order}]
+  const [advancing, setAdvancing] = useState(null); // order_id en curso
+
+  const load = useCallback(() => {
+    catalogProPendingFulfillment().then(setRows).catch(e => { console.error('catalogProPendingFulfillment:', e); setRows(null); });
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { getOrderStatusMap().then(setStatusMap); }, []);
+
+  const nextStatusOf = (internalStatus) => {
+    const i = statusMap.findIndex(s => s.internal_status === internalStatus);
+    return (i >= 0 && i < statusMap.length - 1) ? statusMap[i + 1] : null;
+  };
+
+  const advance = async (row) => {
+    const next = nextStatusOf(row.internal_status);
+    if (!next) return;
+    setAdvancing(row.order_id);
+    try {
+      await catalogProAdvanceFulfillment(row.order_id, next.internal_status);
+      toast(`✅ Estado actualizado: ${next.public_label}`);
+      load();
+      onChange?.();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo actualizar el estado')); }
+    setAdvancing(null);
+  };
+
+  return (
+    <>
+      <div className="ssub">Pedidos reales de productos del Catálogo Pro que debes gestionar (pagar/pedir a CJ y seguir el envío) — los más antiguos primero.</div>
+      {rows === undefined
+        ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Cargando…</div>
+        : rows === null
+          ? <div style={{ textAlign: 'center', color: 'var(--rd)', fontSize: 12, padding: '24px 6px' }}>⚠️ No se pudo cargar — revisa la consola del navegador.</div>
+          : rows.length === 0
+            ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>No hay pedidos pendientes de gestionar ahora mismo.</div>
+            : rows.map(r => {
+              const next = nextStatusOf(r.internal_status);
+              const attrs = r.variant_attributes && Object.keys(r.variant_attributes).length ? Object.values(r.variant_attributes).join(' / ') : null;
+              return (
+                <div key={r.order_id} className="mc" style={{ marginBottom: 10 }}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <CatalogImg src={r.product_image} width={48} height={48} radius={8} iconSize={20} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{r.product_title}{attrs ? ` · ${attrs}` : ''}</div>
+                      <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>×{r.qty} · Pagar a CJ: <b style={{ color: 'var(--tx)' }}>{money(r.cost_to_pay, r.cost_currency)}</b> · Comprador: {r.buyer_name}</div>
+                    </div>
+                    <span className="bdg bg">{r.status_label}</span>
+                  </div>
+                  {!ro && next && (
+                    <div style={{ marginTop: 10 }}>
+                      <button className="btn sm btp" disabled={advancing === r.order_id} onClick={() => advance(r)}>
+                        {advancing === r.order_id ? <span className="spin">↻</span> : `Avanzar a: ${next.public_label}`}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
     </>
   );
 }

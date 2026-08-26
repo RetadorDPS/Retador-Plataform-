@@ -1125,6 +1125,10 @@ export const createOrder = async (data) => {
     p_ship_to: data.shipTo || null,
     p_delivery: data.delivery || null,
     p_payment_method: data.paymentMethod || "coordinado",
+    // Variante elegida (si el producto tiene): el backend valida que sea
+    // real, bloquea SU stock y usa SU precio — nunca confía en lo que
+    // mande el cliente (ver create_order en la base).
+    p_variant_id: data.variantId || null,
   });
   if (error) throw error;
   // La RPC devuelve el id del pedido (string) o una fila con .id — cubrimos ambos.
@@ -1168,6 +1172,45 @@ export const getAvailableStock = async (productId) => {
   if (error) { console.error("available_stock:", error.message); return null; }
   return (data == null) ? null : Number(data);
 };
+// Stock REAL disponible de UNA variante (descuenta lo comprometido en pedidos
+// vivos de esa variante) — mismo criterio que getAvailableStock, pero por
+// variante en vez de por producto.
+export const getAvailableVariantStock = async (variantId) => {
+  if (!variantId) return null;
+  const { data, error } = await supabase.rpc("available_variant_stock", { p_variant_id: variantId });
+  if (error) { console.error("available_variant_stock:", error.message); return null; }
+  return (data == null) ? null : Number(data);
+};
+
+// ── Variantes reales de producto (color/talla/etc.) ──────────────────────────
+// Cualquier vendedor puede crearlas en cualquier producto propio (no solo los
+// del Catálogo Pro). Se leen agrupadas por producto y se sobrescriben enteras
+// al guardar (borrar + insertar de nuevo es más simple y seguro que
+// diferenciar fila por fila, y el editor siempre manda el set completo).
+export const getProductVariants = async (productId) => {
+  if (!productId) return [];
+  const { data, error } = await supabase.from("product_variants").select("*").eq("product_id", productId).order("sort_order", { ascending: true });
+  if (error) { console.error("getProductVariants:", error.message); return []; }
+  return data || [];
+};
+export const replaceProductVariants = async (productId, variants) => {
+  const { error: delError } = await supabase.from("product_variants").delete().eq("product_id", productId);
+  if (delError) { console.error("replaceProductVariants (borrar):", delError.message); throw delError; }
+  const rows = (Array.isArray(variants) ? variants : []).filter(v => v && v.attributes && Object.keys(v.attributes).length);
+  if (rows.length === 0) return [];
+  const payload = rows.map((v, i) => ({
+    product_id: productId,
+    sku: v.sku || null,
+    attributes: v.attributes,
+    price: (v.price === "" || v.price == null) ? null : Number(v.price),
+    stock: Number(v.stock) || 0,
+    image: v.image || null,
+    sort_order: i,
+  }));
+  const { data, error } = await supabase.from("product_variants").insert(payload).select();
+  if (error) { console.error("replaceProductVariants (insertar):", error.message); throw error; }
+  return data || [];
+};
 // Descuento por cantidad — SOLO para la vista previa (el total real, en la orden
 // creada, lo calcula el backend con bulk_discount_pct). tiers: [{min,pct}, ...].
 // Devuelve el % del tramo más alto que la cantidad alcanza (0 si ninguno aplica).
@@ -1178,6 +1221,45 @@ export const bulkDiscountPctFor = (qty, tiers) => {
     .filter(t => q >= (Number(t.min) || 0))
     .reduce((best, t) => Math.max(best, Number(t.pct) || 0), 0);
 };
+
+// ── Selector de variantes agrupado (color/talla) — helpers puros, reusados
+// por el editor de productos, la ficha del comprador y la "Vista a fondo"
+// del Catálogo Pro, para que las tres se comporten exactamente igual. ──────
+const ATTR_LABEL_ES = { color: "Color", talla: "Talla", modelo: "Modelo" };
+export function attrLabelText(label) {
+  if (ATTR_LABEL_ES[label]) return ATTR_LABEL_ES[label];
+  const m = /^atributo_(\d+)$/.exec(label || "");
+  return m ? `Atributo ${m[1]}` : (label || "");
+}
+export function groupVariantAttrs(variants) {
+  const labels = []; const valuesByLabel = {};
+  for (const v of variants || []) {
+    for (const [label, value] of Object.entries(v.attributes || {})) {
+      if (!valuesByLabel[label]) { valuesByLabel[label] = []; labels.push(label); }
+      if (!valuesByLabel[label].includes(value)) valuesByLabel[label].push(value);
+    }
+  }
+  return { labels, valuesByLabel };
+}
+export function resolveVariantBy(variants, selectedAttrs) {
+  const entries = Object.entries(selectedAttrs || {});
+  return (variants || []).find(v => entries.every(([l, val]) => (v.attributes || {})[l] === val)) || null;
+}
+// Todas las combinaciones posibles de un set de grupos de atributos, en el
+// mismo orden en que el vendedor los definió — usado por el editor para
+// generar las filas editables (precio/stock/imagen) de golpe.
+export function cartesianVariants(groups) {
+  const usable = (groups || []).filter(g => g.name.trim() && g.values.some(v => v.trim()));
+  if (usable.length === 0) return [];
+  let combos = [{}];
+  for (const g of usable) {
+    const vals = g.values.map(v => v.trim()).filter(Boolean);
+    const next = [];
+    for (const c of combos) for (const v of vals) next.push({ ...c, [g.name.trim()]: v });
+    combos = next;
+  }
+  return combos;
+}
 
 // ── Escritura resiliente de productos ────────────────────────────────────────
 // Algunas columnas nuevas (cantidad/stock, monedas aceptadas) dependen de que el

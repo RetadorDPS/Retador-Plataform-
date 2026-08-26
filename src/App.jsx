@@ -26,7 +26,7 @@ import {
   toggleFavorite, getMyFavorites, getPlatformStats, getPlatformConfig, setPlatformConfig, setPlatformBlocks, myPermissions, promoteProduct,
   getLedgerEntries, createEscrow, releaseEscrow, getSystemStatus,
   CURRENCIES, CURRENCY_CODES, DEFAULT_CURRENCY, money,
-  createOrder, estimateDeliveryFee, getAvailableStock, writeProductRow,
+  createOrder, estimateDeliveryFee, getAvailableStock, writeProductRow, replaceProductVariants,
   readRatings, aggRating, systemRating, serviceRating, serviceReviews, ratingForName, systemReviews,
   getUserOrders, updateOrderStatus, getUnreadCount, getProductById, getConversationById,
   getPendingCourierApplications, reviewCourierApplication,
@@ -423,6 +423,12 @@ function AppShell({ sessionUser, platformStats = null }) {
       const res = await writeProductRow((r) => supabase.from("products").update(r).eq("id", id).select().single(), upd);
       data = res.data; missing = res.missing;
     } catch (error) { flash("⚠️ " + (error.message || "No se pudo editar")); return; }
+    // Variantes (color/talla/etc.): se sobrescriben enteras con lo que trae el
+    // editor — undefined significa "no se tocó esta sección" (ej. servicios).
+    if (changes.variants !== undefined) {
+      try { await replaceProductVariants(id, changes.variants); }
+      catch (error) { flash("⚠️ Se guardó el producto, pero no las variantes: " + (error.message || "")); }
+    }
     const mapped = mapProduct(data);
     setProducts(prev => { const exists = prev.some(p => p.id === id); return exists ? prev.map(p => p.id === id ? mapped : p) : (mapped.kind === "service" ? prev : [mapped, ...prev]); });
     setServices(prev => prev.map(p => p.id === id ? mapped : p));
@@ -948,6 +954,10 @@ function AppShell({ sessionUser, platformStats = null }) {
         flash("⚠️ Ya tienes una publicación activa con este nombre. Edítala o usa otro título.");
       } else { flash("⚠️ " + (error.message || "No se pudo publicar")); }
       return;
+    }
+    if (!isService && Array.isArray(d.variants) && d.variants.length) {
+      try { await replaceProductVariants(data.id, d.variants); }
+      catch (error) { flash("⚠️ Se publicó el producto, pero no las variantes: " + (error.message || "")); }
     }
     if (isService) { setServices(prev => [mapProduct(data), ...prev]); flash("✅ Servicio publicado — visible en la sección Servicios"); }
     else { setProducts(prev => [mapProduct(data), ...prev]); flash(missing?.length ? `✅ Publicado, pero el backend aún no guarda: ${missing.join(", ")}` : "✅ Producto publicado — visible para todos"); }

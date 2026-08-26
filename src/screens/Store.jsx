@@ -25,7 +25,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy, ShoppingBag,
 } from "lucide-react";
-import { useAt, useR, useCatalog, usePlatformCfg, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants } from "../shared/index.js";
+import { useAt, useR, useCatalog, usePlatformCfg, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, attrLabelText, groupVariantAttrs, resolveVariantBy } from "../shared/index.js";
 // recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
 // se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
 // nunca de entrada para todos (la mayoría son compradores que ni la ven).
@@ -1430,30 +1430,6 @@ function mapCjCategoryToRetador(cjCategoryText, cats, subcatsMap) {
   return { cat: "", subcat: "" };
 }
 
-// Mismo patrón de selector agrupado por atributo (color/talla) usado en la
-// vista de tienda del comprador (AdminPanel.jsx → StorePreviewScreen), aquí
-// reimplementado para el lado del vendedor.
-const ATTR_LABEL_ES = { color: "Color", talla: "Talla", modelo: "Modelo" };
-function attrLabelText(label) {
-  if (ATTR_LABEL_ES[label]) return ATTR_LABEL_ES[label];
-  const m = /^atributo_(\d+)$/.exec(label || "");
-  return m ? `Atributo ${m[1]}` : (label || "");
-}
-function groupVariantAttrs(variants) {
-  const labels = []; const valuesByLabel = {};
-  for (const v of variants || []) {
-    for (const [label, value] of Object.entries(v.attributes || {})) {
-      if (!valuesByLabel[label]) { valuesByLabel[label] = []; labels.push(label); }
-      if (!valuesByLabel[label].includes(value)) valuesByLabel[label].push(value);
-    }
-  }
-  return { labels, valuesByLabel };
-}
-function resolveVariantBy(variants, selectedAttrs) {
-  const entries = Object.entries(selectedAttrs || {});
-  return (variants || []).find(v => entries.every(([l, val]) => (v.attributes || {})[l] === val)) || null;
-}
-
 function CatalogoProSeller({ C, ac, onOpenCatalogDraft }) {
   const [rows, setRows] = useState(undefined); // undefined=cargando · null=error
   const [viewing, setViewing] = useState(null);
@@ -1546,18 +1522,26 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, deliveryLocalEnable
     if (!priceNum || priceNum < cost) { return; }
     setBusy(true);
     const mapped = mapCjCategoryToRetador(product.category, cats, subcats);
-    const totalStock = (product.variants || []).reduce((s, v) => s + (Number(v.stock) || 0), 0);
-    // El editor real de RETADOR todavía no tiene selector de variantes
-    // estructurado (color/talla) post-publicación — se deja constancia de las
-    // variantes disponibles en la descripción, y el stock total como la suma
-    // de todas las variantes del catálogo.
-    const variantNote = labels.length
-      ? `\n\nVariantes disponibles: ${labels.map(l => `${attrLabelText(l)} (${(valuesByLabel[l] || []).join(", ")})`).join(" · ")}`
-      : "";
+    // Variantes REALES (no ya como texto en la descripción): el precio de
+    // venta de cada una se deriva aplicando la misma proporción de margen
+    // que el vendedor eligió aquí sobre "tu costo" de esa variante en
+    // particular — así una variante más cara en el catálogo también sale
+    // más cara en su tienda, no todas al mismo precio plano.
+    const ratio = cost > 0 ? priceNum / cost : 1;
+    const variantRows = (variants || []).map(v => ({
+      sku: v.variant_sku,
+      attributes: v.attributes,
+      price: Math.round((Number(v.recommended_price) || flatCost) * ratio * 100) / 100,
+      stock: Number(v.stock) || 0,
+      image: v.image || null,
+    }));
+    const totalStock = variantRows.length
+      ? variantRows.reduce((s, v) => s + v.stock, 0)
+      : (product.variants || []).reduce((s, v) => s + (Number(v.stock) || 0), 0);
     onOpenDraft({
       title: product.title,
       price: priceNum,
-      description: (product.description || "") + variantNote,
+      description: product.description || "",
       images,
       cat: mapped.cat || null,
       subcat: mapped.subcat || undefined,
@@ -1565,6 +1549,7 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, deliveryLocalEnable
       stock: totalStock > 0 ? totalStock : 50,
       currency: "USD",
       shipModes: { local: deliveryLocalEnabled, persona: false, intl: false },
+      variants: variantRows,
       source_catalog_id: product.id,
       source_type: "catalog_pro",
     });

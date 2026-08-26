@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -309,16 +309,20 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   const [step, setStep] = useState("resumen");
   const [howItWorks, setHowItWorks] = useState(false); // "¿Cómo funciona tu compra?" — guía breve para quien compra por primera vez
   const cur = product.currency || DEFAULT_CURRENCY;
-  const price = parseFloat(product.price || 0);
+  // Variante elegida en la ficha del producto (ProductDetail), si tiene —
+  // manda SU precio (nunca el base) y SU stock, no el del producto entero.
+  const variant = product.selectedVariant || null;
+  const price = parseFloat((variant && variant.price != null ? variant.price : product.price) || 0);
   // Stock REAL disponible ahora mismo (descuenta lo comprometido en pedidos vivos):
   // se consulta al abrir el diálogo para que el selector nunca permita pedir de más.
   // null mientras carga = sin límite conocido todavía (no bloquea, solo no lo muestra).
   const [availStock, setAvailStock] = useState(null);
   useEffect(() => {
     let alive = true;
-    if (product?.id) getAvailableStock(product.id).then(n => { if (alive) setAvailStock(n); }).catch(() => {});
+    if (variant?.id) getAvailableVariantStock(variant.id).then(n => { if (alive) setAvailStock(n); }).catch(() => {});
+    else if (product?.id) getAvailableStock(product.id).then(n => { if (alive) setAvailStock(n); }).catch(() => {});
     return () => { alive = false; };
-  }, [product?.id]);
+  }, [product?.id, variant?.id]);
   useEffect(() => { if (availStock != null) setQty(q => Math.max(1, Math.min(q, availStock))); }, [availStock]);
   // Campo de texto para escribir la cantidad directamente (en vez de solo tocar
   // "+" repetido). Estado de texto aparte del número real: así se puede borrar y
@@ -403,12 +407,13 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
       const shipPrice = shipMode === "intl" ? parseFloat(product.shippingPrice || 0) : shipMode === "local" ? liveLocalBase : 0;
       const shipTo = shipMode === "intl" ? "empresa de envíos" : shipMode === "local" ? "mensajero" : null;
       const order = await createOrder({
-        productId: product.id, title: product.title, image: product.img || product.image, cat: product.cat,
+        productId: product.id, title: product.title, image: variant?.image || product.img || product.image, cat: product.cat,
         sellerId: product.seller_id, sellerName: product.seller_name,
         buyerId: user?.id, buyerName: user?.name, qty, unitPrice: unitPriceWithDisc, amount: total, currency: cur,
         shipMode, modalidad,
         shipPrice, shipTo,
         delivery,
+        variantId: variant?.id || null,
       });
       flash("✅ Pedido creado — ya puedes coordinar con el vendedor");
       onSuccess?.(order);
@@ -448,10 +453,11 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
 
           <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
             <div style={{ width: 54, height: 54, borderRadius: 14, background: "#1a1a1a", overflow: "hidden", flexShrink: 0 }}>
-              {(product.img || product.image) && <img src={product.img || product.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
+              {(variant?.image || product.img || product.image) && <img src={variant?.image || product.img || product.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontSize: 13, fontWeight: 700, color: T1 }}>{product.title}</p>
+              {variant && <p style={{ fontSize: 11, color: T2, marginTop: 2 }}>{Object.values(variant.attributes || {}).join(" / ")}</p>}
               <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }}>
                 <p style={{ fontSize: 16, fontWeight: 900, color: G }}>{money(unitPriceWithDisc, cur)}</p>
                 {discPct > 0 && <span style={{ fontSize: 10.5, color: T3, textDecoration: "line-through" }}>{money(price, cur)}</span>}
@@ -1644,6 +1650,25 @@ function PCard({ p, onClick, isFav, onFav, view = "grid" }) {
   );
 }
 
+// Convierte variantes ya guardadas (product_variants) o precargadas (Mejora
+// B, catálogo) a la forma editable del formulario: precio/stock como texto
+// (para inputs controlados), descartando cualquier fila sin atributos reales.
+function normalizeIncomingVariants(raw) {
+  return (Array.isArray(raw) ? raw : [])
+    .filter(v => v && v.attributes && Object.keys(v.attributes).length)
+    .map(v => ({
+      attributes: v.attributes,
+      price: (v.price == null || v.price === "") ? "" : String(v.price),
+      stock: String(v.stock ?? 0),
+      image: v.image || null,
+      sku: v.sku || null,
+    }));
+}
+function groupsFromVariantRows(rows) {
+  const { labels, valuesByLabel } = groupVariantAttrs(rows);
+  return labels.map(l => ({ name: l, values: valuesByLabel[l] }));
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // PRODUCT DETAIL — carga nombre + trust stats del vendedor
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1692,6 +1717,52 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
   const removeTier = (i) => setTiers(t => t.filter((_, j) => j !== i));
   const [acceptedCurrencies, setAcceptedCurrencies] = useState(() => Array.isArray(product.acceptedCurrencies) ? product.acceptedCurrencies : []);
   const toggleCurrency = (c) => setAcceptedCurrencies(a => a.includes(c) ? a.filter(x => x !== c) : [...a, c]);
+
+  // VARIANTES (color/talla/etc.) — opcional, cualquier vendedor las puede
+  // crear en cualquier producto propio. Al crear desde el Catálogo Pro
+  // (Mejora B) ya vienen precargadas en product.variants; al editar un
+  // producto YA publicado se cargan aparte (product_variants vive en su
+  // propia tabla, no en `products`).
+  const [variantRows, setVariantRows] = useState(() => normalizeIncomingVariants(product.variants));
+  const [variantGroups, setVariantGroups] = useState(() => groupsFromVariantRows(normalizeIncomingVariants(product.variants)));
+  useEffect(() => {
+    if (isCreate || !product.id) return;
+    let alive = true;
+    getProductVariants(product.id).then(rows => {
+      if (!alive) return;
+      const norm = normalizeIncomingVariants(rows);
+      setVariantRows(norm);
+      setVariantGroups(groupsFromVariantRows(norm));
+    });
+    return () => { alive = false; };
+  }, [isCreate, product.id]);
+  // El total de "Cantidad disponible" se sincroniza solo con la suma de las
+  // variantes MIENTRAS haya alguna — así el resto de la app (que sigue
+  // leyendo products.stock para tarjetas/listas) muestra un número
+  // razonable sin que el vendedor tenga que mantener dos cifras a mano.
+  useEffect(() => {
+    if (variantRows.length === 0) return;
+    setStock(String(variantRows.reduce((s, r) => s + (Number(r.stock) || 0), 0)));
+  }, [variantRows]);
+  const addVariantGroup = () => setVariantGroups(g => [...g, { name: "", values: [""] }]);
+  const setVariantGroupName = (i, name) => setVariantGroups(g => g.map((grp, j) => j === i ? { ...grp, name } : grp));
+  const addVariantGroupValue = (i) => setVariantGroups(g => g.map((grp, j) => j === i ? { ...grp, values: [...grp.values, ""] } : grp));
+  const setVariantGroupValue = (i, k, val) => setVariantGroups(g => g.map((grp, j) => j === i ? { ...grp, values: grp.values.map((v, l) => l === k ? val : v) } : grp));
+  const removeVariantGroupValue = (i, k) => setVariantGroups(g => g.map((grp, j) => j === i ? { ...grp, values: grp.values.filter((_, l) => l !== k) } : grp));
+  const removeVariantGroup = (i) => setVariantGroups(g => g.filter((_, j) => j !== i));
+  // Genera TODAS las combinaciones de los grupos definidos, conservando el
+  // precio/stock/imagen ya cargado de las combinaciones que ya existían
+  // (comparando por sus atributos) — nunca borra trabajo ya hecho al agregar
+  // un valor nuevo a un grupo existente.
+  const generateVariantRows = () => {
+    const combos = cartesianVariants(variantGroups);
+    const bySig = {}; variantRows.forEach(r => { bySig[JSON.stringify(r.attributes)] = r; });
+    setVariantRows(combos.map(attrs => bySig[JSON.stringify(attrs)] || { attributes: attrs, price: "", stock: "0", image: null, sku: null }));
+  };
+  const setVariantRowField = (i, k, val) => setVariantRows(rows => rows.map((r, j) => j === i ? { ...r, [k]: val } : r));
+  const setVariantRowImage = (i, src) => setVariantRows(rows => rows.map((r, j) => j === i ? { ...r, image: r.image === src ? null : src } : r));
+  const removeVariantRow = (i) => setVariantRows(rows => rows.filter((_, j) => j !== i));
+
   const save = () => {
     if (!title.trim()) { flash && flash("Ponle un título"); return; }
     if (!isService && !(Number(stock) > 0)) { flash && flash("⚠️ Indica la cantidad disponible (mínimo 1)"); return; }
@@ -1712,6 +1783,11 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
         currency, stock: Number(stock) || 0,
         bulkDiscounts: tiers.filter(t => t.min && t.pct).map(t => ({ min: Number(t.min), pct: Number(t.pct) })),
         acceptedCurrencies,
+        variants: variantRows.map(r => ({
+          sku: r.sku, attributes: r.attributes,
+          price: (r.price === "" || r.price == null) ? null : Number(r.price),
+          stock: Number(r.stock) || 0, image: r.image,
+        })),
       }),
     };
     if (isCreate) { onCreate(payload); return; }
@@ -1766,8 +1842,8 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
                 </button>
               ))}
             </div>
-            <label style={lbl}>Cantidad disponible *</label>
-            <input type="number" min="1" step="1" value={stock} onChange={e => setStock(e.target.value)} style={{ ...inp, marginBottom: 13 }} />
+            <label style={lbl}>Cantidad disponible * {variantRows.length > 0 && <span style={{ color: T3, fontWeight: 500 }}>(suma de las variantes)</span>}</label>
+            <input type="number" min="1" step="1" value={stock} disabled={variantRows.length > 0} onChange={e => setStock(e.target.value)} style={{ ...inp, marginBottom: 13, opacity: variantRows.length > 0 ? .6 : 1 }} />
           </>
         )}
         <label style={lbl}>{isService ? "Categoría del servicio" : "Categoría"}</label>
@@ -1784,6 +1860,63 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
         )}
         <label style={lbl}>Descripción</label>
         <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4} style={{ ...inp, resize: "none", marginBottom: 18 }} />
+
+        {/* Variantes (color/talla/etc.) — solo productos, opcional */}
+        {!isService && (
+          <div style={{ marginBottom: 18 }}>
+            <label style={lbl}>Variantes <span style={{ color: T3, fontWeight: 500 }}>(opcional — color, talla, etc.)</span></label>
+            {variantGroups.map((grp, gi) => (
+              <div key={gi} style={{ border: `1px solid ${B}`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                  <input value={grp.name} onChange={e => setVariantGroupName(gi, e.target.value)} placeholder="Nombre (ej. Color)" style={{ ...inp, flex: 1 }} />
+                  <button onClick={() => removeVariantGroup(gi)} style={{ background: "none", border: "none", color: "#ef4444", fontSize: 18, fontWeight: 700, cursor: "pointer" }}>×</button>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {grp.values.map((val, vi) => (
+                    <div key={vi} style={{ display: "flex", alignItems: "center", gap: 2, background: isDark ? "#1a1a1a" : "#f5f5f7", borderRadius: 8, padding: "2px 2px 2px 9px" }}>
+                      <input value={val} onChange={e => setVariantGroupValue(gi, vi, e.target.value)} placeholder="Valor" style={{ background: "none", border: "none", outline: "none", color: T1, fontSize: 12, width: 64, fontFamily: "inherit", padding: "5px 0" }} />
+                      <button onClick={() => removeVariantGroupValue(gi, vi)} style={{ background: "none", border: "none", color: T3, fontSize: 14, cursor: "pointer", padding: "0 6px" }}>×</button>
+                    </div>
+                  ))}
+                  <button onClick={() => addVariantGroupValue(gi)} style={{ background: "none", border: `1.5px dashed ${B}`, borderRadius: 8, padding: "5px 10px", fontSize: 11, color: G, cursor: "pointer" }}>+ valor</button>
+                </div>
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={addVariantGroup} style={{ flex: 1, background: "none", border: `1.5px dashed ${B}`, borderRadius: 10, padding: "9px", fontSize: 11, fontWeight: 700, color: G, cursor: "pointer" }}>+ Añadir grupo de atributo</button>
+              {variantGroups.length > 0 && (
+                <button onClick={generateVariantRows} style={{ flex: 1, background: G, border: "none", borderRadius: 10, padding: "9px", fontSize: 11, fontWeight: 800, color: "#000", cursor: "pointer" }}>Generar combinaciones</button>
+              )}
+            </div>
+
+            {variantRows.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: T2, textTransform: "uppercase", letterSpacing: .4, marginBottom: 8 }}>{variantRows.length} combinación{variantRows.length === 1 ? "" : "es"}</div>
+                {variantRows.map((row, ri) => (
+                  <div key={ri} style={{ border: `1px solid ${B}`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: T1 }}>{Object.values(row.attributes).join(" / ")}</span>
+                      <button onClick={() => removeVariantRow(ri)} style={{ background: "none", border: "none", color: "#ef4444", fontSize: 16, cursor: "pointer" }}>×</button>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: imgs.length ? 8 : 0 }}>
+                      <input type="number" step="0.01" min="0" value={row.price} onChange={e => setVariantRowField(ri, "price", e.target.value)} placeholder={`Precio (${money(Number(price) || 0, currency)})`} style={{ ...inp, flex: 1 }} />
+                      <input type="number" min="0" step="1" value={row.stock} onChange={e => setVariantRowField(ri, "stock", e.target.value)} placeholder="Stock" style={{ ...inp, flex: 1 }} />
+                    </div>
+                    {imgs.length > 0 && (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {imgs.map((src, ii) => (
+                          <img key={ii} src={src} alt="" onClick={() => setVariantRowImage(ri, src)}
+                            style={{ width: 40, height: 40, borderRadius: 7, objectFit: "cover", cursor: "pointer", border: `2px solid ${row.image === src ? G : "transparent"}`, opacity: row.image === src ? 1 : .55 }}
+                            onError={e => { e.target.style.display = "none"; }} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Descuento por cantidad (solo productos, opcional) */}
         {!isService && (
@@ -2169,12 +2302,46 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
   // aplica a productos (los servicios no tienen inventario). null = aún cargando.
   const isService = p.kind === "service";
   const [availStock, setAvailStock] = useState(null);
+
+  // Variantes reales (color/talla/etc.) — selector agrupado, igual que en la
+  // "Vista a fondo" del Catálogo Pro. Se elige la primera combinación
+  // automáticamente al cargar, para que siempre haya un precio/stock
+  // concreto en pantalla (nunca "desde $X" ambiguo).
+  const [variants, setVariants] = useState(undefined); // undefined=cargando · []=sin variantes
+  const [selectedAttrs, setSelectedAttrs] = useState({});
+  useEffect(() => {
+    setVariants(undefined); setSelectedAttrs({});
+    if (isService || !p.id) { setVariants([]); return; }
+    let alive = true;
+    getProductVariants(p.id).then(rows => {
+      if (!alive) return;
+      setVariants(rows);
+      if (rows.length) setSelectedAttrs(rows[0].attributes || {});
+    }).catch(() => setVariants([]));
+    return () => { alive = false; };
+  }, [p.id, isService]);
+  const { labels: variantLabels, valuesByLabel: variantValuesByLabel } = useMemo(() => groupVariantAttrs(variants || []), [variants]);
+  const activeVariant = useMemo(() => ((variants && variants.length) ? resolveVariantBy(variants, selectedAttrs) : null), [variants, selectedAttrs]);
+  const displayPrice = activeVariant && activeVariant.price != null ? activeVariant.price : p.price;
+  // La foto principal salta a la de la variante elegida, si tiene una propia
+  // entre las fotos ya subidas del producto.
+  useEffect(() => {
+    if (!activeVariant?.image) return;
+    const idx = imgs.indexOf(activeVariant.image);
+    if (idx >= 0) setImgIdx(idx);
+  }, [activeVariant?.image]);
+
   useEffect(() => {
     if (isService || !p.id) return;
     let alive = true;
-    getAvailableStock(p.id).then(n => { if (alive) setAvailStock(n); }).catch(() => {});
+    if (variants === undefined) return; // aún no se sabe si hay variantes — no pedir stock todavía
+    if (activeVariant) {
+      getAvailableVariantStock(activeVariant.id).then(n => { if (alive) setAvailStock(n); }).catch(() => {});
+    } else if (!variants.length) {
+      getAvailableStock(p.id).then(n => { if (alive) setAvailStock(n); }).catch(() => {});
+    }
     return () => { alive = false; };
-  }, [p.id, isService]);
+  }, [p.id, isService, variants, activeVariant?.id]);
   const soldOut = !isService && availStock != null && availStock <= 0;
   // Es mi propio producto/servicio: no tiene sentido comprármelo a mí mismo.
   const isOwnProduct = !!(user?.id && p.seller_id && String(user.id) === String(p.seller_id));
@@ -2248,8 +2415,8 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
               : <span style={{ fontSize: 15 * ts, fontWeight: 800, color: T2 }}>💬 Precio a consultar</span>
           ) : (
             <>
-              <span style={{ fontSize: 21 * ts, fontWeight: 900, color: G }}>{money(p.price, p.currency)}</span>
-              {p.orig_price && <>
+              <span style={{ fontSize: 21 * ts, fontWeight: 900, color: G }}>{money(displayPrice, p.currency)}</span>
+              {p.orig_price && !activeVariant && <>
                 <span style={{ fontSize: 13 * ts, color: T2, textDecoration: "line-through" }}>{(CURRENCIES[p.currency || "USD"] || CURRENCIES.USD).symbol}{parseFloat(p.orig_price).toLocaleString("es-ES")}</span>
                 <span style={{ background: "#16A34A1a", borderRadius: 100, padding: "3px 9px", fontSize: 10 * ts, fontWeight: 700, color: "#22C55E" }}>-{disc}%</span>
               </>}
@@ -2257,6 +2424,30 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
           )}
         </div>
         {!isService && <CurrencyEquivalents product={p} />}
+
+        {/* Selector de variantes (color/talla/etc.), si el producto tiene */}
+        {!isService && variantLabels.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            {variantLabels.map(label => (
+              <div key={label} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: T2, textTransform: "uppercase", letterSpacing: .3, marginBottom: 7 }}>{attrLabelText(label)}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {variantValuesByLabel[label].map(value => {
+                    const isOn = selectedAttrs[label] === value;
+                    const candidate = { ...selectedAttrs, [label]: value };
+                    const exists = variants.some(v => Object.entries(candidate).every(([l, val]) => (v.attributes || {})[l] === val));
+                    return (
+                      <button key={value} type="button" disabled={!exists} onClick={() => setSelectedAttrs(candidate)}
+                        style={{ padding: "7px 13px", borderRadius: 9, fontSize: 12, fontWeight: 700, cursor: exists ? "pointer" : "not-allowed",
+                          background: isOn ? G : (isDark ? "#1a1a1a" : "#f5f5f7"), color: isOn ? "#000" : (exists ? T1 : T3),
+                          border: `1.5px solid ${isOn ? G : B}`, opacity: exists ? 1 : .4 }}>{value}</button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Zona donde se ofrece el servicio (solo servicios) */}
         {isService && p.location && (
@@ -2366,8 +2557,10 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
           <div style={{ flex: 1, textAlign: "center", padding: "15px", borderRadius: 50, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>📦 Es tu producto</div>
         ) : soldOut ? (
           <div style={{ flex: 1, textAlign: "center", padding: "15px", borderRadius: 50, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>🚫 Agotado</div>
+        ) : (variants && variants.length > 0 && !activeVariant) ? (
+          <div style={{ flex: 1, textAlign: "center", padding: "15px", borderRadius: 50, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>Elige las opciones</div>
         ) : (
-          <button className="btn btn-gold" onClick={() => requireAuth(() => onBuy(p))}
+          <button className="btn btn-gold" onClick={() => requireAuth(() => onBuy(activeVariant ? { ...p, selectedVariant: activeVariant } : p))}
             style={{ flex: 1, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800 }}>
             Comprar ahora
           </button>

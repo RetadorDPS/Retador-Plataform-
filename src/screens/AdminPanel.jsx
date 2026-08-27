@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -3968,12 +3968,21 @@ function CatalogProductHero({ title, images, category, whyItSells, pricing }) {
   );
 }
 
+// Tarifas precargadas del tramo Phoenix→Cuba (agencia del socio de Daniel,
+// cobra por libra de peso) — el admin siempre puede escribir una tarifa
+// personalizada distinta, nunca queda limitado a estas dos.
+const HUB_RATE_PRESETS = { aereo: 1.99, rapido: 2.99 };
+const HUB_METHOD_LABEL = { aereo: 'Aéreo', rapido: 'Rápido', personalizado: 'Personalizada' };
+
 function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
   const [edits, setEdits] = useState({}); // { [pricingId]: {margin_pct, margin_fixed} }
   const [regions, setRegions] = useState(product.sellable_regions || []);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [recalcId, setRecalcId] = useState(null); // pricing_id en recálculo, o 'all'
+  const [hubMethod, setHubMethod] = useState('aereo');
+  const [hubRateInput, setHubRateInput] = useState(String(HUB_RATE_PRESETS.aereo));
+  const [applyingHub, setApplyingHub] = useState(false);
 
   const rows = (product.pricing || []).map(p => {
     const draft = edits[p.id] || {};
@@ -4030,6 +4039,22 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
     setRecalcId(null);
   };
 
+  const chooseHubMethod = m => {
+    setHubMethod(m);
+    if (m !== 'personalizado') setHubRateInput(String(HUB_RATE_PRESETS[m]));
+  };
+  const applyHubRate = async () => {
+    const rate = Number(hubRateInput);
+    if (!rate || rate <= 0) { toast('Ingresa una tarifa válida (mayor que 0)'); return; }
+    setApplyingHub(true);
+    try {
+      await catalogProApplyHubRate(rows.map(r => r.id), rate, hubMethod);
+      toast(`✅ Tarifa a Cuba aplicada a las ${rows.length} variante(s)`);
+      onPublished();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo aplicar la tarifa')); }
+    setApplyingHub(false);
+  };
+
   return (
     <>
       <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a Staging</button>
@@ -4051,10 +4076,33 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
         </div>
       )}
 
+      {!ro && (
+        <div className="card cp mb16">
+          <div className="ch"><span className="ct">Tramo Phoenix → Cuba (agencia del socio)</span></div>
+          <div style={{ fontSize: 11, color: 'var(--tx3)', marginBottom: 10 }}>Se cobra por libra de peso — elige la tarifa y aplícala a todas las variantes de este producto de una vez.</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+            {['aereo', 'rapido', 'personalizado'].map(m => (
+              <button key={m} type="button" className={`btn sm ${hubMethod === m ? 'bts' : 'btg'}`} onClick={() => chooseHubMethod(m)}>
+                {m === 'personalizado' ? 'Tarifa personalizada' : `${HUB_METHOD_LABEL[m]} · $${HUB_RATE_PRESETS[m].toFixed(2)}/lb`}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--tx3)' }}>Tarifa ($/lb):</span>
+              <input type="number" step="0.01" min="0.01" className="inp" style={{ width: 90 }} value={hubRateInput} disabled={hubMethod !== 'personalizado'} onChange={e => setHubRateInput(e.target.value)} />
+            </div>
+            <button className="btn btp sm" disabled={applyingHub} onClick={applyHubRate}>
+              {applyingHub ? <span className="spin">↻</span> : '✓'} Aplicar a las {rows.length} variante(s)
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="tw">
           <table>
-            <thead><tr><th>Variante</th><th>Peso</th><th>Costo real</th><th>Envío</th><th>Margen %</th><th>Margen fijo</th><th>Precio recomendado</th><th>Ganancia</th></tr></thead>
+            <thead><tr><th>Variante</th><th>Peso</th><th>Costo real</th><th>Envío a hub</th><th>Envío a Cuba</th><th>Margen %</th><th>Margen fijo</th><th>Precio recomendado</th><th>Ganancia</th></tr></thead>
             <tbody>
               {rows.map(r => (
                 <tr key={r.id}>
@@ -4076,6 +4124,16 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
                           </button>
                         )
                         : <span style={{ color: 'var(--tx3)' }}>⏳ pendiente</span>}
+                  </td>
+                  <td>
+                    {r.cost_hub_to_destination != null
+                      ? (
+                        <div>
+                          <div style={{ fontWeight: 700 }}>{money(r.cost_hub_to_destination)}</div>
+                          <div style={{ fontSize: 9.5, color: 'var(--tx3)', marginTop: 2 }}>${Number(r.hub_to_destination_rate).toFixed(2)}/lb · {HUB_METHOD_LABEL[r.hub_to_destination_method] || r.hub_to_destination_method}</div>
+                        </div>
+                      )
+                      : <span style={{ color: 'var(--tx3)' }}>Sin definir</span>}
                   </td>
                   <td><input type="number" className="inp" style={{ width: 70 }} value={r.marginPct} disabled={ro} onChange={e => setDraft(r.id, { margin_pct: e.target.value })} /></td>
                   <td><input type="number" className="inp" style={{ width: 70 }} value={r.marginFixed} disabled={ro} onChange={e => setDraft(r.id, { margin_fixed: e.target.value })} /></td>

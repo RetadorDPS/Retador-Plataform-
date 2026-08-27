@@ -2102,6 +2102,16 @@ export const catalogProCalculateShipping = async (pricingIds) => {
   return data;
 };
 
+// Aplica una tarifa por libra (aérea/rápida/personalizada) del tramo
+// Phoenix→Cuba a un conjunto de variantes de un producto en Staging de una
+// sola vez — recalcula costo base, precio recomendado y ganancia en el
+// servidor con el margen que cada variante ya tenía.
+export const catalogProApplyHubRate = async (pricingIds, rate, method) => {
+  const { data, error } = await supabase.rpc("catalog_pro_apply_hub_rate", { p_pricing_ids: pricingIds, p_rate: rate, p_method: method });
+  if (error) { console.error("catalogProApplyHubRate:", error.message); throw error; }
+  return data;
+};
+
 export const catalogProUpdateStagingRegions = async (id, sellableRegions) => {
   const { data, error } = await supabase.from("catalog_pro_staging").update({ sellable_regions: sellableRegions }).eq("id", id).select().single();
   if (error) { console.error("catalogProUpdateStagingRegions:", error.message); throw error; }

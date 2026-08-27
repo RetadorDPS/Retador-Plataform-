@@ -1517,6 +1517,14 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, deliveryLocalEnable
   const priceNum = Number(price) || 0;
   const profit = Math.round((priceNum - cost) * 100) / 100;
   const heroImg = activeVariant?.image || images[imgIndex] || images[0];
+  // Costo real del tramo Phoenix→Cuba — el único costo interno que SÍ se le
+  // muestra al vendedor (decisión explícita), junto a "tu costo"/"tu
+  // ganancia", nunca destacado ni oculto.
+  const cubaShipping = activeVariant?.cost_hub_to_destination != null ? Number(activeVariant.cost_hub_to_destination) : null;
+  // Proyección simple (no garantía): ganancia por unidad × escalones fijos
+  // de ventas, se recalcula en vivo con el precio que el vendedor edite.
+  const perUnitProfit = Math.max(0, profit);
+  const PROJECTION_TIERS = [10, 50, 100];
 
   const addToStore = () => {
     if (!priceNum || priceNum < cost) { return; }
@@ -1611,18 +1619,39 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, deliveryLocalEnable
           </div>
         )}
 
-        {/* Mini-calculadora: tu costo → tu precio de venta → tu ganancia */}
+        {/* Mini-calculadora: tu costo → envío a Cuba → tu precio de venta → tu ganancia */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:C.s3, marginBottom:10 }}>
           <span style={{ fontSize:12, color:C.m }}>Tu costo{activeVariant ? " (esta variante)" : ""}</span>
           <span style={{ fontSize:15, fontWeight:800, color:C.t }}>{money(cost, "USD")}</span>
         </div>
+        {cubaShipping != null && (
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:C.s3, marginBottom:10 }}>
+            <span style={{ fontSize:12, color:C.m }}>Envío hasta Cuba</span>
+            <span style={{ fontSize:15, fontWeight:800, color:C.t }}>{money(cubaShipping, "USD")}</span>
+          </div>
+        )}
         <div style={{ marginBottom:10 }}>
           <div style={{ fontSize:10.5, fontWeight:700, color:C.m, textTransform:"uppercase", letterSpacing:.4, marginBottom:6 }}>Tu precio de venta</div>
           <input type="number" step="0.01" min={cost} value={price} onChange={e => setPrice(e.target.value)} style={inpStyle(C)}/>
         </div>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:`${C.ok}18`, marginBottom:16 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:`${C.ok}18`, marginBottom:10 }}>
           <span style={{ fontSize:12, color:C.ok, fontWeight:700 }}>Tu ganancia</span>
           <span style={{ fontSize:15, fontWeight:800, color:C.ok }}>{money(Math.max(0, profit), "USD")}</span>
+        </div>
+
+        {/* Proyección por volumen — estimado, no garantía, se recalcula en
+            vivo con el precio de venta que el vendedor escriba arriba. */}
+        <div style={{ padding:"10px 12px", borderRadius:10, background:`${C.ok}0d`, border:`1px dashed ${C.ok}40`, marginBottom:16 }}>
+          <div style={{ fontSize:10.5, fontWeight:700, color:C.ok, textTransform:"uppercase", letterSpacing:.4, marginBottom:8 }}>Si vendes…</div>
+          <div style={{ display:"flex", gap:7 }}>
+            {PROJECTION_TIERS.map(n => (
+              <div key={n} style={{ flex:1, textAlign:"center", padding:"8px 4px", borderRadius:9, background:C.s1 }}>
+                <div style={{ fontSize:10, color:C.m, marginBottom:3 }}>{n} unidades</div>
+                <div style={{ fontSize:13, fontWeight:800, color:C.ok }}>{money(perUnitProfit * n, "USD")}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize:10, color:C.m, marginTop:7 }}>Estimado según tu precio de venta actual — no es una garantía.</div>
         </div>
         {priceNum > 0 && priceNum < cost && <div style={{ fontSize:11.5, color:C.err, marginBottom:14 }}>Tu precio de venta no puede ser menor a tu costo ({money(cost, "USD")})</div>}
 

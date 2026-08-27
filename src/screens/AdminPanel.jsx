@@ -3908,10 +3908,13 @@ function pickHeroVariant(pricing) {
 // catalog_pro_variant_pricing, ningún número inventado.
 function CatalogProductHero({ title, images, category, whyItSells, pricing }) {
   const hero = pickHeroVariant(pricing);
-  const costBase = hero ? (Number(hero.cost_base_total ?? hero.cost_product) || 0) : 0;
+  // El margen/ganancia se calculan SOLO sobre el costo real del producto en
+  // CJ — el envío (ambos tramos) es dato informativo aparte, nunca se suma
+  // aquí (ver misma regla en CatalogStagingDetail y la Edge Function).
+  const costProduct = hero ? (Number(hero.cost_product) || 0) : 0;
   const price = hero ? (Number(hero.recommended_price) || 0) : 0;
   const profit = hero ? (Number(hero.profit_estimate) || 0) : 0;
-  const marginX = hero && costBase > 0 ? price / costBase : 0;
+  const marginX = hero && costProduct > 0 ? price / costProduct : 0;
   const categoryChip = String(category || '').split(/[>/]/).map(s => s.trim()).filter(Boolean).pop() || null;
   const shippingKnown = hero && hero.shipping_status === 'ok' && hero.cost_shipping_to_hub != null;
   const shippingFailed = hero && hero.shipping_status === 'no_disponible';
@@ -3946,23 +3949,22 @@ function CatalogProductHero({ title, images, category, whyItSells, pricing }) {
             <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{hero ? money(price) : '—'}</div>
           </div>
           <div style={{ background: 'var(--bg2)', borderRadius: 10, padding: '10px 12px' }}>
-            <div style={{ fontSize: 9.5, color: 'var(--tx3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Tu costo</div>
+            <div style={{ fontSize: 9.5, color: 'var(--tx3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Costo del producto</div>
             <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{hero ? money(hero.cost_product) : '—'}</div>
-          </div>
-          <div style={{ background: shippingFailed ? 'var(--rdb, rgba(239,68,68,.1))' : 'var(--bg2)', borderRadius: 10, padding: '10px 12px' }}>
-            <div style={{ fontSize: 9.5, color: shippingFailed ? 'var(--rd)' : 'var(--tx3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Envío al centro logístico</div>
-            <div style={{ fontSize: shippingFailed ? 11.5 : 14, fontWeight: 800, color: shippingFailed ? 'var(--rd)' : 'var(--tx)' }}>
-              {shippingKnown ? money(hero.cost_shipping_to_hub) : shippingFailed ? '⚠️ No disponible' : 'Calculando…'}
-            </div>
-            {hero?.shipping_method && shippingKnown && (
-              <div style={{ fontSize: 9.5, color: 'var(--tx3)', marginTop: 2 }}>{humanizeShipping(hero.shipping_method, hero.shipping_aging)}</div>
-            )}
           </div>
           <div style={{ background: 'var(--gnb)', borderRadius: 10, padding: '10px 12px' }}>
             <div style={{ fontSize: 9.5, color: 'var(--gn)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Tu ganancia</div>
             <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--gn)' }}>{hero ? money(profit) : '—'}</div>
           </div>
+          <div style={{ background: shippingFailed ? 'var(--rdb, rgba(239,68,68,.1))' : 'var(--bg2)', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ fontSize: 9.5, color: shippingFailed ? 'var(--rd)' : 'var(--tx3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Envío (informativo)</div>
+            <div style={{ fontSize: 11, color: shippingFailed ? 'var(--rd)' : 'var(--tx)', lineHeight: 1.55 }}>
+              <div>Hub: {shippingKnown ? <b>{money(hero.cost_shipping_to_hub)}</b> : shippingFailed ? '⚠️ no disp.' : 'calculando…'}</div>
+              <div>Cuba: {hero?.cost_hub_to_destination != null ? <b>{money(hero.cost_hub_to_destination)}</b> : '—'}</div>
+            </div>
+          </div>
         </div>
+        <div style={{ fontSize: 9.5, color: 'var(--tx3)', marginTop: 8 }}>El envío no se suma al costo ni afecta el margen — es solo informativo (ver desglose completo abajo).</div>
       </div>
     </div>
   );
@@ -3989,7 +3991,10 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
     const draft = edits[p.id] || {};
     const marginPct = draft.margin_pct ?? p.margin_pct ?? 0;
     const marginFixed = draft.margin_fixed ?? p.margin_fixed ?? 0;
-    const costBase = Number(p.cost_base_total ?? p.cost_product) || 0;
+    // Margen/precio/ganancia se calculan SOLO sobre el costo real del
+    // producto en CJ — el envío (a hub y a Cuba) es informativo aparte,
+    // nunca se suma aquí (ver misma regla en la Edge Function).
+    const costBase = Number(p.cost_product) || 0;
     const recommended = Math.round((costBase * (1 + Number(marginPct) / 100) + Number(marginFixed)) * 100) / 100;
     const profit = Math.round((recommended - costBase) * 100) / 100;
     return { ...p, marginPct, marginFixed, costBase, recommended, profit, dirty: draft.margin_pct !== undefined || draft.margin_fixed !== undefined };
@@ -4045,13 +4050,18 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
   // pedido a CJ, hay que guardar esa cantidad ANTES de recalcular para que
   // el backend cotice el pedido real (no asume que escala linealmente,
   // vuelve a preguntarle a CJ) y reparta el costo entre esas unidades.
+  // IMPORTANTE: desde el cambio de modelo económico, este flete amortizado
+  // ya NO afecta el precio recomendado ni la ganancia (eso se calcula solo
+  // sobre cost_product) — sigue siendo útil como dato informativo y porque
+  // alimenta cost_to_pay en catalog_pro_fulfillment (lo real que Daniel le
+  // paga a CJ), pero no cambia lo que ve el vendedor.
   const recalcFreightWithQty = async (r) => {
     const qty = Math.max(1, Math.floor(Number(qtyDrafts[r.id] ?? r.import_qty ?? 1)) || 1);
     setRecalcId(r.id);
     try {
       await catalogProUpdateVariantPricing(r.id, { import_qty: qty });
       await catalogProCalculateShipping([r.id]);
-      toast(`✅ Flete recalculado para ${qty} unidad(es)`);
+      toast(`✅ Flete recalculado para ${qty} unidad(es) (informativo, no cambia el precio)`);
       onPublished();
     } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo calcular el flete')); }
     setRecalcId(null);
@@ -4120,7 +4130,7 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="tw">
           <table>
-            <thead><tr><th>Variante</th><th>Peso</th><th>Costo real</th><th>Envío a hub</th><th>Envío a Cuba</th><th>Margen %</th><th>Margen fijo</th><th>Precio recomendado</th><th>Ganancia</th></tr></thead>
+            <thead><tr><th>Variante</th><th>Peso</th><th>Costo real</th><th>Envío a hub (informativo)</th><th>Envío a Cuba (informativo)</th><th>Margen %</th><th>Margen fijo</th><th>Precio recomendado</th><th>Ganancia</th></tr></thead>
             <tbody>
               {rows.map(r => (
                 <tr key={r.id}>
@@ -4146,7 +4156,7 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
                         <input type="number" min="1" step="1" className="inp" style={{ width: 46, fontSize: 10.5, padding: '3px 5px' }}
                           value={qtyDrafts[r.id] ?? r.import_qty ?? 1}
                           onChange={e => setQtyDrafts(q => ({ ...q, [r.id]: e.target.value }))}
-                          title="Cantidad a importar en este pedido a CJ" />
+                          title="Cantidad a importar en este pedido a CJ (solo informativo: ya no cambia el precio recomendado, solo lo que se le paga a CJ por unidad)" />
                         <button className="btn btg sm" style={{ padding: '3px 7px', fontSize: 10.5 }} disabled={recalcId === r.id} onClick={() => recalcFreightWithQty(r)} title="Recalcular flete con esta cantidad">
                           {recalcId === r.id ? <span className="spin">↻</span> : '🔄'}
                         </button>
@@ -4298,7 +4308,7 @@ function StorePreviewScreen({ product }) {
 // tienda" con exactamente lo que vería un comprador (StorePreviewScreen).
 function CatalogPublishedDetail({ product, onBack }) {
   const [view, setView] = useState('costeo');
-  const rows = (product.pricing || []).map(p => ({ ...p, costBase: Number(p.cost_base_total ?? p.cost_product) || 0 }));
+  const rows = (product.pricing || []).map(p => ({ ...p, costBase: Number(p.cost_product) || 0 }));
   return (
     <>
       <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a Publicado</button>

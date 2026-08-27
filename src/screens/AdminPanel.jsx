@@ -3774,19 +3774,21 @@ function VariantAttributeSelector({ variants, selectedAttrs, onChange, disabled 
 function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
   const [data, setData] = useState(undefined); // undefined = cargando
   const [chosenSkus, setChosenSkus] = useState([]);
-  const [selectedAttrs, setSelectedAttrs] = useState({});
   const [importing, setImporting] = useState(false);
 
   useEffect(() => {
-    setData(undefined); setChosenSkus([]); setSelectedAttrs({});
-    catalogProPreview(pid).then(d => {
-      setData(d);
-      if (d?.variants?.length) setSelectedAttrs(d.variants[0].attributes || {});
-    }).catch(e => { toast('⚠️ ' + (e.message || 'No se pudo cargar el preview')); setData(null); });
+    setData(undefined); setChosenSkus([]);
+    catalogProPreview(pid).then(setData)
+      .catch(e => { toast('⚠️ ' + (e.message || 'No se pudo cargar el preview')); setData(null); });
   }, [pid]);
 
-  const activeVariant = useMemo(() => (data ? resolveVariant(data.variants, selectedAttrs) : null), [data, selectedAttrs]);
   const toggleChosen = sku => setChosenSkus(s => s.includes(sku) ? s.filter(x => x !== sku) : s.concat(sku));
+  // "Con stock" = stock YA verificado contra CJ y mayor que 0 — nunca las
+  // que quedaron sin verificar (null), para no incluir a ciegas algo que
+  // pudiera estar agotado de verdad.
+  const withStockSkus = useMemo(() => (data?.variants || []).filter(v => v.stock != null && v.stock > 0).map(v => v.sku), [data]);
+  const selectAllWithStock = () => setChosenSkus(withStockSkus);
+  const deselectAll = () => setChosenSkus([]);
 
   const doImport = async () => {
     if (chosenSkus.length === 0) { toast('Elige al menos una variante'); return; }
@@ -3807,7 +3809,7 @@ function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
       <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a resultados</button>
       <div className="card cp mb16">
         <div style={{ display: 'flex', gap: 12 }}>
-          <CatalogImg src={activeVariant?.image || data.images?.[0]} width={64} height={64} radius={8} iconSize={26} />
+          <CatalogImg src={data.images?.[0]} width={64} height={64} radius={8} iconSize={26} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{data.title}</div>
             <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>{data.category} · {data.variants.length} variantes reales · {data.listedNum ?? 0} listados</div>
@@ -3815,41 +3817,43 @@ function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
         </div>
       </div>
 
-      <div className="card cp mb16">
-        <VariantAttributeSelector variants={data.variants} selectedAttrs={selectedAttrs} onChange={setSelectedAttrs} disabled={ro} />
-        {activeVariant && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--bd)' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--tx)' }}>{money(activeVariant.price)}</div>
-              <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>
-                {activeVariant.stock == null ? 'Stock sin verificar' : `${activeVariant.stock.toLocaleString('es-ES')} en stock`}
-                {activeVariant.weightGrams ? ` · ${activeVariant.weightGrams} g` : ''}
-              </div>
-            </div>
-            {!ro && (
-              <button className={`btn sm ${chosenSkus.includes(activeVariant.sku) ? 'bts' : 'btg'}`} onClick={() => toggleChosen(activeVariant.sku)}>
-                {chosenSkus.includes(activeVariant.sku) ? '✓ Incluida' : '+ Incluir'}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {chosenSkus.length > 0 && (
-        <div className="card cp mb16">
-          <div className="ct">Variantes elegidas para importar ({chosenSkus.length})</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-            {chosenSkus.map(sku => {
-              const v = data.variants.find(x => x.sku === sku);
-              return (
-                <span key={sku} className="bdg bb" style={{ cursor: 'pointer' }} onClick={() => toggleChosen(sku)} title="Quitar">
-                  {v ? Object.values(v.attributes || {}).join(' · ') || sku : sku} ✕
-                </span>
-              );
-            })}
-          </div>
+      {!ro && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <button className="btn btg sm" disabled={withStockSkus.length === 0} onClick={selectAllWithStock}>✓ Seleccionar todas (con stock) — {withStockSkus.length}</button>
+          <button className="btn btg sm" disabled={chosenSkus.length === 0} onClick={deselectAll}>✕ Deseleccionar todas</button>
+          <div style={{ fontSize: 11, color: 'var(--tx3)', marginLeft: 'auto' }}>{chosenSkus.length} de {data.variants.length} seleccionada(s)</div>
         </div>
       )}
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="tw">
+          <table>
+            <thead><tr>{!ro && <th></th>}<th>Variante</th><th>Precio</th><th>Stock verificado</th><th>Peso</th></tr></thead>
+            <tbody>
+              {data.variants.map(v => {
+                const checked = chosenSkus.includes(v.sku);
+                const attrText = Object.values(v.attributes || {}).join(' · ') || v.sku;
+                return (
+                  <tr key={v.sku} style={{ cursor: ro ? 'default' : 'pointer', background: checked ? 'var(--bg2)' : 'transparent' }} onClick={() => !ro && toggleChosen(v.sku)}>
+                    {!ro && <td onClick={e => e.stopPropagation()}><input type="checkbox" checked={checked} onChange={() => toggleChosen(v.sku)} /></td>}
+                    <td style={{ color: 'var(--tx)', fontWeight: 600 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <CatalogImg src={v.image} width={28} height={28} radius={6} iconSize={12} />
+                        <span>{attrText}</span>
+                      </div>
+                    </td>
+                    <td style={{ color: 'var(--tx2)', fontWeight: 700 }}>{money(v.price)}</td>
+                    <td style={{ color: v.stock == null ? 'var(--tx3)' : v.stock > 0 ? 'var(--gn)' : 'var(--rd)', fontWeight: 700 }}>
+                      {v.stock == null ? 'Sin verificar' : v.stock.toLocaleString('es-ES')}
+                    </td>
+                    <td style={{ color: 'var(--tx3)' }}>{v.weightGrams ? `${v.weightGrams} g` : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       {!ro && <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn btp" disabled={importing || chosenSkus.length === 0} onClick={doImport}>
@@ -3858,6 +3862,30 @@ function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
       </div>}
     </>
   );
+}
+
+// Traduce el flete crudo de CJ (ej. método "CJPacket CR", vigencia "25-30")
+// a un texto legible y consistente con el resto del panel — nunca el
+// nombre de fletera interno de CJ tal cual. El destino de este envío
+// SIEMPRE es el centro logístico interno en EE.UU. (fijo, vía
+// freightCalculate) sin importar qué país buscó el admin en CJ — ese país
+// es solo dónde CJ tiene el stock de origen, son cosas distintas.
+function humanizeShippingAging(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const range = s.match(/^(\d+)\s*[-~]\s*(\d+)$/);
+  if (range) return `${range[1]} a ${range[2]} días hábiles`;
+  if (/^\d+$/.test(s)) return `${s} días hábiles`;
+  return s;
+}
+function humanizeShippingMethod(rawName) {
+  const n = String(rawName || '').toLowerCase();
+  if (/express|expedited|\bdhl\b|\bfedex\b|\bups\b|\btnt\b/.test(n)) return 'Envío exprés';
+  return 'Envío estándar';
+}
+function humanizeShipping(name, aging) {
+  const agingText = humanizeShippingAging(aging);
+  return agingText ? `${humanizeShippingMethod(name)} — ${agingText}` : humanizeShippingMethod(name);
 }
 
 // La variante "vitrina" del resumen de ganancia: la más barata entre las
@@ -3922,12 +3950,12 @@ function CatalogProductHero({ title, images, category, whyItSells, pricing }) {
             <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{hero ? money(hero.cost_product) : '—'}</div>
           </div>
           <div style={{ background: shippingFailed ? 'var(--rdb, rgba(239,68,68,.1))' : 'var(--bg2)', borderRadius: 10, padding: '10px 12px' }}>
-            <div style={{ fontSize: 9.5, color: shippingFailed ? 'var(--rd)' : 'var(--tx3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Costo de envío</div>
+            <div style={{ fontSize: 9.5, color: shippingFailed ? 'var(--rd)' : 'var(--tx3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Envío al centro logístico</div>
             <div style={{ fontSize: shippingFailed ? 11.5 : 14, fontWeight: 800, color: shippingFailed ? 'var(--rd)' : 'var(--tx)' }}>
               {shippingKnown ? money(hero.cost_shipping_to_hub) : shippingFailed ? '⚠️ No disponible' : 'Calculando…'}
             </div>
             {hero?.shipping_method && shippingKnown && (
-              <div style={{ fontSize: 9.5, color: 'var(--tx3)', marginTop: 2 }}>{hero.shipping_method} · {hero.shipping_aging} días</div>
+              <div style={{ fontSize: 9.5, color: 'var(--tx3)', marginTop: 2 }}>{humanizeShipping(hero.shipping_method, hero.shipping_aging)}</div>
             )}
           </div>
           <div style={{ background: 'var(--gnb)', borderRadius: 10, padding: '10px 12px' }}>
@@ -4026,15 +4054,21 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="tw">
           <table>
-            <thead><tr><th>Variante</th><th>Costo real</th><th>Envío</th><th>Margen %</th><th>Margen fijo</th><th>Precio recomendado</th><th>Ganancia</th></tr></thead>
+            <thead><tr><th>Variante</th><th>Peso</th><th>Costo real</th><th>Envío</th><th>Margen %</th><th>Margen fijo</th><th>Precio recomendado</th><th>Ganancia</th></tr></thead>
             <tbody>
               {rows.map(r => (
                 <tr key={r.id}>
-                  <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{r.variant_sku}</td>
+                  <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{Object.values(r.attributes || {}).join(' · ') || r.variant_sku}</td>
+                  <td style={{ color: 'var(--tx3)' }}>{r.weight_grams ? `${r.weight_grams} g` : '—'}</td>
                   <td style={{ background: 'var(--bg2)', color: 'var(--tx2)', fontWeight: 700 }}>{money(r.costBase)}</td>
                   <td>
                     {r.shipping_status === 'ok'
-                      ? <span title={r.shipping_method ? `${r.shipping_method} · ${r.shipping_aging} días` : ''}>{money(r.cost_shipping_to_hub)}</span>
+                      ? (
+                        <div>
+                          <div style={{ fontWeight: 700 }}>{money(r.cost_shipping_to_hub)}</div>
+                          <div style={{ fontSize: 9.5, color: 'var(--tx3)', marginTop: 2 }}>{humanizeShipping(r.shipping_method, r.shipping_aging)}</div>
+                        </div>
+                      )
                       : r.shipping_status === 'no_disponible'
                         ? (
                           <button className="btn bts sm" disabled={recalcId === r.id} onClick={() => recalcFreight([r.id], r.id)} title="Reintentar cálculo de flete">

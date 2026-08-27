@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -4134,7 +4134,12 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
             <tbody>
               {rows.map(r => (
                 <tr key={r.id}>
-                  <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{Object.values(r.attributes || {}).join(' · ') || r.variant_sku}</td>
+                  <td style={{ color: 'var(--tx)', fontWeight: 600 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <CatalogImg src={r.image} width={28} height={28} radius={6} iconSize={12} />
+                      <span>{Object.values(r.attributes || {}).join(' · ') || r.variant_sku}</span>
+                    </div>
+                  </td>
                   <td style={{ color: 'var(--tx3)' }}>{r.weight_grams ? `${r.weight_grams} g` : '—'}</td>
                   <td style={{ background: 'var(--bg2)', color: 'var(--tx2)', fontWeight: 700 }}>{money(r.costBase)}</td>
                   <td>
@@ -4272,11 +4277,14 @@ function StorePreviewScreen({ product }) {
   const activeVariant = useMemo(() => resolveVariant(pricing, selectedAttrs), [pricing, selectedAttrs]);
   const descriptionText = useMemo(() => htmlToPlainText(product.description), [product.description]);
   const priceToShow = activeVariant?.recommended_price ?? product.recommended_price;
-  const mainImage = images[mainIdx] || activeVariant?.image;
+  // La foto de la variante activa manda sobre la miniatura del producto que
+  // se haya tocado antes — si no, el selector de variante nunca cambiaba la
+  // imagen (bug real: quedaba fija en images[mainIdx]).
+  const mainImage = activeVariant?.image || images[mainIdx] || images[0];
 
   return (
     <div style={{ maxWidth: 420, margin: '0 auto' }}>
-      <CatalogImg src={mainImage} width="100%" height={320} radius={16} iconSize={54} />
+      <CatalogImg key={mainImage} src={mainImage} width="100%" height={320} radius={16} iconSize={54} />
       {images.length > 1 && (
         <div style={{ display: 'flex', gap: 6, marginTop: 8, overflowX: 'auto', paddingBottom: 2 }}>
           {images.map((url, i) => (
@@ -4328,7 +4336,12 @@ function CatalogPublishedDetail({ product, onBack }) {
                 <tbody>
                   {rows.map(r => (
                     <tr key={r.id}>
-                      <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{Object.values(r.attributes || {}).join(' · ') || r.variant_sku}</td>
+                      <td style={{ color: 'var(--tx)', fontWeight: 600 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <CatalogImg src={r.image} width={28} height={28} radius={6} iconSize={12} />
+                          <span>{Object.values(r.attributes || {}).join(' · ') || r.variant_sku}</span>
+                        </div>
+                      </td>
                       <td style={{ background: 'var(--bg2)', color: 'var(--tx2)', fontWeight: 700 }}>{money(r.costBase)}</td>
                       <td>{r.margin_pct}% {Number(r.margin_fixed) ? `+ ${money(r.margin_fixed)}` : ''}</td>
                       <td style={{ color: 'var(--gn)', fontWeight: 800 }}>{money(r.recommended_price)}</td>
@@ -4350,6 +4363,8 @@ function CatalogPublishedTab({ toast }) {
   const [openId, setOpenId] = useState(null);
   const [toArchive, setToArchive] = useState(null);
   const [archiving, setArchiving] = useState(false);
+  const [toDeleteFinal, setToDeleteFinal] = useState(null); // { product, impact: undefined|array }
+  const [deletingFinal, setDeletingFinal] = useState(false);
   const load = useCallback(() => {
     catalogProListPublished().then(setRows).catch(e => { console.error('catalogProListPublished:', e); setRows(null); });
   }, []);
@@ -4375,6 +4390,27 @@ function CatalogPublishedTab({ toast }) {
     setArchiving(false);
   };
 
+  // "Eliminar definitivamente" (solo sobre un producto YA archivado): primero
+  // se trae en vivo cuántos vendedores lo tienen agregado a su tienda, para
+  // que el admin confirme viendo esa lista real, nunca a ciegas.
+  const askDeleteFinal = (p) => {
+    setToDeleteFinal({ product: p, impact: undefined });
+    catalogProDeleteImpact(p.id)
+      .then(impact => setToDeleteFinal(prev => (prev && prev.product.id === p.id ? { ...prev, impact } : prev)))
+      .catch(e => { toast('⚠️ ' + (e.message || 'No se pudo calcular el impacto')); setToDeleteFinal(null); });
+  };
+  const doDeleteFinal = async () => {
+    if (!toDeleteFinal) return;
+    setDeletingFinal(true);
+    try {
+      const affected = await catalogProDeleteDefinitive(toDeleteFinal.product.id);
+      toast(`✅ Eliminado definitivamente${affected ? ` — ${affected} vendedor(es) notificado(s)` : ''}`);
+      setToDeleteFinal(null);
+      load();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo eliminar')); }
+    setDeletingFinal(false);
+  };
+
   return (
     <>
       <div className="ssub">Catálogo ya publicado — toca uno para ver su costeo por variante (solo lectura; se edita desde Staging antes de publicar).</div>
@@ -4391,13 +4427,38 @@ function CatalogPublishedTab({ toast }) {
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{p.title}</div>
                   <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>{(p.pricing || []).length} variante(s) · desde {money(p.recommended_price)} · {(p.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
                 </div>
-                {p.status !== 'archived' && <button className="btn sm" style={{ background: 'transparent', color: 'var(--rd)', border: '1px solid var(--rd)' }} onClick={e => { e.stopPropagation(); setToArchive(p); }}>Despublicar</button>}
+                {p.status !== 'archived'
+                  ? <button className="btn sm" style={{ background: 'transparent', color: 'var(--rd)', border: '1px solid var(--rd)' }} onClick={e => { e.stopPropagation(); setToArchive(p); }}>Despublicar</button>
+                  : <button className="btn sm" style={{ background: 'transparent', color: 'var(--rd)', border: '1px solid var(--rd)' }} onClick={e => { e.stopPropagation(); askDeleteFinal(p); }}>Eliminar definitivamente</button>}
                 <span className="bdg bg">{p.status}</span>
               </div>
             ))}
       {toArchive && (
         <SimpleConfirm title="¿Despublicar producto?" confirmLabel="Despublicar" color="var(--rd)" busy={archiving} onCancel={() => setToArchive(null)} onConfirm={doArchive}
           msg={<>Vas a despublicar <b style={{ color: 'var(--tx)' }}>{toArchive.title}</b> — desaparece del catálogo de vendedores Pro/Premium. No se borra (por si algún vendedor ya lo agregó a su tienda) y lo puedes reactivar desde Supabase si hace falta.</>} />
+      )}
+      {toDeleteFinal && (
+        <SimpleConfirm title="¿Eliminar definitivamente?" confirmLabel="Eliminar definitivamente" color="var(--rd)"
+          busy={deletingFinal || toDeleteFinal.impact === undefined} onCancel={() => setToDeleteFinal(null)} onConfirm={doDeleteFinal}
+          msg={
+            toDeleteFinal.impact === undefined
+              ? 'Calculando cuántos vendedores lo tienen en su tienda…'
+              : (
+                <>
+                  Vas a eliminar <b style={{ color: 'var(--tx)' }}>{toDeleteFinal.product.title}</b> para siempre de Catálogo Pro.
+                  {toDeleteFinal.impact.length === 0
+                    ? ' Ningún vendedor lo tiene agregado a su tienda todavía.'
+                    : (
+                      <> <b style={{ color: 'var(--rd)' }}>{toDeleteFinal.impact.length} vendedor(es)</b> ya lo tienen en su tienda — su(s) producto(s) quedarán marcados como "ya no disponibles" (no se borran, no se pueden comprar) y recibirán una notificación:
+                        <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                          {toDeleteFinal.impact.map(v => <li key={v.product_id} style={{ fontSize: 11.5, color: 'var(--tx2)' }}>{v.seller_name} — {v.title}</li>)}
+                        </ul>
+                      </>
+                    )}
+                  {' '}Esta acción no se puede deshacer.
+                </>
+              )
+          } />
       )}
     </>
   );

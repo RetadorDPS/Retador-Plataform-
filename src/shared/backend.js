@@ -2196,3 +2196,19 @@ export const catalogProProductVariants = async (catalogId) => {
   if (error) { console.error("catalogProProductVariants:", error.message); throw error; }
   return data || [];
 };
+
+// "Eliminar definitivamente" (solo sobre un producto YA despublicado): antes
+// de borrar, trae qué vendedores lo tienen agregado a su tienda para que el
+// admin confirme con esa lista real, nunca a ciegas.
+export const catalogProDeleteImpact = async (catalogId) => {
+  const { data, error } = await supabase.rpc("catalog_pro_delete_impact", { p_catalog_id: catalogId });
+  if (error) { console.error("catalogProDeleteImpact:", error.message); throw error; }
+  return data || [];
+};
+// Marca como no disponibles (nunca borra) los productos de esos vendedores,
+// les notifica, y borra el producto de catalog_pro_products/variant_pricing.
+export const catalogProDeleteDefinitive = async (catalogId) => {
+  const { data, error } = await supabase.rpc("admin_delete_catalog_pro_product", { p_catalog_id: catalogId });
+  if (error) { console.error("catalogProDeleteDefinitive:", error.message); throw error; }
+  return data;
+};

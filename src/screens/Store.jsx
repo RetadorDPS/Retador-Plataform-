@@ -650,14 +650,25 @@ function ProdsSection({ products, C, ac, onNewProduct, onEditProduct, onArchiveP
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
           {shown.map(prod => (
             <div key={prod.id} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden", opacity:prod.archived_at?.6:1, position:"relative" }}>
-              <PImg p={prod} h={110} fz={36} C={C}/>
+              {/* RETADOR quitó este producto del Catálogo Pro (proveedor ya no
+                  disponible) — nunca se borra solo, el vendedor decide qué
+                  hacer, pero se le avisa claro y sin la foto (ya no es real). */}
+              {prod.is_available === false ? (
+                <div style={{ height:110, display:"flex", alignItems:"center", justifyContent:"center", background:C.s3 }}>
+                  <Package size={30} color={C.m}/>
+                </div>
+              ) : (
+                <PImg p={prod} h={110} fz={36} C={C}/>
+              )}
               <div style={{ padding:11 }}>
                 <div style={{ fontSize:12, fontWeight:500, marginBottom:2, color:C.t }}>{prod.title}</div>
-                <div style={{ fontSize:10, color:C.m, marginBottom:8 }}>{prod.subcat || "Sin categoría"}</div>
+                {prod.is_available === false
+                  ? <div style={{ fontSize:10, color:C.err, fontWeight:700, marginBottom:8 }}>Producto eliminado — ya no disponible</div>
+                  : <div style={{ fontSize:10, color:C.m, marginBottom:8 }}>{prod.subcat || "Sin categoría"}</div>}
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <span style={{ fontSize:14, fontWeight:800, color:C.t }}>{money(prod.price, prod.currency)}</span>
                   <div style={{ display:"flex", gap:5 }}>
-                    {!prod.archived_at ? (<>
+                    {prod.is_available === false ? null : !prod.archived_at ? (<>
                       <button onClick={() => onEditProduct(prod)} style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Edit2 size={11} color={ac}/></button>
                       <button onClick={() => onArchiveProduct(prod.id)} title="Archivar" style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Package size={11} color={C.m}/></button>
                     </>) : (
@@ -1514,6 +1525,14 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, deliveryLocalEnable
   const { labels, valuesByLabel } = useMemo(() => groupVariantAttrs(variants || []), [variants]);
   const activeVariant = useMemo(() => (variants ? resolveVariantBy(variants, selectedAttrs) : null), [variants, selectedAttrs]);
   const cost = Number(activeVariant?.recommended_price) || flatCost;
+  // El precio de venta sugerido se recalcula cada vez que cambia el COSTO
+  // real de la variante activa (al tocar otra variante) — antes se fijaba
+  // una sola vez con el costo de la primera y nunca se actualizaba, dejando
+  // "tu ganancia" en $0.00 o el error de "precio menor al costo" al pasar a
+  // una variante más cara.
+  useEffect(() => {
+    setPrice(String(Math.round(cost * SUGGESTED_MARGIN * 100) / 100));
+  }, [cost]);
   const priceNum = Number(price) || 0;
   const profit = Math.round((priceNum - cost) * 100) / 100;
   const heroImg = activeVariant?.image || images[imgIndex] || images[0];
@@ -1575,7 +1594,7 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, deliveryLocalEnable
         {/* Galería completa */}
         <div style={{ height:220, borderRadius:12, overflow:"hidden", background:`linear-gradient(140deg,${C.s3},${C.d})`, marginBottom:8 }}>
           {heroImg
-            ? <img src={heroImg} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e => { e.target.style.display = "none"; }}/>
+            ? <img key={heroImg} src={heroImg} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e => { e.target.style.display = "none"; }}/>
             : <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", fontSize:44, opacity:.5 }}>📦</div>}
         </div>
         {images.length > 1 && (

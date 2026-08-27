@@ -3980,6 +3980,7 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [recalcId, setRecalcId] = useState(null); // pricing_id en recálculo, o 'all'
+  const [qtyDrafts, setQtyDrafts] = useState({}); // { [pricingId]: "cantidad a importar" (texto del input) }
   const [hubMethod, setHubMethod] = useState('aereo');
   const [hubRateInput, setHubRateInput] = useState(String(HUB_RATE_PRESETS.aereo));
   const [applyingHub, setApplyingHub] = useState(false);
@@ -4034,6 +4035,23 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
     try {
       await catalogProCalculateShipping(pricingIds);
       toast('✅ Flete recalculado');
+      onPublished();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo calcular el flete')); }
+    setRecalcId(null);
+  };
+
+  // El flete de CJ→hub es el costo de UN PEDIDO completo, no por unidad —
+  // si Daniel va a traer varias unidades de esta variante en el mismo
+  // pedido a CJ, hay que guardar esa cantidad ANTES de recalcular para que
+  // el backend cotice el pedido real (no asume que escala linealmente,
+  // vuelve a preguntarle a CJ) y reparta el costo entre esas unidades.
+  const recalcFreightWithQty = async (r) => {
+    const qty = Math.max(1, Math.floor(Number(qtyDrafts[r.id] ?? r.import_qty ?? 1)) || 1);
+    setRecalcId(r.id);
+    try {
+      await catalogProUpdateVariantPricing(r.id, { import_qty: qty });
+      await catalogProCalculateShipping([r.id]);
+      toast(`✅ Flete recalculado para ${qty} unidad(es)`);
       onPublished();
     } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo calcular el flete')); }
     setRecalcId(null);
@@ -4112,18 +4130,28 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
                   <td>
                     {r.shipping_status === 'ok'
                       ? (
-                        <div>
-                          <div style={{ fontWeight: 700 }}>{money(r.cost_shipping_to_hub)}</div>
+                        <div style={{ marginBottom: 6 }}>
+                          <div style={{ fontWeight: 700 }}>{money(r.cost_shipping_to_hub)}<span style={{ fontWeight: 500, fontSize: 9.5, color: 'var(--tx3)' }}> /unidad</span></div>
+                          {r.cost_shipping_to_hub_total != null && (
+                            <div style={{ fontSize: 9.5, color: 'var(--tx3)', marginTop: 2 }}>{money(r.cost_shipping_to_hub_total)} total ÷ {r.import_qty || 1} unid. = {money(r.cost_shipping_to_hub)}</div>
+                          )}
                           <div style={{ fontSize: 9.5, color: 'var(--tx3)', marginTop: 2 }}>{humanizeShipping(r.shipping_method, r.shipping_aging)}</div>
                         </div>
                       )
                       : r.shipping_status === 'no_disponible'
-                        ? (
-                          <button className="btn bts sm" disabled={recalcId === r.id} onClick={() => recalcFreight([r.id], r.id)} title="Reintentar cálculo de flete">
-                            {recalcId === r.id ? <span className="spin">↻</span> : '⚠️ No disponible'}
-                          </button>
-                        )
-                        : <span style={{ color: 'var(--tx3)' }}>⏳ pendiente</span>}
+                        ? <div style={{ fontSize: 10.5, color: 'var(--rd)', fontWeight: 700, marginBottom: 6 }}>⚠️ No disponible</div>
+                        : <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginBottom: 6 }}>⏳ pendiente</div>}
+                    {!ro && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input type="number" min="1" step="1" className="inp" style={{ width: 46, fontSize: 10.5, padding: '3px 5px' }}
+                          value={qtyDrafts[r.id] ?? r.import_qty ?? 1}
+                          onChange={e => setQtyDrafts(q => ({ ...q, [r.id]: e.target.value }))}
+                          title="Cantidad a importar en este pedido a CJ" />
+                        <button className="btn btg sm" style={{ padding: '3px 7px', fontSize: 10.5 }} disabled={recalcId === r.id} onClick={() => recalcFreightWithQty(r)} title="Recalcular flete con esta cantidad">
+                          {recalcId === r.id ? <span className="spin">↻</span> : '🔄'}
+                        </button>
+                      </div>
+                    )}
                   </td>
                   <td>
                     {r.cost_hub_to_destination != null

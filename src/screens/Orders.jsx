@@ -7,6 +7,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   const [rate, setRate] = useState({ sys: 0, courier: 0, seller: 0 });
   const [rateMsg, setRateMsg] = useState({ sys: "", courier: "", seller: "" });
   const [rating, setRating] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
   if (!o) return null;
   const sl = SHIP_LABELS[o.shipType || o.shipMode] || SHIP_LABELS.local;
   const md = MODALIDAD_LABELS[o.modalidad] || MODALIDAD_LABELS.local;
@@ -18,7 +19,17 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   const fmtT = (t) => t ? new Date(t).toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : null;
   const card = isDark ? "#0d0d0d" : S;
   const soft = isDark ? "#111" : "#F5F6F7";
-  const commission = o.commissionPct ? (o.amount * o.commissionPct / 100) : 0;
+  // Bug real de negocio: para pedidos de Catálogo Pro la comisión se estaba
+  // cobrando sobre el TOTAL (incluye el costo real que Daniel le paga a CJ y
+  // el envío, ninguno de los dos es ganancia del vendedor). o.commissionBase
+  // (backend.js) ya trae la ganancia real sumada línea por línea
+  // (precio_venta − costo_real_CJ) × cantidad cuando el pedido es de
+  // Catálogo Pro y se pudo resolver el costo; si no aplica (pedido normal,
+  // o no se pudo resolver ningún costo), queda en null y se usa el cálculo
+  // de siempre, sobre el total de venta.
+  const commission = o.commissionPct
+    ? ((o.commissionBase != null ? o.commissionBase : o.amount) * o.commissionPct / 100)
+    : 0;
   const viewerIsSeller = (!!user?.id && (o.seller_id === user.id || o.sellerId === user.id)) || (!!me && o.sellerName === me);
   const viewerLooksBuyer = (!!user?.id && (o.buyer_id === user.id || o.buyerId === user.id)) || (!!o.buyerName && o.buyerName === me) || o.feeApproval === "pending";
   // Este dato es DINERO que el vendedor le debe a RETADOR — nunca al comprador.
@@ -33,6 +44,12 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   // flujo genérico de "confirma cuando tengas el producto listo" no aplica.
   const isCatalogPro = !!o.catalogProStatusLabel;
   const isCompleted = done || o.courierStage === "completado" || o.status === "completado" || o.status === "entregado" || (o.buyerConfirmed && o.sellerPaid);
+  // Para Catálogo Pro orders.status nunca avanza — "pagado" se decide por si
+  // el fulfillment YA llegó al último paso real (Entregado) de su cadena.
+  const catalogProDelivered = isCatalogPro && o.catalogProSortOrder != null && (o.catalogProSteps || []).length > 0
+    && o.catalogProSortOrder >= Math.max(...o.catalogProSteps.map(s => s.sortOrder));
+  const paymentDone = isCatalogPro ? catalogProDelivered : isCompleted;
+  const totalPagar = o.shipType === "paquete" ? Number(o.shipPrice || 0) : Number(o.amount || 0) + Number(o.shipPrice || 0);
   // Guarda cada reseña de PERSONA de verdad en seller_reviews, ligada a ESTE
   // pedido (order_id = o.id) — SIEMPRE un INSERT nuevo, nunca upsert: cada
   // pedido completado genera su propia fila y se suma al promedio/contador,
@@ -107,9 +124,16 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
         {isCatalogPro && (
           <div style={{ background: card, border: `1px solid ${B}`, borderRadius: 16, padding: "13px 15px 6px", marginBottom: 12 }}>
             <p style={{ fontSize: 9.5, fontWeight: 700, color: T2, textTransform: "uppercase", letterSpacing: .3, marginBottom: 9 }}>📦 Estado del envío</p>
-            {(o.catalogProSteps || []).map((st, i) => {
+            {(() => { const maxOrder = Math.max(1, ...(o.catalogProSteps || []).map(s => s.sortOrder)); return (o.catalogProSteps || []).map((st, i) => {
               const curOrder = o.catalogProSortOrder ?? 1;
-              const isDone = st.sortOrder < curOrder, isCur = st.sortOrder === curOrder, isLast = i === o.catalogProSteps.length - 1;
+              // Cuando el pedido YA llegó al último paso (curOrder === maxOrder,
+              // ej. "Entregado"), ese paso también cuenta como completado — no
+              // como "actual" para siempre. Bug real: antes el pedido se
+              // quedaba mostrando "Entregado — ACTUAL" indefinidamente, nunca
+              // marcado con el check verde.
+              const isDone = st.sortOrder < curOrder || (st.sortOrder === curOrder && curOrder === maxOrder);
+              const isCur = st.sortOrder === curOrder && curOrder !== maxOrder;
+              const isLast = i === o.catalogProSteps.length - 1;
               const col = isDone ? "#22C55E" : isCur ? G : T3;
               return (
                 <div key={st.sortOrder} style={{ display: "flex", gap: 11 }}>
@@ -126,7 +150,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
                   </div>
                 </div>
               );
-            })}
+            }); })()}
           </div>
         )}
 
@@ -163,12 +187,49 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
           </div>
         )}
 
-        {/* Pago / comisión */}
-        <div style={{ background: soft, border: `1px solid ${B}`, borderRadius: 13, padding: "12px 13px", marginBottom: 14 }}>
-          <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>{md.desc}.</p>
-          {o.shipType === "intl" && o.shipPrice ? <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}><span style={{ fontSize: 11, color: T2 }}>Envío internacional</span><span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(o.shipPrice, cur)}</span></div> : null}
-          {o.shipType === "paquete" && o.shipPrice ? <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}><span style={{ fontSize: 11, color: T2 }}>Precio del envío</span><span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(o.shipPrice, cur)}</span></div> : null}
-          {viewerIsSellerStrict && !viewerLooksBuyer && <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}><span style={{ fontSize: 11, color: T2 }}>Comisión plataforma ({o.commissionPct || 0}%)</span><span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(commission, cur)}</span></div>}
+        {/* Pago / comisión — colapsado por defecto (solo el total, o "Pagado"
+            si el pedido ya se completó); desplegado muestra el desglose real
+            línea por línea (order_items reales), el envío y el total. */}
+        {o.modalidad !== "cargo" && <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5, marginBottom: 8 }}>{md.desc}.</p>}
+        <div style={{ background: soft, border: `1px solid ${B}`, borderRadius: 13, marginBottom: 14, overflow: "hidden" }}>
+          <button type="button" onClick={() => setPayOpen(v => !v)} className="p" style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: "12px 13px", cursor: "pointer", textAlign: "left" }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: T1 }}>{paymentDone ? "Pagado" : "Total a pagar"}</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 900, color: G }}>{money(totalPagar, cur)}</span>
+              <span style={{ transform: payOpen ? "rotate(180deg)" : "none", transition: "transform .2s", color: T3, fontSize: 12 }}>⌄</span>
+            </span>
+          </button>
+          {payOpen && (
+            <div style={{ padding: "0 13px 12px" }}>
+              <div style={{ height: 1, background: B, marginBottom: 10 }} />
+              {(o.items && o.items.length ? o.items : [{ title: o.title, variant_attributes: null, qty: o.qty, subtotal: o.amount }]).map((it, i) => {
+                const label = [it.title || o.title, it.variant_attributes && Object.values(it.variant_attributes).join(" / ")].filter(Boolean).join(" · ") + (it.qty > 1 ? ` ×${it.qty}` : "");
+                return (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, color: T2 }}>{label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: T1, flexShrink: 0 }}>{money(it.subtotal, cur)}</span>
+                  </div>
+                );
+              })}
+              {o.shipPrice > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: T2 }}>{o.shipType === "paquete" ? "Precio del envío" : "Envío internacional"}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(o.shipPrice, cur)}</span>
+                </div>
+              )}
+              <div style={{ height: 1, background: B, margin: "6px 0 8px" }} />
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: T1 }}>Total</span>
+                <span style={{ fontSize: 13, fontWeight: 900, color: G }}>{money(totalPagar, cur)}</span>
+              </div>
+              {viewerIsSellerStrict && !viewerLooksBuyer && (
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${B}` }}>
+                  <span style={{ fontSize: 11, color: T2 }}>Comisión plataforma ({o.commissionPct || 0}%)</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(commission, cur)}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Línea de estados + coreografía "vendedor confirma que tiene el
@@ -364,8 +425,18 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
 
   const statusColors = { pendiente: "#FBBF24", pending: "#FBBF24", creada: "#FBBF24", confirmed: "#60A5FA", confirmado: "#60A5FA", shipped: "#A78BFA", delivered: "#22C55E", entregado: "#22C55E", cancelled: "#F87171", fallido: "#F87171" };
   const statusLabels = { pendiente: "Pendiente", pending: "Pendiente", creada: "Creado", confirmed: "Confirmado", confirmado: "Confirmado", shipped: "En camino", delivered: "Entregado", entregado: "Entregado", cancelled: "Cancelado", fallido: "Fallido" };
-  const stepLabel = (o) => o.feeApproval === "pending" ? "Confirma la tarifa" : ((o.flow && o.flow[o.stepIdx]) ? o.flow[o.stepIdx].label : (statusLabels[o.status] || o.status));
+  // Bug real: para pedidos de Catálogo Pro, orders.status nunca avanza (el
+  // estado real vive en catalog_pro_fulfillment / order_status_map, no en
+  // esta columna) — así que la insignia de la lista se quedaba siempre en
+  // "Solicitud creada" aunque el detalle ya mostrara varios pasos hechos.
+  // Con estado real de Catálogo Pro, esa etiqueta manda siempre.
+  const stepLabel = (o) => o.catalogProStatusLabel || (o.feeApproval === "pending" ? "Confirma la tarifa" : ((o.flow && o.flow[o.stepIdx]) ? o.flow[o.stepIdx].label : (statusLabels[o.status] || o.status)));
   const stepColor = (o) => {
+    if (o.catalogProStatusLabel) {
+      const maxOrder = Math.max(1, ...(o.catalogProSteps || []).map(s => s.sortOrder));
+      const cur = o.catalogProSortOrder ?? 1;
+      return cur >= maxOrder ? "#22C55E" : cur <= 1 ? "#FBBF24" : "#60A5FA";
+    }
     if (o.feeApproval === "pending") return "#F59E0B";
     if (!o.flow) return statusColors[o.status] || "#888";
     if (o.stepIdx >= o.flow.length - 1) return "#22C55E";

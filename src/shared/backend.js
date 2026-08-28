@@ -1386,6 +1386,73 @@ export const getUserOrders = async (userId) => {
       (mapRows || []).forEach(r => { (stepsByMode[r.sale_mode] ||= []).push({ sortOrder: r.sort_order, label: r.public_label }); });
     } catch (e) { /* sin cadena completa: se cae al solo-estado-actual */ }
   }
+  // Líneas reales del pedido (order_items) — para el desglose desplegable de
+  // "Detalle del pago" (una fila por variante con su cantidad y precio).
+  let itemsByOrder = {};
+  // Base real de ganancia por pedido de Catálogo Pro, para cobrar la
+  // comisión SOLO sobre (precio_venta − costo_real_CJ) × cantidad, nunca
+  // sobre el costo del producto ni sobre el envío — bug real de negocio ya
+  // detectado (la comisión se cobraba sobre el total del pedido). Pedidos
+  // que no son de Catálogo Pro no tienen entrada aquí y siguen usando el
+  // cálculo de siempre (comisión sobre el total).
+  let commissionBaseByOrder = {};
+  if (orderIds.length) {
+    try {
+      const { data: itemRows } = await supabase.from("order_items")
+        .select("order_id, product_id, variant_id, qty, unit_price, subtotal, title, variant_attributes")
+        .in("order_id", orderIds);
+      (itemRows || []).forEach(r => { (itemsByOrder[r.order_id] ||= []).push(r); });
+
+      const cpItems = (itemRows || []).filter(r => catalogProStatus[r.order_id]);
+      if (cpItems.length) {
+        const productIds = [...new Set(cpItems.map(r => r.product_id).filter(Boolean))];
+        const { data: prods } = await supabase.from("products").select("id, source_catalog_id").in("id", productIds);
+        const sourceCatalogByProduct = {}; (prods || []).forEach(p => { sourceCatalogByProduct[p.id] = p.source_catalog_id; });
+
+        const variantIds = [...new Set(cpItems.map(r => r.variant_id).filter(Boolean))];
+        let skuByVariantId = {};
+        if (variantIds.length) {
+          const { data: pvRows } = await supabase.from("product_variants").select("id, sku").in("id", variantIds);
+          (pvRows || []).forEach(v => { skuByVariantId[v.id] = v.sku; });
+        }
+        // Líneas cuya variante ya no existe (re-importación del catálogo la
+        // borró y el FK la dejó en null) — se busca por los MISMOS atributos
+        // guardados en la línea entre las variantes actuales del producto,
+        // así se sigue encontrando el sku real aunque el id viejo ya no exista.
+        const missingProductIds = [...new Set(cpItems.filter(r => !r.variant_id).map(r => r.product_id).filter(Boolean))];
+        let variantsByProduct = {};
+        if (missingProductIds.length) {
+          const { data: pvRows } = await supabase.from("product_variants").select("id, product_id, sku, attributes").in("product_id", missingProductIds);
+          (pvRows || []).forEach(v => { (variantsByProduct[v.product_id] ||= []).push(v); });
+        }
+        const findSku = (item) => {
+          if (item.variant_id && skuByVariantId[item.variant_id]) return skuByVariantId[item.variant_id];
+          const candidates = variantsByProduct[item.product_id] || [];
+          const match = candidates.find(v => JSON.stringify(v.attributes || {}) === JSON.stringify(item.variant_attributes || {}));
+          return match?.sku || null;
+        };
+
+        const resolved = cpItems.map(item => ({ item, sourceCatalogId: sourceCatalogByProduct[item.product_id] || null, sku: findSku(item) }));
+        const pricingPairs = resolved.filter(r => r.sourceCatalogId && r.sku);
+        let costBySkuAndProduct = {};
+        if (pricingPairs.length) {
+          const catalogIds = [...new Set(pricingPairs.map(r => r.sourceCatalogId))];
+          const { data: priceRows } = await supabase.from("catalog_pro_variant_pricing").select("product_id, variant_sku, cost_product").in("product_id", catalogIds);
+          (priceRows || []).forEach(r => { costBySkuAndProduct[`${r.product_id}::${r.variant_sku}`] = Number(r.cost_product) || 0; });
+        }
+        // Ganancia real por línea: si no se pudo resolver el costo real (ni
+        // por id ni por atributos), esa línea cuenta completa como ganancia
+        // — nunca queda peor que el cálculo anterior, solo mejor cuando sí
+        // se conoce el costo real.
+        resolved.forEach(({ item, sourceCatalogId, sku }) => {
+          const key = sourceCatalogId && sku ? `${sourceCatalogId}::${sku}` : null;
+          const cost = key && costBySkuAndProduct[key] != null ? costBySkuAndProduct[key] : 0;
+          const profit = Math.max(0, Number(item.unit_price) - cost) * Number(item.qty);
+          commissionBaseByOrder[item.order_id] = (commissionBaseByOrder[item.order_id] || 0) + profit;
+        });
+      }
+    } catch (e) { /* sin líneas reales: el desglose y la comisión caen al cálculo simple de siempre */ }
+  }
   return (data || []).map(o => {
     const shipMode = o.ship_mode || "local";
     const flow = ORDER_FLOW[shipMode] || ORDER_FLOW.local;
@@ -1437,6 +1504,8 @@ export const getUserOrders = async (userId) => {
       catalogProStatusLabel: catalogProStatus[o.id]?.status_label || null,
       catalogProSortOrder: catalogProStatus[o.id]?.sort_order ?? null,
       catalogProSteps: catalogProStatus[o.id] ? (stepsByMode[o.sale_mode || "cuba"] || []) : [],
+      items: itemsByOrder[o.id] || [],
+      commissionBase: Object.prototype.hasOwnProperty.call(commissionBaseByOrder, o.id) ? commissionBaseByOrder[o.id] : null,
     };
   });
 };

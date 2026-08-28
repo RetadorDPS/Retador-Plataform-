@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -406,39 +406,50 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   // cotización en cada tecla) y se guarda junto con la cantidad para la que
   // vale, así nunca se muestra ni se cobra un número de otra cantidad.
   const isCatalogPro = product.source_type === 'catalog_pro';
-  const [primaryShipQuote, setPrimaryShipQuote] = useState({ qty: null, total_price: 0, aging: null, is_slow: false, loading: false });
-  const [cartShipQuotes, setCartShipQuotes] = useState({}); // { [variantId]: { qty, total_price, aging, is_slow, loading } }
+  // Modo de venta del producto — fijo, lo eligió el vendedor al agregarlo.
+  // 'mundial': CJ envía DIRECTO al país real del comprador (sin pasar por
+  // nuestro hub) — hace falta saber ESE país antes de poder cotizar nada.
+  const isMundial = isCatalogPro && product.sale_mode === 'mundial';
+  const [mundialCountry, setMundialCountry] = useState('');
+  // En 'mundial' no hay cotización posible hasta que el comprador elija su
+  // país real — nunca se pide/aplica una cotización "genérica".
+  const shipQuoteBlocked = isMundial && !mundialCountry;
+  const [primaryShipQuote, setPrimaryShipQuote] = useState({ qty: null, country: null, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false });
+  const [cartShipQuotes, setCartShipQuotes] = useState({}); // { [variantId]: { qty, country, total_price, aging, is_slow, days_min, days_max, loading } }
   useEffect(() => {
-    if (!isCatalogPro) return;
+    if (!isCatalogPro || shipQuoteBlocked) return;
     let alive = true;
     setPrimaryShipQuote(q => ({ ...q, loading: true }));
     const t = setTimeout(() => {
-      getCatalogProBuyerFreightQuote(product.id, variant?.id || null, qty).then(r => {
+      getCatalogProBuyerFreightQuote(product.id, variant?.id || null, qty, isMundial ? mundialCountry : null).then(r => {
         if (!alive) return;
-        setPrimaryShipQuote({ qty, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, loading: false });
+        setPrimaryShipQuote({ qty, country: mundialCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false });
       }).catch(() => { if (alive) setPrimaryShipQuote(q => ({ ...q, loading: false })); });
     }, 600);
     return () => { alive = false; clearTimeout(t); };
-  }, [isCatalogPro, product.id, variant?.id, qty]);
+  }, [isCatalogPro, shipQuoteBlocked, product.id, variant?.id, qty, isMundial, mundialCountry]);
   useEffect(() => {
-    if (!isCatalogPro || cartLines.length === 0) return;
+    if (!isCatalogPro || shipQuoteBlocked || cartLines.length === 0) return;
     let alive = true;
     setCartShipQuotes(qs => Object.fromEntries(cartLines.map(l => [l.variantId, { ...(qs[l.variantId] || {}), loading: true }])));
     const t = setTimeout(() => {
-      Promise.all(cartLines.map(l => getCatalogProBuyerFreightQuote(product.id, l.variantId, l.qty)
-        .then(r => [l.variantId, { qty: l.qty, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, loading: false }])))
+      Promise.all(cartLines.map(l => getCatalogProBuyerFreightQuote(product.id, l.variantId, l.qty, isMundial ? mundialCountry : null)
+        .then(r => [l.variantId, { qty: l.qty, country: mundialCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false }])))
         .then(pairs => { if (alive) setCartShipQuotes(Object.fromEntries(pairs)); });
     }, 600);
     return () => { alive = false; clearTimeout(t); };
-  }, [isCatalogPro, product.id, cartLines.map(l => `${l.variantId}:${l.qty}`).join(',')]);
+  }, [isCatalogPro, shipQuoteBlocked, product.id, isMundial, mundialCountry, cartLines.map(l => `${l.variantId}:${l.qty}`).join(',')]);
   // "Fresco" = la cotización guardada corresponde EXACTAMENTE a la cantidad
-  // actual de esa línea — si el comprador acaba de cambiar la cantidad, la
-  // cotización vieja no cuenta (ni para mostrar ni para cobrar) hasta que
-  // llegue la nueva.
-  const primaryShipFresh = !isCatalogPro || (primaryShipQuote.qty === qty && !primaryShipQuote.loading);
-  const cartShipFresh = !isCatalogPro || cartLines.every(l => cartShipQuotes[l.variantId]?.qty === l.qty && !cartShipQuotes[l.variantId]?.loading);
-  const shipQuoteReady = primaryShipFresh && cartShipFresh;
+  // (y, en 'mundial', al país) actuales — si el comprador acaba de cambiar
+  // algo, la cotización vieja no cuenta (ni para mostrar ni para cobrar)
+  // hasta que llegue la nueva.
+  const primaryShipFresh = !isCatalogPro || (!shipQuoteBlocked && primaryShipQuote.qty === qty && primaryShipQuote.country === mundialCountry && !primaryShipQuote.loading);
+  const cartShipFresh = !isCatalogPro || (!shipQuoteBlocked && cartLines.every(l => cartShipQuotes[l.variantId]?.qty === l.qty && cartShipQuotes[l.variantId]?.country === mundialCountry && !cartShipQuotes[l.variantId]?.loading));
+  const shipQuoteReady = !shipQuoteBlocked && primaryShipFresh && cartShipFresh;
   const catalogProShipSlow = isCatalogPro && ((primaryShipQuote.qty === qty && primaryShipQuote.is_slow) || cartLines.some(l => cartShipQuotes[l.variantId]?.qty === l.qty && cartShipQuotes[l.variantId]?.is_slow));
+  const catalogProShipDays = isCatalogPro && shipQuoteReady
+    ? (primaryShipQuote.qty === qty && primaryShipQuote.days_min != null ? primaryShipQuote : Object.values(cartShipQuotes).find(q => q?.days_min != null))
+    : null;
   const catalogProShipTotal = isCatalogPro
     ? Math.round((
         (primaryShipQuote.qty === qty ? primaryShipQuote.total_price : 0) +
@@ -476,7 +487,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
 
   const needData = shipMode === "local" || shipMode === "intl";
   const dataValid = shipMode === "local" ? (realName && del.phone && del.addr)
-    : shipMode === "intl" ? (del.name && del.phone && del.prov && del.city && del.addr)
+    : shipMode === "intl" ? (isMundial ? (del.name && del.phone && mundialCountry && del.city && del.addr) : (del.name && del.phone && del.prov && del.city && del.addr))
     : true;
 
   const handle = async () => {
@@ -486,6 +497,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
       let delivery;
       if (shipMode === "persona") delivery = { mode: "persona" };
       else if (shipMode === "local") delivery = { mode: "local", name: realName, nick: del.nick.trim() || undefined, phone: del.phone, address: del.addr, ref: del.ref, pickup: product.seller_name || "Vendedor", pickupAddress: product.pickupAddress || product.sellerAddress || product.location || "", pickupPhone: product.pickupPhone || product.sellerPhone || product.seller_phone || "" };
+      else if (isMundial) delivery = { mode: "intl", country: mundialCountry, recipient: { name: del.name, phone: del.phone, country: mundialCountry, city: del.city, address: del.addr }, origin: "Exterior" };
       else delivery = { mode: "intl", recipient: { name: del.name, phone: del.phone, province: del.prov, city: del.city, address: del.addr }, origin: product.origin || "Exterior", transport: product.shippingType || "standard" };
       // Para Catálogo Pro el backend IGNORA lo que mandemos acá y fuerza
       // shipMode='intl'/shipPrice real (get_catalog_pro_shipping_quote) —
@@ -539,7 +551,12 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
     if (availStock != null && availStock <= 0) { flash("⚠️ Este producto está agotado"); return; }
     if (!cartQtyValid) { flash("⚠️ Alguna de las variantes agregadas no tiene stock suficiente"); return; }
     if (!qtyValid) { flash(`⚠️ Solo quedan ${availStock} disponibles`); return; }
-    if (isCatalogPro && !shipQuoteReady) { flash("⚠️ Espera a que termine de calcularse el envío"); return; }
+    // Para Catálogo Pro needData siempre es true (shipMode va forzado a
+    // 'intl'), así que este botón solo avanza al paso de datos — nunca crea
+    // el pedido directo — el gate real de "cotización lista" vive en el
+    // botón final de ese paso (ahí sí importa, porque en modo 'mundial' la
+    // cotización recién puede pedirse una vez elegido el país, que se elige
+    // EN ese paso siguiente).
     if (needData) setStep("datos"); else handle();
   };
 
@@ -639,15 +656,25 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
             </div>
           )}
 
-          {isCatalogPro && (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
-              {/* OJO — el "aging" que devuelve CJ es solo el tránsito hasta
-                  nuestro punto de entrada, NO el tiempo total hasta el
-                  comprador — todavía no existe en el sistema un tiempo real
-                  del tramo final, así que NUNCA se muestra ese número solo
-                  (sería mentirle al comprador sobre cuándo le llega). */}
-              <span style={{ fontSize: 11, color: T2 }}>✈️ Envío internacional{catalogProShipSlow ? " (más lento por el volumen)" : ""}</span>
-              <span style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>{shipQuoteReady ? money(catalogProShipTotal, cur) : "calculando…"}</span>
+          {isMundial && !mundialCountry && (
+            <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
+              <p style={{ fontSize: 11, color: T2 }}>🌍 Este producto se envía directo desde el proveedor a tu país — elige tu país en el siguiente paso para ver el costo y tiempo real de envío.</p>
+            </div>
+          )}
+
+          {isCatalogPro && !shipQuoteBlocked && (
+            <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: T2 }}>✈️ Envío internacional{catalogProShipSlow ? " (más lento por el volumen)" : ""}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>{shipQuoteReady ? money(catalogProShipTotal, cur) : "calculando…"}</span>
+              </div>
+              {/* days_min/days_max ya vienen combinados desde el backend según
+                  el modo (en 'cuba' incluye el tramo final real y configurable;
+                  en 'mundial' es el tránsito real de CJ tal cual) — nunca se
+                  calcula ni se inventa un rango aquí en el frontend. */}
+              {catalogProShipDays && (
+                <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>Llega en {catalogProShipDays.days_min} a {catalogProShipDays.days_max} días</p>
+              )}
             </div>
           )}
 
@@ -717,8 +744,8 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
             <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>{needData ? "En el siguiente paso completas los datos de entrega; el resto ya viene precargado." : "Coordinarás el encuentro con el vendedor por el chat al crear el pedido."}</p>
           </div>
 
-          <button className="p" onClick={primaryAction} disabled={availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)) ? .5 : 1 }}>
-            {isCatalogPro && !shipQuoteReady ? "Calculando envío…" : needData ? "Continuar →" : `Crear pedido · ${money(buyerTotal, cur)}`}
+          <button className="p" onClick={primaryAction} disabled={availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteBlocked && !shipQuoteReady)} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteBlocked && !shipQuoteReady)) ? .5 : 1 }}>
+            {isCatalogPro && !shipQuoteBlocked && !shipQuoteReady ? "Calculando envío…" : needData ? "Continuar →" : `Crear pedido · ${money(buyerTotal, cur)}`}
           </button>
         </> : <>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -758,14 +785,25 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
               <label style={lbl}>Teléfono *</label>
               <input style={inp} value={del.phone} onChange={e => setD("phone", e.target.value)} placeholder="Ej: +53 5 234 5678" />
             </div>
+            {shipMode === "intl" && isMundial && (
+              <div>
+                <label style={lbl}>País *</label>
+                <select style={{ ...inp, appearance: "none", cursor: "pointer" }} value={mundialCountry} onChange={e => setMundialCountry(e.target.value)}>
+                  <option value="">Selecciona un país</option>
+                  {CJ_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                </select>
+              </div>
+            )}
             {shipMode === "intl" && (
               <div style={{ display: "flex", gap: 9 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={lbl}>Provincia *</label>
-                  <select style={{ ...inp, appearance: "none", cursor: "pointer" }} value={del.prov} onChange={e => setD("prov", e.target.value)}>
-                    {CUBA_PROVINCES.map(p => <option key={p}>{p}</option>)}
-                  </select>
-                </div>
+                {!isMundial && (
+                  <div style={{ flex: 1 }}>
+                    <label style={lbl}>Provincia *</label>
+                    <select style={{ ...inp, appearance: "none", cursor: "pointer" }} value={del.prov} onChange={e => setD("prov", e.target.value)}>
+                      {CUBA_PROVINCES.map(p => <option key={p}>{p}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div style={{ flex: 1 }}>
                   <label style={lbl}>Ciudad / Municipio *</label>
                   <input style={inp} value={del.city} onChange={e => setD("city", e.target.value)} placeholder="Ej: Centro" />
@@ -798,7 +836,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
           </div>
 
           <button className="p" onClick={handle} disabled={loading || !dataValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: dataValid ? G : (isDark ? "#1a1a1a" : "#ddd"), color: dataValid ? "#000" : T3, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            {loading ? <Spin size={18} color="#000" /> : (isCatalogPro && !shipQuoteReady) ? "Calculando envío…" : `Crear pedido · ${money(buyerTotal, cur)}`}
+            {loading ? <Spin size={18} color="#000" /> : (isCatalogPro && !shipQuoteBlocked && !shipQuoteReady) ? "Calculando envío…" : `Crear pedido · ${money(buyerTotal, cur)}`}
           </button>
         </>}
       </div>
@@ -2543,6 +2581,25 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
     if (idx >= 0) setImgIdx(idx);
   }, [activeVariant?.image]);
 
+  // Estimado de envío ANTES de comprar (visible en la ficha, no solo dentro
+  // del diálogo de pago) — SOLO para modo 'cuba', donde el destino siempre
+  // es el mismo (Cuba) así que sí se puede cotizar sin conocer todavía la
+  // dirección real del comprador. En modo 'mundial' el destino depende del
+  // país que el comprador elija recién en el pago — nunca se inventa un
+  // estimado genérico, se avisa que el costo/tiempo real se calcula ahí.
+  const isCatalogPro = p.source_type === 'catalog_pro';
+  const isMundial = isCatalogPro && p.sale_mode === 'mundial';
+  const [cubaShipEstimate, setCubaShipEstimate] = useState(null);
+  useEffect(() => {
+    setCubaShipEstimate(null);
+    if (!isCatalogPro || isMundial || !p.id) return;
+    let alive = true;
+    getCatalogProBuyerFreightQuote(p.id, activeVariant?.id || null, 1).then(r => {
+      if (alive && r?.applicable) setCubaShipEstimate(r);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [isCatalogPro, isMundial, p.id, activeVariant?.id]);
+
   useEffect(() => {
     if (isService || !p.id) return;
     let alive = true;
@@ -2636,6 +2693,18 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
           )}
         </div>
         {!isService && <CurrencyEquivalents product={p} />}
+
+        {isCatalogPro && !isMundial && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: `${G}12`, border: `1px solid ${G}30`, borderRadius: 100, padding: "5px 11px", marginBottom: 12, width: "fit-content" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>✈️ Envío disponible a Cuba</span>
+            {cubaShipEstimate?.days_min != null && <span style={{ fontSize: 10.5, color: T2 }}>· llega en {cubaShipEstimate.days_min} a {cubaShipEstimate.days_max} días</span>}
+          </div>
+        )}
+        {isMundial && (
+          <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
+            <p style={{ fontSize: 11, color: T2 }}>🌍 Producto para compradores fuera de Cuba — el envío se calcula real, según tu país, al momento de pagar.</p>
+          </div>
+        )}
 
         {/* Selector de variantes (color/talla/etc.), si el producto tiene */}
         {!isService && variantLabels.length > 0 && (

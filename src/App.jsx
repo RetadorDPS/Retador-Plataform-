@@ -942,7 +942,9 @@ function AppShell({ sessionUser, platformStats = null }) {
       }),
       // Trazabilidad con el Catálogo Pro (Mejora B): si este producto viene del
       // editor precargado desde un producto del catálogo, queda vinculado.
-      ...(d.source_catalog_id ? { source_catalog_id: d.source_catalog_id, source_type: d.source_type || "catalog_pro" } : {}),
+      // sale_mode ('cuba'/'mundial') lo eligió el vendedor en CatalogDetailSheet
+      // al agregarlo — es fijo por producto, no se vuelve a preguntar acá.
+      ...(d.source_catalog_id ? { source_catalog_id: d.source_catalog_id, source_type: d.source_type || "catalog_pro", sale_mode: d.sale_mode || "cuba" } : {}),
     };
     let data, missing;
     try {

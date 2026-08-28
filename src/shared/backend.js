@@ -1159,12 +1159,19 @@ export const createOrderMulti = async (data) => {
 // (CJ) NO escala lineal por unidad (confirmado con datos reales: 1u=$16.54,
 // 10u=$82.98, jamás 10×16.54), así que nunca se calcula localmente
 // multiplicando: siempre se pide la cotización viva a esta Edge Function
-// (que cachea 24h por variante+cantidad exacta). Devuelve SOLO el monto de
-// envío — nunca costo real de CJ ni margen de Daniel. Para productos que no
-// son del Catálogo Pro devuelve applicable:false (no aplica).
-export const getCatalogProBuyerFreightQuote = async (productId, variantId, qty) => {
-  const { data, error } = await supabase.functions.invoke("cj-buyer-freight-quote", { body: { product_id: productId, variant_id: variantId || null, qty: qty || 1 } });
-  if (error || data?.error) { console.error("getCatalogProBuyerFreightQuote:", error?.message || data?.error); return { total_price: 0, applicable: false, aging: null, is_slow: false }; }
+// (que cachea 24h por variante+cantidad+país exacto). Devuelve SOLO el
+// monto de envío — nunca costo real de CJ ni margen de Daniel. Para
+// productos que no son del Catálogo Pro devuelve applicable:false.
+//
+// destCountry SOLO aplica a productos en modo de venta 'mundial' (CJ envía
+// directo al país real del comprador) — se ignora en modo 'cuba' (siempre
+// pasa por el hub, el país de destino real del comprador no cambia esa
+// ruta). El resultado trae days_min/days_max ya combinados según el modo
+// (en 'cuba' incluye el tramo final; en 'mundial' es el tránsito de CJ tal
+// cual) — mostrar SIEMPRE ese rango, nunca inventar uno propio en pantalla.
+export const getCatalogProBuyerFreightQuote = async (productId, variantId, qty, destCountry) => {
+  const { data, error } = await supabase.functions.invoke("cj-buyer-freight-quote", { body: { product_id: productId, variant_id: variantId || null, qty: qty || 1, dest_country: destCountry || null } });
+  if (error || data?.error) { console.error("getCatalogProBuyerFreightQuote:", error?.message || data?.error); return { total_price: 0, applicable: false, aging: null, is_slow: false, days_min: null, days_max: null }; }
   return data;
 };
 // Envío suelto SIN producto ni vendedor (create_package_delivery): usa el

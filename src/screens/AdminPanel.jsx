@@ -2353,6 +2353,11 @@ function Economia({toast, data={}, ro}){
     eurCup: cfg.fx?.eurToCup ?? 430,
     promoActive: cfg.promoActive === true,
     promoCost: cfg.promoCost ?? 100,
+    // Catálogo Pro, modo 'cuba': días reales del tramo final (hub→Cuba) que
+    // se SUMAN al tránsito real de CJ para mostrarle al comprador el rango
+    // combinado — configurable acá, nunca hardcodeado en el código.
+    catalogProHubDaysMin: cfg.catalogProHubDaysMin ?? 8,
+    catalogProHubDaysMax: cfg.catalogProHubDaysMax ?? 15,
   });
   const set=(k,v)=>setT(s=>({...s,[k]:v}));
   const saveTarifas=(override={})=>{
@@ -2369,6 +2374,8 @@ function Economia({toast, data={}, ro}){
       localBase: Number(t.localBase)||0,
       localPerKm: Number(t.localPerKm)||0,
       rates: { 'España':{aereo:Number(t.esAereo)||0,maritimo:Number(t.esMar)||0}, 'Estados Unidos':{aereo:Number(t.usAereo)||0,maritimo:Number(t.usMar)||0} },
+      catalogProHubDaysMin: Number(t.catalogProHubDaysMin)||0,
+      catalogProHubDaysMax: Number(t.catalogProHubDaysMax)||0,
       promoActive: t.promoActive === true,
       promoCost: Number(t.promoCost)||0,
     });
@@ -2691,6 +2698,12 @@ function Economia({toast, data={}, ro}){
         {field('España → Cuba · Marítimo', numInput('esMar','USD/lb','$'))}
         {field('EE.UU. → Cuba · Aéreo', numInput('usAereo','USD/lb','$'))}
         {field('EE.UU. → Cuba · Marítimo', numInput('usMar','USD/lb','$'))}
+      </div>
+
+      <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',margin:'4px 0 10px'}}>Catálogo Pro — tramo final (hub→Cuba)</div>
+      <div className="g2" style={{marginBottom:8}}>
+        {field('Días mínimos', numInput('catalogProHubDaysMin','días',''), 'Se suma al tránsito real de CJ para el rango que ve el comprador en productos modo Cuba.')}
+        {field('Días máximos', numInput('catalogProHubDaysMax','días',''))}
       </div>
 
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginTop:16,flexWrap:'wrap'}}>
@@ -4521,13 +4534,20 @@ function CatalogPendingOrdersTab({ toast, ro, onChange }) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { getOrderStatusMap().then(setStatusMap); }, []);
 
-  const nextStatusOf = (internalStatus) => {
-    const i = statusMap.findIndex(s => s.internal_status === internalStatus);
-    return (i >= 0 && i < statusMap.length - 1) ? statusMap[i + 1] : null;
+  // El orden de pasos depende del modo del pedido — 'cuba' pasa por el
+  // centro logístico (5 pasos); 'mundial' va directo de CJ al comprador (4
+  // pasos, más simple, nunca pasa por el centro). order_status_map trae AMBAS
+  // cadenas mezcladas — hay que filtrar por sale_mode antes de buscar "el
+  // siguiente paso", si no, un pedido 'mundial' podría intentar avanzar a un
+  // paso de la cadena 'cuba' (o viceversa) por coincidencia de sort_order.
+  const nextStatusOf = (internalStatus, saleMode) => {
+    const chain = statusMap.filter(s => s.sale_mode === (saleMode || 'cuba'));
+    const i = chain.findIndex(s => s.internal_status === internalStatus);
+    return (i >= 0 && i < chain.length - 1) ? chain[i + 1] : null;
   };
 
   const advance = async (row) => {
-    const next = nextStatusOf(row.internal_status);
+    const next = nextStatusOf(row.internal_status, row.sale_mode);
     if (!next) return;
     setAdvancing(row.order_id);
     try {
@@ -4549,8 +4569,9 @@ function CatalogPendingOrdersTab({ toast, ro, onChange }) {
           : rows.length === 0
             ? <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>No hay pedidos pendientes de gestionar ahora mismo.</div>
             : rows.map(r => {
-              const next = nextStatusOf(r.internal_status);
+              const next = nextStatusOf(r.internal_status, r.sale_mode);
               const attrs = r.variant_attributes && Object.keys(r.variant_attributes).length ? Object.values(r.variant_attributes).join(' / ') : null;
+              const isMundial = r.sale_mode === 'mundial';
               return (
                 <div key={r.id} className="mc" style={{ marginBottom: 10 }}>
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -4559,7 +4580,10 @@ function CatalogPendingOrdersTab({ toast, ro, onChange }) {
                       <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{r.product_title}{attrs ? ` · ${attrs}` : ''}</div>
                       <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>×{r.qty} · Pagar a CJ: <b style={{ color: 'var(--tx)' }}>{money(r.cost_to_pay, r.cost_currency)}</b> · Comprador: {r.buyer_name}</div>
                     </div>
-                    <span className="bdg bg">{r.status_label}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                      <span className="bdg bg">{r.status_label}</span>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: isMundial ? 'var(--ac)' : 'var(--tx3)' }}>{isMundial ? '🌍 Mundial — sin pasar por el centro' : '🇨🇺 Cuba'}</span>
+                    </div>
                   </div>
                   {!ro && next && (
                     <div style={{ marginTop: 10 }}>

@@ -406,46 +406,44 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   // cotización en cada tecla) y se guarda junto con la cantidad para la que
   // vale, así nunca se muestra ni se cobra un número de otra cantidad.
   const isCatalogPro = product.source_type === 'catalog_pro';
-  // Modo de venta del producto — fijo, lo eligió el vendedor al agregarlo.
-  // 'mundial': CJ envía DIRECTO al país real del comprador (sin pasar por
-  // nuestro hub) — hace falta saber ESE país antes de poder cotizar nada.
-  const isMundial = isCatalogPro && product.sale_mode === 'mundial';
-  const [mundialCountry, setMundialCountry] = useState('');
-  // En 'mundial' no hay cotización posible hasta que el comprador elija su
-  // país real — nunca se pide/aplica una cotización "genérica".
-  const shipQuoteBlocked = isMundial && !mundialCountry;
+  // El DESTINO ya no es un modo fijo del producto — lo elige el comprador en
+  // cada compra. 'CU' activa la ruta vía nuestro hub (tiempo combinado,
+  // igual que siempre); cualquier otro país real de CJ_COUNTRIES es envío
+  // directo de CJ, sin pasar por el hub. Por defecto arranca en Cuba (el
+  // destino más común de esta app) — el comprador siempre puede cambiarlo.
+  const [destCountry, setDestCountry] = useState('CU');
   const [primaryShipQuote, setPrimaryShipQuote] = useState({ qty: null, country: null, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false });
   const [cartShipQuotes, setCartShipQuotes] = useState({}); // { [variantId]: { qty, country, total_price, aging, is_slow, days_min, days_max, loading } }
   useEffect(() => {
-    if (!isCatalogPro || shipQuoteBlocked) return;
+    if (!isCatalogPro) return;
     let alive = true;
     setPrimaryShipQuote(q => ({ ...q, loading: true }));
     const t = setTimeout(() => {
-      getCatalogProBuyerFreightQuote(product.id, variant?.id || null, qty, isMundial ? mundialCountry : null).then(r => {
+      getCatalogProBuyerFreightQuote(product.id, variant?.id || null, qty, destCountry).then(r => {
         if (!alive) return;
-        setPrimaryShipQuote({ qty, country: mundialCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false });
+        setPrimaryShipQuote({ qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false });
       }).catch(() => { if (alive) setPrimaryShipQuote(q => ({ ...q, loading: false })); });
     }, 600);
     return () => { alive = false; clearTimeout(t); };
-  }, [isCatalogPro, shipQuoteBlocked, product.id, variant?.id, qty, isMundial, mundialCountry]);
+  }, [isCatalogPro, product.id, variant?.id, qty, destCountry]);
   useEffect(() => {
-    if (!isCatalogPro || shipQuoteBlocked || cartLines.length === 0) return;
+    if (!isCatalogPro || cartLines.length === 0) return;
     let alive = true;
     setCartShipQuotes(qs => Object.fromEntries(cartLines.map(l => [l.variantId, { ...(qs[l.variantId] || {}), loading: true }])));
     const t = setTimeout(() => {
-      Promise.all(cartLines.map(l => getCatalogProBuyerFreightQuote(product.id, l.variantId, l.qty, isMundial ? mundialCountry : null)
-        .then(r => [l.variantId, { qty: l.qty, country: mundialCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false }])))
+      Promise.all(cartLines.map(l => getCatalogProBuyerFreightQuote(product.id, l.variantId, l.qty, destCountry)
+        .then(r => [l.variantId, { qty: l.qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false }])))
         .then(pairs => { if (alive) setCartShipQuotes(Object.fromEntries(pairs)); });
     }, 600);
     return () => { alive = false; clearTimeout(t); };
-  }, [isCatalogPro, shipQuoteBlocked, product.id, isMundial, mundialCountry, cartLines.map(l => `${l.variantId}:${l.qty}`).join(',')]);
+  }, [isCatalogPro, product.id, destCountry, cartLines.map(l => `${l.variantId}:${l.qty}`).join(',')]);
   // "Fresco" = la cotización guardada corresponde EXACTAMENTE a la cantidad
-  // (y, en 'mundial', al país) actuales — si el comprador acaba de cambiar
-  // algo, la cotización vieja no cuenta (ni para mostrar ni para cobrar)
-  // hasta que llegue la nueva.
-  const primaryShipFresh = !isCatalogPro || (!shipQuoteBlocked && primaryShipQuote.qty === qty && primaryShipQuote.country === mundialCountry && !primaryShipQuote.loading);
-  const cartShipFresh = !isCatalogPro || (!shipQuoteBlocked && cartLines.every(l => cartShipQuotes[l.variantId]?.qty === l.qty && cartShipQuotes[l.variantId]?.country === mundialCountry && !cartShipQuotes[l.variantId]?.loading));
-  const shipQuoteReady = !shipQuoteBlocked && primaryShipFresh && cartShipFresh;
+  // y al país de destino actuales — si el comprador acaba de cambiar algo,
+  // la cotización vieja no cuenta (ni para mostrar ni para cobrar) hasta que
+  // llegue la nueva.
+  const primaryShipFresh = !isCatalogPro || (primaryShipQuote.qty === qty && primaryShipQuote.country === destCountry && !primaryShipQuote.loading);
+  const cartShipFresh = !isCatalogPro || cartLines.every(l => cartShipQuotes[l.variantId]?.qty === l.qty && cartShipQuotes[l.variantId]?.country === destCountry && !cartShipQuotes[l.variantId]?.loading);
+  const shipQuoteReady = primaryShipFresh && cartShipFresh;
   const catalogProShipSlow = isCatalogPro && ((primaryShipQuote.qty === qty && primaryShipQuote.is_slow) || cartLines.some(l => cartShipQuotes[l.variantId]?.qty === l.qty && cartShipQuotes[l.variantId]?.is_slow));
   const catalogProShipDays = isCatalogPro && shipQuoteReady
     ? (primaryShipQuote.qty === qty && primaryShipQuote.days_min != null ? primaryShipQuote : Object.values(cartShipQuotes).find(q => q?.days_min != null))
@@ -487,7 +485,9 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
 
   const needData = shipMode === "local" || shipMode === "intl";
   const dataValid = shipMode === "local" ? (realName && del.phone && del.addr)
-    : shipMode === "intl" ? (isMundial ? (del.name && del.phone && mundialCountry && del.city && del.addr) : (del.name && del.phone && del.prov && del.city && del.addr))
+    : shipMode === "intl" ? (isCatalogPro
+        ? (del.name && del.phone && destCountry && del.city && del.addr && (destCountry !== "CU" || del.prov))
+        : (del.name && del.phone && del.prov && del.city && del.addr))
     : true;
 
   const handle = async () => {
@@ -497,7 +497,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
       let delivery;
       if (shipMode === "persona") delivery = { mode: "persona" };
       else if (shipMode === "local") delivery = { mode: "local", name: realName, nick: del.nick.trim() || undefined, phone: del.phone, address: del.addr, ref: del.ref, pickup: product.seller_name || "Vendedor", pickupAddress: product.pickupAddress || product.sellerAddress || product.location || "", pickupPhone: product.pickupPhone || product.sellerPhone || product.seller_phone || "" };
-      else if (isMundial) delivery = { mode: "intl", country: mundialCountry, recipient: { name: del.name, phone: del.phone, country: mundialCountry, city: del.city, address: del.addr }, origin: "Exterior" };
+      else if (isCatalogPro) delivery = { mode: "intl", country: destCountry, recipient: { name: del.name, phone: del.phone, country: destCountry, ...(destCountry === "CU" ? { province: del.prov } : {}), city: del.city, address: del.addr }, origin: "Exterior" };
       else delivery = { mode: "intl", recipient: { name: del.name, phone: del.phone, province: del.prov, city: del.city, address: del.addr }, origin: product.origin || "Exterior", transport: product.shippingType || "standard" };
       // Para Catálogo Pro el backend IGNORA lo que mandemos acá y fuerza
       // shipMode='intl'/shipPrice real (get_catalog_pro_shipping_quote) —
@@ -656,25 +656,35 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
             </div>
           )}
 
-          {isMundial && !mundialCountry && (
-            <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
-              <p style={{ fontSize: 11, color: T2 }}>🌍 Este producto se envía directo desde el proveedor a tu país — elige tu país en el siguiente paso para ver el costo y tiempo real de envío.</p>
+          {/* El comprador elige el país de destino AQUÍ, antes de ver el total
+              — Cuba primero (vía nuestro hub, tiempo combinado), debajo el
+              resto de países reales donde CJ envía directo. Precio y tiempo
+              se recotizan en vivo (con debounce) cada vez que cambia. */}
+          {isCatalogPro && (
+            <div style={{ marginBottom: 12 }}>
+              <label style={lbl}>¿A qué país lo enviamos?</label>
+              <select style={{ ...inp, appearance: "none", cursor: "pointer" }} value={destCountry} onChange={e => setDestCountry(e.target.value)}>
+                <option value="CU">🇨🇺 Cuba</option>
+                {CJ_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+              </select>
             </div>
           )}
 
-          {isCatalogPro && !shipQuoteBlocked && (
+          {isCatalogPro && (
             <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: 11, color: T2 }}>✈️ Envío internacional{catalogProShipSlow ? " (más lento por el volumen)" : ""}</span>
                 <span style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>{shipQuoteReady ? money(catalogProShipTotal, cur) : "calculando…"}</span>
               </div>
               {/* days_min/days_max ya vienen combinados desde el backend según
-                  el modo (en 'cuba' incluye el tramo final real y configurable;
-                  en 'mundial' es el tránsito real de CJ tal cual) — nunca se
-                  calcula ni se inventa un rango aquí en el frontend. */}
+                  el destino elegido (a Cuba incluye el tramo final real y
+                  configurable; a cualquier otro país es el tránsito real de
+                  CJ tal cual) — nunca se calcula ni se inventa un rango aquí
+                  en el frontend. */}
               {catalogProShipDays && (
                 <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>Llega en {catalogProShipDays.days_min} a {catalogProShipDays.days_max} días</p>
               )}
+              {destCountry === "CU" && <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>🇨🇺 Envío disponible a Cuba</p>}
             </div>
           )}
 
@@ -744,8 +754,8 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
             <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>{needData ? "En el siguiente paso completas los datos de entrega; el resto ya viene precargado." : "Coordinarás el encuentro con el vendedor por el chat al crear el pedido."}</p>
           </div>
 
-          <button className="p" onClick={primaryAction} disabled={availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteBlocked && !shipQuoteReady)} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteBlocked && !shipQuoteReady)) ? .5 : 1 }}>
-            {isCatalogPro && !shipQuoteBlocked && !shipQuoteReady ? "Calculando envío…" : needData ? "Continuar →" : `Crear pedido · ${money(buyerTotal, cur)}`}
+          <button className="p" onClick={primaryAction} disabled={availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)) ? .5 : 1 }}>
+            {isCatalogPro && !shipQuoteReady ? "Calculando envío…" : needData ? "Continuar →" : `Crear pedido · ${money(buyerTotal, cur)}`}
           </button>
         </> : <>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -785,18 +795,9 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
               <label style={lbl}>Teléfono *</label>
               <input style={inp} value={del.phone} onChange={e => setD("phone", e.target.value)} placeholder="Ej: +53 5 234 5678" />
             </div>
-            {shipMode === "intl" && isMundial && (
-              <div>
-                <label style={lbl}>País *</label>
-                <select style={{ ...inp, appearance: "none", cursor: "pointer" }} value={mundialCountry} onChange={e => setMundialCountry(e.target.value)}>
-                  <option value="">Selecciona un país</option>
-                  {CJ_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
-                </select>
-              </div>
-            )}
             {shipMode === "intl" && (
               <div style={{ display: "flex", gap: 9 }}>
-                {!isMundial && (
+                {(!isCatalogPro || destCountry === "CU") && (
                   <div style={{ flex: 1 }}>
                     <label style={lbl}>Provincia *</label>
                     <select style={{ ...inp, appearance: "none", cursor: "pointer" }} value={del.prov} onChange={e => setD("prov", e.target.value)}>
@@ -836,7 +837,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
           </div>
 
           <button className="p" onClick={handle} disabled={loading || !dataValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: dataValid ? G : (isDark ? "#1a1a1a" : "#ddd"), color: dataValid ? "#000" : T3, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            {loading ? <Spin size={18} color="#000" /> : (isCatalogPro && !shipQuoteBlocked && !shipQuoteReady) ? "Calculando envío…" : `Crear pedido · ${money(buyerTotal, cur)}`}
+            {loading ? <Spin size={18} color="#000" /> : (isCatalogPro && !shipQuoteReady) ? "Calculando envío…" : `Crear pedido · ${money(buyerTotal, cur)}`}
           </button>
         </>}
       </div>
@@ -1953,6 +1954,11 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
   const [shipPrice, setShipPrice] = useState(product.shippingPrice ?? product.ship_price ?? "");
   const [location, setLocation] = useState(product.location || "");
   const isService = product.kind === "service";   // el kind NO se puede cambiar al editar
+  // Producto de Catálogo Pro: el envío no tiene un precio fijo que el
+  // vendedor deba escribir — se cotiza real por pedido según el destino
+  // que elija el comprador (ver BuyModal), así que ni se pide ni bloquea
+  // publicar por faltar ese campo.
+  const isCatalogPro = !!product.source_catalog_id;
   // Categoría de servicio: propia (config.serviceCats), texto libre guardado en
   // `subcat` — nunca en `cat` (esa tiene FK a categories, categorías de producto).
   const serviceCats = (Array.isArray(pCfg.serviceCats) && pCfg.serviceCats.length) ? pCfg.serviceCats : DEFAULT_SERVICE_CATS;
@@ -2017,7 +2023,7 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
     if (!title.trim()) { flash && flash("Ponle un título"); return; }
     if (!isService && !(Number(stock) > 0)) { flash && flash("⚠️ Indica la cantidad disponible (mínimo 1)"); return; }
     if (!isService && !shipModes.local && !shipModes.persona && !shipModes.intl) { flash && flash("⚠️ Marca al menos una forma de entrega"); return; }
-    if (!isService && shipModes.intl && !Number(shipPrice)) { flash && flash("⚠️ Define el precio del envío internacional"); return; }
+    if (!isService && !isCatalogPro && shipModes.intl && !Number(shipPrice)) { flash && flash("⚠️ Define el precio del envío internacional"); return; }
     if (isService && !svcCat) { flash && flash("⚠️ Elige una categoría de servicio"); return; }
     if (isCreate && !isService && (!catLabel || !catLabel.trim())) { flash && flash("⚠️ Elige una categoría"); return; }
     const parts = catLabel.split("/").map(s => s.trim());
@@ -2246,7 +2252,7 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
             <input value={location} onChange={e => setLocation(e.target.value)} placeholder="Ej: Vedado, La Habana" style={inp} />
           </div>
         )}
-        {shipModes.intl && (
+        {shipModes.intl && !isCatalogPro && (
           <div style={{ marginTop: 4, marginBottom: 8 }}>
             <label style={lbl}>Precio del envío internacional</label>
             <input type="number" value={shipPrice} onChange={e => setShipPrice(e.target.value)} placeholder="Precio del envío" style={inp} />
@@ -2582,23 +2588,21 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
   }, [activeVariant?.image]);
 
   // Estimado de envío ANTES de comprar (visible en la ficha, no solo dentro
-  // del diálogo de pago) — SOLO para modo 'cuba', donde el destino siempre
-  // es el mismo (Cuba) así que sí se puede cotizar sin conocer todavía la
-  // dirección real del comprador. En modo 'mundial' el destino depende del
-  // país que el comprador elija recién en el pago — nunca se inventa un
-  // estimado genérico, se avisa que el costo/tiempo real se calcula ahí.
+  // del diálogo de pago) — se cotiza siempre hacia Cuba (destino por defecto
+  // y el más común de esta app) como estimado representativo; el comprador
+  // puede elegir cualquier otro país real al momento de comprar, donde se
+  // recotiza con su destino exacto.
   const isCatalogPro = p.source_type === 'catalog_pro';
-  const isMundial = isCatalogPro && p.sale_mode === 'mundial';
   const [cubaShipEstimate, setCubaShipEstimate] = useState(null);
   useEffect(() => {
     setCubaShipEstimate(null);
-    if (!isCatalogPro || isMundial || !p.id) return;
+    if (!isCatalogPro || !p.id) return;
     let alive = true;
-    getCatalogProBuyerFreightQuote(p.id, activeVariant?.id || null, 1).then(r => {
+    getCatalogProBuyerFreightQuote(p.id, activeVariant?.id || null, 1, 'CU').then(r => {
       if (alive && r?.applicable) setCubaShipEstimate(r);
     }).catch(() => {});
     return () => { alive = false; };
-  }, [isCatalogPro, isMundial, p.id, activeVariant?.id]);
+  }, [isCatalogPro, p.id, activeVariant?.id]);
 
   useEffect(() => {
     if (isService || !p.id) return;
@@ -2694,15 +2698,10 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
         </div>
         {!isService && <CurrencyEquivalents product={p} />}
 
-        {isCatalogPro && !isMundial && (
+        {isCatalogPro && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, background: `${G}12`, border: `1px solid ${G}30`, borderRadius: 100, padding: "5px 11px", marginBottom: 12, width: "fit-content" }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>✈️ Envío disponible a Cuba</span>
-            {cubaShipEstimate?.days_min != null && <span style={{ fontSize: 10.5, color: T2 }}>· llega en {cubaShipEstimate.days_min} a {cubaShipEstimate.days_max} días</span>}
-          </div>
-        )}
-        {isMundial && (
-          <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
-            <p style={{ fontSize: 11, color: T2 }}>🌍 Producto para compradores fuera de Cuba — el envío se calcula real, según tu país, al momento de pagar.</p>
+            <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>✈️ Envío disponible a Cuba y a otros países</span>
+            {cubaShipEstimate?.days_min != null && <span style={{ fontSize: 10.5, color: T2 }}>· a Cuba llega en {cubaShipEstimate.days_min} a {cubaShipEstimate.days_max} días</span>}
           </div>
         )}
 

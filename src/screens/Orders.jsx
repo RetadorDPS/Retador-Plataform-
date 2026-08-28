@@ -97,15 +97,36 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
         </div>
 
         {/* Estado de fulfillment del Catálogo Pro (solo si este pedido es de un
-            producto que viene de ahí) — SIEMPRE el texto público ya sanitizado
-            de order_status_map, nunca el proveedor real ni su ubicación. */}
-        {o.catalogProStatusLabel && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, background: `${G}12`, border: `1px solid ${G}30`, borderRadius: 13, padding: "11px 13px", marginBottom: 12 }}>
-            <span style={{ fontSize: 16 }}>📦</span>
-            <div>
-              <p style={{ fontSize: 9.5, fontWeight: 700, color: T2, textTransform: "uppercase", letterSpacing: .3 }}>Estado del envío</p>
-              <p style={{ fontSize: 12.5, fontWeight: 800, color: T1, marginTop: 2 }}>{o.catalogProStatusLabel}</p>
-            </div>
+            producto que viene de ahí) — lista progresiva con la cadena REAL
+            de pasos (5 con centro logístico si el pedido fue a Cuba, 4 más
+            simples para cualquier otro país), igual de visual que la
+            "Progreso" genérica que no aplica aquí, pero sin botones de
+            confirmación manual ni mención de mensajero. SIEMPRE el texto
+            público ya sanitizado de order_status_map, nunca el proveedor
+            real ni su ubicación. */}
+        {isCatalogPro && (
+          <div style={{ background: card, border: `1px solid ${B}`, borderRadius: 16, padding: "13px 15px 6px", marginBottom: 12 }}>
+            <p style={{ fontSize: 9.5, fontWeight: 700, color: T2, textTransform: "uppercase", letterSpacing: .3, marginBottom: 9 }}>📦 Estado del envío</p>
+            {(o.catalogProSteps || []).map((st, i) => {
+              const curOrder = o.catalogProSortOrder ?? 1;
+              const isDone = st.sortOrder < curOrder, isCur = st.sortOrder === curOrder, isLast = i === o.catalogProSteps.length - 1;
+              const col = isDone ? "#22C55E" : isCur ? G : T3;
+              return (
+                <div key={st.sortOrder} style={{ display: "flex", gap: 11 }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 18, flexShrink: 0 }}>
+                    <div style={{ width: 18, height: 18, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: isDone ? "#22C55E" : "transparent", border: isDone ? "none" : `2px solid ${col}` }}>
+                      {isDone && <svg width="9" height="7" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                      {isCur && <div style={{ width: 7, height: 7, borderRadius: "50%", background: G }} />}
+                    </div>
+                    {!isLast && <div style={{ width: 2, flex: 1, minHeight: 20, background: isDone ? "#22C55E" : B, marginTop: 2, marginBottom: 2, borderRadius: 2 }} />}
+                  </div>
+                  <div style={{ flex: 1, paddingBottom: 12 }}>
+                    <p style={{ fontSize: 12.5, fontWeight: isCur ? 800 : 600, color: isDone ? T1 : isCur ? G : T3 }}>{st.label}</p>
+                    {isCur && <p style={{ fontSize: 9.5, color: G, marginTop: 1, fontWeight: 700 }}>ACTUAL</p>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -310,7 +331,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button className="p" onClick={onChat} style={{ width: 48, height: 48, borderRadius: "50%", border: `1px solid ${B}`, background: soft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Ic n="msg" c={T2} s={19} /></button>
         </div>
-        <p style={{ fontSize: 9, color: T3, textAlign: "center", marginTop: 10, lineHeight: 1.5 }}>Cada confirmación la marca quien corresponde según el tipo de entrega (vendedor, comprador o mensajero).</p>
+        {!isCatalogPro && <p style={{ fontSize: 9, color: T3, textAlign: "center", marginTop: 10, lineHeight: 1.5 }}>Cada confirmación la marca quien corresponde según el tipo de entrega (vendedor, comprador o mensajero).</p>}
       </div>
     </div>
   );

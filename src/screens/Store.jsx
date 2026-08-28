@@ -1505,12 +1505,6 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
   const flatCost = Number(product.recommended_price) || 0;
   const [price, setPrice] = useState(String(Math.round(flatCost * SUGGESTED_MARGIN * 100) / 100));
   const [busy, setBusy] = useState(false);
-  // Modo de venta — fijo por producto, se elige UNA vez al agregarlo a la
-  // tienda y ya no cambia. 'cuba': va vía nuestro hub (como hasta ahora).
-  // 'mundial': CJ lo envía directo al país del comprador, sin pasar por el
-  // hub — para vendedores que quieren vender a cualquier parte del mundo,
-  // no solo a Cuba. Obligatorio elegir uno antes de poder agregar.
-  const [saleMode, setSaleMode] = useState(null);
 
   useEffect(() => {
     setVariants(undefined); setSelectedAttrs({});
@@ -1550,7 +1544,7 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
   const PROJECTION_TIERS = [10, 50, 100];
 
   const addToStore = () => {
-    if (!priceNum || priceNum < cost || !saleMode) { return; }
+    if (!priceNum || priceNum < cost) { return; }
     setBusy(true);
     const mapped = mapCjCategoryToRetador(product.category, cats, subcats);
     // Variantes REALES (no ya como texto en la descripción): el precio de
@@ -1587,7 +1581,6 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
       variants: variantRows,
       source_catalog_id: product.id,
       source_type: "catalog_pro",
-      sale_mode: saleMode,
     });
     setBusy(false);
   };
@@ -1683,27 +1676,9 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
         </div>
         {priceNum > 0 && priceNum < cost && <div style={{ fontSize:11.5, color:C.err, marginBottom:14 }}>Tu precio de venta no puede ser menor a tu costo ({money(cost, "USD")})</div>}
 
-        {/* Modo de venta — obligatorio, fijo por producto (no cambia pedido
-            a pedido). Define la ruta de envío real y quién puede comprarlo. */}
-        <div style={{ marginBottom:16 }}>
-          <div style={{ fontSize:10.5, fontWeight:700, color:C.m, textTransform:"uppercase", letterSpacing:.4, marginBottom:6 }}>¿Vas a vender este producto en Cuba o a cualquier parte del mundo? *</div>
-          <div style={{ display:"flex", gap:8 }}>
-            {[
-              { v:"cuba", label:"Cuba", desc:"Envío vía nuestro operador hasta Cuba" },
-              { v:"mundial", label:"Cualquier país", desc:"CJ lo envía directo al comprador, fuera de Cuba" },
-            ].map(o => (
-              <button key={o.v} onClick={() => setSaleMode(o.v)} style={{ flex:1, textAlign:"left", padding:"10px 11px", borderRadius:10, cursor:"pointer",
-                border:`1.5px solid ${saleMode === o.v ? ac : C.b}`, background: saleMode === o.v ? `${ac}18` : C.s3 }}>
-                <div style={{ fontSize:12.5, fontWeight:800, color: saleMode === o.v ? C.t : C.m }}>{o.label}</div>
-                <div style={{ fontSize:10, color:C.m, marginTop:2, lineHeight:1.35 }}>{o.desc}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-
         <div style={{ display:"flex", gap:9 }}>
           <button onClick={onClose} style={{ flex:1, padding:12, borderRadius:10, border:`1px solid ${C.b}`, background:"transparent", color:C.m, fontSize:13, fontWeight:700, cursor:"pointer" }}>Cancelar</button>
-          <button onClick={addToStore} disabled={busy || !priceNum || priceNum < cost || !saleMode} style={{ flex:1, padding:12, borderRadius:10, border:"none", background:ac, color:"#000", fontSize:13, fontWeight:800, cursor:"pointer", opacity:(busy || !priceNum || priceNum < cost || !saleMode) ? .6 : 1 }}>Añadir a mi tienda</button>
+          <button onClick={addToStore} disabled={busy || !priceNum || priceNum < cost} style={{ flex:1, padding:12, borderRadius:10, border:"none", background:ac, color:"#000", fontSize:13, fontWeight:800, cursor:"pointer", opacity:(busy || !priceNum || priceNum < cost) ? .6 : 1 }}>Añadir a mi tienda</button>
         </div>
       </div>
     </div>

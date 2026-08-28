@@ -942,9 +942,11 @@ function AppShell({ sessionUser, platformStats = null }) {
       }),
       // Trazabilidad con el Catálogo Pro (Mejora B): si este producto viene del
       // editor precargado desde un producto del catálogo, queda vinculado.
-      // sale_mode ('cuba'/'mundial') lo eligió el vendedor en CatalogDetailSheet
-      // al agregarlo — es fijo por producto, no se vuelve a preguntar acá.
-      ...(d.source_catalog_id ? { source_catalog_id: d.source_catalog_id, source_type: d.source_type || "catalog_pro", sale_mode: d.sale_mode || "cuba" } : {}),
+      // El destino (Cuba u otro país) ya no se fija aquí — lo elige el
+      // comprador en cada compra (ver BuyModal); el trigger de la base deja
+      // products.sale_mode en 'cuba' por defecto, sin que nadie lo use ya
+      // para decidir la ruta de envío.
+      ...(d.source_catalog_id ? { source_catalog_id: d.source_catalog_id, source_type: d.source_type || "catalog_pro" } : {}),
     };
     let data, missing;
     try {

@@ -1163,12 +1163,13 @@ export const createOrderMulti = async (data) => {
 // monto de envío — nunca costo real de CJ ni margen de Daniel. Para
 // productos que no son del Catálogo Pro devuelve applicable:false.
 //
-// destCountry SOLO aplica a productos en modo de venta 'mundial' (CJ envía
-// directo al país real del comprador) — se ignora en modo 'cuba' (siempre
-// pasa por el hub, el país de destino real del comprador no cambia esa
-// ruta). El resultado trae days_min/days_max ya combinados según el modo
-// (en 'cuba' incluye el tramo final; en 'mundial' es el tránsito de CJ tal
-// cual) — mostrar SIEMPRE ese rango, nunca inventar uno propio en pantalla.
+// destCountry lo elige el COMPRADOR en cada compra (ya no un sale_mode fijo
+// del producto): 'CU' activa la ruta vía nuestro hub (Phoenix); cualquier
+// otro país real de CJ_COUNTRIES es envío directo de CJ, sin hub. Siempre
+// obligatorio — nunca se pide sin país. El resultado trae days_min/days_max
+// ya combinados según el destino (en 'CU' incluye el tramo final; en
+// cualquier otro país es el tránsito de CJ tal cual) — mostrar SIEMPRE ese
+// rango, nunca inventar uno propio en pantalla.
 export const getCatalogProBuyerFreightQuote = async (productId, variantId, qty, destCountry) => {
   const { data, error } = await supabase.functions.invoke("cj-buyer-freight-quote", { body: { product_id: productId, variant_id: variantId || null, qty: qty || 1, dest_country: destCountry || null } });
   if (error || data?.error) { console.error("getCatalogProBuyerFreightQuote:", error?.message || data?.error); return { total_price: 0, applicable: false, aging: null, is_slow: false, days_min: null, days_max: null }; }
@@ -1375,6 +1376,16 @@ export const getUserOrders = async (userId) => {
       (statusRows || []).forEach(r => { catalogProStatus[r.order_id] = r; });
     } catch (e) { /* sin fulfillment de Catálogo Pro para estos pedidos: normal, la mayoría no lo son */ }
   }
+  // Cadena COMPLETA de pasos por modo (5 con centro logístico si el destino
+  // fue Cuba, 4 más simples para cualquier otro país) — para pintar el
+  // seguimiento como lista progresiva real, no solo el paso actual.
+  let stepsByMode = {};
+  if (orderIds.length) {
+    try {
+      const { data: mapRows } = await supabase.from("order_status_map").select("sale_mode, sort_order, public_label").order("sort_order", { ascending: true });
+      (mapRows || []).forEach(r => { (stepsByMode[r.sale_mode] ||= []).push({ sortOrder: r.sort_order, label: r.public_label }); });
+    } catch (e) { /* sin cadena completa: se cae al solo-estado-actual */ }
+  }
   return (data || []).map(o => {
     const shipMode = o.ship_mode || "local";
     const flow = ORDER_FLOW[shipMode] || ORDER_FLOW.local;
@@ -1424,6 +1435,8 @@ export const getUserOrders = async (userId) => {
       createdAt,
       updatedAt: o.updated_at ? new Date(o.updated_at).getTime() : createdAt,
       catalogProStatusLabel: catalogProStatus[o.id]?.status_label || null,
+      catalogProSortOrder: catalogProStatus[o.id]?.sort_order ?? null,
+      catalogProSteps: catalogProStatus[o.id] ? (stepsByMode[o.sale_mode || "cuba"] || []) : [],
     };
   });
 };
@@ -1962,7 +1975,7 @@ export const SHIP_LABELS = {
 export const MODALIDAD_LABELS = {
   local:     { label: "Local",       desc: "Pago coordinado por fuera" },
   conectado: { label: "Conectado",   desc: "Pago por la plataforma · solo enlace" },
-  cargo:     { label: "Garantizado", desc: "Pago por la plataforma · envío garantizado" },
+  cargo:     { label: "Garantizado", desc: "Detalle del pago" },
 };
 
 // Chat vigilado (solo pedidos locales): oculta teléfonos, correos y enlaces para que

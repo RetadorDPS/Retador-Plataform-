@@ -439,7 +439,6 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   const cartShipFresh = !isCatalogPro || cartLines.every(l => cartShipQuotes[l.variantId]?.qty === l.qty && !cartShipQuotes[l.variantId]?.loading);
   const shipQuoteReady = primaryShipFresh && cartShipFresh;
   const catalogProShipSlow = isCatalogPro && ((primaryShipQuote.qty === qty && primaryShipQuote.is_slow) || cartLines.some(l => cartShipQuotes[l.variantId]?.qty === l.qty && cartShipQuotes[l.variantId]?.is_slow));
-  const catalogProShipAging = isCatalogPro ? (primaryShipQuote.qty === qty ? primaryShipQuote.aging : Object.values(cartShipQuotes).find(q => q?.aging)?.aging) : null;
   const catalogProShipTotal = isCatalogPro
     ? Math.round((
         (primaryShipQuote.qty === qty ? primaryShipQuote.total_price : 0) +
@@ -642,7 +641,12 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
 
           {isCatalogPro && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
-              <span style={{ fontSize: 11, color: T2 }}>✈️ Envío internacional{catalogProShipAging ? ` · llega en ${catalogProShipAging} días` : ""}</span>
+              {/* OJO — el "aging" que devuelve CJ es solo el tránsito hasta
+                  nuestro punto de entrada, NO el tiempo total hasta el
+                  comprador — todavía no existe en el sistema un tiempo real
+                  del tramo final, así que NUNCA se muestra ese número solo
+                  (sería mentirle al comprador sobre cuándo le llega). */}
+              <span style={{ fontSize: 11, color: T2 }}>✈️ Envío internacional{catalogProShipSlow ? " (más lento por el volumen)" : ""}</span>
               <span style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>{shipQuoteReady ? money(catalogProShipTotal, cur) : "calculando…"}</span>
             </div>
           )}

@@ -1039,15 +1039,17 @@ function AppShell({ sessionUser, platformStats = null }) {
     if (local) go(local);
     else getProductById(productId).then(p => { if (p) go(p); else flash("Ese producto ya no está disponible"); }).catch(() => {});
   };
-  // "Iniciar pedido" desde el panel fijo de producto en el chat: mismo flujo de
-  // compra real de siempre (handleBuy → modal de pedido), nada nuevo inventado.
-  const startOrderFromChat = (productId) => {
-    if (!productId) return;
-    const go = (p) => { if (!p) { flash("Ese producto ya no está disponible"); return; } setChatOpen(false); handleBuy(p); };
-    const local = products.find(x => x.id === productId);
-    if (local) go(local);
-    else getProductById(productId).then(go).catch(() => flash("Ese producto ya no está disponible"));
-  };
+  // "Iniciar pedido" desde el panel fijo de producto en el chat.
+  // BUG REAL corregido: antes llamaba a handleBuy(p) directo, que abre
+  // BuyModal SIN selector de variante (BuyModal solo lee product.selectedVariant
+  // si ya viene puesto — nunca deja elegirla). Eso dejaba el pedido pegado a la
+  // variante/precio base del producto sin poder cambiarla. La ficha completa
+  // (ProductDetail) sí trae el selector real de variantes y ya arma
+  // {...p, selectedVariant} antes de llamar a onBuy — así que "Iniciar pedido"
+  // ahora abre esa misma ficha (mismo camino que "Ver ficha completa") en vez
+  // de saltar directo al modal, para que el comprador elija variante ahí antes
+  // de confirmar, igual que siempre.
+  const startOrderFromChat = (productId) => openProductFromChat(productId);
   const openMessages = () => { setSelChat(null); setChatOpen(false); setTab("perfil"); setPScr("messages"); };
   // Abre el chat DIRECTO por conversation_id (notificación kind='message', o el aviso
   // push tocado fuera de la app): resuelve quién es la otra persona y abre su chat.

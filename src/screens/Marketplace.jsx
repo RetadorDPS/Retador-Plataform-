@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, getCatalogProShippingQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -398,28 +398,53 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   const removeCartLine = (variantId) => setCartLines(ls => ls.filter(l => l.variantId !== variantId));
   const setCartLineQty = (variantId, n) => setCartLines(ls => ls.map(l => l.variantId === variantId ? { ...l, qty: Math.max(1, n) } : l));
 
-  // Catálogo Pro: el envío (CJ→hub + hub→Cuba) es real y se cobra aparte —
-  // se cotiza en vivo por CADA variante (cada una puede pesar/costar
-  // distinto) para que el comprador vea el mismo número que va a cobrar el
-  // backend al confirmar, nunca una sorpresa.
+  // Catálogo Pro: el envío internacional es real y se cobra aparte. OJO —
+  // bug real ya visto: el flete no escala lineal por unidad (CJ real: 1u=
+  // $16.54, 10u=$82.98, NUNCA 10×16.54), así que jamás se calcula aquí
+  // multiplicando un precio por la cantidad — siempre se cotiza en vivo
+  // para la cantidad EXACTA de cada línea (debounced, para no golpear la
+  // cotización en cada tecla) y se guarda junto con la cantidad para la que
+  // vale, así nunca se muestra ni se cobra un número de otra cantidad.
   const isCatalogPro = product.source_type === 'catalog_pro';
-  const [shipQuotePerUnit, setShipQuotePerUnit] = useState(0);
-  const [cartShipQuotes, setCartShipQuotes] = useState({});
+  const [primaryShipQuote, setPrimaryShipQuote] = useState({ qty: null, total_price: 0, aging: null, is_slow: false, loading: false });
+  const [cartShipQuotes, setCartShipQuotes] = useState({}); // { [variantId]: { qty, total_price, aging, is_slow, loading } }
   useEffect(() => {
     if (!isCatalogPro) return;
     let alive = true;
-    getCatalogProShippingQuote(product.id, variant?.id || null).then(q => { if (alive) setShipQuotePerUnit(Number(q?.ship_price_per_unit) || 0); }).catch(() => {});
-    return () => { alive = false; };
-  }, [isCatalogPro, product.id, variant?.id]);
+    setPrimaryShipQuote(q => ({ ...q, loading: true }));
+    const t = setTimeout(() => {
+      getCatalogProBuyerFreightQuote(product.id, variant?.id || null, qty).then(r => {
+        if (!alive) return;
+        setPrimaryShipQuote({ qty, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, loading: false });
+      }).catch(() => { if (alive) setPrimaryShipQuote(q => ({ ...q, loading: false })); });
+    }, 600);
+    return () => { alive = false; clearTimeout(t); };
+  }, [isCatalogPro, product.id, variant?.id, qty]);
   useEffect(() => {
     if (!isCatalogPro || cartLines.length === 0) return;
     let alive = true;
-    Promise.all(cartLines.map(l => getCatalogProShippingQuote(product.id, l.variantId).then(q => [l.variantId, Number(q?.ship_price_per_unit) || 0]).catch(() => [l.variantId, 0])))
-      .then(pairs => { if (alive) setCartShipQuotes(Object.fromEntries(pairs)); });
-    return () => { alive = false; };
-  }, [isCatalogPro, product.id, cartLines.map(l => l.variantId).join(',')]);
+    setCartShipQuotes(qs => Object.fromEntries(cartLines.map(l => [l.variantId, { ...(qs[l.variantId] || {}), loading: true }])));
+    const t = setTimeout(() => {
+      Promise.all(cartLines.map(l => getCatalogProBuyerFreightQuote(product.id, l.variantId, l.qty)
+        .then(r => [l.variantId, { qty: l.qty, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, loading: false }])))
+        .then(pairs => { if (alive) setCartShipQuotes(Object.fromEntries(pairs)); });
+    }, 600);
+    return () => { alive = false; clearTimeout(t); };
+  }, [isCatalogPro, product.id, cartLines.map(l => `${l.variantId}:${l.qty}`).join(',')]);
+  // "Fresco" = la cotización guardada corresponde EXACTAMENTE a la cantidad
+  // actual de esa línea — si el comprador acaba de cambiar la cantidad, la
+  // cotización vieja no cuenta (ni para mostrar ni para cobrar) hasta que
+  // llegue la nueva.
+  const primaryShipFresh = !isCatalogPro || (primaryShipQuote.qty === qty && !primaryShipQuote.loading);
+  const cartShipFresh = !isCatalogPro || cartLines.every(l => cartShipQuotes[l.variantId]?.qty === l.qty && !cartShipQuotes[l.variantId]?.loading);
+  const shipQuoteReady = primaryShipFresh && cartShipFresh;
+  const catalogProShipSlow = isCatalogPro && ((primaryShipQuote.qty === qty && primaryShipQuote.is_slow) || cartLines.some(l => cartShipQuotes[l.variantId]?.qty === l.qty && cartShipQuotes[l.variantId]?.is_slow));
+  const catalogProShipAging = isCatalogPro ? (primaryShipQuote.qty === qty ? primaryShipQuote.aging : Object.values(cartShipQuotes).find(q => q?.aging)?.aging) : null;
   const catalogProShipTotal = isCatalogPro
-    ? Math.round((shipQuotePerUnit * qty + cartLines.reduce((s, l) => s + (cartShipQuotes[l.variantId] || 0) * l.qty, 0)) * 100) / 100
+    ? Math.round((
+        (primaryShipQuote.qty === qty ? primaryShipQuote.total_price : 0) +
+        cartLines.reduce((s, l) => s + (cartShipQuotes[l.variantId]?.qty === l.qty ? cartShipQuotes[l.variantId].total_price : 0), 0)
+      ) * 100) / 100
     : 0;
   // Total real del/los producto(s) elegido(s) — grandTotal si hay carrito
   // múltiple, total simple si es una sola línea (comportamiento de siempre).
@@ -515,6 +540,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
     if (availStock != null && availStock <= 0) { flash("⚠️ Este producto está agotado"); return; }
     if (!cartQtyValid) { flash("⚠️ Alguna de las variantes agregadas no tiene stock suficiente"); return; }
     if (!qtyValid) { flash(`⚠️ Solo quedan ${availStock} disponibles`); return; }
+    if (isCatalogPro && !shipQuoteReady) { flash("⚠️ Espera a que termine de calcularse el envío"); return; }
     if (needData) setStep("datos"); else handle();
   };
 
@@ -585,7 +611,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 2}. {Object.values(l.attrs || {}).join(" / ") || "Variante"}</div>
-                    <div style={{ fontSize: 10, color: T2, marginTop: 1 }}>{money(l.subtotal, cur)}{isCatalogPro && cartShipQuotes[l.variantId] ? ` · + ${money(cartShipQuotes[l.variantId] * l.qty, cur)} envío` : ""}</div>
+                    <div style={{ fontSize: 10, color: T2, marginTop: 1 }}>{money(l.subtotal, cur)}{isCatalogPro && cartShipQuotes[l.variantId]?.qty === l.qty ? ` · + ${money(cartShipQuotes[l.variantId].total_price, cur)} envío` : isCatalogPro ? " · calculando envío…" : ""}</div>
                   </div>
                   <button className="p" onClick={() => setCartLineQty(l.variantId, l.qty - 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>−</button>
                   <span style={{ fontSize: 12.5, fontWeight: 800, color: T1, width: 20, textAlign: "center" }}>{l.qty}</span>
@@ -614,10 +640,10 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
             </div>
           )}
 
-          {isCatalogPro && catalogProShipTotal > 0 && (
+          {isCatalogPro && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
-              <span style={{ fontSize: 11, color: T2 }}>✈️ Envío internacional (CJ→hub + hub→Cuba)</span>
-              <span style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>{money(catalogProShipTotal, cur)}</span>
+              <span style={{ fontSize: 11, color: T2 }}>✈️ Envío internacional{catalogProShipAging ? ` · llega en ${catalogProShipAging} días` : ""}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>{shipQuoteReady ? money(catalogProShipTotal, cur) : "calculando…"}</span>
             </div>
           )}
 
@@ -633,7 +659,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
           {(() => {
             const isIntl = shipMode === "intl", isLocal = shipMode === "local";
             const shipCost = isCatalogPro ? catalogProShipTotal : isIntl ? parseFloat(product.shippingPrice || 0) : isLocal ? liveLocalBase : 0;
-            const shipLabel = isCatalogPro ? "Envío internacional (CJ→hub + hub→Cuba)" : isIntl ? "Envío internacional" : isLocal ? "Delivery local" : "";
+            const shipLabel = isCatalogPro ? "Envío internacional" : isIntl ? "Envío internacional" : isLocal ? "Delivery local" : "";
             const shipWho = isCatalogPro ? "empresa de envíos" : isIntl ? "empresa de envíos" : isLocal ? "mensajero" : "";
             const cupFmt = v => Math.round(v || 0).toLocaleString() + " CUP";
             const row = (label, who, val, strong, cup) => (
@@ -687,8 +713,8 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
             <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>{needData ? "En el siguiente paso completas los datos de entrega; el resto ya viene precargado." : "Coordinarás el encuentro con el vendedor por el chat al crear el pedido."}</p>
           </div>
 
-          <button className="p" onClick={primaryAction} disabled={availModes.length === 0 || !qtyValid} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (availModes.length === 0 || !qtyValid) ? .5 : 1 }}>
-            {needData ? "Continuar →" : `Crear pedido · ${money(buyerTotal, cur)}`}
+          <button className="p" onClick={primaryAction} disabled={availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)) ? .5 : 1 }}>
+            {isCatalogPro && !shipQuoteReady ? "Calculando envío…" : needData ? "Continuar →" : `Crear pedido · ${money(buyerTotal, cur)}`}
           </button>
         </> : <>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -767,8 +793,8 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
             )}
           </div>
 
-          <button className="p" onClick={handle} disabled={loading || !dataValid} style={{ width: "100%", background: dataValid ? G : (isDark ? "#1a1a1a" : "#ddd"), color: dataValid ? "#000" : T3, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            {loading ? <Spin size={18} color="#000" /> : `Crear pedido · ${money(buyerTotal, cur)}`}
+          <button className="p" onClick={handle} disabled={loading || !dataValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: dataValid ? G : (isDark ? "#1a1a1a" : "#ddd"), color: dataValid ? "#000" : T3, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            {loading ? <Spin size={18} color="#000" /> : (isCatalogPro && !shipQuoteReady) ? "Calculando envío…" : `Crear pedido · ${money(buyerTotal, cur)}`}
           </button>
         </>}
       </div>

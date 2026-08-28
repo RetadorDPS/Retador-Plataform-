@@ -1154,16 +1154,18 @@ export const createOrderMulti = async (data) => {
   const id = (orderId && typeof orderId === "object") ? (orderId.id ?? orderId[0]?.id) : orderId;
   return { ...data, id, status: "creada", createdAt: Date.now() };
 };
-// Cotización real de envío (CJ→hub + hub→Cuba) de un producto/variante del
-// Catálogo Pro — SOLO los dos montos de flete, nunca costo real de CJ ni
-// margen de Daniel. Para productos que no son del Catálogo Pro devuelve
-// todo en 0 (no aplica). La usa BuyModal para mostrar el desglose ANTES de
-// confirmar — el mismo cálculo que hace create_order/create_order_multi al
-// crear el pedido de verdad, así el comprador nunca ve una sorpresa.
-export const getCatalogProShippingQuote = async (productId, variantId) => {
-  const { data, error } = await supabase.rpc("get_catalog_pro_shipping_quote", { p_product_id: productId, p_variant_id: variantId || null });
-  if (error) { console.error("getCatalogProShippingQuote:", error.message); return { cost_shipping_to_hub: 0, cost_hub_to_destination: 0, ship_price_per_unit: 0 }; }
-  return (Array.isArray(data) ? data[0] : data) || { cost_shipping_to_hub: 0, cost_hub_to_destination: 0, ship_price_per_unit: 0 };
+// Cotización real de envío internacional de un producto/variante del
+// Catálogo Pro para la cantidad EXACTA que se va a pedir — el flete real
+// (CJ) NO escala lineal por unidad (confirmado con datos reales: 1u=$16.54,
+// 10u=$82.98, jamás 10×16.54), así que nunca se calcula localmente
+// multiplicando: siempre se pide la cotización viva a esta Edge Function
+// (que cachea 24h por variante+cantidad exacta). Devuelve SOLO el monto de
+// envío — nunca costo real de CJ ni margen de Daniel. Para productos que no
+// son del Catálogo Pro devuelve applicable:false (no aplica).
+export const getCatalogProBuyerFreightQuote = async (productId, variantId, qty) => {
+  const { data, error } = await supabase.functions.invoke("cj-buyer-freight-quote", { body: { product_id: productId, variant_id: variantId || null, qty: qty || 1 } });
+  if (error || data?.error) { console.error("getCatalogProBuyerFreightQuote:", error?.message || data?.error); return { total_price: 0, applicable: false, aging: null, is_slow: false }; }
+  return data;
 };
 // Envío suelto SIN producto ni vendedor (create_package_delivery): usa el
 // MISMO pool/flujo de mensajero que un pedido de compra (misma tabla orders,

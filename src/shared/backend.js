@@ -1135,6 +1135,36 @@ export const createOrder = async (data) => {
   const id = (orderId && typeof orderId === "object") ? (orderId.id ?? orderId[0]?.id) : orderId;
   return { ...data, id, status: "creada", createdAt: Date.now() };
 };
+// Carrito de variantes múltiples: UN pedido con VARIAS variantes del MISMO
+// producto, cada una con su propia cantidad — cada línea se valida (stock y
+// precio real) en el servidor exactamente igual que createOrder, nunca se
+// confía en lo que arma el cliente. lines: [{ variantId, qty }, ...].
+export const createOrderMulti = async (data) => {
+  const { data: orderId, error } = await supabase.rpc("create_order_multi", {
+    p_product_id: data.productId,
+    p_lines: (data.lines || []).map(l => ({ variant_id: l.variantId, qty: l.qty || 1 })),
+    p_ship_mode: data.shipMode,
+    p_modalidad: data.modalidad || null,
+    p_ship_price: Number(data.shipPrice) || 0,
+    p_ship_to: data.shipTo || null,
+    p_delivery: data.delivery || null,
+    p_payment_method: data.paymentMethod || "coordinado",
+  });
+  if (error) throw error;
+  const id = (orderId && typeof orderId === "object") ? (orderId.id ?? orderId[0]?.id) : orderId;
+  return { ...data, id, status: "creada", createdAt: Date.now() };
+};
+// Cotización real de envío (CJ→hub + hub→Cuba) de un producto/variante del
+// Catálogo Pro — SOLO los dos montos de flete, nunca costo real de CJ ni
+// margen de Daniel. Para productos que no son del Catálogo Pro devuelve
+// todo en 0 (no aplica). La usa BuyModal para mostrar el desglose ANTES de
+// confirmar — el mismo cálculo que hace create_order/create_order_multi al
+// crear el pedido de verdad, así el comprador nunca ve una sorpresa.
+export const getCatalogProShippingQuote = async (productId, variantId) => {
+  const { data, error } = await supabase.rpc("get_catalog_pro_shipping_quote", { p_product_id: productId, p_variant_id: variantId || null });
+  if (error) { console.error("getCatalogProShippingQuote:", error.message); return { cost_shipping_to_hub: 0, cost_hub_to_destination: 0, ship_price_per_unit: 0 }; }
+  return (Array.isArray(data) ? data[0] : data) || { cost_shipping_to_hub: 0, cost_hub_to_destination: 0, ship_price_per_unit: 0 };
+};
 // Envío suelto SIN producto ni vendedor (create_package_delivery): usa el
 // MISMO pool/flujo de mensajero que un pedido de compra (misma tabla orders,
 // mismos estados, mismo get_available_deliveries) — ship_mode='paquete' y

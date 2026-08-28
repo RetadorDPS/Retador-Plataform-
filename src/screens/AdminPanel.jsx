@@ -4552,7 +4552,7 @@ function CatalogPendingOrdersTab({ toast, ro, onChange }) {
               const next = nextStatusOf(r.internal_status);
               const attrs = r.variant_attributes && Object.keys(r.variant_attributes).length ? Object.values(r.variant_attributes).join(' / ') : null;
               return (
-                <div key={r.order_id} className="mc" style={{ marginBottom: 10 }}>
+                <div key={r.id} className="mc" style={{ marginBottom: 10 }}>
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                     <CatalogImg src={r.product_image} width={48} height={48} radius={8} iconSize={20} />
                     <div style={{ flex: 1, minWidth: 0 }}>

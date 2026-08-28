@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, getCatalogProShippingQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -312,6 +312,17 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   // Variante elegida en la ficha del producto (ProductDetail), si tiene —
   // manda SU precio (nunca el base) y SU stock, no el del producto entero.
   const variant = product.selectedVariant || null;
+  // Carrito de variantes múltiples (Bloque 2): product.__variants es la
+  // lista COMPLETA de variantes reales que ProductDetail ya trae cargada —
+  // se reutiliza tal cual, sin volver a pedirla. Si el producto no tiene
+  // variantes (o solo tiene una), allVariants queda vacío/con 1 y NINGUNA
+  // de las piezas nuevas de abajo se muestra — el pedido de una sola
+  // variante sigue exactamente igual que siempre.
+  const allVariants = Array.isArray(product.__variants) ? product.__variants : [];
+  const canAddMoreVariants = allVariants.length > 1;
+  const variantLabel = v => Object.values(v?.attributes || {}).join(' / ') || v?.sku || 'Variante';
+  const [cartLines, setCartLines] = useState([]); // [{variantId, attrs, image, price, stock, qty}] — variantes ADICIONALES a `variant`
+  const [pickingVariant, setPickingVariant] = useState(false);
   const price = parseFloat((variant && variant.price != null ? variant.price : product.price) || 0);
   // Stock REAL disponible ahora mismo (descuenta lo comprometido en pedidos vivos):
   // se consulta al abrir el diálogo para que el selector nunca permita pedir de más.
@@ -369,6 +380,54 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   const unitPriceWithDisc = discPct > 0 ? price * (1 - discPct / 100) : price;
   const total = unitPriceWithDisc * qty;
 
+  // Líneas adicionales del carrito (Bloque 2) — cada una con su propio
+  // descuento por cantidad, igual que la línea principal de arriba.
+  const cartLinesCalc = cartLines.map(l => {
+    const d = bulkDiscountPctFor(l.qty, product.bulkDiscounts);
+    const unit = d > 0 ? l.price * (1 - d / 100) : l.price;
+    return { ...l, unitWithDisc: unit, subtotal: Math.round(unit * l.qty * 100) / 100 };
+  });
+  const isMulti = cartLines.length > 0;
+  const grandTotal = Math.round((total + cartLinesCalc.reduce((s, l) => s + l.subtotal, 0)) * 100) / 100;
+
+  const addCartLine = (v) => {
+    if (!v || v.id === variant?.id || cartLines.some(l => l.variantId === v.id)) return;
+    setCartLines(ls => [...ls, { variantId: v.id, attrs: v.attributes, image: v.image, price: v.price != null ? Number(v.price) : (Number(product.price) || 0), stock: v.stock, qty: 1 }]);
+    setPickingVariant(false);
+  };
+  const removeCartLine = (variantId) => setCartLines(ls => ls.filter(l => l.variantId !== variantId));
+  const setCartLineQty = (variantId, n) => setCartLines(ls => ls.map(l => l.variantId === variantId ? { ...l, qty: Math.max(1, n) } : l));
+
+  // Catálogo Pro: el envío (CJ→hub + hub→Cuba) es real y se cobra aparte —
+  // se cotiza en vivo por CADA variante (cada una puede pesar/costar
+  // distinto) para que el comprador vea el mismo número que va a cobrar el
+  // backend al confirmar, nunca una sorpresa.
+  const isCatalogPro = product.source_type === 'catalog_pro';
+  const [shipQuotePerUnit, setShipQuotePerUnit] = useState(0);
+  const [cartShipQuotes, setCartShipQuotes] = useState({});
+  useEffect(() => {
+    if (!isCatalogPro) return;
+    let alive = true;
+    getCatalogProShippingQuote(product.id, variant?.id || null).then(q => { if (alive) setShipQuotePerUnit(Number(q?.ship_price_per_unit) || 0); }).catch(() => {});
+    return () => { alive = false; };
+  }, [isCatalogPro, product.id, variant?.id]);
+  useEffect(() => {
+    if (!isCatalogPro || cartLines.length === 0) return;
+    let alive = true;
+    Promise.all(cartLines.map(l => getCatalogProShippingQuote(product.id, l.variantId).then(q => [l.variantId, Number(q?.ship_price_per_unit) || 0]).catch(() => [l.variantId, 0])))
+      .then(pairs => { if (alive) setCartShipQuotes(Object.fromEntries(pairs)); });
+    return () => { alive = false; };
+  }, [isCatalogPro, product.id, cartLines.map(l => l.variantId).join(',')]);
+  const catalogProShipTotal = isCatalogPro
+    ? Math.round((shipQuotePerUnit * qty + cartLines.reduce((s, l) => s + (cartShipQuotes[l.variantId] || 0) * l.qty, 0)) * 100) / 100
+    : 0;
+  // Total real del/los producto(s) elegido(s) — grandTotal si hay carrito
+  // múltiple, total simple si es una sola línea (comportamiento de siempre).
+  // buyerTotal suma el envío internacional del Catálogo Pro cuando aplica —
+  // ese es el número que el comprador debe ver como "lo que va a pagar".
+  const productTotal = isMulti ? grandTotal : total;
+  const buyerTotal = Math.round((productTotal + (isCatalogPro ? catalogProShipTotal : 0)) * 100) / 100;
+
   const SHIP_META = {
     local:   { icon: "🛵", label: "Delivery local",      desc: "Un mensajero te lo lleva" },
     intl:    { icon: "✈️", label: "Envío internacional", desc: "Cargo a toda Cuba" },
@@ -404,17 +463,34 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
       if (shipMode === "persona") delivery = { mode: "persona" };
       else if (shipMode === "local") delivery = { mode: "local", name: realName, nick: del.nick.trim() || undefined, phone: del.phone, address: del.addr, ref: del.ref, pickup: product.seller_name || "Vendedor", pickupAddress: product.pickupAddress || product.sellerAddress || product.location || "", pickupPhone: product.pickupPhone || product.sellerPhone || product.seller_phone || "" };
       else delivery = { mode: "intl", recipient: { name: del.name, phone: del.phone, province: del.prov, city: del.city, address: del.addr }, origin: product.origin || "Exterior", transport: product.shippingType || "standard" };
-      const shipPrice = shipMode === "intl" ? parseFloat(product.shippingPrice || 0) : shipMode === "local" ? liveLocalBase : 0;
+      // Para Catálogo Pro el backend IGNORA lo que mandemos acá y fuerza
+      // shipMode='intl'/shipPrice real (get_catalog_pro_shipping_quote) —
+      // esto es solo para que el registro local/optimista muestre algo
+      // razonable mientras llega la respuesta real de la base.
+      const shipPrice = isCatalogPro ? catalogProShipTotal
+        : shipMode === "intl" ? parseFloat(product.shippingPrice || 0)
+        : shipMode === "local" ? liveLocalBase : 0;
       const shipTo = shipMode === "intl" ? "empresa de envíos" : shipMode === "local" ? "mensajero" : null;
-      const order = await createOrder({
-        productId: product.id, title: product.title, image: variant?.image || product.img || product.image, cat: product.cat,
-        sellerId: product.seller_id, sellerName: product.seller_name,
-        buyerId: user?.id, buyerName: user?.name, qty, unitPrice: unitPriceWithDisc, amount: total, currency: cur,
-        shipMode, modalidad,
-        shipPrice, shipTo,
-        delivery,
-        variantId: variant?.id || null,
-      });
+      const common = {
+        productId: product.id, shipMode, modalidad, shipPrice, shipTo, delivery,
+        paymentMethod: "coordinado",
+      };
+      const order = isMulti
+        ? await createOrderMulti({
+            ...common,
+            title: product.title, image: variant?.image || product.img || product.image,
+            lines: [
+              { variantId: variant?.id || null, qty },
+              ...cartLines.map(l => ({ variantId: l.variantId, qty: l.qty })),
+            ],
+          })
+        : await createOrder({
+            ...common,
+            title: product.title, image: variant?.image || product.img || product.image, cat: product.cat,
+            sellerId: product.seller_id, sellerName: product.seller_name,
+            buyerId: user?.id, buyerName: user?.name, qty, unitPrice: unitPriceWithDisc, amount: total, currency: cur,
+            variantId: variant?.id || null,
+          });
       flash("✅ Pedido creado — ya puedes coordinar con el vendedor");
       onSuccess?.(order);
     } catch (e) {
@@ -429,10 +505,15 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   // Red de seguridad adicional: aunque el campo ya topa la cantidad en vivo
   // mientras se escribe, "Continuar" también rechaza avanzar si por lo que sea
   // qty quedara por encima del stock real.
-  const qtyValid = availStock == null || qty <= availStock;
+  // La misma validación de arriba, pero para CADA línea adicional del carrito
+  // — cada variante tiene su propio stock real, así que una línea sí puede
+  // pasarse aunque la línea principal esté bien.
+  const cartQtyValid = cartLines.every(l => l.stock == null || l.qty <= l.stock);
+  const qtyValid = (availStock == null || qty <= availStock) && cartQtyValid;
   const primaryAction = () => {
     if (availModes.length === 0) return;
     if (availStock != null && availStock <= 0) { flash("⚠️ Este producto está agotado"); return; }
+    if (!cartQtyValid) { flash("⚠️ Alguna de las variantes agregadas no tiene stock suficiente"); return; }
     if (!qtyValid) { flash(`⚠️ Solo quedan ${availStock} disponibles`); return; }
     if (needData) setStep("datos"); else handle();
   };
@@ -487,6 +568,59 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
               {availStock <= 0 ? "⚠️ Sin stock disponible ahora mismo" : availStock <= 5 ? `¡Últimas ${availStock} disponibles!` : `${availStock} disponibles`}
             </p>
           )}
+
+          {/* Carrito de variantes múltiples (Bloque 2) — SOLO aparece si el
+              producto tiene más de una variante real. La línea de arriba
+              (imagen/precio/Cantidad) sigue siendo "línea 1"; acá se agregan
+              líneas ADICIONALES, cada una con su propia variante y cantidad. */}
+          {canAddMoreVariants && (
+            <div style={{ marginBottom: 14 }}>
+              {isMulti && (
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: T2, marginBottom: 8 }}>1. {variant ? variantLabel(variant) : "Sin variante"} · ×{qty} · {money(total, cur)}</div>
+              )}
+              {cartLinesCalc.map((l, i) => (
+                <div key={l.variantId} style={{ display: "flex", alignItems: "center", gap: 8, background: soft, border: `1px solid ${B}`, borderRadius: 11, padding: "9px 11px", marginBottom: 7 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 8, background: "#1a1a1a", overflow: "hidden", flexShrink: 0 }}>
+                    {l.image && <img src={l.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 2}. {Object.values(l.attrs || {}).join(" / ") || "Variante"}</div>
+                    <div style={{ fontSize: 10, color: T2, marginTop: 1 }}>{money(l.subtotal, cur)}{isCatalogPro && cartShipQuotes[l.variantId] ? ` · + ${money(cartShipQuotes[l.variantId] * l.qty, cur)} envío` : ""}</div>
+                  </div>
+                  <button className="p" onClick={() => setCartLineQty(l.variantId, l.qty - 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>−</button>
+                  <span style={{ fontSize: 12.5, fontWeight: 800, color: T1, width: 20, textAlign: "center" }}>{l.qty}</span>
+                  <button className="p" disabled={l.stock != null && l.qty >= l.stock} onClick={() => setCartLineQty(l.variantId, l.qty + 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: (l.stock != null && l.qty >= l.stock) ? T3 : T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>+</button>
+                  <button className="p" onClick={() => removeCartLine(l.variantId)} aria-label="Quitar" style={{ width: 24, height: 24, borderRadius: 7, border: "none", background: "none", color: T3, fontSize: 15, lineHeight: 1 }}>×</button>
+                </div>
+              ))}
+
+              {pickingVariant ? (
+                <div style={{ background: soft, border: `1px solid ${B}`, borderRadius: 12, padding: 11, marginTop: 4 }}>
+                  <VariantPicker allVariants={allVariants} excludeIds={[variant?.id, ...cartLines.map(l => l.variantId)].filter(Boolean)}
+                    onPick={addCartLine} onCancel={() => setPickingVariant(false)} T1={T1} T2={T2} T3={T3} B={B} G={G} isDark={isDark} />
+                </div>
+              ) : (
+                <button className="p" onClick={() => setPickingVariant(true)} style={{ width: "100%", textAlign: "center", padding: "10px", borderRadius: 11, border: `1.5px dashed ${B}`, background: "none", color: G, fontSize: 12, fontWeight: 800, cursor: "pointer", marginTop: 4 }}>
+                  + Agregar otra variante
+                </button>
+              )}
+
+              {isMulti && (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, paddingTop: 10, borderTop: `1px solid ${B}` }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: T1 }}>Total del pedido</span>
+                  <span style={{ fontSize: 17, fontWeight: 900, color: G }}>{money(grandTotal, cur)}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isCatalogPro && catalogProShipTotal > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
+              <span style={{ fontSize: 11, color: T2 }}>✈️ Envío internacional (CJ→hub + hub→Cuba)</span>
+              <span style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>{money(catalogProShipTotal, cur)}</span>
+            </div>
+          )}
+
           {Array.isArray(product.bulkDiscounts) && product.bulkDiscounts.length > 0 && (
             <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
               <p style={{ fontSize: 9.5, fontWeight: 800, color: G, marginBottom: 4, textTransform: "uppercase", letterSpacing: .3 }}>Descuento por cantidad</p>
@@ -498,9 +632,9 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
 
           {(() => {
             const isIntl = shipMode === "intl", isLocal = shipMode === "local";
-            const shipCost = isIntl ? parseFloat(product.shippingPrice || 0) : isLocal ? liveLocalBase : 0;
-            const shipLabel = isIntl ? "Envío internacional" : isLocal ? "Delivery local" : "";
-            const shipWho = isIntl ? "empresa de envíos" : isLocal ? "mensajero" : "";
+            const shipCost = isCatalogPro ? catalogProShipTotal : isIntl ? parseFloat(product.shippingPrice || 0) : isLocal ? liveLocalBase : 0;
+            const shipLabel = isCatalogPro ? "Envío internacional (CJ→hub + hub→Cuba)" : isIntl ? "Envío internacional" : isLocal ? "Delivery local" : "";
+            const shipWho = isCatalogPro ? "empresa de envíos" : isIntl ? "empresa de envíos" : isLocal ? "mensajero" : "";
             const cupFmt = v => Math.round(v || 0).toLocaleString() + " CUP";
             const row = (label, who, val, strong, cup) => (
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: strong ? 0 : 7 }}>
@@ -511,19 +645,19 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
               </div>
             );
             return <div style={{ background: soft, border: `1px solid ${B}`, borderRadius: 12, padding: "12px 13px", marginBottom: 14 }}>
-              {row(qty > 1 ? `Producto · ×${qty}` : "Producto", "al vendedor", total)}
+              {row(isMulti ? "Producto (todas las líneas)" : qty > 1 ? `Producto · ×${qty}` : "Producto", "al vendedor", productTotal)}
               {shipCost > 0 && row(isLocal ? "Domicilio (estimado)" : shipLabel, isLocal ? "al mensajero" : shipWho, shipCost, false, isLocal)}
               <div style={{ height: 1, background: B, margin: "3px 0 9px" }} />
               {isLocal
                 ? <>
-                    {row("Total del producto", "", total, true)}
+                    {row("Total del producto", "", productTotal, true)}
                     <div style={{ fontSize: 10, color: T3, marginTop: 8, lineHeight: 1.5 }}>+ <b>{cupFmt(shipCost)}</b> de domicilio (estimado), que pagas <b>al mensajero en efectivo (CUP)</b> al recibir. Si la distancia resulta mayor, te avisaremos para <b>aprobar el nuevo total antes</b> de que el mensajero salga.</div>
                   </>
-                : row("Total a pagar", "", total + shipCost, true)}
+                : row("Total a pagar", "", productTotal + shipCost, true)}
             </div>;
           })()}
 
-          {availModes.length > 0 && (
+          {isCatalogPro ? null : availModes.length > 0 && (
             <div style={{ marginBottom: 14 }}>
               <p style={{ fontSize: 11, fontWeight: 700, color: T2, marginBottom: 8 }}>¿Cómo quieres recibirlo?</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
@@ -554,7 +688,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
           </div>
 
           <button className="p" onClick={primaryAction} disabled={availModes.length === 0 || !qtyValid} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (availModes.length === 0 || !qtyValid) ? .5 : 1 }}>
-            {needData ? "Continuar →" : `Crear pedido · ${money(total, cur)}`}
+            {needData ? "Continuar →" : `Crear pedido · ${money(buyerTotal, cur)}`}
           </button>
         </> : <>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -563,10 +697,11 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
           </div>
 
           <div style={{ background: soft, border: `1px solid ${B}`, borderRadius: 12, padding: "10px 13px", marginBottom: 16 }}>
-            <p style={{ fontSize: 10, color: T3, fontWeight: 700, marginBottom: 3 }}>{SHIP_META[shipMode].icon} {SHIP_META[shipMode].label} · {money(total, cur)}</p>
-            <p style={{ fontSize: 11.5, color: T1, fontWeight: 700 }}>{product.title}{qty > 1 ? ` ×${qty}` : ""}</p>
+            <p style={{ fontSize: 10, color: T3, fontWeight: 700, marginBottom: 3 }}>{SHIP_META[shipMode].icon} {SHIP_META[shipMode].label} · {money(buyerTotal, cur)}</p>
+            <p style={{ fontSize: 11.5, color: T1, fontWeight: 700 }}>{product.title}{isMulti ? " y más" : qty > 1 ? ` ×${qty}` : ""}</p>
             {shipMode === "local" && <p style={{ fontSize: 10, color: T2, marginTop: 2 }}>Recogida (vendedor): {product.location || product.seller_name || "Vendedor"}</p>}
-            {shipMode === "intl" && <p style={{ fontSize: 10, color: T2, marginTop: 2 }}>Envío {product.shippingType || "standard"} · destino Cuba</p>}
+            {shipMode === "intl" && !isCatalogPro && <p style={{ fontSize: 10, color: T2, marginTop: 2 }}>Envío {product.shippingType || "standard"} · destino Cuba</p>}
+            {isCatalogPro && <p style={{ fontSize: 10, color: T2, marginTop: 2 }}>Producto {money(productTotal, cur)} + envío {money(catalogProShipTotal, cur)}</p>}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 11, marginBottom: 18 }}>
@@ -633,11 +768,58 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
           </div>
 
           <button className="p" onClick={handle} disabled={loading || !dataValid} style={{ width: "100%", background: dataValid ? G : (isDark ? "#1a1a1a" : "#ddd"), color: dataValid ? "#000" : T3, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            {loading ? <Spin size={18} color="#000" /> : `Crear pedido · ${money(total, cur)}`}
+            {loading ? <Spin size={18} color="#000" /> : `Crear pedido · ${money(buyerTotal, cur)}`}
           </button>
         </>}
       </div>
       {howItWorks && <HowItWorksSheet onClose={() => setHowItWorks(false)} />}
+    </div>
+  );
+}
+
+// Selector de "agregar otra variante" para el carrito múltiple del Bloque 2 —
+// reusa los mismos helpers (groupVariantAttrs/resolveVariantBy/attrLabelText)
+// que ya usa la ficha del producto, así el comportamiento es idéntico. Se le
+// pasan las variantes YA agregadas (excludeIds) para no dejar elegir una
+// combinación repetida — sumar cantidad se hace en la línea existente, no
+// agregando otra fila igual.
+function VariantPicker({ allVariants, excludeIds, onPick, onCancel, T1, T2, T3, B, G, isDark }) {
+  const pickable = allVariants.filter(v => !excludeIds.includes(v.id));
+  const { labels, valuesByLabel } = groupVariantAttrs(pickable);
+  const [sel, setSel] = useState({});
+  const match = labels.length > 0 ? resolveVariantBy(pickable, sel) : null;
+  const ready = labels.every(l => sel[l] != null);
+
+  return (
+    <div>
+      {labels.map(label => (
+        <div key={label} style={{ marginBottom: 9 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: T2, textTransform: "uppercase", letterSpacing: .3, marginBottom: 6 }}>{attrLabelText(label)}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {valuesByLabel[label].map(value => {
+              const isOn = sel[label] === value;
+              const candidate = { ...sel, [label]: value };
+              const exists = pickable.some(v => Object.entries(candidate).every(([l, val]) => (v.attributes || {})[l] === val));
+              return (
+                <button key={value} type="button" disabled={!exists}
+                  onClick={() => setSel(candidate)}
+                  style={{ padding: "6px 11px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: exists ? "pointer" : "not-allowed",
+                    background: isOn ? G : (isDark ? "#1a1a1a" : "#f5f5f7"), color: isOn ? "#000" : (exists ? T1 : T3),
+                    border: `1.5px solid ${isOn ? G : B}`, opacity: exists ? 1 : .4 }}>{value}</button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      {pickable.length === 0 ? (
+        <p style={{ fontSize: 11, color: T2, textAlign: "center", padding: "6px 0" }}>Ya agregaste todas las variantes disponibles.</p>
+      ) : (
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <button className="p" onClick={onCancel} style={{ flex: 1, padding: "9px", borderRadius: 9, border: `1px solid ${B}`, background: "none", color: T2, fontSize: 11.5, fontWeight: 700 }}>Cancelar</button>
+          <button className="p" disabled={!ready || !match} onClick={() => match && onPick(match)}
+            style={{ flex: 1, padding: "9px", borderRadius: 9, border: "none", background: (ready && match) ? G : (isDark ? "#1a1a1a" : "#ddd"), color: (ready && match) ? "#000" : T3, fontSize: 11.5, fontWeight: 800 }}>Agregar</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2560,7 +2742,7 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
         ) : (variants && variants.length > 0 && !activeVariant) ? (
           <div style={{ flex: 1, textAlign: "center", padding: "15px", borderRadius: 50, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>Elige las opciones</div>
         ) : (
-          <button className="btn btn-gold" onClick={() => requireAuth(() => onBuy(activeVariant ? { ...p, selectedVariant: activeVariant } : p))}
+          <button className="btn btn-gold" onClick={() => requireAuth(() => onBuy(activeVariant ? { ...p, selectedVariant: activeVariant, __variants: variants } : { ...p, __variants: variants }))}
             style={{ flex: 1, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800 }}>
             Comprar ahora
           </button>

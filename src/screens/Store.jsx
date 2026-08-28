@@ -25,7 +25,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy, ShoppingBag,
 } from "lucide-react";
-import { useAt, useR, useCatalog, usePlatformCfg, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, attrLabelText, groupVariantAttrs, resolveVariantBy } from "../shared/index.js";
+import { useAt, useR, useCatalog, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, attrLabelText, groupVariantAttrs, resolveVariantBy } from "../shared/index.js";
 // recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
 // se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
 // nunca de entrada para todos (la mayoría son compradores que ni la ven).
@@ -1445,8 +1445,6 @@ function CatalogoProSeller({ C, ac, onOpenCatalogDraft }) {
   const [rows, setRows] = useState(undefined); // undefined=cargando · null=error
   const [viewing, setViewing] = useState(null);
   const { cats, subcats } = useCatalog();
-  const pCfg = usePlatformCfg();
-  const deliveryLocalEnabled = pCfg.sectionsEnabled?.deliveryLocal !== false;
   const load = () => { catalogProSellerCatalog().then(setRows).catch(() => setRows(null)); };
   useEffect(() => { load(); }, []);
 
@@ -1487,7 +1485,7 @@ function CatalogoProSeller({ C, ac, onOpenCatalogDraft }) {
         </div>
       )}
       {viewing && (
-        <CatalogDetailSheet product={viewing} C={C} ac={ac} cats={cats} subcats={subcats} deliveryLocalEnabled={deliveryLocalEnabled}
+        <CatalogDetailSheet product={viewing} C={C} ac={ac} cats={cats} subcats={subcats}
           onClose={() => setViewing(null)}
           onOpenDraft={(draft) => { setViewing(null); onOpenCatalogDraft?.(draft); }}/>
       )}
@@ -1499,7 +1497,7 @@ function CatalogoProSeller({ C, ac, onOpenCatalogDraft }) {
 // limpia, selector de variantes agrupado con "tu costo" por variante, y la
 // calculadora de ganancia — visible aquí mismo, no en un paso aparte. Nunca
 // muestra costo real de CJ, flete real ni margen de RETADOR.
-function CatalogDetailSheet({ product, C, ac, cats, subcats, deliveryLocalEnabled, onClose, onOpenDraft }) {
+function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraft }) {
   const [variants, setVariants] = useState(undefined); // undefined=cargando · null=sin variantes/error
   const [selectedAttrs, setSelectedAttrs] = useState({});
   const [imgIndex, setImgIndex] = useState(0);
@@ -1575,7 +1573,11 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, deliveryLocalEnable
       kind: "product",
       stock: totalStock > 0 ? totalStock : 50,
       currency: "USD",
-      shipModes: { local: deliveryLocalEnabled, persona: false, intl: false },
+      // Producto del Catálogo Pro: llega vía hub/CJ, nunca hay stock físico
+      // local ni entrega en persona real — SIEMPRE envío internacional (el
+      // backend además lo fuerza con un trigger, esto es solo para que el
+      // vendedor vea el valor correcto desde el primer momento).
+      shipModes: { local: false, persona: false, intl: true },
       variants: variantRows,
       source_catalog_id: product.id,
       source_type: "catalog_pro",

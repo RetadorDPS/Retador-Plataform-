@@ -21,6 +21,17 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   const commission = o.commissionPct ? (o.amount * o.commissionPct / 100) : 0;
   const viewerIsSeller = (!!user?.id && (o.seller_id === user.id || o.sellerId === user.id)) || (!!me && o.sellerName === me);
   const viewerLooksBuyer = (!!user?.id && (o.buyer_id === user.id || o.buyerId === user.id)) || (!!o.buyerName && o.buyerName === me) || o.feeApproval === "pending";
+  // Este dato es DINERO que el vendedor le debe a RETADOR — nunca al comprador.
+  // A diferencia de viewerIsSeller (usado para botones/etiquetas, donde un
+  // nombre coincidente es una señal aceptable), aquí exigimos el id real:
+  // dos cuentas distintas pueden compartir nombre de pila y no hay margen
+  // para que ese empate exponga la comisión a quien no corresponde.
+  const viewerIsSellerStrict = !!user?.id && (o.seller_id === user.id || o.sellerId === user.id);
+  // Un pedido es de Catálogo Pro si y solo si tiene estado público de
+  // catalog_pro_fulfillment (ver comentario más abajo, junto a "Estado del
+  // envío") — ahí el vendedor nunca tiene el producto físico, así que el
+  // flujo genérico de "confirma cuando tengas el producto listo" no aplica.
+  const isCatalogPro = !!o.catalogProStatusLabel;
   const isCompleted = done || o.courierStage === "completado" || o.status === "completado" || o.status === "entregado" || (o.buyerConfirmed && o.sellerPaid);
   // Guarda cada reseña de PERSONA de verdad en seller_reviews, ligada a ESTE
   // pedido (order_id = o.id) — SIEMPRE un INSERT nuevo, nunca upsert: cada
@@ -136,10 +147,17 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
           <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>{md.desc}.</p>
           {o.shipType === "intl" && o.shipPrice ? <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}><span style={{ fontSize: 11, color: T2 }}>Envío internacional</span><span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(o.shipPrice, cur)}</span></div> : null}
           {o.shipType === "paquete" && o.shipPrice ? <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}><span style={{ fontSize: 11, color: T2 }}>Precio del envío</span><span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(o.shipPrice, cur)}</span></div> : null}
-          {viewerIsSeller && !viewerLooksBuyer && <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}><span style={{ fontSize: 11, color: T2 }}>Comisión plataforma ({o.commissionPct || 0}%)</span><span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(commission, cur)}</span></div>}
+          {viewerIsSellerStrict && !viewerLooksBuyer && <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}><span style={{ fontSize: 11, color: T2 }}>Comisión plataforma ({o.commissionPct || 0}%)</span><span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(commission, cur)}</span></div>}
         </div>
 
-        {/* Línea de estados */}
+        {/* Línea de estados + coreografía "vendedor confirma que tiene el
+            producto listo": es el flujo de envío normal, donde el vendedor
+            SÍ tiene el paquete físico. En Catálogo Pro el vendedor nunca lo
+            tiene (viene directo de CJ vía el hub de Daniel) — esos pasos
+            nunca avanzan y el botón de confirmación no aplica, así que toda
+            esta sección se oculta y el estado real ya se muestra arriba en
+            "Estado del envío". */}
+        {!isCatalogPro && <>
         <p style={{ fontSize: 10, fontWeight: 700, color: T2, letterSpacing: .4, marginBottom: 12, textTransform: "uppercase" }}>Progreso</p>
         <div style={{ background: card, border: `1px solid ${B}`, borderRadius: 16, padding: "15px 15px 6px", marginBottom: 16 }}>
           {flow.map((st, i) => {
@@ -246,6 +264,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
             {actions}
           </>;
         })()}
+        </>}
 
         {/* Calificaciones al completar */}
         {isCompleted && (viewerLooksBuyer || !viewerIsSeller) && (rated

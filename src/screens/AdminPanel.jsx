@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -3983,6 +3983,98 @@ function CatalogProductHero({ title, images, category, whyItSells, pricing }) {
   );
 }
 
+// Diálogo real de comparación "costo viejo vs nuevo" antes de aplicar la
+// actualización — nunca se escribe nada sin que el admin vea el cambio y
+// confirme (Corrección 2: cost_product puede quedar desactualizado en
+// silencio si CJ cambia su precio después de importar).
+function RefreshCostModal({ preview, busy, onCancel, onConfirm }) {
+  const rows = preview || [];
+  const changed = rows.filter(r => r.changed);
+  const unchanged = rows.filter(r => !r.changed && !r.error);
+  const errored = rows.filter(r => r.error);
+  return (
+    <div onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 900, padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg1)', border: '1px solid var(--bd2)', borderRadius: 14, padding: 20, maxWidth: 440, width: '100%', maxHeight: '82vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)', marginBottom: 4 }}>Costo real en CJ ahora mismo</div>
+        <div style={{ fontSize: 11.5, color: 'var(--tx3)', marginBottom: 14 }}>
+          {changed.length > 0 ? `${changed.length} variante(s) cambiaron de precio en CJ desde la última vez.` : 'Ninguna variante cambió de precio en CJ.'}
+        </div>
+        {changed.map(r => (
+          <div key={r.id} style={{ background: 'var(--bg2)', borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--tx)', marginBottom: 6 }}>{r.variant_sku}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+              <span style={{ color: 'var(--tx3)' }}>Costo real</span>
+              <span><span style={{ color: 'var(--tx3)', textDecoration: 'line-through' }}>{money(r.old_cost_product)}</span> {'→'} <b style={{ color: r.new_cost_product > r.old_cost_product ? 'var(--rd)' : 'var(--gn)' }}>{money(r.new_cost_product)}</b></span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+              <span style={{ color: 'var(--tx3)' }}>Precio recomendado</span>
+              <span><span style={{ color: 'var(--tx3)', textDecoration: 'line-through' }}>{money(r.old_recommended_price)}</span> {'→'} <b style={{ color: 'var(--tx)' }}>{money(r.new_recommended_price)}</b></span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+              <span style={{ color: 'var(--tx3)' }}>Ganancia</span>
+              <span><span style={{ color: 'var(--tx3)', textDecoration: 'line-through' }}>{money(r.old_profit_estimate)}</span> {'→'} <b style={{ color: 'var(--gn)' }}>{money(r.new_profit_estimate)}</b></span>
+            </div>
+          </div>
+        ))}
+        {unchanged.length > 0 && <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginBottom: 8 }}>{unchanged.length} variante(s) sin cambio.</div>}
+        {errored.map(r => (
+          <div key={r.id} style={{ fontSize: 10.5, color: 'var(--rd)', marginBottom: 4 }}>⚠️ {r.variant_sku}: {r.error}</div>
+        ))}
+        <div style={{ display: 'flex', gap: 9, marginTop: 14 }}>
+          <button className="btn btg" style={{ flex: 1, justifyContent: 'center' }} disabled={busy} onClick={onCancel}>Cancelar</button>
+          <button className="btn bts" style={{ flex: 1, justifyContent: 'center' }} disabled={busy || changed.length === 0} onClick={onConfirm}>{busy ? <span className="spin">↻</span> : `Aplicar a ${changed.length} variante(s)`}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Botón "Actualizar costo real" — bajo demanda únicamente, nunca automático.
+// Primero pide una comparación (apply:false) y, si hay cambios reales, deja
+// que el admin decida en el diálogo de arriba antes de escribir nada.
+function RefreshCostButton({ pricingIds, toast, onApplied }) {
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  const check = async () => {
+    if (!pricingIds.length) return;
+    setLoading(true);
+    try {
+      const res = await catalogProRefreshCost(pricingIds, false);
+      const rows = res.results || [];
+      const changed = rows.filter(r => r.changed);
+      const errored = rows.filter(r => r.error);
+      if (changed.length === 0) {
+        toast(errored.length ? `⚠️ No se pudo consultar ${errored.length} variante(s) — el resto ya está al día` : '✅ Ya está al día — ningún costo cambió en CJ');
+      } else {
+        setPreview(rows);
+      }
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo consultar el costo real')); }
+    setLoading(false);
+  };
+
+  const apply = async () => {
+    setApplying(true);
+    try {
+      await catalogProRefreshCost(pricingIds, true);
+      toast('✅ Costo real actualizado');
+      setPreview(null);
+      onApplied();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo aplicar la actualización')); }
+    setApplying(false);
+  };
+
+  return (
+    <>
+      <button className="btn btg sm" disabled={loading || !pricingIds.length} onClick={check}>
+        {loading ? <span className="spin">↻</span> : '💲'} Actualizar costo real
+      </button>
+      {preview && <RefreshCostModal preview={preview} busy={applying} onCancel={() => setPreview(null)} onConfirm={apply} />}
+    </>
+  );
+}
+
 // Tarifas precargadas del tramo Phoenix→Cuba (agencia del socio de Daniel,
 // cobra por libra de peso) — el admin siempre puede escribir una tarifa
 // personalizada distinta, nunca queda limitado a estas dos.
@@ -4098,7 +4190,10 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
 
   return (
     <>
-      <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a Staging</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
+        <button className="btn btg sm" onClick={onBack}>‹ Volver a Staging</button>
+        {!ro && <RefreshCostButton pricingIds={rows.map(r => r.id)} toast={toast} onApplied={onPublished} />}
+      </div>
       <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} />
       <div className="ssub" style={{ marginTop: -4 }}>{rows.length} variante(s) · {product.listed_num ?? 0} listados en CJ</div>
 
@@ -4327,12 +4422,15 @@ function StorePreviewScreen({ product }) {
 // variante de un producto YA publicado, sin poder editarlo (eso solo se
 // hace antes de publicar, en Staging). Trae una sub-pestaña "Vista de
 // tienda" con exactamente lo que vería un comprador (StorePreviewScreen).
-function CatalogPublishedDetail({ product, onBack }) {
+function CatalogPublishedDetail({ product, toast, onBack, onUpdated }) {
   const [view, setView] = useState('costeo');
   const rows = (product.pricing || []).map(p => ({ ...p, costBase: Number(p.cost_product) || 0 }));
   return (
     <>
-      <button className="btn btg sm" style={{ marginBottom: 12 }} onClick={onBack}>‹ Volver a Publicado</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
+        <button className="btn btg sm" onClick={onBack}>‹ Volver a Publicado</button>
+        <RefreshCostButton pricingIds={rows.map(r => r.id)} toast={toast} onApplied={onUpdated} />
+      </div>
       <div className="tabs" style={{ maxWidth: 320 }}>
         {[['costeo', 'Costeo (interno)'], ['tienda', 'Vista de tienda']].map(([k, l]) =>
           <div key={k} className={`tab ${view === k ? 'on' : ''}`} onClick={() => setView(k)}>{l}</div>)}
@@ -4389,7 +4487,7 @@ function CatalogPublishedTab({ toast }) {
   }, [openId]);
 
   const open = (rows || []).find(r => r.id === openId);
-  if (open) return <CatalogPublishedDetail product={open} onBack={() => setOpenId(null)} />;
+  if (open) return <CatalogPublishedDetail product={open} toast={toast} onBack={() => setOpenId(null)} onUpdated={load} />;
 
   const doArchive = async () => {
     if (!toArchive) return;

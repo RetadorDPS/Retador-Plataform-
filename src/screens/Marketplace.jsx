@@ -1517,19 +1517,26 @@ export function ChatsModal({ onClose, initial, orders = [], chatMsgs = {}, chatP
 // Recordatorio de región — discreto y descartable (NUNCA un modal), de vez en
 // cuando (no en cada visita): se apoya en un timestamp propio en localStorage,
 // nunca se vuelve a mostrar antes de que pasen unos días desde la última vez
-// que se vio o se descartó. Deja de aparecer solo en cuanto haya provincia real.
+// que se vio o se descartó. Deja de aparecer solo en cuanto haya región real.
+// BUG REAL corregido: antes se apagaba con myProvince (profiles.shop_province),
+// que SOLO se llena si el país elegido es Cuba — alguien con región real fuera
+// de Cuba (ej. "Estados Unidos") tiene shop_province = null para siempre, así
+// que el aviso nunca se apagaba aunque la región SÍ estuviera guardada. Ahora
+// se apaga con hasRegion (profiles.shop_country), que existe sin importar cuál
+// país se haya elegido — myProvince se sigue usando tal cual para el orden por
+// cercanía en Cuba, que es lo único para lo que sirve.
 const REGION_REMINDER_KEY = "retador_region_reminder_last";
 const REGION_REMINDER_DAYS = 3;
-function useRegionReminder(myProvince) {
+function useRegionReminder(hasRegion) {
   const [show, setShow] = useState(false);
   useEffect(() => {
-    if (myProvince) { setShow(false); return; }
+    if (hasRegion) { setShow(false); return; }
     try {
       const last = Number(localStorage.getItem(REGION_REMINDER_KEY) || 0);
       const dueMs = REGION_REMINDER_DAYS * 24 * 60 * 60 * 1000;
       if (Date.now() - last >= dueMs) setShow(true);
     } catch (e) {}
-  }, [myProvince]);
+  }, [hasRegion]);
   const dismiss = () => { try { localStorage.setItem(REGION_REMINDER_KEY, String(Date.now())); } catch (e) {} setShow(false); };
   return { show, dismiss };
 }
@@ -1548,7 +1555,8 @@ export function MarketHome({ loading, products, filter, setFilter, myProvince = 
   const { tokens: dt, mode: dMode } = useDensity();
   const plusBtnRef = useRef(null);
   const feedAds = useFeedAds("inicio"); // anuncios intercalados cada N productos
-  const regionReminder = useRegionReminder(myProvince);
+  const hasRegion = !!(user?.profile?.shop_country);
+  const regionReminder = useRegionReminder(hasRegion);
   // Conserva la posición del scroll del feed: se guarda al scrollear y se
   // restaura al volver (entrar a un producto y regresar no salta al inicio).
   const feedRef = useRef(null);
@@ -2641,21 +2649,29 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
   }, [activeVariant?.image]);
 
   // Estimado de envío ANTES de comprar (visible en la ficha, no solo dentro
-  // del diálogo de pago) — se cotiza siempre hacia Cuba (destino por defecto
-  // y el más común de esta app) como estimado representativo; el comprador
-  // puede elegir cualquier otro país real al momento de comprar, donde se
-  // recotiza con su destino exacto.
+  // del diálogo de pago) — se cotiza hacia la REGIÓN REAL guardada del
+  // comprador (profiles.shop_country), no siempre hacia Cuba: si su región
+  // es un país con almacén propio de CJ, se le muestra el tiempo directo a
+  // SU país (sin combinar con el tramo del hub, que solo aplica a Cuba); si
+  // su región es Cuba, o no ha elegido región todavía, se mantiene el
+  // estimado hacia Cuba de siempre. El comprador puede elegir cualquier otro
+  // país real al momento de comprar, donde se recotiza con su destino exacto.
   const isCatalogPro = p.source_type === 'catalog_pro';
-  const [cubaShipEstimate, setCubaShipEstimate] = useState(null);
+  const SHOP_COUNTRY_TO_CJ = { eeuu: 'US', espana: 'ES', cuba: 'CU' };
+  const SHOP_COUNTRY_LABEL = { eeuu: 'Estados Unidos', espana: 'España', cuba: 'Cuba' };
+  const buyerShopCountry = user?.profile?.shop_country || null;
+  const buyerDestCode = SHOP_COUNTRY_TO_CJ[buyerShopCountry] || 'CU';
+  const buyerDestLabel = SHOP_COUNTRY_LABEL[buyerShopCountry] || null;
+  const [shipEstimate, setShipEstimate] = useState(null);
   useEffect(() => {
-    setCubaShipEstimate(null);
+    setShipEstimate(null);
     if (!isCatalogPro || !p.id) return;
     let alive = true;
-    getCatalogProBuyerFreightQuote(p.id, activeVariant?.id || null, 1, 'CU').then(r => {
-      if (alive && r?.applicable) setCubaShipEstimate(r);
+    getCatalogProBuyerFreightQuote(p.id, activeVariant?.id || null, 1, buyerDestCode).then(r => {
+      if (alive && r?.applicable) setShipEstimate(r);
     }).catch(() => {});
     return () => { alive = false; };
-  }, [isCatalogPro, p.id, activeVariant?.id]);
+  }, [isCatalogPro, p.id, activeVariant?.id, buyerDestCode]);
 
   useEffect(() => {
     if (isService || !p.id) return;
@@ -2752,9 +2768,18 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
         {!isService && <CurrencyEquivalents product={p} />}
 
         {isCatalogPro && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, background: `${G}12`, border: `1px solid ${G}30`, borderRadius: 100, padding: "5px 11px", marginBottom: 12, width: "fit-content" }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>✈️ Envío disponible a Cuba y a otros países</span>
-            {cubaShipEstimate?.days_min != null && <span style={{ fontSize: 10.5, color: T2 }}>· a Cuba llega en {cubaShipEstimate.days_min} a {cubaShipEstimate.days_max} días</span>}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", background: `${G}12`, border: `1px solid ${G}30`, borderRadius: 100, padding: "5px 11px", marginBottom: 12, width: "fit-content" }}>
+            {buyerDestCode === "CU" ? (
+              <>
+                <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>✈️ Envío disponible a Cuba y a otros países</span>
+                {shipEstimate?.days_min != null && <span style={{ fontSize: 10.5, color: T2 }}>· a Cuba llega en {shipEstimate.days_min} a {shipEstimate.days_max} días</span>}
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>✈️ Envío disponible a {buyerDestLabel || "tu país"} y a otros países</span>
+                {shipEstimate?.days_min != null && <span style={{ fontSize: 10.5, color: T2 }}>— a {buyerDestLabel} llega en {shipEstimate.days_min} a {shipEstimate.days_max} días</span>}
+              </>
+            )}
           </div>
         )}
 

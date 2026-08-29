@@ -1392,7 +1392,7 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
       de productos (EditProductModal, modo "create") precargado con todo —
       nada se guarda en la tienda hasta que el vendedor pulse "Publicar" en
       ese editor. */
-const SUGGESTED_MARGIN = 1.4; // +40% sobre "tu costo", solo una sugerencia editable
+const SUGGESTED_MARGIN_PCT = 30; // % de margen sugerido por defecto sobre "tu costo", editable
 
 // Mapeo best-effort de la categoría de CJ (texto libre en inglés, ej. "Sports
 // & Outdoors/Cycling/Bicycles") a una categoría/subcategoría REAL de RETADOR.
@@ -1458,7 +1458,7 @@ function CatalogoProSeller({ C, ac, onOpenCatalogDraft }) {
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
           {rows.map(p => {
             const cost = Number(p.recommended_price) || 0;
-            const suggested = Math.round(cost * SUGGESTED_MARGIN * 100) / 100;
+            const suggested = Math.round(cost * (1 + SUGGESTED_MARGIN_PCT / 100) * 100) / 100;
             const profit = Math.round((suggested - cost) * 100) / 100;
             return (
               <div key={p.id} onClick={() => setViewing(p)} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden", cursor:"pointer" }}>
@@ -1503,7 +1503,11 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
   const [imgIndex, setImgIndex] = useState(0);
   const images = Array.isArray(product.images) ? product.images : [];
   const flatCost = Number(product.recommended_price) || 0;
-  const [price, setPrice] = useState(String(Math.round(flatCost * SUGGESTED_MARGIN * 100) / 100));
+  // Doble control ligado: % de margen y precio exacto, cada uno se puede
+  // editar y recalcula al otro sobre "tu costo" — nunca quedan desincronizados
+  // porque solo uno se toca a la vez (el que el vendedor está escribiendo).
+  const [pricePct, setPricePct] = useState(String(SUGGESTED_MARGIN_PCT));
+  const [price, setPrice] = useState(String(Math.round(flatCost * (1 + SUGGESTED_MARGIN_PCT / 100) * 100) / 100));
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -1529,10 +1533,24 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
   // "tu ganancia" en $0.00 o el error de "precio menor al costo" al pasar a
   // una variante más cara.
   useEffect(() => {
-    setPrice(String(Math.round(cost * SUGGESTED_MARGIN * 100) / 100));
+    setPricePct(String(SUGGESTED_MARGIN_PCT));
+    setPrice(String(Math.round(cost * (1 + SUGGESTED_MARGIN_PCT / 100) * 100) / 100));
   }, [cost]);
   const priceNum = Number(price) || 0;
   const profit = Math.round((priceNum - cost) * 100) / 100;
+  // Un solo lado escribe a la vez: al tocar el % se recalcula el precio; al
+  // tocar el precio se recalcula el % real resultante — nunca se disparan
+  // entre sí en bucle porque cada handler solo actualiza el OTRO campo.
+  const handlePctChange = (raw) => {
+    setPricePct(raw);
+    const pct = Number(raw);
+    if (Number.isFinite(pct)) setPrice(String(Math.round(cost * (1 + pct / 100) * 100) / 100));
+  };
+  const handlePriceChange = (raw) => {
+    setPrice(raw);
+    const p = Number(raw);
+    if (Number.isFinite(p) && cost > 0) setPricePct(String(Math.round(((p / cost) - 1) * 1000) / 10));
+  };
   const heroImg = activeVariant?.image || images[imgIndex] || images[0];
   // Costo real del tramo Phoenix→Cuba — el único costo interno que SÍ se le
   // muestra al vendedor (decisión explícita), junto a "tu costo"/"tu
@@ -1652,8 +1670,20 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
           </div>
         )}
         <div style={{ marginBottom:10 }}>
-          <div style={{ fontSize:10.5, fontWeight:700, color:C.m, textTransform:"uppercase", letterSpacing:.4, marginBottom:6 }}>Tu precio de venta</div>
-          <input type="number" step="0.01" min={cost} value={price} onChange={e => setPrice(e.target.value)} style={inpStyle(C)}/>
+          <div style={{ fontSize:10.5, fontWeight:700, color:C.m, textTransform:"uppercase", letterSpacing:.4, marginBottom:6 }}>Tu margen y precio de venta</div>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <div style={{ position:"relative", flex:"0 0 78px" }}>
+              <input type="number" step="1" value={pricePct} onChange={e => handlePctChange(e.target.value)}
+                style={{ ...inpStyle(C), paddingRight:22, textAlign:"right" }} title="Margen % sobre tu costo" />
+              <span style={{ position:"absolute", right:9, top:"50%", transform:"translateY(-50%)", fontSize:12, color:C.m, pointerEvents:"none" }}>%</span>
+            </div>
+            <span style={{ color:C.m, fontSize:13, flexShrink:0 }}>→</span>
+            <div style={{ position:"relative", flex:1 }}>
+              <span style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)", fontSize:13, color:C.m, pointerEvents:"none" }}>$</span>
+              <input type="number" step="0.01" min={cost} value={price} onChange={e => handlePriceChange(e.target.value)}
+                style={{ ...inpStyle(C), paddingLeft:22 }} title="Precio exacto de venta" />
+            </div>
+          </div>
         </div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:`${C.ok}18`, marginBottom:10 }}>
           <span style={{ fontSize:12, color:C.ok, fontWeight:700 }}>Tu ganancia</span>

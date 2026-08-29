@@ -2233,6 +2233,18 @@ export const catalogProApplyHubRate = async (pricingIds, rate, method) => {
   return data;
 };
 
+// Actualizar costo real BAJO DEMANDA (nunca automático): vuelve a preguntarle
+// a CJ el precio actual de una o varias variantes. apply=false solo trae la
+// comparación (costo viejo vs nuevo) para que el admin decida; apply=true
+// escribe cost_product/recommended_price/profit_estimate de verdad — el
+// margen que cada variante ya tenía se respeta tal cual.
+export const catalogProRefreshCost = async (pricingIds, apply = false) => {
+  const { data, error } = await supabase.functions.invoke("cj-refresh-cost", { body: { pricing_ids: pricingIds, apply } });
+  if (error) { console.error("catalogProRefreshCost:", error.message); throw error; }
+  if (data?.error) throw new Error(data.error);
+  return data;
+};
+
 export const catalogProUpdateStagingRegions = async (id, sellableRegions) => {
   const { data, error } = await supabase.from("catalog_pro_staging").update({ sellable_regions: sellableRegions }).eq("id", id).select().single();
   if (error) { console.error("catalogProUpdateStagingRegions:", error.message); throw error; }

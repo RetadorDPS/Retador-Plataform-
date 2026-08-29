@@ -412,46 +412,95 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
   // directo de CJ, sin pasar por el hub. Por defecto arranca en Cuba (el
   // destino más común de esta app) — el comprador siempre puede cambiarlo.
   const [destCountry, setDestCountry] = useState('CU');
-  const [primaryShipQuote, setPrimaryShipQuote] = useState({ qty: null, country: null, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false });
-  const [cartShipQuotes, setCartShipQuotes] = useState({}); // { [variantId]: { qty, country, total_price, aging, is_slow, days_min, days_max, loading } }
+  const [primaryShipQuote, setPrimaryShipQuote] = useState({ qty: null, country: null, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: false });
+  const [cartShipQuotes, setCartShipQuotes] = useState({}); // { [variantId]: { qty, country, total_price, aging, is_slow, days_min, days_max, loading, failed } }
+  // BUG REAL ya visto (Daniel, 2-3 veces seguidas): el envío de una variante
+  // se mostraba como $0 un instante al agregar/cambiar cantidad. Causa
+  // exacta: getCatalogProBuyerFreightQuote() traga cualquier error real de
+  // red/edge function y devuelve { total_price:0, applicable:false } — una
+  // respuesta CON LA MISMA FORMA que un resultado real. Antes, este efecto
+  // solo miraba total_price y marcaba qty/country con los valores actuales,
+  // así que ese $0 de error quedaba "fresco" y se mostraba como si fuera la
+  // cotización real. Ahora: applicable:false NUNCA se marca como listo —
+  // sigue "calculando…" y reintenta solo (sin que el comprador tenga que
+  // tocar +/- de nuevo), con "cancelled" para que una respuesta vieja jamás
+  // sobreescriba a una más nueva si el usuario cambia cantidad/país rápido.
   useEffect(() => {
     if (!isCatalogPro) return;
-    let alive = true;
-    setPrimaryShipQuote(q => ({ ...q, loading: true }));
-    const t = setTimeout(() => {
+    let cancelled = false;
+    let timer;
+    setPrimaryShipQuote(q => ({ ...q, loading: true, failed: false }));
+    const fetchQuote = (attempt) => {
       getCatalogProBuyerFreightQuote(product.id, variant?.id || null, qty, destCountry).then(r => {
-        if (!alive) return;
-        setPrimaryShipQuote({ qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false });
-      }).catch(() => { if (alive) setPrimaryShipQuote(q => ({ ...q, loading: false })); });
-    }, 600);
-    return () => { alive = false; clearTimeout(t); };
+        if (cancelled) return;
+        if (r?.applicable === false) {
+          if (attempt < 3) { timer = setTimeout(() => fetchQuote(attempt + 1), 900); return; }
+          setPrimaryShipQuote(q => ({ ...q, loading: false, failed: true }));
+          return;
+        }
+        setPrimaryShipQuote({ qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false });
+      }).catch(() => {
+        if (cancelled) return;
+        if (attempt < 3) { timer = setTimeout(() => fetchQuote(attempt + 1), 900); return; }
+        setPrimaryShipQuote(q => ({ ...q, loading: false, failed: true }));
+      });
+    };
+    timer = setTimeout(() => fetchQuote(0), 600);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [isCatalogPro, product.id, variant?.id, qty, destCountry]);
+  // Misma corrección que arriba, pero por línea independiente: antes,
+  // Promise.all() esperaba a TODAS las variantes juntas y, si UNA fallaba
+  // (el mismo error real que la Edge Function traga y disfraza de $0), el
+  // conjunto entero se quedaba sin actualizar (o, peor, ese $0 de error
+  // entraba disfrazado de "fresco" para esa variante). Ahora cada línea
+  // pide, reintenta y se actualiza sola — así una variante con problema
+  // nunca contamina ni bloquea a las demás, y sigue "calculando…" (nunca
+  // $0) hasta tener un resultado real y aplicable.
   useEffect(() => {
     if (!isCatalogPro || cartLines.length === 0) return;
-    let alive = true;
-    setCartShipQuotes(qs => Object.fromEntries(cartLines.map(l => [l.variantId, { ...(qs[l.variantId] || {}), loading: true }])));
-    const t = setTimeout(() => {
-      Promise.all(cartLines.map(l => getCatalogProBuyerFreightQuote(product.id, l.variantId, l.qty, destCountry)
-        .then(r => [l.variantId, { qty: l.qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false }])))
-        .then(pairs => { if (alive) setCartShipQuotes(Object.fromEntries(pairs)); });
-    }, 600);
-    return () => { alive = false; clearTimeout(t); };
+    let cancelled = false;
+    const ids = cartLines.map(l => l.variantId);
+    setCartShipQuotes(qs => Object.fromEntries(ids.map(id => [id, { ...(qs[id] || {}), loading: true, failed: false }])));
+    const timers = [];
+    const fetchLine = (l, attempt) => {
+      getCatalogProBuyerFreightQuote(product.id, l.variantId, l.qty, destCountry).then(r => {
+        if (cancelled) return;
+        if (r?.applicable === false) {
+          if (attempt < 3) { timers.push(setTimeout(() => fetchLine(l, attempt + 1), 900)); return; }
+          setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { ...(qs[l.variantId] || {}), loading: false, failed: true } }));
+          return;
+        }
+        setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { qty: l.qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false } }));
+      }).catch(() => {
+        if (cancelled) return;
+        if (attempt < 3) { timers.push(setTimeout(() => fetchLine(l, attempt + 1), 900)); return; }
+        setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { ...(qs[l.variantId] || {}), loading: false, failed: true } }));
+      });
+    };
+    const t = setTimeout(() => { cartLines.forEach(l => fetchLine(l, 0)); }, 600);
+    timers.push(t);
+    return () => { cancelled = true; timers.forEach(clearTimeout); };
   }, [isCatalogPro, product.id, destCountry, cartLines.map(l => `${l.variantId}:${l.qty}`).join(',')]);
   // "Fresco" = la cotización guardada corresponde EXACTAMENTE a la cantidad
-  // y al país de destino actuales — si el comprador acaba de cambiar algo,
-  // la cotización vieja no cuenta (ni para mostrar ni para cobrar) hasta que
-  // llegue la nueva.
-  const primaryShipFresh = !isCatalogPro || (primaryShipQuote.qty === qty && primaryShipQuote.country === destCountry && !primaryShipQuote.loading);
-  const cartShipFresh = !isCatalogPro || cartLines.every(l => cartShipQuotes[l.variantId]?.qty === l.qty && cartShipQuotes[l.variantId]?.country === destCountry && !cartShipQuotes[l.variantId]?.loading);
+  // y al país de destino actuales, YA terminó de cargar y NO es un error
+  // disfrazado de $0 (failed) — si falta cualquiera de las tres cosas, ni se
+  // muestra ni se cobra: se trata como "todavía no hay cotización real".
+  const primaryShipMatch = q => q?.qty === qty && q?.country === destCountry;
+  const primaryShipFresh = !isCatalogPro || (primaryShipMatch(primaryShipQuote) && !primaryShipQuote.loading && !primaryShipQuote.failed);
+  const primaryShipFailed = isCatalogPro && primaryShipMatch(primaryShipQuote) && !primaryShipQuote.loading && !!primaryShipQuote.failed;
+  const cartLineMatch = l => cartShipQuotes[l.variantId]?.qty === l.qty && cartShipQuotes[l.variantId]?.country === destCountry;
+  const cartShipFresh = !isCatalogPro || cartLines.every(l => cartLineMatch(l) && !cartShipQuotes[l.variantId]?.loading && !cartShipQuotes[l.variantId]?.failed);
+  const cartShipFailed = isCatalogPro && cartLines.some(l => cartLineMatch(l) && !cartShipQuotes[l.variantId]?.loading && !!cartShipQuotes[l.variantId]?.failed);
   const shipQuoteReady = primaryShipFresh && cartShipFresh;
-  const catalogProShipSlow = isCatalogPro && ((primaryShipQuote.qty === qty && primaryShipQuote.is_slow) || cartLines.some(l => cartShipQuotes[l.variantId]?.qty === l.qty && cartShipQuotes[l.variantId]?.is_slow));
+  const shipQuoteFailed = primaryShipFailed || cartShipFailed;
+  const catalogProShipSlow = isCatalogPro && ((primaryShipMatch(primaryShipQuote) && primaryShipQuote.is_slow) || cartLines.some(l => cartLineMatch(l) && cartShipQuotes[l.variantId]?.is_slow));
   const catalogProShipDays = isCatalogPro && shipQuoteReady
-    ? (primaryShipQuote.qty === qty && primaryShipQuote.days_min != null ? primaryShipQuote : Object.values(cartShipQuotes).find(q => q?.days_min != null))
+    ? (primaryShipMatch(primaryShipQuote) && primaryShipQuote.days_min != null ? primaryShipQuote : Object.values(cartShipQuotes).find(q => q?.days_min != null))
     : null;
   const catalogProShipTotal = isCatalogPro
     ? Math.round((
-        (primaryShipQuote.qty === qty ? primaryShipQuote.total_price : 0) +
-        cartLines.reduce((s, l) => s + (cartShipQuotes[l.variantId]?.qty === l.qty ? cartShipQuotes[l.variantId].total_price : 0), 0)
+        (primaryShipMatch(primaryShipQuote) && !primaryShipQuote.failed ? primaryShipQuote.total_price : 0) +
+        cartLines.reduce((s, l) => s + (cartLineMatch(l) && !cartShipQuotes[l.variantId]?.failed ? cartShipQuotes[l.variantId].total_price : 0), 0)
       ) * 100) / 100
     : 0;
   // Total real del/los producto(s) elegido(s) — grandTotal si hay carrito
@@ -627,7 +676,11 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 2}. {Object.values(l.attrs || {}).join(" / ") || "Variante"}</div>
-                    <div style={{ fontSize: 10, color: T2, marginTop: 1 }}>{money(l.subtotal, cur)}{isCatalogPro && cartShipQuotes[l.variantId]?.qty === l.qty ? ` · + ${money(cartShipQuotes[l.variantId].total_price, cur)} envío` : isCatalogPro ? " · calculando envío…" : ""}</div>
+                    <div style={{ fontSize: 10, color: T2, marginTop: 1 }}>{money(l.subtotal, cur)}{isCatalogPro
+                      ? (cartLineMatch(l) && !cartShipQuotes[l.variantId]?.loading
+                          ? (cartShipQuotes[l.variantId]?.failed ? " · no se pudo calcular el envío" : ` · + ${money(cartShipQuotes[l.variantId].total_price, cur)} envío`)
+                          : " · calculando envío…")
+                      : ""}</div>
                   </div>
                   <button className="p" onClick={() => setCartLineQty(l.variantId, l.qty - 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>−</button>
                   <span style={{ fontSize: 12.5, fontWeight: 800, color: T1, width: 20, textAlign: "center" }}>{l.qty}</span>
@@ -674,7 +727,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
             <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: 11, color: T2 }}>✈️ Envío internacional{catalogProShipSlow ? " (más lento por el volumen)" : ""}</span>
-                <span style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>{shipQuoteReady ? money(catalogProShipTotal, cur) : "calculando…"}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>{shipQuoteReady ? money(catalogProShipTotal, cur) : shipQuoteFailed ? "no disponible" : "calculando…"}</span>
               </div>
               {/* days_min/days_max ya vienen combinados desde el backend según
                   el destino elegido (a Cuba incluye el tramo final real y
@@ -755,7 +808,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
           </div>
 
           <button className="p" onClick={primaryAction} disabled={availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)) ? .5 : 1 }}>
-            {isCatalogPro && !shipQuoteReady ? "Calculando envío…" : needData ? "Continuar →" : `Crear pedido · ${money(buyerTotal, cur)}`}
+            {isCatalogPro && shipQuoteFailed ? "No se pudo calcular el envío — reintenta" : isCatalogPro && !shipQuoteReady ? "Calculando envío…" : needData ? "Continuar →" : `Crear pedido · ${money(buyerTotal, cur)}`}
           </button>
         </> : <>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -837,7 +890,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess }) {
           </div>
 
           <button className="p" onClick={handle} disabled={loading || !dataValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: dataValid ? G : (isDark ? "#1a1a1a" : "#ddd"), color: dataValid ? "#000" : T3, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            {loading ? <Spin size={18} color="#000" /> : (isCatalogPro && !shipQuoteReady) ? "Calculando envío…" : `Crear pedido · ${money(buyerTotal, cur)}`}
+            {loading ? <Spin size={18} color="#000" /> : (isCatalogPro && shipQuoteFailed) ? "No se pudo calcular el envío — reintenta" : (isCatalogPro && !shipQuoteReady) ? "Calculando envío…" : `Crear pedido · ${money(buyerTotal, cur)}`}
           </button>
         </>}
       </div>

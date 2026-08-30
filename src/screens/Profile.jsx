@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2, Archive, ArchiveRestore } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink, getMyFollowing, toggleFollow, requestPlanPromo, getPromoSettings, hazteProLink } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink, getMyFollowing, toggleFollow, requestPlanPromo, getPromoSettings, hazteProLink, getMyCommissionSummary, money } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -62,6 +62,69 @@ function FxTirita() {
   );
 }
 
+// ─── APORTE POR CATÁLOGO PRO ──────────────────────────────────────────────────
+// Comisión real pendiente del vendedor por sus ventas de Catálogo Pro (tabla
+// seller_commission_ledger vía get_seller_commission_summary), en el mismo
+// menú lateral, arriba de la tirita de tasas. Copy amigable a propósito —
+// nunca lenguaje de deuda — y el mismo patrón de desplegable que "Detalle
+// del pago" en el pedido (chevron que rota + desglose línea por línea). El
+// propio RPC decide si mostrar algo real (has_catalog_pro): nunca aparece
+// para quien jamás vendió desde el Catálogo Pro, y solo se consulta si el
+// vendedor ya es Pro/Premium (isProStore, el mismo gate real de Tienda Pro).
+function ComisionCatalogoPro({ isProStore }) {
+  const { CARD, B, T1, T2, T3, isDark } = useAt();
+  const [summary, setSummary] = useState(null); // null = aún no se pidió / cargando
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!isProStore) return;
+    let alive = true;
+    getMyCommissionSummary()
+      .then(s => { if (alive) setSummary(s); })
+      .catch(() => { if (alive) setSummary({ has_catalog_pro: false, pending: [], items: [] }); });
+    return () => { alive = false; };
+  }, [isProStore]);
+  if (!isProStore || !summary || !summary.has_catalog_pro) return null;
+  const pending = summary.pending || [];
+  const items = summary.items || [];
+  const alDia = pending.length === 0;
+  const bg = isDark ? "#0d0d0d" : CARD, bd = isDark ? "#1a1a1a" : B;
+  return (
+    <div style={{ background: bg, border: `1px solid ${bd}`, borderRadius: 12, marginBottom: 10, overflow: "hidden" }}>
+      <button type="button" onClick={() => items.length && setOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", padding: "9px 12px", cursor: items.length ? "pointer" : "default", textAlign: "left", WebkitTapHighlightColor: "transparent" }}>
+        <span style={{ fontSize: 13, flexShrink: 0 }}>🤝</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 10.5, color: T3, fontWeight: 600, display: "block" }}>Aporte por uso de la plataforma</span>
+          {alDia ? (
+            <span style={{ fontSize: 11, color: "#22C55E", fontWeight: 800 }}>Estás al día ✓</span>
+          ) : (
+            <span style={{ fontSize: 11, color: T2, fontWeight: 600 }}>
+              {pending.map((p, i) => (
+                <span key={p.currency}>{i > 0 && " · "}<span style={{ color: G, fontWeight: 800 }}>{money(p.total, p.currency)}</span></span>
+              ))} pendiente
+            </span>
+          )}
+        </span>
+        {items.length > 0 && <span style={{ color: T3, fontSize: 11, flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>⌄</span>}
+      </button>
+      {open && items.length > 0 && (
+        <div style={{ padding: "0 12px 10px" }}>
+          <div style={{ height: 1, background: bd, marginBottom: 8 }} />
+          <p style={{ fontSize: 9.5, color: T3, marginBottom: 8, lineHeight: 1.5 }}>Mantén tu cuenta Pro activa: es tu aporte por cada venta hecha con el Catálogo Pro, calculado solo sobre tu ganancia real.</p>
+          {items.map(it => (
+            <div key={it.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "5px 0" }}>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontSize: 10.5, color: T1, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.title || "Producto"}</p>
+                <p style={{ fontSize: 9, color: T3 }}>{new Date(it.created_at).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}{it.paid ? " · Pagado" : ""}</p>
+              </div>
+              <span style={{ fontSize: 10.5, fontWeight: 800, color: it.paid ? T3 : G, flexShrink: 0 }}>{money(it.amount, it.currency)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // PANEL LATERAL del Perfil: se abre con ☰ desde la vista principal del perfil y
 // contiene TODO lo que antes estaba apilado (Mensajes, Pedidos, Billetera,
 // Herramientas, Modo mensajero, Configuración, Panel admin). Respeta permisos:
@@ -69,7 +132,7 @@ function FxTirita() {
 // "Configuración" se quitó de este menú: consolidada en un solo lugar real
 // (el engranaje arriba a la derecha del Perfil) — dos entradas a la misma
 // pantalla eran ruido, y el dueño pidió dejar solo una.
-export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, onOrders, onWallet, onTools, onCourier, onFollowing, onAdmin, messagesBadge = 0, ordersBadge = 0, adminBadge = 0 }) {
+export function ProfileMenuDrawer({ open, onClose, user, isOwner, isProStore, onMessages, onOrders, onWallet, onTools, onCourier, onFollowing, onAdmin, messagesBadge = 0, ordersBadge = 0, adminBadge = 0 }) {
   const { BG, S, B, T1, T2, T3, isDark } = useAt();
   const items = [
     { ic: "msg",    label: "Mensajes",                sub: "Chats y conversaciones",              action: onMessages, color: G,         badge: messagesBadge },
@@ -104,9 +167,11 @@ export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, on
             </div>
           ))}
         </div>
-        {/* Tirita de tasas del día — pegada al borde inferior del todo, separada
-            del bloque de opciones (no solo "el espacio de abajo" del menú). */}
+        {/* Aporte por Catálogo Pro (si aplica) + tirita de tasas del día —
+            pegados al borde inferior del todo, separados del bloque de
+            opciones (no solo "el espacio de abajo" del menú). */}
         <div style={{ flexShrink: 0, padding: "10px 12px calc(12px + env(safe-area-inset-bottom,0px))", borderTop: `1px solid ${B}` }}>
+          <ComisionCatalogoPro isProStore={isProStore} />
           <FxTirita />
         </div>
       </div>

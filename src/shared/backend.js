@@ -698,6 +698,17 @@ export const requestPlanPromo = async (plan, via, evidenceUrls = null) => {
   if (error) { console.error("requestPlanPromo:", error.message); throw error; }
   return data;
 };
+
+// ── APORTE POR CATÁLOGO PRO (Bloque 2 del menú ☰): resumen real de comisión
+// pendiente del vendedor autenticado, SOLO sobre kind='commission' (excluye
+// a propósito la deuda de mensajero, que es otro sistema aparte). El propio
+// RPC ya filtra por auth.uid() y devuelve has_catalog_pro para que el
+// frontend nunca muestre esto a quien jamás vendió desde ahí.
+export const getMyCommissionSummary = async () => {
+  const { data, error } = await supabase.rpc("get_seller_commission_summary");
+  if (error) { console.error("getMyCommissionSummary:", error.message); throw error; }
+  return data || { has_catalog_pro: false, pending: [], items: [] };
+};
 export const getOrCreateReferralCode = async () => {
   const { data, error } = await supabase.rpc("get_or_create_referral_code");
   if (error) { console.error("getOrCreateReferralCode:", error.message); return null; }

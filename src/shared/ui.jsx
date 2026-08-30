@@ -90,15 +90,19 @@ select option{background:#161616;color:#fff}
 .lr:active{transform:scale(.97)}
 .btn{display:inline-flex;align-items:center;justify-content:center;cursor:pointer;border-radius:10px;font-weight:700;letter-spacing:.01em;transition:transform .1s,box-shadow .12s,opacity .1s;-webkit-user-select:none;user-select:none}
 .btn:active{transform:scale(.95);opacity:.88}
-.btn-dark{background:#1a1a1a;border:1px solid #2a2a2a;color:#e8e8e8;box-shadow:0 2px 0 #000,0 4px 12px rgba(0,0,0,.55)}
-.btn-dark:hover{box-shadow:0 3px 0 #000,0 6px 18px rgba(0,0,0,.65);transform:translateY(-1px)}
-.btn-dark:active{box-shadow:0 1px 0 #000,0 2px 6px rgba(0,0,0,.4);transform:translateY(1px)}
-.btn-light{background:#fff;border:1px solid #D0D0DE;color:#18182C;box-shadow:0 2px 0 rgba(24,24,44,.18),0 4px 10px rgba(24,24,44,.1)}
-.btn-light:hover{box-shadow:0 3px 0 rgba(24,24,44,.2),0 6px 14px rgba(24,24,44,.14);transform:translateY(-1px)}
-.btn-light:active{box-shadow:0 1px 0 rgba(24,24,44,.12);transform:translateY(1px)}
-.btn-gold{background:#FFC01E;border:1px solid #d4a000;color:#000;box-shadow:0 2px 0 rgba(180,130,0,.6),0 4px 14px rgba(245,184,0,.3)}
-.btn-gold:hover{box-shadow:0 3px 0 rgba(180,130,0,.7),0 6px 18px rgba(245,184,0,.38);transform:translateY(-1px)}
-.btn-gold:active{box-shadow:0 1px 0 rgba(180,130,0,.5);transform:translateY(1px)}
+/* ── Sistema de acciones plano (reemplaza el viejo look "botón de juego" con
+   relieve/borde inferior duro) — CTA plano con sombra ambiental discreta +
+   dock unificado para las acciones secundarias, una sola forma con
+   divisores finos en vez de tarjetas sueltas. Ver .act-cta/.act-dock/
+   .act-slot, usados en la ficha de producto y cualquier otra zona de
+   acciones similar de la plataforma. */
+.act-cta{border:none;border-radius:13px;font-weight:800;letter-spacing:.01em;transition:filter .12s,transform .08s;-webkit-user-select:none;user-select:none}
+.act-cta:active{transform:scale(.98)}
+.act-dock{display:flex;align-items:stretch;border-radius:13px;overflow:hidden;-webkit-user-select:none;user-select:none}
+.act-slot{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:9px 4px;cursor:pointer;border:none;background:none;font-family:inherit;transition:background .12s,color .12s,opacity .1s}
+.act-slot:not(:first-child){border-left-width:1px;border-left-style:solid}
+.act-slot:active{opacity:.55}
+.act-slot span{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
 .chip{display:inline-flex;align-items:center;cursor:pointer;border-radius:100px;font-weight:700;transition:transform .1s,box-shadow .12s;-webkit-user-select:none;user-select:none;box-shadow:0 1px 0 rgba(0,0,0,.25),0 2px 6px rgba(0,0,0,.2)}
 .chip:hover{box-shadow:0 2px 0 rgba(0,0,0,.3),0 4px 10px rgba(0,0,0,.25);transform:translateY(-1px)}
 .chip:active{box-shadow:0 0px 0 rgba(0,0,0,.15);transform:translateY(1px) scale(.97)}

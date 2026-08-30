@@ -2898,63 +2898,71 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
         <ProductReviews product={p} user={user} flash={flash} requireAuth={requireAuth} />
       </div>
 
-      {/* Acciones */}
-      <div style={{ padding: "0 18px 32px", display: "flex", gap: 8 }}>
+      {/* Acciones — sistema plano (Propuesta C elegida por Daniel): el CTA
+          principal queda solo en su fila, dominante por separación y color;
+          las acciones secundarias comparten una sola franja (el "dock") con
+          divisores finos en vez de tarjetas sueltas con relieve de "botón
+          de juego". El dock ya está armado para que el carrito (Bloque 3)
+          entre como una celda más, sin rehacer el layout. */}
+      <div style={{ padding: "0 18px 32px", display: "flex", flexDirection: "column", gap: 8 }}>
         {isService ? (
-          <button className="btn btn-gold" onClick={() => requireAuth(() => {
+          <button className="act-cta" onClick={() => requireAuth(() => {
             if (p.seller_id) {
               // Abre el chat CON CONTEXTO del servicio (misma franja "estás consultando sobre esto").
               onChat(p.seller_id, sellerName || p.seller_name || "Vendedor", { type: "service", id: p.id, title: p.title || "", image: p.image || null, price: p.price ?? null, currency: p.currency || "USD" });
               trackEvent(user?.id, p.id, "chat").catch(() => {});
             } else flash("ℹ️ No disponible");
           })}
-            style={{ flex: 1, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            style={{ width: "100%", background: G, color: "#000", padding: "15px", fontSize: 13, boxShadow: `0 10px 20px -8px ${G}45`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
             📞 Contactar
           </button>
         ) : isOwnProduct ? (
-          <div style={{ flex: 1, textAlign: "center", padding: "15px", borderRadius: 50, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>📦 Es tu producto</div>
+          <div style={{ width: "100%", textAlign: "center", padding: "15px", borderRadius: 13, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>📦 Es tu producto</div>
         ) : soldOut ? (
-          <div style={{ flex: 1, textAlign: "center", padding: "15px", borderRadius: 50, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>🚫 Agotado</div>
+          <div style={{ width: "100%", textAlign: "center", padding: "15px", borderRadius: 13, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>🚫 Agotado</div>
         ) : (variants && variants.length > 0 && !activeVariant) ? (
-          <div style={{ flex: 1, textAlign: "center", padding: "15px", borderRadius: 50, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>Elige las opciones</div>
+          <div style={{ width: "100%", textAlign: "center", padding: "15px", borderRadius: 13, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>Elige las opciones</div>
         ) : (
-          <button className="btn btn-gold" onClick={() => requireAuth(() => onBuy(activeVariant ? { ...p, selectedVariant: activeVariant, __variants: variants } : { ...p, __variants: variants }))}
-            style={{ flex: 1, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800 }}>
+          <button className="act-cta" onClick={() => requireAuth(() => onBuy(activeVariant ? { ...p, selectedVariant: activeVariant, __variants: variants } : { ...p, __variants: variants }))}
+            style={{ width: "100%", background: G, color: "#000", padding: "15px", fontSize: 13, boxShadow: `0 10px 20px -8px ${G}45` }}>
             Comprar ahora
           </button>
         )}
-        {!isService && (
-          <button className={`btn ${isDark ? "btn-dark" : "btn-light"}`} onClick={() => requireAuth(() => {
-            if (p.seller_id) {
-              // Abre el chat CON CONTEXTO del producto (franja "estás consultando sobre esto").
-              onChat(p.seller_id, sellerName || p.seller_name || "Vendedor", { type: "product", id: p.id, title: p.title || "", image: p.image || null, price: p.price ?? null, currency: p.currency || "USD" });
-              trackEvent(user?.id, p.id, "chat").catch(() => {});
-            } else flash("ℹ️ Vendedor no disponible");
-          })} title="Chatear con el vendedor"
-            style={{ width: 50, height: 50, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-            <Ic n="msg" c={T2} s={19} />
-          </button>
-        )}
-        <button className={`btn ${isDark ? "btn-dark" : "btn-light"}`} onClick={async () => {
-          // SOLO enlace (title/text/url) — a propósito, NUNCA adjuntar la foto como
-          // archivo aquí. Se probó mandar foto+enlace juntos (navigator.share con
-          // files+url) y se REVIRTIÓ: al compartir así a una Historia de Facebook,
-          // Facebook se queda con la foto y DESCARTA el enlace — se pierde el clic
-          // de vuelta al producto, que es el objetivo real de "compartir". Solo
-          // enlace SÍ genera la vista previa con foto/título automática (las
-          // etiquetas Open Graph de la página estática) Y SÍ lleva de vuelta al
-          // producto al tocarla. No "mejorar" esto agregando el archivo sin leer
-          // este comentario primero.
-          const link = shareLink("product", p.id);
-          const txt = `${p.title} — en RETADOR`;
-          try {
-            if (navigator.share) { await navigator.share({ title: p.title, text: txt, url: link }); return; }
-            if (navigator.clipboard) { await navigator.clipboard.writeText(link); flash("🔗 Enlace copiado"); return; }
-            flash("Compartir no disponible en este dispositivo");
-          } catch (e) { /* el usuario canceló o no se permitió */ }
-        }} title="Compartir producto" style={{ width: 50, height: 50, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <Ic n="share" c={T2} s={17} />
-        </button>
+        <div className="act-dock" style={{ border: `1px solid ${B}`, background: S }}>
+            {!isService && (
+              <button className="act-slot" onClick={() => requireAuth(() => {
+                if (p.seller_id) {
+                  // Abre el chat CON CONTEXTO del producto (franja "estás consultando sobre esto").
+                  onChat(p.seller_id, sellerName || p.seller_name || "Vendedor", { type: "product", id: p.id, title: p.title || "", image: p.image || null, price: p.price ?? null, currency: p.currency || "USD" });
+                  trackEvent(user?.id, p.id, "chat").catch(() => {});
+                } else flash("ℹ️ Vendedor no disponible");
+              })} title="Chatear con el vendedor" style={{ color: T2 }}>
+                <Ic n="msg" c={T2} s={17} />
+                <span>Mensaje</span>
+              </button>
+            )}
+            <button className="act-slot" onClick={async () => {
+              // SOLO enlace (title/text/url) — a propósito, NUNCA adjuntar la foto como
+              // archivo aquí. Se probó mandar foto+enlace juntos (navigator.share con
+              // files+url) y se REVIRTIÓ: al compartir así a una Historia de Facebook,
+              // Facebook se queda con la foto y DESCARTA el enlace — se pierde el clic
+              // de vuelta al producto, que es el objetivo real de "compartir". Solo
+              // enlace SÍ genera la vista previa con foto/título automática (las
+              // etiquetas Open Graph de la página estática) Y SÍ lleva de vuelta al
+              // producto al tocarla. No "mejorar" esto agregando el archivo sin leer
+              // este comentario primero.
+              const link = shareLink("product", p.id);
+              const txt = `${p.title} — en RETADOR`;
+              try {
+                if (navigator.share) { await navigator.share({ title: p.title, text: txt, url: link }); return; }
+                if (navigator.clipboard) { await navigator.clipboard.writeText(link); flash("🔗 Enlace copiado"); return; }
+                flash("Compartir no disponible en este dispositivo");
+              } catch (e) { /* el usuario canceló o no se permitió */ }
+            }} title="Compartir producto" style={{ color: T2, borderLeftColor: B }}>
+              <Ic n="share" c={T2} s={16} />
+              <span>Compartir</span>
+            </button>
+        </div>
       </div>
     </div>
   );

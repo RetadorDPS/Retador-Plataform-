@@ -41,9 +41,9 @@ import {
   CATS, SUBCATS, CatalogContext, CatalogProvider, useCatalog, CatIcon,
   useCSS, Ic, Spin, Logo,
   getPageLayout, liveSlot, LiveBlock, LiveSlot,
-  useScrollDir, consumeBack, pushBackHandler, shouldIgnorePop, ErrorBoundary, ProfileSkeleton } from "./shared/index.js";
+  useScrollDir, consumeBack, pushBackHandler, shouldIgnorePop, ErrorBoundary, ProfileSkeleton, getCartCount } from "./shared/index.js";
 import { LocalDelivery, IntlShipping } from "./screens/Delivery.jsx";
-import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProductModal, ProductDetail, PubSheet, EnviosMenu, BottomNav } from "./screens/Marketplace.jsx";
+import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProductModal, ProductDetail, PubSheet, EnviosMenu, BottomNav, CartScreen } from "./screens/Marketplace.jsx";
 // Carga bajo demanda (code splitting real) — estas pantallas son grandes y
 // SOLO se montan detrás de un interruptor/pestaña que casi nadie toca en los
 // primeros segundos (Billetera, Herramientas, Modo Mensajero, Subastas, y el
@@ -505,6 +505,16 @@ function AppShell({ sessionUser, platformStats = null }) {
   const [showCourier, setShowCourier] = useState(false);
   const [showFollowing, setShowFollowing] = useState(false); // pantalla "Siguiendo" (☰ → Siguiendo)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false); // panel lateral del Perfil (☰)
+  // Carrito (Bloque 3): pantalla ☰ → Carrito. cartCount es el número de LÍNEAS
+  // reales (cart_items, nunca localStorage) — se recarga al iniciar sesión y
+  // cada vez que algo cambia el carrito (agregar/editar/quitar/comprar).
+  const [showCart, setShowCart] = useState(false);
+  const [cartCount, setCartCount] = useState(0);
+  const refreshCartCount = useCallback(() => {
+    if (!user?.id) { setCartCount(0); return; }
+    getCartCount().then(setCartCount).catch(() => {});
+  }, [user?.id]);
+  useEffect(() => { refreshCartCount(); }, [refreshCartCount]);
   // RETIRADO: el registro local de mensajeros (retador_couriers en localStorage)
   // ya NO es vía de aprobación. La única vía real es courier_applications en el
   // backend + review_courier_application del admin (que pone role='courier').
@@ -2013,6 +2023,11 @@ function AppShell({ sessionUser, platformStats = null }) {
           <FollowingListScreen user={user} onBack={() => setShowFollowing(false)} onViewProfile={(id) => { setShowFollowing(false); openPublicProfile(id); }} />
         </div>
       )}
+      {showCart && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 4000, background: effectiveTheme === "dark" ? "#080808" : "#ffffff", display: "flex", flexDirection: "column", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+          <CartScreen user={user} onBack={() => setShowCart(false)} flash={flash} onChange={refreshCartCount} />
+        </div>
+      )}
       {showTools && (() => {
         const isPremium = isOwner || ["pro", "premium"].includes(user?.plan);
         const dark = effectiveTheme === "dark";
@@ -2162,7 +2177,7 @@ function AppShell({ sessionUser, platformStats = null }) {
             onBuy={(p) => { setViewProdOverlay(null); setViewProfileId(null); setChatOpen(false); setShowCourier(false); handleBuy(p); }}
             onFav={toggleFav} isFav={favorites.has(viewProdOverlay.id)} canChat={hasOrderWith(viewProdOverlay.seller_id)}
             onDelete={null} onEdit={null}
-            flash={flash} requireAuth={requireAuth} user={user}
+            flash={flash} requireAuth={requireAuth} user={user} onCartAdded={refreshCartCount}
           />
         </div>
       )}
@@ -2298,7 +2313,7 @@ function AppShell({ sessionUser, platformStats = null }) {
                 onBuy={handleBuy} onFav={toggleFav} isFav={favorites.has(selProd.id)} canChat={hasOrderWith(selProd.seller_id)}
                 onDelete={(selProd.seller_id === user?.id) ? (() => askConfirm("Se elimina para siempre. Perderás las fotos y las reseñas de este producto. Esta acción no se puede deshacer.", () => { handleDelete(selProd.id); if (prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); } else if (prodBackTo === "store-main") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("main"); } else setMScr("home"); })) : null}
                 onEdit={(selProd.seller_id === user?.id) ? (() => setEditProd(selProd)) : null}
-                flash={flash} requireAuth={requireAuth} user={user}
+                flash={flash} requireAuth={requireAuth} user={user} onCartAdded={refreshCartCount}
               />
             )}
             {mScr === "sellerProfile" && selSeller && (
@@ -2430,9 +2445,9 @@ function AppShell({ sessionUser, platformStats = null }) {
             {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => openOrderChat(o)} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} seenIds={seenOrderIds} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { markOrderSeen(x.id); setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
             {/* Panel lateral del Perfil (☰): todo el menú que antes estaba apilado */}
             <ProfileMenuDrawer open={profileMenuOpen} onClose={() => setProfileMenuOpen(false)} user={user} isOwner={hasPanel}
-              onMessages={openMessages} onOrders={() => setPScr("orders")} onWallet={() => setShowWallet(true)}
+              onMessages={openMessages} onOrders={() => setPScr("orders")} onCart={() => setShowCart(true)} onWallet={() => setShowWallet(true)}
               onTools={() => setShowTools(true)} onCourier={() => setShowCourier(true)} onFollowing={() => setShowFollowing(true)}
-              onAdmin={() => { setAdminOpenPage(null); setShowAdmin(true); }} messagesBadge={chatUnread} ordersBadge={ordersUnseen} adminBadge={courierApps.length} />
+              onAdmin={() => { setAdminOpenPage(null); setShowAdmin(true); }} messagesBadge={chatUnread} ordersBadge={ordersUnseen} cartBadge={cartCount} adminBadge={courierApps.length} />
           </>}
         </>
       </div>

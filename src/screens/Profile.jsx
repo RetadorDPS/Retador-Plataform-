@@ -132,11 +132,12 @@ function ComisionPorVentas() {
 // "Configuración" se quitó de este menú: consolidada en un solo lugar real
 // (el engranaje arriba a la derecha del Perfil) — dos entradas a la misma
 // pantalla eran ruido, y el dueño pidió dejar solo una.
-export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, onOrders, onWallet, onTools, onCourier, onFollowing, onAdmin, messagesBadge = 0, ordersBadge = 0, adminBadge = 0 }) {
+export function ProfileMenuDrawer({ open, onClose, user, isOwner, onMessages, onOrders, onCart, onWallet, onTools, onCourier, onFollowing, onAdmin, messagesBadge = 0, ordersBadge = 0, cartBadge = 0, adminBadge = 0 }) {
   const { BG, S, B, T1, T2, T3, isDark } = useAt();
   const items = [
     { ic: "msg",    label: "Mensajes",                sub: "Chats y conversaciones",              action: onMessages, color: G,         badge: messagesBadge },
     { ic: "pkg",    label: "Mis pedidos",             sub: "Compras y ventas",                    action: onOrders,   color: "#60A5FA",  badge: ordersBadge },
+    { ic: "cart",   label: "Carrito",                 sub: "Lo que ya agregaste para comprar",    action: onCart,     color: "#F97316",  badge: cartBadge },
     { ic: "wallet", label: "Mi billetera",            sub: "Enviar, recibir, pagar y convertir",  action: onWallet,   color: "#22C55E" },
     { ic: "heart",  label: "Siguiendo",               sub: "Vendedores que sigues",                action: onFollowing, color: "#EC4899" },
     { ic: "tools",  label: "Herramientas",            sub: "Importador inteligente y más",        action: onTools,    color: "#6EE7B7" },

@@ -1233,6 +1233,53 @@ export const getAvailableVariantStock = async (variantId) => {
   return (data == null) ? null : Number(data);
 };
 
+// ── CARRITO (Bloque 3) — persistencia real en cart_items (RLS: cada quien ve
+// y edita solo lo suyo), NUNCA localStorage: es dato de negocio real que debe
+// sobrevivir entre dispositivos y sesiones. ──────────────────────────────────
+// Agrega o incrementa (si ya existe esa combinación producto+variante en el
+// carrito, cart_add_item suma la cantidad en vez de duplicar la fila).
+export const cartAddItem = async (productId, variantId, qty = 1) => {
+  const { error } = await supabase.rpc("cart_add_item", { p_product_id: productId, p_variant_id: variantId || null, p_qty: qty });
+  if (error) { console.error("cartAddItem:", error.message); throw error; }
+};
+export const cartSetQty = async (id, qty) => {
+  const { error } = await supabase.from("cart_items").update({ qty: Math.max(1, Number(qty) || 1) }).eq("id", id);
+  if (error) { console.error("cartSetQty:", error.message); throw error; }
+};
+export const cartRemoveItem = async (id) => {
+  const { error } = await supabase.from("cart_items").delete().eq("id", id);
+  if (error) { console.error("cartRemoveItem:", error.message); throw error; }
+};
+// Total de LÍNEAS (no de unidades) — es lo que se muestra en el badge del
+// menú, igual criterio que un carrito real: cuántos artículos distintos hay,
+// no cuántas unidades en total.
+export const getCartCount = async () => {
+  const { count, error } = await supabase.from("cart_items").select("id", { count: "exact", head: true });
+  if (error) { console.error("getCartCount:", error.message); return 0; }
+  return count || 0;
+};
+// Carrito completo con el producto y la variante YA resueltos (mismo shape
+// real que usa BuyModal) — cart_items solo guarda ids, así que se completa
+// aquí con getProductById (misma fuente que la ficha del producto) y una
+// consulta batch de variantes. Una línea cuyo producto ya no existe (lo borró
+// el vendedor) se descarta en silencio — nunca rompe la pantalla del carrito.
+export const getCartItems = async () => {
+  const { data: rows, error } = await supabase.from("cart_items").select("id, product_id, variant_id, qty, created_at").order("created_at", { ascending: true });
+  if (error) { console.error("getCartItems:", error.message); return []; }
+  if (!rows || !rows.length) return [];
+  const productIds = [...new Set(rows.map(r => r.product_id))];
+  const variantIds = [...new Set(rows.map(r => r.variant_id).filter(Boolean))];
+  const [products, variantsRes] = await Promise.all([
+    Promise.all(productIds.map(id => getProductById(id))),
+    variantIds.length ? supabase.from("product_variants").select("*").in("id", variantIds) : Promise.resolve({ data: [] }),
+  ]);
+  const productById = Object.fromEntries(products.filter(Boolean).map(p => [p.id, p]));
+  const variantById = Object.fromEntries((variantsRes.data || []).map(v => [v.id, v]));
+  return rows
+    .map(r => ({ id: r.id, productId: r.product_id, variantId: r.variant_id, qty: r.qty, product: productById[r.product_id] || null, variant: r.variant_id ? (variantById[r.variant_id] || null) : null }))
+    .filter(l => l.product);
+};
+
 // ── Variantes reales de producto (color/talla/etc.) ──────────────────────────
 // Cualquier vendedor puede crearlas en cualquier producto propio (no solo los
 // del Catálogo Pro). Se leen agrupadas por producto y se sobrescriben enteras

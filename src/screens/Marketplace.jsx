@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -300,12 +300,15 @@ function getSavedInstructions() {
   return "";
 }
 
-export function BuyModal({ product, user, onClose, flash, onSuccess }) {
+export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
   const platformCfg = usePlatformCfg(); // tarifa local desde la config GLOBAL del backend
   const liveLocalBase = estimateDeliveryFee(platformCfg, null) || 150;
   const [loading, setLoading] = useState(false);
-  const [qty, setQty] = useState(1);
+  // initialQty: precarga desde el Carrito (Bloque 3) la cantidad que ya
+  // había guardada en esa línea — el resto del flujo sigue exactamente igual
+  // que comprando directo desde la ficha del producto.
+  const [qty, setQty] = useState(initialQty || 1);
   const [step, setStep] = useState("resumen");
   const [howItWorks, setHowItWorks] = useState(false); // "¿Cómo funciona tu compra?" — guía breve para quien compra por primera vez
   const cur = product.currency || DEFAULT_CURRENCY;
@@ -2551,7 +2554,7 @@ function CurrencyEquivalents({ product }) {
   );
 }
 
-export function ProductDetail({ product: initialProduct, onBack, onDelivery, onChat, onViewProfile, onBuy, onFav, isFav, flash, requireAuth, user, canChat, onDelete, onEdit }) {
+export function ProductDetail({ product: initialProduct, onBack, onDelivery, onChat, onViewProfile, onBuy, onFav, isFav, flash, requireAuth, user, canChat, onDelete, onEdit, onCartAdded }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { S, B, T1, T2, T3, isDark, ts } = useAt();
   const { cats } = useCatalog();
@@ -2929,6 +2932,23 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
           </button>
         )}
         <div className="act-dock" style={{ border: `1px solid ${B}`, background: S }}>
+            {/* Agregar al carrito (Bloque 3) — reusa el selector de variantes YA
+                visible en la ficha (arriba, los chips de color/talla): si el
+                producto tiene variantes y no hay una combinación completa
+                elegida, se avisa en vez de agregar algo ambiguo. */}
+            {!isService && !isOwnProduct && !soldOut && (
+              <button className="act-slot" onClick={() => requireAuth(async () => {
+                if (variants && variants.length > 0 && !activeVariant) { flash("⚠️ Elige las opciones arriba antes de agregar"); return; }
+                try {
+                  await cartAddItem(p.id, activeVariant?.id || null, 1);
+                  flash("🛒 Agregado al carrito");
+                  onCartAdded?.();
+                } catch (e) { flash("❌ " + (e.message || "No se pudo agregar al carrito")); }
+              })} title="Agregar al carrito" style={{ color: T2, borderLeftColor: B }}>
+                <Ic n="cart" c={T2} s={17} />
+                <span>Carrito</span>
+              </button>
+            )}
             {!isService && (
               <button className="act-slot" onClick={() => requireAuth(() => {
                 if (p.seller_id) {
@@ -2964,6 +2984,157 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
             </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// CARRITO (Bloque 3) — persistencia real en cart_items (nunca localStorage).
+// Agrupado por vendedor porque cada vendedor genera su PROPIO pedido al
+// pagar (nunca se combinan productos de vendedores distintos en un mismo
+// pedido). El checkout reutiliza el MISMO BuyModal de la ficha de producto
+// tal cual, precargado con la variante y cantidad guardadas — sin lógica de
+// pago nueva. Al confirmar un pedido con éxito, esa línea se borra del
+// carrito; "Comprar todo" simplemente encadena ese mismo flujo una línea a
+// la vez (si el comprador cierra el modal a mitad de camino, se detiene ahí
+// — nunca fuerza el resto).
+// ═════════════════════════════════════════════════════════════════════════════
+export function CartScreen({ user, onBack, flash, onChange }) {
+  const { S, B, CARD, T1, T2, T3, isDark } = useAt();
+  const [items, setItems] = useState(null); // null = cargando
+  const [busyId, setBusyId] = useState(null);
+  const [buyLine, setBuyLine] = useState(null); // { ...línea, __full: producto armado para BuyModal, __initialQty }
+  const [queue, setQueue] = useState([]); // líneas restantes cuando se usa "Comprar todo"
+
+  const load = () => getCartItems().then(rows => setItems(rows)).catch(() => setItems([]));
+  useEffect(() => { load(); }, []);
+
+  const groups = useMemo(() => {
+    const by = {};
+    (items || []).forEach(it => {
+      const sid = it.product.seller_id || "sin-vendedor";
+      (by[sid] ||= { sellerId: sid, sellerName: it.product.seller_name || "Vendedor", lines: [] }).lines.push(it);
+    });
+    return Object.values(by);
+  }, [items]);
+  const grandTotal = (items || []).reduce((s, it) => s + (Number(it.variant?.price ?? it.product.price) || 0) * it.qty, 0);
+  const cur = items && items[0] ? (items[0].product.currency || DEFAULT_CURRENCY) : DEFAULT_CURRENCY;
+
+  const changeQty = async (line, delta) => {
+    const n = Math.max(1, line.qty + delta);
+    if (n === line.qty) return;
+    setBusyId(line.id);
+    setItems(rows => rows.map(r => r.id === line.id ? { ...r, qty: n } : r));
+    try { await cartSetQty(line.id, n); } catch (e) { flash("❌ No se pudo actualizar la cantidad"); load(); }
+    setBusyId(null);
+    onChange?.();
+  };
+  const remove = async (line) => {
+    setItems(rows => rows.filter(r => r.id !== line.id));
+    try { await cartRemoveItem(line.id); } catch (e) { flash("❌ No se pudo quitar del carrito"); load(); }
+    onChange?.();
+  };
+
+  // Arma el mismo objeto "producto completo + variante seleccionada" que ya
+  // usa ProductDetail al llamar onBuy — así BuyModal se comporta EXACTO
+  // igual que comprando desde la ficha, con toda su lógica intacta (envío
+  // vivo de Catálogo Pro, variantes, modalidad, etc.).
+  const openBuyFor = async (line) => {
+    const variants = await getProductVariants(line.productId).catch(() => []);
+    const activeVariant = line.variantId ? (variants.find(v => v.id === line.variantId) || line.variant) : null;
+    setBuyLine({ ...line, __full: { ...line.product, selectedVariant: activeVariant, __variants: variants }, __initialQty: line.qty });
+  };
+  const buyOne = (line) => { setQueue([]); openBuyFor(line); };
+  const buyAll = () => {
+    const all = items || [];
+    if (!all.length) return;
+    const [first, ...rest] = all;
+    setQueue(rest);
+    openBuyFor(first);
+  };
+  const onBuySuccess = async () => {
+    const done = buyLine;
+    setBuyLine(null);
+    if (done) { await cartRemoveItem(done.id).catch(() => {}); }
+    await load();
+    onChange?.();
+    if (queue.length) {
+      const [next, ...rest] = queue;
+      setQueue(rest);
+      openBuyFor(next);
+    }
+  };
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", overscrollBehaviorY: "contain" }}>
+      <div style={{ background: isDark ? "rgba(8,8,8,.95)" : "rgba(255,255,255,.97)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${B}`, position: "sticky", top: 0, zIndex: 5 }}>
+        <div style={{ padding: "13px 18px", display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={onBack} className="p" style={{ background: "none", border: "none", display: "flex" }}><Ic n="back" c="#666" s={20} /></button>
+          <p style={{ fontSize: 14, fontWeight: 800, color: T1 }}>Carrito</p>
+        </div>
+      </div>
+
+      {items === null ? (
+        <div style={{ textAlign: "center", color: T3, fontSize: 12, padding: "40px 0" }}>Cargando…</div>
+      ) : items.length === 0 ? (
+        <div style={{ padding: "60px 32px", textAlign: "center" }}>
+          <div style={{ fontSize: 46, marginBottom: 14 }}>🛒</div>
+          <p style={{ fontSize: 14, fontWeight: 700, color: T1, marginBottom: 7 }}>Tu carrito está vacío</p>
+          <p style={{ fontSize: 11.5, color: T3, lineHeight: 1.5 }}>Los productos que agregues desde su ficha aparecerán aquí.</p>
+        </div>
+      ) : (
+        <div style={{ padding: "14px 14px 100px" }}>
+          {groups.map(g => (
+            <div key={g.sellerId} style={{ marginBottom: 18 }}>
+              <p style={{ fontSize: 10.5, fontWeight: 800, color: T2, textTransform: "uppercase", letterSpacing: .3, marginBottom: 8, padding: "0 4px" }}>{g.sellerName}</p>
+              {g.lines.map(line => {
+                const price = Number(line.variant?.price ?? line.product.price) || 0;
+                const subtotal = price * line.qty;
+                const img = line.variant?.image || line.product.image || line.product.img;
+                return (
+                  <div key={line.id} style={{ display: "flex", gap: 10, background: isDark ? "#0d0d0d" : CARD, border: `1px solid ${B}`, borderRadius: 14, padding: 12, marginBottom: 8 }}>
+                    <div style={{ width: 56, height: 56, borderRadius: 11, background: "#1a1a1a", overflow: "hidden", flexShrink: 0 }}>
+                      {img && <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 12.5, fontWeight: 700, color: T1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{line.product.title}</p>
+                      {line.variant && <p style={{ fontSize: 10.5, color: T2, marginTop: 1 }}>{Object.values(line.variant.attributes || {}).join(" / ")}</p>}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 7 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                          <button className="p" disabled={busyId === line.id} onClick={() => changeQty(line, -1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: T1, fontSize: 14, fontWeight: 700, lineHeight: 1 }}>−</button>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: T1, minWidth: 16, textAlign: "center" }}>{line.qty}</span>
+                          <button className="p" disabled={busyId === line.id} onClick={() => changeQty(line, 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: T1, fontSize: 14, fontWeight: 700, lineHeight: 1 }}>+</button>
+                        </div>
+                        <p style={{ fontSize: 13, fontWeight: 900, color: G }}>{money(subtotal, line.product.currency)}</p>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "space-between" }}>
+                      <button onClick={() => remove(line)} className="p" title="Quitar" style={{ background: "none", border: "none", color: T3, padding: 2 }}><Ic n="close" c={T3} s={15} /></button>
+                      <button onClick={() => buyOne(line)} className="p" style={{ background: G, border: "none", borderRadius: 8, padding: "6px 10px", color: "#000", fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>Comprar</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+
+          <div style={{ background: isDark ? "#0d0d0d" : CARD, border: `1px solid ${B}`, borderRadius: 14, padding: "13px 15px", display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
+            <div>
+              <p style={{ fontSize: 10, color: T3, fontWeight: 700 }}>TOTAL (informativo)</p>
+              <p style={{ fontSize: 9.5, color: T3, marginTop: 2 }}>El pago se hace por vendedor, no en bloque</p>
+            </div>
+            <p style={{ fontSize: 17, fontWeight: 900, color: G }}>{money(grandTotal, cur)}</p>
+          </div>
+          <button onClick={buyAll} className="act-cta" style={{ width: "100%", background: G, color: "#000", padding: "14px", fontSize: 13, marginTop: 10, boxShadow: `0 10px 20px -8px ${G}45` }}>
+            Comprar todo
+          </button>
+        </div>
+      )}
+
+      {buyLine && (
+        <BuyModal product={buyLine.__full} user={user} initialQty={buyLine.__initialQty}
+          onClose={() => { setBuyLine(null); setQueue([]); }} flash={flash} onSuccess={onBuySuccess} />
+      )}
     </div>
   );
 }

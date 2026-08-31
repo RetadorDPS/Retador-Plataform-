@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -2554,7 +2554,7 @@ function CurrencyEquivalents({ product }) {
   );
 }
 
-export function ProductDetail({ product: initialProduct, onBack, onDelivery, onChat, onViewProfile, onBuy, onFav, isFav, flash, requireAuth, user, canChat, onDelete, onEdit, onCartAdded }) {
+export function ProductDetail({ product: initialProduct, onBack, onDelivery, onChat, onViewProfile, onBuy, onFav, isFav, flash, requireAuth, user, canChat, onDelete, onEdit, onCartAdded, onProductClick }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const { S, B, T1, T2, T3, isDark, ts } = useAt();
   const { cats } = useCatalog();
@@ -2983,6 +2983,40 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
               <span>Compartir</span>
             </button>
         </div>
+      </div>
+
+      {/* "También te puede interesar" — la ficha se sentía corta y vacía justo
+          debajo del dock. Misma categoría, excluye el actual, más recientes
+          primero (criterio simple, sin ranking de similitud) — reusa PCard,
+          la MISMA tarjeta de todo el resto de la plataforma. */}
+      <RelatedProducts product={p} onProduct={onProductClick} />
+    </div>
+  );
+}
+
+// Fila horizontal deslizable de productos relacionados, justo debajo del
+// dock de acciones — se oculta entera si no hay nada real que mostrar
+// (nunca una sección vacía con solo el título).
+function RelatedProducts({ product, onProduct }) {
+  const { T1, T3 } = useAt();
+  const [items, setItems] = useState(null); // null = cargando
+  useEffect(() => {
+    let alive = true;
+    setItems(null);
+    if (!product?.id || !product?.cat) { setItems([]); return; }
+    getRelatedProducts(product.id, product.cat, product.kind).then(r => { if (alive) setItems(r); }).catch(() => { if (alive) setItems([]); });
+    return () => { alive = false; };
+  }, [product?.id, product?.cat, product?.kind]);
+  if (!items || items.length === 0) return null;
+  return (
+    <div style={{ padding: "8px 0 28px" }}>
+      <p style={{ fontSize: 13, fontWeight: 800, color: T1, margin: "0 18px 12px" }}>También te puede interesar</p>
+      <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "0 18px 4px", scrollSnapType: "x proximity" }}>
+        {items.map(rp => (
+          <div key={rp.id} style={{ width: 148, flexShrink: 0, scrollSnapAlign: "start" }}>
+            <PCard p={rp} onClick={() => onProduct?.(rp)} isFav={false} onFav={() => {}} />
+          </div>
+        ))}
       </div>
     </div>
   );

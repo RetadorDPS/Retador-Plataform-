@@ -303,6 +303,19 @@ export const loadServices = async () => {
   if (error) { console.error("loadServices:", error.message); return []; }
   return (data || []).map(mapProduct);
 };
+// "También te puede interesar" (ficha de producto): misma categoría, excluye
+// el actual, activo/aprobado, más recientes primero — el criterio más simple
+// de implementar con los datos que ya existen (sin ranking de similitud).
+export const getRelatedProducts = async (productId, cat, kind, limit = 12) => {
+  if (!productId || !cat) return [];
+  let q = supabase.from("products").select(FEED_SELECT)
+    .eq("cat", cat).eq("status", "active").eq("moderation_status", "approved")
+    .neq("id", productId).order("created_at", { ascending: false }).limit(limit);
+  q = kind === "service" ? q.eq("kind", "service") : q.or("kind.eq.product,kind.is.null").or("stock.is.null,stock.gt.0");
+  const { data, error } = await q;
+  if (error) { console.error("getRelatedProducts:", error.message); return []; }
+  return (data || []).map(mapProduct);
+};
 // ── Paginación real por bloques (Tienda) ─────────────────────────────────────
 // loadProducts/loadServices de arriba se dejan TAL CUAL (las sigue usando
 // Búsqueda avanzada y el resto de filtros de la Tienda — Ofertas/Nuevo/Más

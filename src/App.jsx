@@ -300,6 +300,16 @@ function GuestDeepLinkPreview({ deepLink, onChangeDeepLink, onExit, onRequestAut
   // cae derecho de vuelta a este producto/perfil). Un solo punto de entrada.
   const requireAuth = () => { onRequestAuth(); return false; };
 
+  // BUG REAL reportado (QR de un perfil Pro llevaba a la versión Free): quien
+  // entra por un enlace/QR compartido SIN sesión cae aquí — y antes esta
+  // pantalla SIEMPRE mostraba FreeProfileScreen sin mirar el plan real de la
+  // cuenta, sin importar si el vendedor era Pro. El enlace/QR en sí nunca
+  // guardó ningún plan (share-preview solo redirige por id) — el plan se debe
+  // resolver EN VIVO cada vez que se abre, igual que ya hace AppShell para
+  // quien SÍ tiene sesión (getSellerPlan sin caché, ver viewedStoreEligible).
+  const [storeEligible, setStoreEligible] = useState(null); // null=cargando
+  const [storeData, setStoreData] = useState(null);
+
   useEffect(() => {
     let alive = true;
     if (deepLink.type === "product") {
@@ -307,8 +317,22 @@ function GuestDeepLinkPreview({ deepLink, onChangeDeepLink, onExit, onRequestAut
       getProductById(deepLink.id).then(p => { if (alive) setProduct(p || null); }).catch(() => { if (alive) setProduct(null); });
     } else {
       setProfile(undefined);
+      setStoreEligible(null);
+      setStoreData(null);
       getUserById(deepLink.id).then(u => { if (alive) setProfile(u || null); }).catch(() => { if (alive) setProfile(null); });
       getProductsBySeller(deepLink.id, { publicView: true }).then(list => { if (alive) setSellerProducts(list); }).catch(() => {});
+      Promise.all([getSellerPlan(deepLink.id), getPlans()]).then(async ([planId, plans]) => {
+        if (!alive) return;
+        const plan = plans.find(p => p.id === planId);
+        const eligible = !!plan?.can_customize;
+        if (!eligible) { setStoreEligible(false); return; }
+        const [c, s, r, prods, revs] = await Promise.all([
+          getStoreConfig(deepLink.id), getProfileHeaderStats(deepLink.id), getSellerRatingInfo(deepLink.id), getProductsBySeller(deepLink.id), getSellerReviews(deepLink.id),
+        ]);
+        if (!alive) return;
+        setStoreData({ cfg: c || {}, stats: s, rating: r, products: prods, reviews: revs });
+        setStoreEligible(true);
+      }).catch(() => { if (alive) setStoreEligible(false); });
     }
     return () => { alive = false; };
   }, [deepLink.type, deepLink.id]);
@@ -336,7 +360,7 @@ function GuestDeepLinkPreview({ deepLink, onChangeDeepLink, onExit, onRequestAut
     return (
       <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "#080808", display: "flex", flexDirection: "column" }}>
         <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", paddingBottom: 56 }}>
-          <ProductDetail product={product} onBack={onExit}
+          <ProductDetail product={product} onBack={onExit} onProductClick={(rp) => onChangeDeepLink({ type: "product", id: rp.id })}
             onDelivery={() => {}} onChat={() => {}} onViewProfile={(id) => onChangeDeepLink({ type: "profile", id })}
             onBuy={() => {}} onFav={() => {}} isFav={false} flash={flash} requireAuth={requireAuth}
             user={null} canChat={false} onDelete={null} onEdit={null} />
@@ -346,14 +370,34 @@ function GuestDeepLinkPreview({ deepLink, onChangeDeepLink, onExit, onRequestAut
     );
   }
 
-  if (profile === undefined) return <PantallaCargando />;
+  if (profile === undefined || storeEligible === null) return <PantallaCargando />;
   if (profile === null) return notFound;
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "#080808", display: "flex", flexDirection: "column" }}>
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", paddingBottom: 56 }}>
-        <FreeProfileScreen onBack={onExit} user={null} sellerId={deepLink.id} initialProfile={{}}
-          onProfileUpdate={() => {}} isOwner={false} onChat={requireAuth} isVerified={!!profile.verified}
-          onReport={() => {}} userProducts={sellerProducts} onProduct={(p) => onChangeDeepLink({ type: "product", id: p.id })} />
+        {storeEligible ? (
+          <StoreFront
+            cfg={storeData?.cfg || {}}
+            products={(storeData?.products || []).filter(p => !p.archived_at)}
+            headerStats={storeData?.stats}
+            ratingInfo={storeData?.rating}
+            reviews={storeData?.reviews || []}
+            profileRealName={profile.name || ""}
+            isVerified={!!profile.verified}
+            sellerId={deepLink.id}
+            viewerId={null}
+            onReviewChanged={() => {}}
+            isOwner={false}
+            onBack={onExit}
+            onChat={requireAuth}
+            onProduct={(p) => onChangeDeepLink({ type: "product", id: p.id })}
+            flash={flash}
+          />
+        ) : (
+          <FreeProfileScreen onBack={onExit} user={null} sellerId={deepLink.id} initialProfile={{}}
+            onProfileUpdate={() => {}} isOwner={false} onChat={requireAuth} isVerified={!!profile.verified}
+            onReport={() => {}} userProducts={sellerProducts} onProduct={(p) => onChangeDeepLink({ type: "product", id: p.id })} />
+        )}
       </div>
       {signInBar}{toastEl}
     </div>
@@ -2172,6 +2216,7 @@ function AppShell({ sessionUser, platformStats = null }) {
           <ProductDetail
             product={viewProdOverlay}
             onBack={() => setViewProdOverlay(null)}
+            onProductClick={(rp) => setViewProdOverlay(rp)}
             onDelivery={() => { setViewProdOverlay(null); setViewProfileId(null); setChatOpen(false); setShowCourier(false); setTab("envios"); setEScr("local"); }}
             onChat={requestChat} onViewProfile={openPublicProfile}
             onBuy={(p) => { setViewProdOverlay(null); setViewProfileId(null); setChatOpen(false); setShowCourier(false); handleBuy(p); }}
@@ -2301,7 +2346,7 @@ function AppShell({ sessionUser, platformStats = null }) {
             </div>
             {mScr === "product" && selProd && (
               <ProductDetail
-                product={selProd} onBack={() => {
+                product={selProd} onProductClick={(rp) => setSelProd(rp)} onBack={() => {
                   if (prodBackTo === "profile-full") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("profile-full"); }
                   else if (prodBackTo === "store-main") { setProdBackTo(null); setMScr("home"); setTab("perfil"); setPScr("main"); }
                   else if (prodBackTo === "sellerProfile") { setProdBackTo(null); setMScr("sellerProfile"); }

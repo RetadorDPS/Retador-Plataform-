@@ -15,9 +15,17 @@
          antiguo servía al reinstalar; así la instalación SIEMPRE lee este manifest
          (standalone, con reloj y barra de estado visibles). -->
     <link rel="manifest" href="manifest.webmanifest?v=14" />
-    <!-- Color inicial de las barras del sistema (pantalla de inicio, oscura).
-         La app lo actualiza por JS en cada cambio de tema (claro/oscuro). -->
-    <meta name="theme-color" content="#080808" />
+    <!-- Color inicial de las barras del sistema — DOS etiquetas con media
+         query (estándar, sin JS) para que coincida con el tema real del
+         SISTEMA desde el primer byte, sin esperar a que corra ningún script
+         (antes había una sola etiqueta fija en oscuro: en un teléfono con el
+         sistema en tema claro, la barra de estado se pintaba oscura hasta
+         que el script de abajo alcanzaba a corregirla — la causa real del
+         "borde oscuro arriba" inconsistente que reportó Daniel). El script
+         de abajo sigue existiendo para el caso en que el usuario eligió
+         DENTRO de la app un tema distinto al del sistema. -->
+    <meta name="theme-color" content="#080808" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)" />
     <link rel="icon" type="image/png" href="icons/icon-192.png" />
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -30,14 +38,18 @@
          cargue ni corra React: script SÍNCRONO (bloquea el parseo hasta
          terminar — nada de #root se pinta antes de que esto corra) que lee
          la preferencia real guardada (retador_theme) y fija html/body.style.
-         backgroundColor + el meta theme-color YA. El CSS de index.css
-         (prefers-color-scheme) cubre el instante ANTES incluso de que este
-         script corra (o si falla); este script es el ajuste fino para
-         cuando el usuario eligió un tema DISTINTO al del sistema. Sin esto,
-         el primer repintado real dependía de un useEffect de React que solo
-         corre DESPUÉS de montar — ese frame de por medio era la ventana real
-         donde un redimensionado del sistema (p. ej. al armar la vista de
-         apps recientes) podía "fotografiar" el color viejo. -->
+         backgroundColor + AMBAS etiquetas meta theme-color YA. Las dos
+         etiquetas con media query de arriba cubren el instante ANTES
+         incluso de que este script corra (o si falla) para quien usa el
+         tema del sistema; este script es el ajuste fino para cuando el
+         usuario eligió DENTRO de la app un tema distinto al del sistema —
+         por eso actualiza las DOS etiquetas (querySelectorAll, no solo la
+         primera), así el color correcto queda fijo sin importar cuál de las
+         dos coincida con la media query del sistema en ese momento. Sin
+         esto, el primer repintado real dependía de un useEffect de React
+         que solo corre DESPUÉS de montar — ese frame de por medio era la
+         ventana real donde un redimensionado del sistema (p. ej. al armar
+         la vista de apps recientes) podía "fotografiar" el color viejo. -->
     <script>
       (function () {
         try {
@@ -47,7 +59,8 @@
           var color = dark ? "#080808" : "#FFFFFF";
           document.documentElement.style.backgroundColor = color;
           document.body.style.backgroundColor = color;
-          document.querySelector('meta[name="theme-color"]').setAttribute("content", color);
+          var metas = document.querySelectorAll('meta[name="theme-color"]');
+          for (var i = 0; i < metas.length; i++) metas[i].setAttribute("content", color);
         } catch (e) {}
       })();
     </script>

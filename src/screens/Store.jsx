@@ -1441,7 +1441,7 @@ function mapCjCategoryToRetador(cjCategoryText, cats, subcatsMap) {
   return { cat: "", subcat: "" };
 }
 
-function CatalogoProSeller({ C, ac, onOpenCatalogDraft }) {
+function CatalogoProSeller({ C, ac, onOpenCatalogDraft, user }) {
   const [rows, setRows] = useState(undefined); // undefined=cargando · null=error
   const [viewing, setViewing] = useState(null);
   const { cats, subcats } = useCatalog();
@@ -1485,7 +1485,7 @@ function CatalogoProSeller({ C, ac, onOpenCatalogDraft }) {
         </div>
       )}
       {viewing && (
-        <CatalogDetailSheet product={viewing} C={C} ac={ac} cats={cats} subcats={subcats}
+        <CatalogDetailSheet product={viewing} C={C} ac={ac} cats={cats} subcats={subcats} user={user}
           onClose={() => setViewing(null)}
           onOpenDraft={(draft) => { setViewing(null); onOpenCatalogDraft?.(draft); }}/>
       )}
@@ -1497,7 +1497,7 @@ function CatalogoProSeller({ C, ac, onOpenCatalogDraft }) {
 // limpia, selector de variantes agrupado con "tu costo" por variante, y la
 // calculadora de ganancia — visible aquí mismo, no en un paso aparte. Nunca
 // muestra costo real de CJ, flete real ni margen de RETADOR.
-function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraft }) {
+function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraft, user }) {
   const [variants, setVariants] = useState(undefined); // undefined=cargando · null=sin variantes/error
   const [selectedAttrs, setSelectedAttrs] = useState({});
   const [imgIndex, setImgIndex] = useState(0);
@@ -1591,6 +1591,17 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
       kind: "product",
       stock: totalStock > 0 ? totalStock : 50,
       currency: "USD",
+      // BUG REAL corregido: este draft nunca traía la provincia del vendedor,
+      // así que todo producto agregado desde el Catálogo Pro quedaba con
+      // province=NULL — y el orden "mi provincia primero" del feed (ver
+      // loadProductsPage en backend.js) trata NULL como "resto del país" para
+      // CUALQUIER visitante, sin importar qué tan reciente sea. Por eso se
+      // veían "al final": no por una fecha vieja (created_at siempre se pone
+      // bien, por default de la columna), sino por quedar siempre fuera del
+      // bloque prioritario. Mismo criterio que el formulario normal de
+      // publicar (Marketplace.jsx): última provincia usada, si no la del
+      // perfil del vendedor.
+      province: (() => { try { return localStorage.getItem("retador_last_province") || ""; } catch (e) { return ""; } })() || user?.profile?.shop_province || null,
       // Producto del Catálogo Pro: llega vía hub/CJ, nunca hay stock físico
       // local ni entrega en persona real — SIEMPRE envío internacional (el
       // backend además lo fuerza con un trigger, esto es solo para que el
@@ -1753,7 +1764,7 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
       onNewProduct={api.onNewProduct} onEditProduct={api.onEditProduct}
       onArchiveProduct={api.onArchiveProduct} onUnarchiveProduct={api.onUnarchiveProduct}
       onDeleteProduct={api.onDeleteProduct} onToggleFeatured={api.onToggleFeatured} maxProducts={myPlan?.max_products}/>;
-    if (sec === "catalog")    return <CatalogoProSeller C={C} ac={ac} onOpenCatalogDraft={api.onOpenCatalogDraft}/>;
+    if (sec === "catalog")    return <CatalogoProSeller C={C} ac={ac} onOpenCatalogDraft={api.onOpenCatalogDraft} user={user}/>;
     if (sec === "analytics")  return <Analytics products={products} orders={orders} C={C} ac={ac}/>;
     if (sec === "customers")  return <Clientes orders={orders} C={C} ac={ac}/>;
     if (sec === "design")     return <Diseno cfg={cfg} products={products} onUpdateConfig={api.onUpdateConfig} C={C} ac={ac} flash={notify} profileRealName={profileRealName}/>;

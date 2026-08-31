@@ -2901,12 +2901,17 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
         <ProductReviews product={p} user={user} flash={flash} requireAuth={requireAuth} />
       </div>
 
-      {/* Acciones — sistema plano (Propuesta C elegida por Daniel): el CTA
-          principal queda solo en su fila, dominante por separación y color;
-          las acciones secundarias comparten una sola franja (el "dock") con
-          divisores finos en vez de tarjetas sueltas con relieve de "botón
-          de juego". El dock ya está armado para que el carrito (Bloque 3)
-          entre como una celda más, sin rehacer el layout. */}
+      {/* Acciones — sistema plano (Bloque 1): el CTA principal queda solo en
+          su fila, dominante por separación y color; las acciones secundarias
+          comparten una sola franja (el "dock") con divisores finos en vez de
+          tarjetas sueltas con relieve de "botón de juego". El dock ya está
+          armado para que el carrito (Bloque 3) entre como una celda más, sin
+          rehacer el layout.
+          Pulido de iconos (Bloque 4, Daniel eligió Propuesta C del mockup):
+          cada ícono secundario vive dentro de .act-badge, una insignia
+          dorada tenue — eco pequeño del CTA sin competir con él. El CTA en
+          sí usa el degradado ámbar de la Propuesta E (mismo radio de
+          siempre, solo cambia relleno y sombra). */}
       <div style={{ padding: "0 18px 32px", display: "flex", flexDirection: "column", gap: 8 }}>
         {isService ? (
           <button className="act-cta" onClick={() => requireAuth(() => {
@@ -2916,7 +2921,7 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
               trackEvent(user?.id, p.id, "chat").catch(() => {});
             } else flash("ℹ️ No disponible");
           })}
-            style={{ width: "100%", background: G, color: "#000", padding: "15px", fontSize: 13, boxShadow: `0 10px 20px -8px ${G}45`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            style={{ width: "100%", background: "linear-gradient(135deg,#ffd35c,#f2ac00 68%)", color: "#1a1200", padding: "15px", fontSize: 13, boxShadow: "0 8px 16px -8px rgba(242,172,0,.55)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
             📞 Contactar
           </button>
         ) : isOwnProduct ? (
@@ -2927,7 +2932,7 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
           <div style={{ width: "100%", textAlign: "center", padding: "15px", borderRadius: 13, background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, fontSize: 13, fontWeight: 800 }}>Elige las opciones</div>
         ) : (
           <button className="act-cta" onClick={() => requireAuth(() => onBuy(activeVariant ? { ...p, selectedVariant: activeVariant, __variants: variants } : { ...p, __variants: variants }))}
-            style={{ width: "100%", background: G, color: "#000", padding: "15px", fontSize: 13, boxShadow: `0 10px 20px -8px ${G}45` }}>
+            style={{ width: "100%", background: "linear-gradient(135deg,#ffd35c,#f2ac00 68%)", color: "#1a1200", padding: "15px", fontSize: 13, boxShadow: "0 8px 16px -8px rgba(242,172,0,.55)" }}>
             Comprar ahora
           </button>
         )}
@@ -2945,7 +2950,7 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
                   onCartAdded?.();
                 } catch (e) { flash("❌ " + (e.message || "No se pudo agregar al carrito")); }
               })} title="Agregar al carrito" style={{ color: T2, borderLeftColor: B }}>
-                <Ic n="cart" c={T2} s={17} />
+                <span className="act-badge"><Ic n="cart" c={T2} s={15} /></span>
                 <span>Carrito</span>
               </button>
             )}
@@ -2957,7 +2962,7 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
                   trackEvent(user?.id, p.id, "chat").catch(() => {});
                 } else flash("ℹ️ Vendedor no disponible");
               })} title="Chatear con el vendedor" style={{ color: T2 }}>
-                <Ic n="msg" c={T2} s={17} />
+                <span className="act-badge"><Ic n="msg" c={T2} s={15} /></span>
                 <span>Mensaje</span>
               </button>
             )}
@@ -2979,7 +2984,7 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
                 flash("Compartir no disponible en este dispositivo");
               } catch (e) { /* el usuario canceló o no se permitió */ }
             }} title="Compartir producto" style={{ color: T2, borderLeftColor: B }}>
-              <Ic n="share" c={T2} s={16} />
+              <span className="act-badge"><Ic n="share" c={T2} s={14} /></span>
               <span>Compartir</span>
             </button>
         </div>
@@ -3159,7 +3164,7 @@ export function CartScreen({ user, onBack, flash, onChange }) {
             </div>
             <p style={{ fontSize: 17, fontWeight: 900, color: G }}>{money(grandTotal, cur)}</p>
           </div>
-          <button onClick={buyAll} className="act-cta" style={{ width: "100%", background: G, color: "#000", padding: "14px", fontSize: 13, marginTop: 10, boxShadow: `0 10px 20px -8px ${G}45` }}>
+          <button onClick={buyAll} className="act-cta" style={{ width: "100%", background: "linear-gradient(135deg,#ffd35c,#f2ac00 68%)", color: "#1a1200", padding: "14px", fontSize: 13, marginTop: 10, boxShadow: "0 8px 16px -8px rgba(242,172,0,.55)" }}>
             Comprar todo
           </button>
         </div>

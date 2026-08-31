@@ -99,10 +99,14 @@ select option{background:#161616;color:#fff}
 .act-cta{border:none;border-radius:13px;font-weight:800;letter-spacing:.01em;transition:filter .12s,transform .08s;-webkit-user-select:none;user-select:none}
 .act-cta:active{transform:scale(.98)}
 .act-dock{display:flex;align-items:stretch;border-radius:13px;overflow:hidden;-webkit-user-select:none;user-select:none}
-.act-slot{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:9px 4px;cursor:pointer;border:none;background:none;font-family:inherit;transition:background .12s,color .12s,opacity .1s}
+.act-slot{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:9px 4px;cursor:pointer;border:none;background:none;font-family:inherit;transition:background .12s,color .12s,opacity .1s}
 .act-slot:not(:first-child){border-left-width:1px;border-left-style:solid}
 .act-slot:active{opacity:.55}
 .act-slot span{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+/* Insignia dorada tenue detrás de cada ícono secundario (Propuesta C, elegida
+   por Daniel para el pulido del dock) — un eco pequeño del dorado del CTA en
+   cada acción, sin competir con él. */
+.act-badge{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:rgba(255,192,30,.1);border:1px solid rgba(255,192,30,.22)}
 .chip{display:inline-flex;align-items:center;cursor:pointer;border-radius:100px;font-weight:700;transition:transform .1s,box-shadow .12s;-webkit-user-select:none;user-select:none;box-shadow:0 1px 0 rgba(0,0,0,.25),0 2px 6px rgba(0,0,0,.2)}
 .chip:hover{box-shadow:0 2px 0 rgba(0,0,0,.3),0 4px 10px rgba(0,0,0,.25);transform:translateY(-1px)}
 .chip:active{box-shadow:0 0px 0 rgba(0,0,0,.15);transform:translateY(1px) scale(.97)}
@@ -142,7 +146,7 @@ export const Ic = ({ n, c = "#fff", s = 22 }) => {
     search: <svg {...p} viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
     back:   <svg {...p} viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>,
     close:  <svg {...p} viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
-    msg:    <svg {...p} viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>,
+    msg:    <svg {...p} viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>,
     send:   <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
     award:  <svg {...p} viewBox="0 0 24 24"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/></svg>,
     moto:   <svg {...p} viewBox="0 0 24 24"><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6h1l2 5m-7 6.5h7l2-5H9"/></svg>,
@@ -161,7 +165,7 @@ export const Ic = ({ n, c = "#fff", s = 22 }) => {
     check:  <svg {...p} viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>,
     map:    <svg {...p} viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>,
     pkg:    <svg {...p} viewBox="0 0 24 24"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 002 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>,
-    cart:   <svg {...p} viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>,
+    cart:   <svg {...p} viewBox="0 0 24 24"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 002 1.58h9.78a2 2 0 002-1.58l1.65-7.43H5.12"/></svg>,
   };
   return M[n] || null;
 };

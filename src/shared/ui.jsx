@@ -107,6 +107,19 @@ select option{background:#161616;color:#fff}
    por Daniel para el pulido del dock) — un eco pequeño del dorado del CTA en
    cada acción, sin competir con él. */
 .act-badge{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:rgba(255,192,30,.1);border:1px solid rgba(255,192,30,.22)}
+/* ── Barra de compra flotante de la ficha de producto ──────────────────────
+   Las fichas del Catálogo Pro son largas (decenas de opciones de variante +
+   ficha técnica completa): el comprador terminaba de leer y ya no tenía el
+   botón de comprar a mano. Esta barra se pega al borde inferior mientras se
+   baja y se retira sola cuando el dock real ya está en pantalla, para no
+   mostrar el mismo botón dos veces. */
+.act-float{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:10px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));border-top-width:1px;border-top-style:solid;-webkit-backdrop-filter:blur(18px) saturate(1.3);backdrop-filter:blur(18px) saturate(1.3);animation:act-float-in .22s cubic-bezier(.4,0,.2,1)}
+@keyframes act-float-in{from{transform:translateY(100%)}to{transform:translateY(0)}}
+/* Control de "ver más/ver menos" de las listas plegables (opciones de
+   variante y descripción). Borde discontinuo dorado a propósito: se lee
+   como "aquí hay algo más", distinto de una opción elegible. */
+.mas{display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-weight:800;border-radius:9px;border-width:1.5px;border-style:dashed;background:none;font-family:inherit;transition:filter .12s,transform .08s}
+.mas:active{transform:scale(.97)}
 .chip{display:inline-flex;align-items:center;cursor:pointer;border-radius:100px;font-weight:700;transition:transform .1s,box-shadow .12s;-webkit-user-select:none;user-select:none;box-shadow:0 1px 0 rgba(0,0,0,.25),0 2px 6px rgba(0,0,0,.2)}
 .chip:hover{box-shadow:0 2px 0 rgba(0,0,0,.3),0 4px 10px rgba(0,0,0,.25);transform:translateY(-1px)}
 .chip:active{box-shadow:0 0px 0 rgba(0,0,0,.15);transform:translateY(1px) scale(.97)}

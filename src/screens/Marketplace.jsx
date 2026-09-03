@@ -1984,6 +1984,107 @@ function groupsFromVariantRows(rows) {
   return labels.map(l => ({ name: l, values: valuesByLabel[l] }));
 }
 
+// ── Listas de opciones plegables (grupo de variantes de la ficha) ────────────
+// Los productos del Catálogo Pro llegan con listas enormes: la impresora
+// térmica trae más de sesenta opciones en un solo atributo, y ocupaban
+// media pantalla antes de que el comprador llegara siquiera al precio.
+// El corte NO es un número fijo de opciones sino un presupuesto de ANCHO:
+// con etiquetas cortas ("Rosa", "Azul") entran seis o siete en la primera
+// fila; con etiquetas largas ("Papel de impresora transparente") entran dos
+// o tres. Así el primer vistazo siempre ocupa más o menos lo mismo, que es
+// lo que se pidió, en vez de una fila diminuta o cuatro filas apretadas.
+const ATTR_PRESUPUESTO = 46;   // ancho aproximado, en caracteres, de la vista plegada
+const ATTR_MIN_VISIBLES = 4;   // nunca menos de esto, aunque las etiquetas sean larguísimas
+
+function cuantasCaben(values) {
+  let usado = 0, corte = 0;
+  for (let i = 0; i < values.length; i++) {
+    usado += String(values[i]).length + 3; // +3 ≈ el aire propio del chip
+    if (i >= ATTR_MIN_VISIBLES && usado > ATTR_PRESUPUESTO) break;
+    corte = i + 1;
+  }
+  return corte;
+}
+
+// Un atributo (Color, Talla…) con sus opciones. Plegado por defecto cuando
+// hay más de las que caben; la opción ELEGIDA se muestra siempre, aunque
+// esté más allá del corte — si no, al plegar parecía que no había nada
+// seleccionado.
+function AttrChipGroup({ label, values, selectedValue, isEnabled, onPick, T1, T2, T3, B, isDark }) {
+  const [abierto, setAbierto] = useState(false);
+  const corte = useMemo(() => cuantasCaben(values), [values]);
+  const hayMas = values.length > corte;
+  const visibles = useMemo(() => {
+    if (abierto || !hayMas) return values;
+    const base = values.slice(0, corte);
+    // La elegida siempre a la vista, aunque esté escondida en la cola.
+    if (selectedValue != null && !base.includes(selectedValue) && values.includes(selectedValue)) base.push(selectedValue);
+    return base;
+  }, [abierto, hayMas, values, corte, selectedValue]);
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 7, marginBottom: 7 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, color: T2, textTransform: "uppercase", letterSpacing: .3 }}>{attrLabelText(label)}</span>
+        {hayMas && <span style={{ fontSize: 9, color: T3, fontWeight: 600 }}>{values.length} opciones</span>}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {visibles.map(value => {
+          const isOn = selectedValue === value;
+          const exists = isEnabled(value);
+          return (
+            <button key={value} type="button" disabled={!exists} onClick={() => onPick(value)}
+              style={{ padding: "7px 13px", borderRadius: 9, fontSize: 12, fontWeight: 700, cursor: exists ? "pointer" : "not-allowed",
+                background: isOn ? G : (isDark ? "#1a1a1a" : "#f5f5f7"), color: isOn ? "#000" : (exists ? T1 : T3),
+                border: `1.5px solid ${isOn ? G : B}`, opacity: exists ? 1 : .4 }}>{value}</button>
+          );
+        })}
+        {hayMas && (
+          <button type="button" className="mas" onClick={() => setAbierto(o => !o)}
+            aria-expanded={abierto}
+            style={{ padding: "7px 12px", fontSize: 12, color: G, borderColor: `${G}80` }}>
+            {abierto ? "Ver menos" : `+${values.length - corte} más`}
+            <span style={{ fontSize: 9, lineHeight: 1 }}>{abierto ? "▲" : "▼"}</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Descripción con "Leer más / Recoger". Las fichas técnicas del Catálogo Pro
+// llegan a 2.500 caracteres y empujaban el vendedor, las formas de entrega y
+// las reseñas fuera de la pantalla. Solo se recorta si de verdad es larga:
+// una descripción corta se muestra entera y sin ningún control extra.
+const DESC_LARGA = 260;
+
+function DescripcionPlegable({ texto, ts, T2, T3, BGfade }) {
+  const [abierto, setAbierto] = useState(false);
+  const esLarga = String(texto).length > DESC_LARGA;
+  return (
+    <>
+      <p style={{ fontSize: 10 * ts, fontWeight: 700, color: T3, marginBottom: 5, letterSpacing: .5, textTransform: "uppercase" }}>Descripción</p>
+      <div style={{ position: "relative", marginBottom: esLarga ? 8 : 16 }}>
+        <p style={{ fontSize: 12 * ts, color: T2, lineHeight: 1.65, whiteSpace: "pre-wrap", margin: 0,
+          maxHeight: (esLarga && !abierto) ? 108 : "none", overflow: (esLarga && !abierto) ? "hidden" : "visible" }}>{texto}</p>
+        {esLarga && !abierto && (
+          // Degradado de corte: deja claro que el texto sigue, sin cortarlo a
+          // media letra. pointerEvents:none para no robarle el toque al texto.
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 44, pointerEvents: "none",
+            background: `linear-gradient(to bottom, transparent, ${BGfade})` }} />
+        )}
+      </div>
+      {esLarga && (
+        <button type="button" className="mas" onClick={() => setAbierto(o => !o)} aria-expanded={abierto}
+          style={{ padding: "7px 12px", fontSize: 11.5, color: G, borderColor: `${G}80`, marginBottom: 16 }}>
+          {abierto ? "Recoger" : "Leer descripción completa"}
+          <span style={{ fontSize: 9, lineHeight: 1 }}>{abierto ? "▲" : "▼"}</span>
+        </button>
+      )}
+    </>
+  );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // PRODUCT DETAIL — carga nombre + trust stats del vendedor
 // ═════════════════════════════════════════════════════════════════════════════
@@ -2556,7 +2657,7 @@ function CurrencyEquivalents({ product }) {
 
 export function ProductDetail({ product: initialProduct, onBack, onDelivery, onChat, onViewProfile, onBuy, onFav, isFav, flash, requireAuth, user, canChat, onDelete, onEdit, onCartAdded, onProductClick }) {
   const { cols, isMobile, isTablet, isDesktop } = useR();
-  const { S, B, T1, T2, T3, isDark, ts } = useAt();
+  const { BG, S, B, T1, T2, T3, isDark, ts } = useAt();
   const { cats } = useCatalog();
   // El feed del Marketplace ahora trae solo las columnas livianas de la
   // tarjeta (ver FEED_SELECT en backend.js) — aquí, al abrir el detalle, se
@@ -2691,6 +2792,29 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
   // Es mi propio producto/servicio: no tiene sentido comprármelo a mí mismo.
   const isOwnProduct = !!(user?.id && p.seller_id && String(user.id) === String(p.seller_id));
 
+  // ── Barra de compra flotante ────────────────────────────────────────────
+  // La ficha es larga (opciones de variante + ficha técnica + vendedor +
+  // reseñas + relacionados): al terminar de leer, el botón de comprar
+  // quedaba muy arriba. La barra se pega abajo mientras el dock real NO
+  // está en pantalla, y se retira sola en cuanto aparece, para no mostrar
+  // el mismo botón dos veces. Se observa contra el propio contenedor con
+  // scroll (root: scrollRef), no contra la ventana: la ficha vive dentro de
+  // un div con overflow propio y el viewport del navegador no sirve aquí.
+  const dockRef = useRef(null);
+  const [dockALaVista, setDockALaVista] = useState(true);
+  useEffect(() => {
+    const el = dockRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(
+      ([entry]) => setDockALaVista(entry.isIntersecting),
+      { root: scrollRef.current || null, threshold: 0.1 },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [p.id, isService, isOwnProduct, soldOut]);
+  // Solo tiene sentido flotar un botón que el usuario pueda pulsar de verdad.
+  const mostrarFlotante = !dockALaVista && !isOwnProduct && !soldOut;
+
   return (
     <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", position: "relative" }}>
       {/* Botón volver — sticky, SIEMPRE visible (no depende de position:fixed) */}
@@ -2713,6 +2837,52 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
           </div>
         )}
       </div>
+
+      {/* Barra de compra flotante — mismo truco que el botón volver de arriba,
+          pero anclada abajo: sticky con altura 0 para que no empuje nada del
+          contenido, y el contenido real posicionado sobre el borde inferior.
+          A propósito NO usa position:fixed (la ficha vive dentro de un
+          contenedor con scroll propio; fixed la sacaría de ahí). */}
+      {!isService && (
+        <div style={{ position: "sticky", bottom: 0, zIndex: 560, height: 0, overflow: "visible", pointerEvents: "none" }}>
+          {mostrarFlotante && (
+            <div className="act-float" style={{ background: isDark ? "rgba(10,10,10,.9)" : "rgba(255,255,255,.92)", borderTopColor: B, pointerEvents: "auto" }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 900, color: G, lineHeight: 1.15 }}>{money(displayPrice, p.currency)}</div>
+                <div style={{ fontSize: 9.5, color: T2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {/* Recuerda QUÉ variante se está comprando: con listas de 60
+                      opciones, al llegar abajo ya no se ve cuál quedó elegida. */}
+                  {activeVariant ? Object.values(activeVariant.attributes || {}).join(" · ") : (p.title || "")}
+                </div>
+              </div>
+              <button className="act-slot" onClick={() => requireAuth(async () => {
+                if (variants && variants.length > 0 && !activeVariant) { flash("⚠️ Elige las opciones arriba antes de agregar"); return; }
+                try {
+                  await cartAddItem(p.id, activeVariant?.id || null, 1);
+                  flash("🛒 Agregado al carrito");
+                  onCartAdded?.();
+                } catch (e) { flash("❌ " + (e.message || "No se pudo agregar al carrito")); }
+              })} title="Agregar al carrito" style={{ flex: "0 0 auto", color: T2, padding: "4px 2px" }}>
+                <span className="act-badge"><Ic n="cart" c={T2} s={15} /></span>
+              </button>
+              {(variants && variants.length > 0 && !activeVariant) ? (
+                // Mismo criterio que el dock: sin combinación elegida no se
+                // puede comprar, y tocarlo sube a las opciones en vez de
+                // dejar al comprador adivinando por qué no pasa nada.
+                <button className="act-cta" onClick={() => { scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" }); flash("⚠️ Elige las opciones arriba"); }}
+                  style={{ flex: "0 0 auto", background: isDark ? "#1a1a1a" : "#e2e8f0", color: T3, padding: "12px 18px", fontSize: 12.5 }}>
+                  Elige las opciones
+                </button>
+              ) : (
+                <button className="act-cta" onClick={() => requireAuth(() => onBuy(activeVariant ? { ...p, selectedVariant: activeVariant, __variants: variants } : { ...p, __variants: variants }))}
+                  style={{ flex: "0 0 auto", background: "linear-gradient(135deg,#ffd35c,#f2ac00 68%)", color: "#1a1200", padding: "12px 20px", fontSize: 12.5, boxShadow: "0 6px 14px -7px rgba(242,172,0,.6)" }}>
+                  Comprar ahora
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {/* Imagen hero — carrusel deslizable entre todas las fotos del producto */}
       <div style={{ position: "relative", aspectRatio: "1 / 1", background: "#161616", overflow: "hidden" }}>
         <ImageCarousel images={imgs} index={imgIdx} setIndex={setImgIdx} onOpen={() => setViewerOpen(true)} />
@@ -2790,22 +2960,14 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
         {!isService && variantLabels.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             {variantLabels.map(label => (
-              <div key={label} style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: T2, textTransform: "uppercase", letterSpacing: .3, marginBottom: 7 }}>{attrLabelText(label)}</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {variantValuesByLabel[label].map(value => {
-                    const isOn = selectedAttrs[label] === value;
-                    const candidate = { ...selectedAttrs, [label]: value };
-                    const exists = variants.some(v => Object.entries(candidate).every(([l, val]) => (v.attributes || {})[l] === val));
-                    return (
-                      <button key={value} type="button" disabled={!exists} onClick={() => setSelectedAttrs(candidate)}
-                        style={{ padding: "7px 13px", borderRadius: 9, fontSize: 12, fontWeight: 700, cursor: exists ? "pointer" : "not-allowed",
-                          background: isOn ? G : (isDark ? "#1a1a1a" : "#f5f5f7"), color: isOn ? "#000" : (exists ? T1 : T3),
-                          border: `1.5px solid ${isOn ? G : B}`, opacity: exists ? 1 : .4 }}>{value}</button>
-                    );
-                  })}
-                </div>
-              </div>
+              <AttrChipGroup key={label} label={label} values={variantValuesByLabel[label]}
+                selectedValue={selectedAttrs[label]}
+                isEnabled={value => {
+                  const candidate = { ...selectedAttrs, [label]: value };
+                  return variants.some(v => Object.entries(candidate).every(([l, val]) => (v.attributes || {})[l] === val));
+                }}
+                onPick={value => setSelectedAttrs({ ...selectedAttrs, [label]: value })}
+                T1={T1} T2={T2} T3={T3} B={B} isDark={isDark} />
             ))}
           </div>
         )}
@@ -2847,10 +3009,7 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
         )}
 
         {p.description && (
-          <>
-            <p style={{ fontSize: 10 * ts, fontWeight: 700, color: T3, marginBottom: 5, letterSpacing: .5, textTransform: "uppercase" }}>Descripción</p>
-            <p style={{ fontSize: 12 * ts, color: T2, lineHeight: 1.65, marginBottom: 16 }}>{p.description}</p>
-          </>
+          <DescripcionPlegable texto={p.description} ts={ts} T2={T2} T3={T3} BGfade={isDark ? BG : "#fff"} />
         )}
 
         {/* Vendedor con trust stats */}
@@ -2912,7 +3071,7 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
           dorada tenue — eco pequeño del CTA sin competir con él. El CTA en
           sí usa el degradado ámbar de la Propuesta E (mismo radio de
           siempre, solo cambia relleno y sombra). */}
-      <div style={{ padding: "0 18px 32px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div ref={dockRef} style={{ padding: "0 18px 32px", display: "flex", flexDirection: "column", gap: 8 }}>
         {isService ? (
           <button className="act-cta" onClick={() => requireAuth(() => {
             if (p.seller_id) {

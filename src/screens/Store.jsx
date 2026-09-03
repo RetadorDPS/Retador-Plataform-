@@ -614,6 +614,9 @@ function Pedidos({ orders, C, ac }) {
 /* ── 3) PRODUCTOS (reutiliza formulario y funciones reales) ─────────────── */
 function ProdsSection({ products, C, ac, onNewProduct, onEditProduct, onArchiveProduct, onUnarchiveProduct, onDeleteProduct, onToggleFeatured, maxProducts }) {
   const [view, setView] = useState("activos");
+  // Tarjeta "abierta" de un producto eliminado del Catálogo Pro (is_available
+  // false) — un solo id a la vez, toggle al volver a tocar la misma.
+  const [removedOpen, setRemovedOpen] = useState(null);
   const activos = products.filter(p => !p.archived_at);
   const archivados = products.filter(p => p.archived_at);
   const shown = view === "activos" ? activos : archivados;
@@ -648,38 +651,58 @@ function ProdsSection({ products, C, ac, onNewProduct, onEditProduct, onArchiveP
       ) : (<>
         {shown.length === 0 && <div style={{ padding:"40px", textAlign:"center", color:C.m, fontSize:13 }}>{view==="activos" ? "Aún no has publicado nada." : "No tienes productos archivados."}</div>}
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-          {shown.map(prod => (
-            <div key={prod.id} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden", opacity:prod.archived_at?.6:1, position:"relative" }}>
-              {/* RETADOR quitó este producto del Catálogo Pro (proveedor ya no
-                  disponible) — nunca se borra solo, el vendedor decide qué
-                  hacer, pero se le avisa claro y sin la foto (ya no es real). */}
-              {prod.is_available === false ? (
-                <div style={{ height:110, display:"flex", alignItems:"center", justifyContent:"center", background:C.s3 }}>
-                  <Package size={30} color={C.m}/>
-                </div>
-              ) : (
-                <PImg p={prod} h={110} fz={36} C={C}/>
-              )}
-              <div style={{ padding:11 }}>
-                <div style={{ fontSize:12, fontWeight:500, marginBottom:2, color:C.t }}>{prod.title}</div>
-                {prod.is_available === false
-                  ? <div style={{ fontSize:10, color:C.err, fontWeight:700, marginBottom:8 }}>Producto eliminado — ya no disponible</div>
-                  : <div style={{ fontSize:10, color:C.m, marginBottom:8 }}>{prod.subcat || "Sin categoría"}</div>}
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                  <span style={{ fontSize:14, fontWeight:800, color:C.t }}>{money(prod.price, prod.currency)}</span>
-                  <div style={{ display:"flex", gap:5 }}>
-                    {prod.is_available === false ? null : !prod.archived_at ? (<>
-                      <button onClick={() => onEditProduct(prod)} style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Edit2 size={11} color={ac}/></button>
-                      <button onClick={() => onArchiveProduct(prod.id)} title="Archivar" style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Package size={11} color={C.m}/></button>
-                    </>) : (
-                      <button onClick={() => onUnarchiveProduct(prod.id)} title="Recuperar" style={{ width:26, height:26, borderRadius:6, background:`${ac}22`, border:`1px solid ${ac}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Upload size={11} color={ac}/></button>
-                    )}
-                    <button onClick={() => onDeleteProduct(prod.id)} style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Trash2 size={11} color={C.err}/></button>
+          {shown.map(prod => {
+            // RETADOR quitó este producto del Catálogo Pro (proveedor ya no
+            // disponible) — nunca se borra solo, el vendedor decide qué hacer.
+            // La foto real se conserva en la base (solo cambia is_available),
+            // así que se muestra atenuada — no una caja gris vacía — para que
+            // se note que algo pasó sin dejar un hueco feo. Tocar la tarjeta
+            // abre el aviso con la única acción real disponible: eliminarlo.
+            const removed = prod.is_available === false;
+            const open = removed && removedOpen === prod.id;
+            return (
+              <div key={prod.id}
+                onClick={removed ? () => setRemovedOpen(open ? null : prod.id) : undefined}
+                style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden", opacity:prod.archived_at?.6:1, position:"relative", cursor:removed?"pointer":"default" }}>
+                {open ? (
+                  <div style={{ minHeight:190, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", textAlign:"center", padding:"18px 14px", gap:10 }}>
+                    <Package size={26} color={C.m}/>
+                    <div style={{ fontSize:11.5, color:C.t, fontWeight:600, lineHeight:1.4 }}>Este producto ya no está disponible</div>
+                    <button onClick={e => { e.stopPropagation(); onDeleteProduct(prod.id); }}
+                      style={{ padding:"8px 20px", borderRadius:8, background:"transparent", border:`1px solid ${C.err}`, color:C.err, cursor:"pointer", fontSize:11.5, fontWeight:700 }}>
+                      Eliminar
+                    </button>
                   </div>
-                </div>
+                ) : (<>
+                  {removed ? (
+                    <div style={{ opacity:.32, filter:"grayscale(.4)" }}><PImg p={prod} h={110} fz={36} C={C}/></div>
+                  ) : (
+                    <PImg p={prod} h={110} fz={36} C={C}/>
+                  )}
+                  <div style={{ padding:11 }}>
+                    <div style={{ fontSize:12, fontWeight:500, marginBottom:2, color:C.t }}>{prod.title}</div>
+                    {removed
+                      ? <div style={{ fontSize:10, color:C.err, fontWeight:700, marginBottom:8 }}>Producto eliminado — ya no disponible</div>
+                      : <div style={{ fontSize:10, color:C.m, marginBottom:8 }}>{prod.subcat || "Sin categoría"}</div>}
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                      <span style={{ fontSize:14, fontWeight:800, color:C.t }}>{money(prod.price, prod.currency)}</span>
+                      {!removed && (
+                        <div style={{ display:"flex", gap:5 }}>
+                          {!prod.archived_at ? (<>
+                            <button onClick={() => onEditProduct(prod)} style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Edit2 size={11} color={ac}/></button>
+                            <button onClick={() => onArchiveProduct(prod.id)} title="Archivar" style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Package size={11} color={C.m}/></button>
+                          </>) : (
+                            <button onClick={() => onUnarchiveProduct(prod.id)} title="Recuperar" style={{ width:26, height:26, borderRadius:6, background:`${ac}22`, border:`1px solid ${ac}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Upload size={11} color={ac}/></button>
+                          )}
+                          <button onClick={() => onDeleteProduct(prod.id)} style={{ width:26, height:26, borderRadius:6, background:C.s3, border:`1px solid ${C.b}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}><Trash2 size={11} color={C.err}/></button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>)}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </>)}
     </div>

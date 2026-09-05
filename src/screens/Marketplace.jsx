@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -542,8 +542,14 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
         : (del.name && del.phone && del.prov && del.city && del.addr))
     : true;
 
-  const handle = async () => {
+  // paymentMethod: "coordinado" (siempre existió) o "tarjeta" (Payment
+  // Engine). El pedido se crea EXACTAMENTE igual en los dos casos — la única
+  // diferencia es lo que pasa DESPUÉS de creado: coordinado avisa y cierra el
+  // modal; tarjeta manda el order_id (nada más: ni precio ni moneda) a
+  // stripe-create-checkout y redirige a la página real de Stripe.
+  const handle = async (paymentMethod = "coordinado") => {
     setLoading(true);
+    let order;
     try {
       const modalidad = shipMode === "intl" ? "cargo" : "local"; // exterior(cargo) vs local; el dueño afina conectado/cargo después
       let delivery;
@@ -561,9 +567,9 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
       const shipTo = shipMode === "intl" ? "empresa de envíos" : shipMode === "local" ? "mensajero" : null;
       const common = {
         productId: product.id, shipMode, modalidad, shipPrice, shipTo, delivery,
-        paymentMethod: "coordinado",
+        paymentMethod,
       };
-      const order = isMulti
+      order = isMulti
         ? await createOrderMulti({
             ...common,
             title: product.title, image: variant?.image || product.img || product.image,
@@ -579,11 +585,34 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
             buyerId: user?.id, buyerName: user?.name, qty, unitPrice: unitPriceWithDisc, amount: total, currency: cur,
             variantId: variant?.id || null,
           });
-      flash("✅ Pedido creado — ya puedes coordinar con el vendedor");
-      onSuccess?.(order);
     } catch (e) {
       flash("❌ " + (e.message || "No se pudo crear el pedido"));
-    } finally { setLoading(false); }
+      setLoading(false);
+      return;
+    }
+
+    if (paymentMethod !== "tarjeta") {
+      flash("✅ Pedido creado — ya puedes coordinar con el vendedor");
+      onSuccess?.(order);
+      setLoading(false);
+      return;
+    }
+
+    // El pedido YA existe (arriba) — de aquí en más solo se manda su id.
+    // El precio, la moneda y el vendedor los reconstruye el backend leyendo
+    // el pedido real en la base; nada de eso viaja desde el frontend.
+    try {
+      const { checkout_url } = await createStripeCheckout(order.id);
+      if (!checkout_url) throw new Error("Stripe no devolvió una URL de pago");
+      window.location.href = checkout_url;
+      // Sin setLoading(false) a propósito: la página está a punto de navegar
+      // a Stripe — dejar el botón "cargando" evita un doble toque mientras
+      // se completa la redirección.
+    } catch (e) {
+      flash("⚠️ El pedido se creó, pero no se pudo abrir el cobro con tarjeta: " + (e.message || "intenta de nuevo desde tus pedidos"));
+      onSuccess?.(order);
+      setLoading(false);
+    }
   };
 
   const card = isDark ? "#0f0f0f" : S;
@@ -598,11 +627,18 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   // pasarse aunque la línea principal esté bien.
   const cartQtyValid = cartLines.every(l => l.stock == null || l.qty <= l.stock);
   const qtyValid = (availStock == null || qty <= availStock) && cartQtyValid;
+  // Mismas validaciones para los dos botones que pueden crear el pedido
+  // directo desde "resumen" (coordinado y tarjeta) — antes solo primaryAction
+  // las corría, y el botón de tarjeta nuevo las habría saltado por completo.
+  const canSubmit = () => {
+    if (availModes.length === 0) return false;
+    if (availStock != null && availStock <= 0) { flash("⚠️ Este producto está agotado"); return false; }
+    if (!cartQtyValid) { flash("⚠️ Alguna de las variantes agregadas no tiene stock suficiente"); return false; }
+    if (!qtyValid) { flash(`⚠️ Solo quedan ${availStock} disponibles`); return false; }
+    return true;
+  };
   const primaryAction = () => {
-    if (availModes.length === 0) return;
-    if (availStock != null && availStock <= 0) { flash("⚠️ Este producto está agotado"); return; }
-    if (!cartQtyValid) { flash("⚠️ Alguna de las variantes agregadas no tiene stock suficiente"); return; }
-    if (!qtyValid) { flash(`⚠️ Solo quedan ${availStock} disponibles`); return; }
+    if (!canSubmit()) return;
     // Para Catálogo Pro needData siempre es true (shipMode va forzado a
     // 'intl'), así que este botón solo avanza al paso de datos — nunca crea
     // el pedido directo — el gate real de "cotización lista" vive en el
@@ -810,9 +846,20 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
             <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>{needData ? "En el siguiente paso completas los datos de entrega; el resto ya viene precargado." : "Coordinarás el encuentro con el vendedor por el chat al crear el pedido."}</p>
           </div>
 
-          <button className="p" onClick={primaryAction} disabled={availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)) ? .5 : 1 }}>
-            {isCatalogPro && shipQuoteFailed ? "No se pudo calcular el envío — reintenta" : isCatalogPro && !shipQuoteReady ? "Calculando envío…" : needData ? "Continuar →" : `Crear pedido · ${money(buyerTotal, cur)}`}
+          <button className="p" onClick={primaryAction} disabled={loading || availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (loading || availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)) ? .5 : 1 }}>
+            {loading ? <Spin size={18} color="#000" /> : isCatalogPro && shipQuoteFailed ? "No se pudo calcular el envío — reintenta" : isCatalogPro && !shipQuoteReady ? "Calculando envío…" : needData ? "Continuar →" : `Crear pedido · ${money(buyerTotal, cur)}`}
           </button>
+          {/* Pago con tarjeta (Payment Engine) — junto al pago coordinado de
+              siempre, nunca lo reemplaza. Solo tiene sentido aquí cuando este
+              botón YA crea el pedido (needData=false, p.ej. "persona"): con
+              needData=true este botón solo navega a "Datos de entrega" —
+              el par real de botones vive más abajo, tras completar esos datos. */}
+          {!needData && (
+            <button className="p" onClick={() => { if (canSubmit()) handle("tarjeta"); }} disabled={loading || availModes.length === 0 || !qtyValid}
+              style={{ width: "100%", marginTop: 10, background: "none", color: G, border: `1.5px solid ${G}`, borderRadius: 50, padding: "13px", fontSize: 12.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (loading || availModes.length === 0 || !qtyValid) ? .5 : 1 }}>
+              {loading ? <Spin size={16} color={G} /> : <>💳 Pagar con tarjeta</>}
+            </button>
+          )}
         </> : <>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
             <button className="p" onClick={() => setStep("resumen")} style={{ background: "none", border: "none", display: "flex", padding: 0 }}><Ic n="back" c={T2} s={18} /></button>
@@ -892,8 +939,15 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
             )}
           </div>
 
-          <button className="p" onClick={handle} disabled={loading || !dataValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: dataValid ? G : (isDark ? "#1a1a1a" : "#ddd"), color: dataValid ? "#000" : T3, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          <button className="p" onClick={() => handle("coordinado")} disabled={loading || !dataValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: dataValid ? G : (isDark ? "#1a1a1a" : "#ddd"), color: dataValid ? "#000" : T3, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
             {loading ? <Spin size={18} color="#000" /> : (isCatalogPro && shipQuoteFailed) ? "No se pudo calcular el envío — reintenta" : (isCatalogPro && !shipQuoteReady) ? "Calculando envío…" : `Crear pedido · ${money(buyerTotal, cur)}`}
+          </button>
+          {/* Pago con tarjeta (Payment Engine) — junto al pago coordinado de
+              arriba, nunca en su lugar. Mismos datos de entrega, mismo pedido:
+              la única diferencia es qué pasa después de crearlo. */}
+          <button className="p" onClick={() => handle("tarjeta")} disabled={loading || !dataValid || (isCatalogPro && !shipQuoteReady)}
+            style={{ width: "100%", marginTop: 10, background: "none", color: G, border: `1.5px solid ${G}`, borderRadius: 50, padding: "13px", fontSize: 12.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (loading || !dataValid || (isCatalogPro && !shipQuoteReady)) ? .5 : 1 }}>
+            {loading ? <Spin size={16} color={G} /> : <>💳 Pagar con tarjeta</>}
           </button>
         </>}
       </div>

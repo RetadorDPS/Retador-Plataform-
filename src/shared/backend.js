@@ -1178,6 +1178,42 @@ export const createOrderMulti = async (data) => {
   const id = (orderId && typeof orderId === "object") ? (orderId.id ?? orderId[0]?.id) : orderId;
   return { ...data, id, status: "creada", createdAt: Date.now() };
 };
+
+// ── Payment Engine — cobro con tarjeta (Stripe) ─────────────────────────────
+// El frontend NUNCA manda precio, moneda ni vendedor: solo el order_id del
+// pedido que YA existe (creado arriba, exactamente igual que el pago
+// coordinado). stripe-create-checkout reconstruye todo lo demás leyendo el
+// pedido real en la base con el service role — si alguien manipulara el
+// precio desde aquí, no tendría ningún efecto: ese dato ni se lee.
+export const createStripeCheckout = async (orderId) => {
+  const { data, error } = await supabase.functions.invoke("stripe-create-checkout", { body: { order_id: orderId } });
+  if (error) {
+    // supabase-js NO expone el mensaje real de un 4xx/5xx en error.message
+    // (siempre dice "Edge Function returned a non-2xx status code") — hay
+    // que leerlo del cuerpo JSON que la función sí manda (error.context es
+    // la Response cruda). Sin esto, un error real de Stripe (p.ej. moneda no
+    // soportada) se vería como un mensaje genérico e inútil para el comprador.
+    let msg = error.message;
+    try { const body = await error.context.json(); if (body?.error) msg = body.error; } catch (e) {}
+    throw new Error(msg);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data; // { checkout_url, transaction_id, reutilizada }
+};
+
+// Estado REAL de pago de un pedido — se usa al volver de Stripe Checkout
+// para saber si el webhook ya puso el dinero en custodia. Nunca se asume
+// éxito por haber vuelto de la URL de éxito: eso solo abre esta pantalla,
+// que consulta el pedido de verdad y se queda mirando hasta que el webhook
+// (que puede tardar unos segundos) lo confirme.
+export const getOrderPaymentState = async (orderId) => {
+  const { data, error } = await supabase.from("orders")
+    .select("id, title, amount, currency, held_amount, payment_status, payment_method, status")
+    .eq("id", orderId).maybeSingle();
+  if (error) { console.error("getOrderPaymentState:", error.message); return null; }
+  return data;
+};
+
 // Cotización real de envío internacional de un producto/variante del
 // Catálogo Pro para la cantidad EXACTA que se va a pedir — el flete real
 // (CJ) NO escala lineal por unidad (confirmado con datos reales: 1u=$16.54,

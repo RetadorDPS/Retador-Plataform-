@@ -67,6 +67,7 @@ import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
 import { RetadorInicio, PantallaCargando } from "./screens/Inicio.jsx";
 import { StoreFront, StoreDashboard } from "./screens/Store.jsx";
 import OnboardingScreen from "./screens/Onboarding.jsx";
+import { PagoStripeScreen } from "./screens/PagoStripe.jsx";
 import InstallPrompt from "./pwa/InstallPrompt.jsx";
 import PushPrompt from "./pwa/PushPrompt.jsx";
 import { ensurePushSubscription } from "./pwa/push.js";
@@ -1185,6 +1186,23 @@ function AppShell({ sessionUser, platformStats = null }) {
     try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
     setTab("perfil"); setPScr("profile-full"); setAutoOpenPlans(true);
   }, [user?.id]);
+  // Retorno de Stripe Checkout: "?pago=exito|cancelado&pedido=<id>" — es la
+  // URL exacta que arma stripe-create-checkout (success_url/cancel_url).
+  // Mismo mecanismo de query param que los deep links de arriba: se lee UNA
+  // vez y se limpia la URL. Volver de aquí NO confirma el pago — solo abre
+  // la pantalla que consulta el pedido real y espera al webhook.
+  const [stripeReturn, setStripeReturn] = useState(null); // { orderId, resultado }
+  useEffect(() => {
+    if (!user?.id) return;
+    let pago = null, pedido = null;
+    try {
+      const q = new URLSearchParams(window.location.search);
+      pago = q.get("pago"); pedido = q.get("pedido");
+    } catch (e) {}
+    if (!pago || !pedido) return;
+    try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
+    setStripeReturn({ orderId: pedido, resultado: pago });
+  }, [user?.id]);
   // Equipo y permisos: miembros con secciones delegadas
   const [teamMembers, setTeamMembers] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_team') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('retador_team', JSON.stringify(teamMembers)); } catch {} }, [teamMembers]);
@@ -1995,6 +2013,17 @@ function AppShell({ sessionUser, platformStats = null }) {
       )}
 
       {/* Overlays */}
+      {/* Retorno de Stripe Checkout — por encima de cualquier otra cosa: es
+          una navegación externa que el comprador acaba de hacer, no debe
+          quedar tapada por un overlay que hubiera quedado abierto antes. */}
+      {stripeReturn && (
+        <PagoStripeScreen
+          orderId={stripeReturn.orderId}
+          resultado={stripeReturn.resultado}
+          onVerPedido={(oid) => { setStripeReturn(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }}
+          onIrAlInicio={() => { setStripeReturn(null); setTab("market"); setPScr("main"); }}
+        />
+      )}
       {showCats   && <CatModal onClose={() => setShowCats(false)} onSelect={cat => { setActiveCat(cat); setShowCats(false); }} active={activeCat} />}
       {/* z-index propio (5400) POR ENCIMA de "Mi Panel" (zIndex:800, capa a
           pantalla completa aparte) — antes PubSheet usaba su zIndex interno

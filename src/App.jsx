@@ -28,7 +28,7 @@ import {
   CURRENCIES, CURRENCY_CODES, DEFAULT_CURRENCY, money,
   createOrder, estimateDeliveryFee, getAvailableStock, writeProductRow, replaceProductVariants,
   readRatings, aggRating, systemRating, serviceRating, serviceReviews, ratingForName, systemReviews,
-  getUserOrders, updateOrderStatus, getUnreadCount, getProductById, getConversationById,
+  getUserOrders, updateOrderStatus, sweepExpiredCardOrders, getUnreadCount, getProductById, getConversationById,
   getPendingCourierApplications, reviewCourierApplication,
   getNotifications, markNotificationsRead, markNotificationsReadByKind, refreshSessionProfile, isSuspendedUser,
   getPlans, getStoreConfig, upsertMyStoreConfig, getProfileHeaderStats, getSellerRatingInfo, getSellerReviews,
@@ -1534,6 +1534,10 @@ function AppShell({ sessionUser, platformStats = null }) {
   // dos partes (comprador/vendedor/mensajero) vean SIEMPRE lo mismo, sin duplicar.
   const loadOrders = useCallback(async () => {
     if (!user?.id) return;
+    // Barrido oportunista (mismo patrón que sweepExpiredArchives): cancela
+    // los pedidos con tarjeta que llevan más de 30 min sin confirmarse antes
+    // de traer la lista, para que nunca se vean "atascados" en pantalla.
+    try { await sweepExpiredCardOrders(); } catch (e) {}
     try { const real = await getUserOrders(user.id); setOrders(real || []); } catch (e) {}
   }, [user?.id]);
   useEffect(() => { loadOrders(); }, [loadOrders]);

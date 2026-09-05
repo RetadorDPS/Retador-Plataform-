@@ -1200,6 +1200,15 @@ export const createStripeCheckout = async (orderId) => {
   if (data?.error) throw new Error(data.error);
   return data; // { checkout_url, transaction_id, reutilizada }
 };
+// Barrido oportunista de pedidos con tarjeta abandonados (30 min sin
+// confirmarse) — mismo patrón que sweepExpiredArchives: sin cron real en
+// este proyecto, se llama silenciosamente al entrar a Mis pedidos. Nunca
+// lanza. El pedido pasa a status='cancelado' y libera el stock que tenía
+// reservado (available_stock ya excluye los cancelados).
+export const sweepExpiredCardOrders = async () => {
+  try { const { data } = await supabase.rpc("sweep_expired_card_orders"); return data || 0; }
+  catch (e) { return 0; }
+};
 
 // Estado REAL de pago de un pedido — se usa al volver de Stripe Checkout
 // para saber si el webhook ya puso el dinero en custodia. Nunca se asume
@@ -1592,6 +1601,7 @@ export const getUserOrders = async (userId) => {
       deliveryCost: o.delivery_cost ?? o.ship_price ?? null,
       paymentMethod: o.payment_method ?? null,
       payMethod: o.payment_method ?? null,
+      paymentStatus: o.payment_status ?? null,
       heldAmount: o.held_amount ?? null,
       walletPaid: o.wallet_paid ?? null,
       // SIEMPRE el nombre real del perfil; el del formulario ya no lo suplanta.

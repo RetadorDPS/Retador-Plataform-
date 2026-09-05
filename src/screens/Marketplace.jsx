@@ -309,6 +309,16 @@ const PAYMENT_METHODS = [
   { key: "tarjeta", icon: "💳", label: "Pagar con tarjeta", desc: "Pago seguro y al instante con Stripe" },
 ];
 const PAYMENT_METHOD_STORAGE_KEY = "retador_ultimo_metodo_pago";
+// Ninguna llamada async del checkout debe dejar el botón "cargando" para
+// siempre: si el navegador se suspende de fondo (cambio de app, red caída) y
+// la promesa nunca resuelve, este límite la corta y cae al catch de siempre
+// — mismo problema y misma idea de "nunca spinner infinito" que se corrigió
+// en PagoStripeScreen, aplicado aquí a la creación del pedido y del cobro.
+const CHECKOUT_TIMEOUT_MS = 20000;
+const conTiempoLimite = (promesa, ms = CHECKOUT_TIMEOUT_MS) => Promise.race([
+  promesa,
+  new Promise((_, reject) => setTimeout(() => reject(new Error("Esto está tardando demasiado — inténtalo de nuevo")), ms)),
+]);
 
 export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
@@ -598,21 +608,21 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
         paymentMethod,
       };
       order = isMulti
-        ? await createOrderMulti({
+        ? await conTiempoLimite(createOrderMulti({
             ...common,
             title: product.title, image: variant?.image || product.img || product.image,
             lines: [
               { variantId: variant?.id || null, qty },
               ...cartLines.map(l => ({ variantId: l.variantId, qty: l.qty })),
             ],
-          })
-        : await createOrder({
+          }))
+        : await conTiempoLimite(createOrder({
             ...common,
             title: product.title, image: variant?.image || product.img || product.image, cat: product.cat,
             sellerId: product.seller_id, sellerName: product.seller_name,
             buyerId: user?.id, buyerName: user?.name, qty, unitPrice: unitPriceWithDisc, amount: total, currency: cur,
             variantId: variant?.id || null,
-          });
+          }));
     } catch (e) {
       flash("❌ " + (e.message || "No se pudo crear el pedido"));
       setLoading(false);
@@ -630,7 +640,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     // El precio, la moneda y el vendedor los reconstruye el backend leyendo
     // el pedido real en la base; nada de eso viaja desde el frontend.
     try {
-      const { checkout_url } = await createStripeCheckout(order.id);
+      const { checkout_url } = await conTiempoLimite(createStripeCheckout(order.id));
       if (!checkout_url) throw new Error("Stripe no devolvió una URL de pago");
       // Si el comprador sale de Stripe con el botón "atrás" (en vez de cancelar
       // o pagar de verdad), esta pestaña vuelve a mostrarse sin haber pasado por

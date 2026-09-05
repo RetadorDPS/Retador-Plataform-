@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, submitOrderReview, useAt, useR, PullIndicator, usePullToRefresh } from "../shared/index.js";
+import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, submitOrderReview, useAt, useR, PullIndicator, usePullToRefresh, createStripeCheckout } from "../shared/index.js";
+
+// Un pedido con tarjeta que TODAVÍA no confirma pago (ni por payment_status ni
+// por held_amount) — ya sea recién creado o abandonado en Stripe Checkout.
+// "cancelado" = sweep_expired_card_orders ya lo cerró por expirar (30 min).
+const isCardPending = (o) => o.paymentMethod === "tarjeta" && o.paymentStatus !== "confirmado" && !o.heldAmount && o.status !== "cancelado";
+const isCardExpired = (o) => o.paymentMethod === "tarjeta" && o.paymentStatus === "rechazado" && o.status === "cancelado";
 
 export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewProfile, flash, onSellerConfirm, onBuyerConfirm, onSellerPayment, onApproveFee }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
@@ -8,7 +14,22 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   const [rateMsg, setRateMsg] = useState({ sys: "", courier: "", seller: "" });
   const [rating, setRating] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  const [retryingCard, setRetryingCard] = useState(false);
   if (!o) return null;
+  // Reabre el cobro con tarjeta para ESTE mismo pedido (nunca crea uno nuevo)
+  // — mismo mecanismo que el botón "Reintentar el pago" de PagoStripeScreen.
+  const retryCardPayment = async () => {
+    setRetryingCard(true);
+    try {
+      const { checkout_url } = await createStripeCheckout(o.id);
+      if (!checkout_url) throw new Error("Stripe no devolvió una URL de pago");
+      try { sessionStorage.setItem("retador_pago_pendiente", JSON.stringify({ orderId: o.id })); } catch (e) {}
+      window.location.href = checkout_url;
+    } catch (e) {
+      setRetryingCard(false);
+      flash && flash("⚠️ No se pudo reabrir el cobro: " + (e.message || "intenta de nuevo"));
+    }
+  };
   const sl = SHIP_LABELS[o.shipType || o.shipMode] || SHIP_LABELS.local;
   const md = MODALIDAD_LABELS[o.modalidad] || MODALIDAD_LABELS.local;
   const flow = o.flow || [];
@@ -282,7 +303,17 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
           // SIEMPRE por ship_mode: persona/intl jamás hablan de mensajero.
           const mode = (o.shipType || o.shipMode) === "persona" ? "persona" : ((o.shipType || o.shipMode) === "intl" ? "intl" : "local");
           let nudge = null, actions = [];
-          if (mode === "local" && o.feeApproval === "pending") {
+          // El pago con tarjeta manda sobre cualquier otra coreografía: si
+          // todavía no se confirma (o expiró sin confirmarse), nada de la
+          // coordinación de entrega tiene sentido todavía.
+          if (isCardExpired(o)) {
+            nudge = "❌ No se completó el pago a tiempo y el pedido se canceló automáticamente. Puedes crear uno nuevo cuando quieras.";
+          } else if (isCardPending(o)) {
+            nudge = viewerIsBuyer
+              ? "💳 Todavía no se confirma tu pago con tarjeta. Si saliste de Stripe antes de terminar, puedes reintentarlo."
+              : "Esperando que el comprador complete el pago con tarjeta.";
+            if (viewerIsBuyer) actions.push(btn(retryingCard ? "Abriendo el pago…" : "Reintentar el pago", retryCardPayment));
+          } else if (mode === "local" && o.feeApproval === "pending") {
             // El COMPRADOR ve la propuesta y decide; el vendedor solo se entera.
             const prop = Math.round(o.proposedFee || 0), orig = Math.round(o.deliveryCost || o.baseFee || o.shipPrice || 0);
             if (!isSeller) {
@@ -412,6 +443,23 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
   const listRef = useRef(null);
   const ptr = usePullToRefresh(listRef, onRefresh, { disabled: !onRefresh });
 
+  // Reintentar el pago con tarjeta de un pedido puntual de la lista — mismo
+  // mecanismo que en PagoStripeScreen/OrderDetailScreen: reabre el cobro para
+  // ESE order_id, nunca crea uno nuevo.
+  const [retryingId, setRetryingId] = useState(null);
+  const retryCardPaymentFromList = async (o, e) => {
+    e?.stopPropagation?.();
+    setRetryingId(o.id);
+    try {
+      const { checkout_url } = await createStripeCheckout(o.id);
+      if (!checkout_url) throw new Error("Stripe no devolvió una URL de pago");
+      try { sessionStorage.setItem("retador_pago_pendiente", JSON.stringify({ orderId: o.id })); } catch (err) {}
+      window.location.href = checkout_url;
+    } catch (err) {
+      setRetryingId(null);
+      flash && flash("⚠️ No se pudo reabrir el cobro: " + (err.message || "intenta de nuevo"));
+    }
+  };
   // Rol de cada pedido según quién soy (por id de comprador/vendedor).
   const roleOf = (o) => o.role || (((o.buyerId ?? o.buyer_id) === user?.id) ? "compra" : "venta");
   const compras = orders.filter(o => roleOf(o) === "compra");
@@ -430,8 +478,14 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
   // esta columna) — así que la insignia de la lista se quedaba siempre en
   // "Solicitud creada" aunque el detalle ya mostrara varios pasos hechos.
   // Con estado real de Catálogo Pro, esa etiqueta manda siempre.
-  const stepLabel = (o) => o.catalogProStatusLabel || (o.feeApproval === "pending" ? "Confirma la tarifa" : ((o.flow && o.flow[o.stepIdx]) ? o.flow[o.stepIdx].label : (statusLabels[o.status] || o.status)));
+  // El pago con tarjeta manda sobre cualquier otra etiqueta — nunca debe
+  // verse "Creado" (ni el estado de Catálogo Pro) si en realidad todavía no
+  // se confirmó el cobro, o si expiró sin pagarse.
+  const stepLabel = (o) => isCardExpired(o) ? "Pago no completado" : isCardPending(o) ? "Pago pendiente"
+    : o.catalogProStatusLabel || (o.feeApproval === "pending" ? "Confirma la tarifa" : ((o.flow && o.flow[o.stepIdx]) ? o.flow[o.stepIdx].label : (statusLabels[o.status] || o.status)));
   const stepColor = (o) => {
+    if (isCardExpired(o)) return "#F87171";
+    if (isCardPending(o)) return "#F59E0B";
     if (o.catalogProStatusLabel) {
       const maxOrder = Math.max(1, ...(o.catalogProSteps || []).map(s => s.sortOrder));
       const cur = o.catalogProSortOrder ?? 1;
@@ -476,6 +530,13 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
           <p style={{ fontSize: 10, color: T3 }}>{new Date(o.createdAt || o.created_at || Date.now()).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}</p>
           {onOpen && <span style={{ fontSize: 10, fontWeight: 700, color: G }}>Ver seguimiento ›</span>}
         </div>
+        {/* Reintentar el pago con tarjeta directo desde la lista — sin tener
+            que entrar al seguimiento. Solo tiene sentido para quien compró. */}
+        {roleOf(o) === "compra" && isCardPending(o) && (
+          <button onClick={e => retryCardPaymentFromList(o, e)} disabled={retryingId === o.id} style={{ width: "100%", marginTop: 10, background: G, color: "#000", border: "none", borderRadius: 50, padding: "10px", fontSize: 11.5, fontWeight: 800, cursor: "pointer", opacity: retryingId === o.id ? .6 : 1 }}>
+            {retryingId === o.id ? "Abriendo el pago…" : "Reintentar el pago"}
+          </button>
+        )}
       </div>
     );
   };

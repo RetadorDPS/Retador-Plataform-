@@ -300,6 +300,16 @@ function getSavedInstructions() {
   return "";
 }
 
+// Métodos de pago del pedido — el comprador SIEMPRE elige uno antes de que el
+// pedido pueda crearse (ver PAYMENT_METHOD_STORAGE_KEY más abajo): nunca debe
+// existir un pedido sin método de pago asociado. Lista abierta a futuro
+// (nuevos métodos solo se agregan aquí).
+const PAYMENT_METHODS = [
+  { key: "coordinado", icon: "🤝", label: "Coordinar con el vendedor", desc: "Pagas al coordinar la entrega, sin tarjeta" },
+  { key: "tarjeta", icon: "💳", label: "Pagar con tarjeta", desc: "Pago seguro y al instante con Stripe" },
+];
+const PAYMENT_METHOD_STORAGE_KEY = "retador_ultimo_metodo_pago";
+
 export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
   const platformCfg = usePlatformCfg(); // tarifa local desde la config GLOBAL del backend
@@ -311,6 +321,21 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   const [qty, setQty] = useState(initialQty || 1);
   const [step, setStep] = useState("resumen");
   const [howItWorks, setHowItWorks] = useState(false); // "¿Cómo funciona tu compra?" — guía breve para quien compra por primera vez
+  // Método de pago del pedido — arranca en null (nada elegido) salvo que el
+  // comprador ya haya elegido uno antes en este mismo navegador, en cuyo caso
+  // se precarga (pero SIGUE pudiendo cambiarlo). Mientras sea null, el botón
+  // de crear el pedido queda deshabilitado: nunca se crea un pedido sin
+  // método de pago asociado, sea coordinado o tarjeta.
+  const [paymentMethod, setPaymentMethod] = useState(() => {
+    try {
+      const v = localStorage.getItem(PAYMENT_METHOD_STORAGE_KEY);
+      return PAYMENT_METHODS.some(m => m.key === v) ? v : null;
+    } catch { return null; }
+  });
+  const choosePaymentMethod = (key) => {
+    setPaymentMethod(key);
+    try { localStorage.setItem(PAYMENT_METHOD_STORAGE_KEY, key); } catch {}
+  };
   const cur = product.currency || DEFAULT_CURRENCY;
   // Variante elegida en la ficha del producto (ProductDetail), si tiene —
   // manda SU precio (nunca el base) y SU stock, no el del producto entero.
@@ -542,12 +567,15 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
         : (del.name && del.phone && del.prov && del.city && del.addr))
     : true;
 
-  // paymentMethod: "coordinado" (siempre existió) o "tarjeta" (Payment
-  // Engine). El pedido se crea EXACTAMENTE igual en los dos casos — la única
-  // diferencia es lo que pasa DESPUÉS de creado: coordinado avisa y cierra el
-  // modal; tarjeta manda el order_id (nada más: ni precio ni moneda) a
-  // stripe-create-checkout y redirige a la página real de Stripe.
-  const handle = async (paymentMethod = "coordinado") => {
+  // El pedido se crea con el método de pago YA elegido (paymentMethod, del
+  // estado) desde el principio — nunca se crea "sin método" para decidir
+  // después. El botón que llama a esto está deshabilitado mientras
+  // paymentMethod sea null (ver render), pero se repite la comprobación acá
+  // como red de seguridad real, no decorativa.
+  // "coordinado" avisa y cierra el modal; "tarjeta" manda el order_id (nada
+  // más: ni precio ni moneda) a stripe-create-checkout y redirige a Stripe.
+  const handle = async () => {
+    if (!paymentMethod) return;
     setLoading(true);
     let order;
     try {
@@ -604,6 +632,12 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     try {
       const { checkout_url } = await createStripeCheckout(order.id);
       if (!checkout_url) throw new Error("Stripe no devolvió una URL de pago");
+      // Si el comprador sale de Stripe con el botón "atrás" (en vez de cancelar
+      // o pagar de verdad), esta pestaña vuelve a mostrarse sin haber pasado por
+      // success_url/cancel_url. Dejamos esta marca para que App.jsx la detecte al
+      // volver a ver la app y abra la pantalla de espera real en vez de quedarse
+      // con el botón "cargando" para siempre.
+      try { sessionStorage.setItem("retador_pago_pendiente", JSON.stringify({ orderId: order.id })); } catch (e) {}
       window.location.href = checkout_url;
       // Sin setLoading(false) a propósito: la página está a punto de navegar
       // a Stripe — dejar el botón "cargando" evita un doble toque mientras
@@ -641,12 +675,46 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     if (!canSubmit()) return;
     // Para Catálogo Pro needData siempre es true (shipMode va forzado a
     // 'intl'), así que este botón solo avanza al paso de datos — nunca crea
-    // el pedido directo — el gate real de "cotización lista" vive en el
-    // botón final de ese paso (ahí sí importa, porque en modo 'mundial' la
-    // cotización recién puede pedirse una vez elegido el país, que se elige
-    // EN ese paso siguiente).
-    if (needData) setStep("datos"); else handle();
+    // el pedido directo — el gate real de "cotización lista" (y de método de
+    // pago elegido) vive en el botón final de ese paso (ahí sí importa,
+    // porque en modo 'mundial' la cotización recién puede pedirse una vez
+    // elegido el país, que se elige EN ese paso siguiente).
+    if (needData) { setStep("datos"); return; }
+    if (!paymentMethod) return;
+    handle();
   };
+  // Texto del botón que crea el pedido — igual en "resumen" (modo persona)
+  // y en "datos" (local/intl/Catálogo Pro): sin método elegido, invita a
+  // elegir uno y no deja avanzar; con método elegido, dice lo que va a pasar.
+  const crearPedidoLabel = !paymentMethod ? "Seleccionar método de pago"
+    : paymentMethod === "tarjeta" ? "💳 Pagar con tarjeta"
+    : `Crear pedido · ${money(buyerTotal, cur)}`;
+  // Selector de método de pago — mismo lenguaje visual que el selector de
+  // "¿Cómo quieres recibirlo?" (filas con icono, descripción y círculo de
+  // radio) para que se sienta parte del mismo formulario, no un agregado.
+  const metodoPagoSelector = (
+    <div style={{ marginBottom: 16 }}>
+      <p style={{ fontSize: 11, fontWeight: 700, color: T2, marginBottom: 8 }}>¿Cómo quieres pagar?</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {PAYMENT_METHODS.map(m => {
+          const on = paymentMethod === m.key;
+          return (
+            <button key={m.key} type="button" onClick={() => choosePaymentMethod(m.key)}
+              style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", background: on ? G + "14" : (isDark ? "#0d0d0d" : soft), border: `1.5px solid ${on ? G : B}`, borderRadius: 12, padding: "11px 13px", cursor: "pointer" }}>
+              <span style={{ fontSize: 18 }}>{m.icon}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 800, color: on ? G : T1 }}>{m.label}</div>
+                <div style={{ fontSize: 9, color: T2, marginTop: 1 }}>{m.desc}</div>
+              </div>
+              <div style={{ width: 16, height: 16, borderRadius: "50%", flexShrink: 0, border: `1.5px solid ${on ? G : B}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {on && <div style={{ width: 8, height: 8, borderRadius: "50%", background: G }} />}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   return (
     <div className="fi" style={{ position: "fixed", inset: 0, zIndex: 500 }} onClick={onClose}>
@@ -843,23 +911,24 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
           )}
 
           <div style={{ background: isDark ? "#0d0d0d" : soft, border: `1px solid ${B}`, borderRadius: 12, padding: "11px 13px", marginBottom: 16 }}>
-            <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>{needData ? "En el siguiente paso completas los datos de entrega; el resto ya viene precargado." : "Coordinarás el encuentro con el vendedor por el chat al crear el pedido."}</p>
+            <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5 }}>
+              {needData ? "En el siguiente paso completas los datos de entrega y eliges cómo pagar."
+                : paymentMethod === "tarjeta" ? "Pagarás con tarjeta ahora mismo, de forma segura."
+                : paymentMethod === "coordinado" ? "Coordinarás el encuentro con el vendedor por el chat al crear el pedido."
+                : "Elige cómo quieres pagar para continuar."}
+            </p>
           </div>
 
-          <button className="p" onClick={primaryAction} disabled={loading || availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (loading || availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady)) ? .5 : 1 }}>
-            {loading ? <Spin size={18} color="#000" /> : isCatalogPro && shipQuoteFailed ? "No se pudo calcular el envío — reintenta" : isCatalogPro && !shipQuoteReady ? "Calculando envío…" : needData ? "Continuar →" : `Crear pedido · ${money(buyerTotal, cur)}`}
+          {/* Selector de método de pago — solo tiene sentido aquí cuando este
+              botón YA va a crear el pedido (needData=false, p.ej. "persona").
+              Con needData=true el botón de abajo solo navega a "Datos de
+              entrega": el selector real vive en ese paso, justo antes de crear
+              el pedido de verdad. Nunca se crea un pedido sin este paso. */}
+          {!needData && metodoPagoSelector}
+
+          <button className="p" onClick={primaryAction} disabled={loading || availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady) || (!needData && !paymentMethod)} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (loading || availModes.length === 0 || !qtyValid || (isCatalogPro && !shipQuoteReady) || (!needData && !paymentMethod)) ? .5 : 1 }}>
+            {loading ? <Spin size={18} color="#000" /> : isCatalogPro && shipQuoteFailed ? "No se pudo calcular el envío — reintenta" : isCatalogPro && !shipQuoteReady ? "Calculando envío…" : needData ? "Continuar →" : crearPedidoLabel}
           </button>
-          {/* Pago con tarjeta (Payment Engine) — junto al pago coordinado de
-              siempre, nunca lo reemplaza. Solo tiene sentido aquí cuando este
-              botón YA crea el pedido (needData=false, p.ej. "persona"): con
-              needData=true este botón solo navega a "Datos de entrega" —
-              el par real de botones vive más abajo, tras completar esos datos. */}
-          {!needData && (
-            <button className="p" onClick={() => { if (canSubmit()) handle("tarjeta"); }} disabled={loading || availModes.length === 0 || !qtyValid}
-              style={{ width: "100%", marginTop: 10, background: "none", color: G, border: `1.5px solid ${G}`, borderRadius: 50, padding: "13px", fontSize: 12.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (loading || availModes.length === 0 || !qtyValid) ? .5 : 1 }}>
-              {loading ? <Spin size={16} color={G} /> : <>💳 Pagar con tarjeta</>}
-            </button>
-          )}
         </> : <>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
             <button className="p" onClick={() => setStep("resumen")} style={{ background: "none", border: "none", display: "flex", padding: 0 }}><Ic n="back" c={T2} s={18} /></button>
@@ -939,15 +1008,13 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
             )}
           </div>
 
-          <button className="p" onClick={() => handle("coordinado")} disabled={loading || !dataValid || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: dataValid ? G : (isDark ? "#1a1a1a" : "#ddd"), color: dataValid ? "#000" : T3, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            {loading ? <Spin size={18} color="#000" /> : (isCatalogPro && shipQuoteFailed) ? "No se pudo calcular el envío — reintenta" : (isCatalogPro && !shipQuoteReady) ? "Calculando envío…" : `Crear pedido · ${money(buyerTotal, cur)}`}
-          </button>
-          {/* Pago con tarjeta (Payment Engine) — junto al pago coordinado de
-              arriba, nunca en su lugar. Mismos datos de entrega, mismo pedido:
-              la única diferencia es qué pasa después de crearlo. */}
-          <button className="p" onClick={() => handle("tarjeta")} disabled={loading || !dataValid || (isCatalogPro && !shipQuoteReady)}
-            style={{ width: "100%", marginTop: 10, background: "none", color: G, border: `1.5px solid ${G}`, borderRadius: 50, padding: "13px", fontSize: 12.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (loading || !dataValid || (isCatalogPro && !shipQuoteReady)) ? .5 : 1 }}>
-            {loading ? <Spin size={16} color={G} /> : <>💳 Pagar con tarjeta</>}
+          {/* Selector de método de pago — este SÍ es siempre el paso final
+              que crea el pedido (local/intl/Catálogo Pro), así que aquí
+              SIEMPRE se elige antes de poder crearlo. */}
+          {metodoPagoSelector}
+
+          <button className="p" onClick={handle} disabled={loading || !dataValid || !paymentMethod || (isCatalogPro && !shipQuoteReady)} style={{ width: "100%", background: (dataValid && paymentMethod) ? G : (isDark ? "#1a1a1a" : "#ddd"), color: (dataValid && paymentMethod) ? "#000" : T3, border: "none", borderRadius: 50, padding: "15px", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            {loading ? <Spin size={18} color="#000" /> : (isCatalogPro && shipQuoteFailed) ? "No se pudo calcular el envío — reintenta" : (isCatalogPro && !shipQuoteReady) ? "Calculando envío…" : crearPedidoLabel}
           </button>
         </>}
       </div>

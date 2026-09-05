@@ -1199,9 +1199,31 @@ function AppShell({ sessionUser, platformStats = null }) {
       const q = new URLSearchParams(window.location.search);
       pago = q.get("pago"); pedido = q.get("pedido");
     } catch (e) {}
-    if (!pago || !pedido) return;
-    try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
-    setStripeReturn({ orderId: pedido, resultado: pago });
+    if (pago && pedido) {
+      try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
+      try { sessionStorage.removeItem("retador_pago_pendiente"); } catch (e) {}
+      setStripeReturn({ orderId: pedido, resultado: pago });
+      return;
+    }
+    // No volvimos por un redirect limpio de Stripe (success_url/cancel_url): puede
+    // que el comprador haya salido del cobro con el botón "atrás" del navegador,
+    // dejando un pedido con tarjeta creado pero sin confirmar. Lo detectamos al
+    // volver a ver esta pestaña — ya sea una carga normal o una restauración desde
+    // el caché de retroceso del navegador (bfcache) — y abrimos la misma pantalla
+    // de espera, pero sin un resultado explícito (ver PagoStripeScreen).
+    const revisarPagoPendiente = () => {
+      try {
+        const raw = sessionStorage.getItem("retador_pago_pendiente");
+        if (!raw) return;
+        sessionStorage.removeItem("retador_pago_pendiente");
+        const { orderId } = JSON.parse(raw);
+        if (orderId) setStripeReturn(prev => prev || { orderId, resultado: null });
+      } catch (e) {}
+    };
+    revisarPagoPendiente();
+    const onPageShow = (e) => { if (e.persisted) revisarPagoPendiente(); };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
   }, [user?.id]);
   // Equipo y permisos: miembros con secciones delegadas
   const [teamMembers, setTeamMembers] = useState(() => { try { return JSON.parse(localStorage.getItem('retador_team') || '[]'); } catch { return []; } });
@@ -2020,6 +2042,7 @@ function AppShell({ sessionUser, platformStats = null }) {
         <PagoStripeScreen
           orderId={stripeReturn.orderId}
           resultado={stripeReturn.resultado}
+          flash={flash}
           onVerPedido={(oid) => { setStripeReturn(null); setSelOrderId(oid); setTab("perfil"); setPScr("order-detail"); }}
           onIrAlInicio={() => { setStripeReturn(null); setTab("market"); setPScr("main"); }}
         />

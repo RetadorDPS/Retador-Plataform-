@@ -1209,6 +1209,20 @@ export const sweepExpiredCardOrders = async () => {
   try { const { data } = await supabase.rpc("sweep_expired_card_orders"); return data || 0; }
   catch (e) { return 0; }
 };
+// Mismo barrido oportunista, para pedidos COORDINADOS que el vendedor nunca
+// confirmó en 3 días — no dependen de payment_status (los coordinados no lo
+// usan), solo de llevar demasiado tiempo en 'creada'.
+export const sweepExpiredCoordinatedOrders = async () => {
+  try { const { data } = await supabase.rpc("sweep_expired_coordinated_orders"); return data || 0; }
+  catch (e) { return 0; }
+};
+// Cancelación inmediata de un pedido con tarjeta sin pago confirmado — el
+// comprador no tiene que esperar los 30 min del barrido automático. Libera
+// el stock reservado igual que el barrido (available_stock excluye 'cancelado').
+export const cancelCardOrder = async (orderId) => {
+  const { error } = await supabase.rpc("cancel_card_order", { p_order_id: orderId });
+  if (error) throw new Error(error.message);
+};
 
 // Estado REAL de pago de un pedido — se usa al volver de Stripe Checkout
 // para saber si el webhook ya puso el dinero en custodia. Nunca se asume

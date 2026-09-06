@@ -7,7 +7,7 @@ import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, submitOrderReview, useAt, 
 const isCardPending = (o) => o.paymentMethod === "tarjeta" && o.paymentStatus !== "confirmado" && !o.heldAmount && o.status !== "cancelado";
 const isCardExpired = (o) => o.paymentMethod === "tarjeta" && o.paymentStatus === "rechazado" && o.status === "cancelado";
 
-export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewProfile, flash, onSellerConfirm, onBuyerConfirm, onSellerPayment, onApproveFee }) {
+export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewProfile, flash, onSellerConfirm, onBuyerConfirm, onSellerPayment, onApproveFee, onCancelOrder }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
   const [rated, setRated] = useState(() => { try { return !!(JSON.parse(localStorage.getItem("retador_ratings") || "{}")[o?.id]); } catch (e) { return false; } });
   const [rate, setRate] = useState({ sys: 0, courier: 0, seller: 0 });
@@ -15,6 +15,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   const [rating, setRating] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [retryingCard, setRetryingCard] = useState(false);
+  const [cancelingCard, setCancelingCard] = useState(false);
   if (!o) return null;
   // Reabre el cobro con tarjeta para ESTE mismo pedido (nunca crea uno nuevo)
   // — mismo mecanismo que el botón "Reintentar el pago" de PagoStripeScreen.
@@ -29,6 +30,12 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
       setRetryingCard(false);
       flash && flash("⚠️ No se pudo reabrir el cobro: " + (e.message || "intenta de nuevo"));
     }
+  };
+  const cancelCardPayment = async () => {
+    if (cancelingCard) return;
+    setCancelingCard(true);
+    await onCancelOrder?.(o.id);
+    setCancelingCard(false);
   };
   const sl = SHIP_LABELS[o.shipType || o.shipMode] || SHIP_LABELS.local;
   const md = MODALIDAD_LABELS[o.modalidad] || MODALIDAD_LABELS.local;
@@ -312,7 +319,10 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
             nudge = viewerIsBuyer
               ? "💳 Todavía no se confirma tu pago con tarjeta. Si saliste de Stripe antes de terminar, puedes reintentarlo."
               : "Esperando que el comprador complete el pago con tarjeta.";
-            if (viewerIsBuyer) actions.push(btn(retryingCard ? "Abriendo el pago…" : "Reintentar el pago", retryCardPayment));
+            if (viewerIsBuyer) {
+              actions.push(btn(retryingCard ? "Abriendo el pago…" : "Reintentar el pago", retryCardPayment));
+              actions.push(btn(cancelingCard ? "Cancelando…" : "Cancelar pedido", cancelCardPayment, "danger"));
+            }
           } else if (mode === "local" && o.feeApproval === "pending") {
             // El COMPRADOR ve la propuesta y decide; el vendedor solo se entera.
             const prop = Math.round(o.proposedFee || 0), orig = Math.round(o.deliveryCost || o.baseFee || o.shipPrice || 0);
@@ -432,7 +442,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
 const ORDERS_ARCHIVE_MS = 30 * 24 * 60 * 60 * 1000; // 30 días
 const ORDERS_DONE_STATUSES = ["completado", "entregado", "delivered"];
 
-export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {}, onOpen, onRefresh = null }) {
+export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {}, onOpen, onRefresh = null, onCancelOrder }) {
   const { BG, S, B, CARD, T1, T2, T3, isDark } = useAt();
   const { cols, isMobile, isTablet, isDesktop } = useR();
   const [tab, setTab] = useState("compras");   // "compras" | "ventas"
@@ -460,10 +470,23 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
       flash && flash("⚠️ No se pudo reabrir el cobro: " + (err.message || "intenta de nuevo"));
     }
   };
+  // Cancelar pedido con tarjeta directo desde la lista.
+  const [cancelingId, setCancelingId] = useState(null);
+  const cancelFromList = async (o, e) => {
+    e?.stopPropagation?.();
+    if (cancelingId) return;
+    setCancelingId(o.id);
+    await onCancelOrder?.(o.id);
+    setCancelingId(null);
+  };
   // Rol de cada pedido según quién soy (por id de comprador/vendedor).
   const roleOf = (o) => o.role || (((o.buyerId ?? o.buyer_id) === user?.id) ? "compra" : "venta");
-  const compras = orders.filter(o => roleOf(o) === "compra");
-  const ventas  = orders.filter(o => roleOf(o) === "venta");
+  // Los cancelados (por expiración automática o cancelación manual) NO se
+  // mezclan con los activos — viven en su propia pestaña "Cancelados", nunca
+  // se borran de la base, solo se ocultan de la vista principal.
+  const compras = orders.filter(o => roleOf(o) === "compra" && o.status !== "cancelado");
+  const ventas  = orders.filter(o => roleOf(o) === "venta" && o.status !== "cancelado");
+  const cancelados = orders.filter(o => o.status === "cancelado");
   // "Sin ver" = pedidos que el usuario todavía no ha ABIERTO (por id). Entrar a
   // esta pantalla ya no marca nada como visto: el aviso sigue ahí, señalando
   // exactamente cuál es el pedido nuevo, hasta que se abra.
@@ -471,8 +494,8 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
   const comprasNew = compras.filter(isNew).length;
   const ventasNew  = ventas.filter(isNew).length;
 
-  const statusColors = { pendiente: "#FBBF24", pending: "#FBBF24", creada: "#FBBF24", confirmed: "#60A5FA", confirmado: "#60A5FA", shipped: "#A78BFA", delivered: "#22C55E", entregado: "#22C55E", cancelled: "#F87171", fallido: "#F87171" };
-  const statusLabels = { pendiente: "Pendiente", pending: "Pendiente", creada: "Creado", confirmed: "Confirmado", confirmado: "Confirmado", shipped: "En camino", delivered: "Entregado", entregado: "Entregado", cancelled: "Cancelado", fallido: "Fallido" };
+  const statusColors = { pendiente: "#FBBF24", pending: "#FBBF24", creada: "#FBBF24", confirmed: "#60A5FA", confirmado: "#60A5FA", shipped: "#A78BFA", delivered: "#22C55E", entregado: "#22C55E", cancelled: "#F87171", cancelado: "#F87171", fallido: "#F87171" };
+  const statusLabels = { pendiente: "Pendiente", pending: "Pendiente", creada: "Creado", confirmed: "Confirmado", confirmado: "Confirmado", shipped: "En camino", delivered: "Entregado", entregado: "Entregado", cancelled: "Cancelado", cancelado: "Cancelado", fallido: "Fallido" };
   // Bug real: para pedidos de Catálogo Pro, orders.status nunca avanza (el
   // estado real vive en catalog_pro_fulfillment / order_status_map, no en
   // esta columna) — así que la insignia de la lista se quedaba siempre en
@@ -530,12 +553,17 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
           <p style={{ fontSize: 10, color: T3 }}>{new Date(o.createdAt || o.created_at || Date.now()).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}</p>
           {onOpen && <span style={{ fontSize: 10, fontWeight: 700, color: G }}>Ver seguimiento ›</span>}
         </div>
-        {/* Reintentar el pago con tarjeta directo desde la lista — sin tener
+        {/* Reintentar el pago o cancelar directo desde la lista — sin tener
             que entrar al seguimiento. Solo tiene sentido para quien compró. */}
         {roleOf(o) === "compra" && isCardPending(o) && (
-          <button onClick={e => retryCardPaymentFromList(o, e)} disabled={retryingId === o.id} style={{ width: "100%", marginTop: 10, background: G, color: "#000", border: "none", borderRadius: 50, padding: "10px", fontSize: 11.5, fontWeight: 800, cursor: "pointer", opacity: retryingId === o.id ? .6 : 1 }}>
-            {retryingId === o.id ? "Abriendo el pago…" : "Reintentar el pago"}
-          </button>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button onClick={e => retryCardPaymentFromList(o, e)} disabled={retryingId === o.id || cancelingId === o.id} style={{ flex: 1, background: G, color: "#000", border: "none", borderRadius: 50, padding: "10px", fontSize: 11.5, fontWeight: 800, cursor: "pointer", opacity: (retryingId === o.id || cancelingId === o.id) ? .6 : 1 }}>
+              {retryingId === o.id ? "Abriendo el pago…" : "Reintentar el pago"}
+            </button>
+            <button onClick={e => cancelFromList(o, e)} disabled={retryingId === o.id || cancelingId === o.id} style={{ flex: 1, background: "none", color: "#ef4444", border: "1px solid #ef444455", borderRadius: 50, padding: "10px", fontSize: 11.5, fontWeight: 800, cursor: "pointer", opacity: (retryingId === o.id || cancelingId === o.id) ? .6 : 1 }}>
+              {cancelingId === o.id ? "Cancelando…" : "Cancelar pedido"}
+            </button>
+          </div>
         )}
       </div>
     );
@@ -555,10 +583,12 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
     );
   }, [G, T1, T2]);
 
-  const list = tab === "compras" ? compras : ventas;
+  const list = tab === "compras" ? compras : tab === "ventas" ? ventas : cancelados;
   const empty = tab === "compras"
     ? { icon: "🛍️", title: "Aún no has comprado nada.", sub: "Cuando compres, tus pedidos aparecerán aquí." }
-    : { icon: "🏷️", title: "Aún no te han comprado nada.", sub: "Publica productos para empezar a vender." };
+    : tab === "ventas"
+    ? { icon: "🏷️", title: "Aún no te han comprado nada.", sub: "Publica productos para empezar a vender." }
+    : { icon: "🗑️", title: "No tienes pedidos cancelados.", sub: "Los que se cancelen (a mano o automáticamente) aparecen aquí." };
 
   const isArchivable = (o) => {
     if (!ORDERS_DONE_STATUSES.includes(o.status)) return false;
@@ -579,6 +609,7 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
         <div style={{ display: "flex", padding: "0 10px" }}>
           <TabBtn id="compras" label="Compras" nuevos={comprasNew} tab={tab} setTab={setTab} />
           <TabBtn id="ventas"  label="Ventas"  nuevos={ventasNew} tab={tab} setTab={setTab} />
+          <TabBtn id="cancelados" label="Cancelados" nuevos={0} tab={tab} setTab={setTab} />
         </div>
       </div>
 

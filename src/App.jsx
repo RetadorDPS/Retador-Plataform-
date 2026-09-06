@@ -28,7 +28,7 @@ import {
   CURRENCIES, CURRENCY_CODES, DEFAULT_CURRENCY, money,
   createOrder, estimateDeliveryFee, getAvailableStock, writeProductRow, replaceProductVariants,
   readRatings, aggRating, systemRating, serviceRating, serviceReviews, ratingForName, systemReviews,
-  getUserOrders, updateOrderStatus, sweepExpiredCardOrders, getUnreadCount, getProductById, getConversationById,
+  getUserOrders, updateOrderStatus, sweepExpiredCardOrders, sweepExpiredCoordinatedOrders, cancelCardOrder, getUnreadCount, getProductById, getConversationById,
   getPendingCourierApplications, reviewCourierApplication,
   getNotifications, markNotificationsRead, markNotificationsReadByKind, refreshSessionProfile, isSuspendedUser,
   getPlans, getStoreConfig, upsertMyStoreConfig, getProfileHeaderStats, getSellerRatingInfo, getSellerReviews,
@@ -1535,11 +1535,26 @@ function AppShell({ sessionUser, platformStats = null }) {
   const loadOrders = useCallback(async () => {
     if (!user?.id) return;
     // Barrido oportunista (mismo patrón que sweepExpiredArchives): cancela
-    // los pedidos con tarjeta que llevan más de 30 min sin confirmarse antes
-    // de traer la lista, para que nunca se vean "atascados" en pantalla.
+    // los pedidos con tarjeta que llevan más de 30 min sin confirmarse y los
+    // coordinados que el vendedor nunca confirmó en 3 días, antes de traer
+    // la lista, para que nunca se vean "atascados" en pantalla.
     try { await sweepExpiredCardOrders(); } catch (e) {}
+    try { await sweepExpiredCoordinatedOrders(); } catch (e) {}
     try { const real = await getUserOrders(user.id); setOrders(real || []); } catch (e) {}
   }, [user?.id]);
+  // Cancelación inmediata de un pedido con tarjeta sin pago confirmado — el
+  // comprador no espera los 30 min del barrido automático. Misma RPC segura
+  // que ya valida en el backend que sea el comprador y que el pago no esté
+  // confirmado; acá solo se recarga para que lista y seguimiento vean lo mismo.
+  const cancelCardOrderAction = async (orderId) => {
+    try {
+      await cancelCardOrder(orderId);
+      await loadOrders();
+      flash("✅ Pedido cancelado");
+    } catch (e) {
+      flash("⚠️ No se pudo cancelar: " + (e.message || "intenta de nuevo"));
+    }
+  };
   useEffect(() => { loadOrders(); }, [loadOrders]);
   useEffect(() => { if (pScr === "orders" || pScr === "order-detail") loadOrders(); }, [pScr, loadOrders]);
 
@@ -2542,8 +2557,8 @@ function AppShell({ sessionUser, platformStats = null }) {
               blockedUsers={blockedUsers} onToggleBlock={toggleBlock}
               walletOn={sections.wallet !== false}
               onOpenWallet={() => setShowWallet(true)} orders={orders.filter(o => (o.buyerId ? o.buyerId === user?.id : true))} />}
-            {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} seenIds={seenOrderIds} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { markOrderSeen(o.id); setSelOrderId(o.id); setPScr("order-detail"); }} onRefresh={loadOrders} />}
-            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => openOrderChat(o)} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} seenIds={seenOrderIds} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { markOrderSeen(x.id); setSelOrderId(x.id); setPScr("order-detail"); }} />; })()}
+            {pScr === "orders"   && <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} seenIds={seenOrderIds} onBack={() => setPScr("main")} flash={flash} onOpen={(o) => { markOrderSeen(o.id); setSelOrderId(o.id); setPScr("order-detail"); }} onRefresh={loadOrders} onCancelOrder={cancelCardOrderAction} />}
+            {pScr === "order-detail" && (() => { const o = mergedOrders.find(x => x.id === selOrderId); const meName = profileData?.name || user?.name; return o ? <OrderDetailScreen order={o} user={user} me={meName} onBack={() => setPScr("orders")} onChat={() => openOrderChat(o)} onViewProfile={openPublicProfile} onSellerConfirm={() => sellerConfirmOrder(o.id)} onBuyerConfirm={() => buyerConfirmReceipt(o.id)} onSellerPayment={(ok) => sellerConfirmPayment(o.id, ok)} onApproveFee={(ok) => buyerApproveFee(o.id, ok)} onCancelOrder={cancelCardOrderAction} flash={flash} /> : <OrdersScreen user={user} me={profileData?.name || user?.name} orders={mergedOrders} seenIds={seenOrderIds} onBack={() => setPScr("main")} flash={flash} onOpen={(x) => { markOrderSeen(x.id); setSelOrderId(x.id); setPScr("order-detail"); }} onRefresh={loadOrders} onCancelOrder={cancelCardOrderAction} />; })()}
             {/* Panel lateral del Perfil (☰): todo el menú que antes estaba apilado */}
             <ProfileMenuDrawer open={profileMenuOpen} onClose={() => setProfileMenuOpen(false)} user={user} isOwner={hasPanel}
               onMessages={openMessages} onOrders={() => setPScr("orders")} onCart={() => setShowCart(true)} onWallet={() => setShowWallet(true)}

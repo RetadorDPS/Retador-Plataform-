@@ -232,11 +232,21 @@ export const mapProduct = (p) => {
     // Monedas en las que el vendedor acepta cobrar (USD/EUR/CUP) — NO es método
     // de pago (eso lo acuerdan comprador y vendedor entre ellos).
     acceptedCurrencies: Array.isArray(p.accepted_currencies) ? p.accepted_currencies : [],
+    // Formas de pago que el vendedor declaró aceptar en ESTE producto
+    // ('efectivo' y/o 'tarjeta'). Es distinto de la moneda: dice CÓMO cobra, no
+    // en qué moneda. El checkout cruza esto con la regla de venta interna en
+    // Cuba (ver metodosPagoDisponibles en Marketplace.jsx).
+    acceptedPaymentMethods: Array.isArray(p.accepted_payment_methods) && p.accepted_payment_methods.length
+      ? p.accepted_payment_methods
+      : ["efectivo"],
     // Vendedor embebido — `??` conserva seller_verified si ya venía literal en
     // el objeto (fila sin vendedor real que unir).
     seller_verified: seller ? !!seller.is_verified : (p.seller_verified ?? false),
     seller_name: p.seller_name || seller?.full_name || undefined,
     seller_avatar_url: seller?.avatar_url || p.seller_avatar_url || null,
+    // País de la tienda del vendedor — lo necesita el checkout para saber si la
+    // venta es interna en Cuba (allí se puede pagar en efectivo al coordinar).
+    seller_shop_country: seller?.shop_country || p.seller_shop_country || null,
     // "Destacado" del vendedor (gratis, lo activa él mismo en Mi Panel) — decide
     // si aparece en el carrusel de Destacados de Inicio de SU Tienda. Distinto de
     // `badge` (etiqueta de texto) y de `promoted` (promoción pagada/admin).
@@ -247,7 +257,7 @@ export const mapProduct = (p) => {
 // vendedor EN EL MISMO viaje (products.seller_id → profiles.id, FK real:
 // products_seller_id_fkey) — nunca una segunda consulta aparte para saber si
 // el vendedor está verificado.
-const PRODUCT_SELECT = "*, seller:profiles!seller_id(is_verified, full_name, avatar_url)";
+const PRODUCT_SELECT = "*, seller:profiles!seller_id(is_verified, full_name, avatar_url, shop_country)";
 // SELECT liviano SOLO para el feed público (loadProducts/loadServices): trae
 // nada más las columnas que la tarjeta de lista, la búsqueda y los filtros/
 // orden realmente leen (confirmado revisando cada uso real en Marketplace.jsx
@@ -256,7 +266,7 @@ const PRODUCT_SELECT = "*, seller:profiles!seller_id(is_verified, full_name, ava
 // El detalle (ProductDetail) ya no depende de que el feed traiga todo: al
 // abrirse pide el producto completo aparte con getProductById (ver ahí). Si
 // se necesita otro campo nuevo en una tarjeta/filtro, agregarlo aquí también.
-const FEED_SELECT = "id, seller_id, title, description, images, cat, subcat, price, orig_price, currency, origin, stock, sold_count, rating, reviews_count, province, location, badge, kind, promoted, created_at, store_featured, seller:profiles!seller_id(is_verified, full_name, avatar_url)";
+const FEED_SELECT = "id, seller_id, title, description, images, cat, subcat, price, orig_price, currency, origin, stock, sold_count, rating, reviews_count, province, location, badge, kind, promoted, created_at, store_featured, ship_modes, accepted_payment_methods, seller:profiles!seller_id(is_verified, full_name, avatar_url, shop_country)";
 // Un solo producto por id (para leer la dirección de recogida en el detalle del
 // mensajero cuando el producto no está cargado en memoria).
 export const getProductById = async (id) => {

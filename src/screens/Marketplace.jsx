@@ -309,6 +309,65 @@ const PAYMENT_METHODS = [
   { key: "tarjeta", icon: "💳", label: "Pagar con tarjeta", desc: "Pago seguro y al instante con Stripe" },
 ];
 const PAYMENT_METHOD_STORAGE_KEY = "retador_ultimo_metodo_pago";
+// Última selección de "Cómo aceptas el pago" del vendedor, para precargarla en
+// la siguiente publicación (igual que la provincia y los datos de recogida).
+export const SELLER_PAYMENT_STORAGE_KEY = "retador_ultimos_metodos_cobro";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REGLA DE NEGOCIO — qué formas de pago admite de verdad un producto.
+//
+// Venta interna en Cuba = vendedor con tienda en Cuba, entrega local o en
+// persona (un servicio se presta siempre en persona), y destino Cuba. Solo ahí
+// tiene sentido el efectivo al coordinar la entrega. En cualquier otro caso
+// (envío internacional, catálogo, vendedor fuera de Cuba, o entrega local pero
+// destino fuera de Cuba) la tarjeta es obligatoria, sin importar en qué moneda
+// esté publicado el producto.
+//
+// Es la misma regla que aplica la base (es_venta_interna_cuba /
+// metodos_pago_producto): aquí solo se refleja para la interfaz.
+// ═══════════════════════════════════════════════════════════════════════════
+export const esPaisCuba = (pais) => ["cuba", "cu"].includes(String(pais || "").trim().toLowerCase());
+
+export function esVentaInternaCuba({ paisVendedor, shipModes, kind, paisDestino }) {
+  if (!esPaisCuba(paisVendedor)) return false;
+  const sm = shipModes || {};
+  const entregaEnMano = kind === "service" || !!sm.local || !!sm.persona;
+  if (!entregaEnMano) return false;
+  // Sin país de destino se entiende Cuba: las entregas locales / en persona
+  // ocurren donde está el vendedor y por eso nunca mandan país.
+  return paisDestino == null || paisDestino === "" || esPaisCuba(paisDestino);
+}
+
+// Formas de cobro que el VENDEDOR puede marcar en su producto. La tarjeta es
+// obligatoria (no se puede desmarcar) en cuanto la venta deja de ser interna.
+export function metodosCobroVendedor({ paisVendedor, shipModes, kind }) {
+  const interna = esVentaInternaCuba({ paisVendedor, shipModes, kind });
+  return {
+    interna,
+    efectivoDisponible: interna,   // fuera de la venta interna no hay efectivo posible
+    tarjetaObligatoria: !interna,  // la app cobra por Stripe sí o sí
+  };
+}
+
+// Lo que ve el COMPRADOR en el checkout: intersección entre lo que el vendedor
+// aceptó y lo que la regla permite. Devuelve las opciones de PAYMENT_METHODS.
+export function metodosPagoDisponibles(product, paisDestino) {
+  const interna = esVentaInternaCuba({
+    paisVendedor: product?.seller_shop_country ?? product?.seller?.shop_country,
+    shipModes: product?.shipModes || product?.ship_modes,
+    kind: product?.kind,
+    paisDestino,
+  });
+  const aceptados = Array.isArray(product?.acceptedPaymentMethods) && product.acceptedPaymentMethods.length
+    ? product.acceptedPaymentMethods
+    : ["efectivo"];
+  const claves = [];
+  if (interna && aceptados.includes("efectivo")) claves.push("coordinado");
+  if (aceptados.includes("tarjeta") || !interna) claves.push("tarjeta");
+  // Red de seguridad: un producto nunca se queda sin ninguna forma de pago.
+  if (!claves.length) claves.push("tarjeta");
+  return PAYMENT_METHODS.filter(m => claves.includes(m.key));
+}
 // Ninguna llamada async del checkout debe dejar el botón "cargando" para
 // siempre: si el navegador se suspende de fondo (cambio de app, red caída) y
 // la promesa nunca resuelve, este límite la corta y cae al catch de siempre
@@ -557,6 +616,25 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   const availModes = ["local", "intl", "persona"].filter(k => sm[k]);
   const [shipMode, setShipMode] = useState(availModes[0] || "local");
 
+  // Formas de pago REALES de este producto: intersección entre lo que el
+  // vendedor declaró aceptar y lo que permite la regla de venta interna en
+  // Cuba (misma regla que aplica la base al crear el pedido). Ya no es una
+  // lista fija: fuera de la venta interna solo queda la tarjeta.
+  const metodosPago = useMemo(
+    () => metodosPagoDisponibles(product, isCatalogPro ? destCountry : null),
+    [product, isCatalogPro, destCountry]
+  );
+  // El método recordado del navegador no sirve si este producto no lo admite;
+  // y cuando solo hay una forma posible se deja marcada de entrada (el pedido
+  // se sigue creando únicamente al pulsar el botón principal).
+  useEffect(() => {
+    if (paymentMethod && !metodosPago.some(m => m.key === paymentMethod)) {
+      setPaymentMethod(metodosPago.length === 1 ? metodosPago[0].key : null);
+      return;
+    }
+    if (!paymentMethod && metodosPago.length === 1) setPaymentMethod(metodosPago[0].key);
+  }, [metodosPago, paymentMethod]);
+
   // Datos de entrega — vienen precargados con lo que ya sabemos; el usuario completa el resto.
   const savedAddrs = getSavedAddresses();
   const mainAddr = savedAddrs.find(a => a.main) || savedAddrs[0];
@@ -705,8 +783,13 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   const metodoPagoSelector = (
     <div style={{ marginBottom: 16 }}>
       <p style={{ fontSize: 11, fontWeight: 700, color: T2, marginBottom: 8 }}>¿Cómo quieres pagar?</p>
+      {metodosPago.length === 1 && metodosPago[0].key === "tarjeta" && (
+        <p style={{ fontSize: 9.5, color: T2, marginTop: -4, marginBottom: 8, lineHeight: 1.5 }}>
+          Este pedido se paga con tarjeta: el vendedor no acepta efectivo para esta entrega.
+        </p>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {PAYMENT_METHODS.map(m => {
+        {metodosPago.map(m => {
           const on = paymentMethod === m.key;
           return (
             <button key={m.key} type="button" onClick={() => choosePaymentMethod(m.key)}
@@ -2270,6 +2353,40 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
   const [acceptedCurrencies, setAcceptedCurrencies] = useState(() => Array.isArray(product.acceptedCurrencies) ? product.acceptedCurrencies : []);
   const toggleCurrency = (c) => setAcceptedCurrencies(a => a.includes(c) ? a.filter(x => x !== c) : [...a, c]);
 
+  // ── Cómo aceptas el pago (misma sección que al publicar) ───────────────────
+  // 'efectivo' solo existe en la venta interna en Cuba (vendedor cubano +
+  // entrega local o en persona). Fuera de ahí la tarjeta es obligatoria y no
+  // se puede desmarcar; añadirla, en cambio, siempre se puede.
+  const [acceptedPaymentMethods, setAcceptedPaymentMethods] = useState(() => {
+    const v = product.acceptedPaymentMethods || product.accepted_payment_methods;
+    const limpios = Array.isArray(v) ? v.filter(m => m === "efectivo" || m === "tarjeta") : [];
+    return limpios.length ? limpios : ["efectivo"];
+  });
+  const reglaCobro = metodosCobroVendedor({
+    paisVendedor: product.seller_shop_country || product.seller?.shop_country || "cuba",
+    shipModes,
+    kind: product.kind,
+  });
+  const toggleCobro = (metodo) => {
+    const marcado = acceptedPaymentMethods.includes(metodo);
+    if (marcado && metodo === "tarjeta" && reglaCobro.tarjetaObligatoria) {
+      flash && flash("💳 Con envío internacional el cobro es siempre con tarjeta");
+      return;
+    }
+    if (marcado && acceptedPaymentMethods.length <= 1) {
+      flash && flash("⚠️ Marca al menos una forma de cobro");
+      return;
+    }
+    setAcceptedPaymentMethods(a => marcado ? a.filter(m => m !== metodo) : [...a, metodo]);
+  };
+  // Si el vendedor cambia la entrega y la venta deja de ser interna, la tarjeta
+  // vuelve sola: nunca puede quedar un producto internacional sin ella.
+  useEffect(() => {
+    if (reglaCobro.tarjetaObligatoria && !acceptedPaymentMethods.includes("tarjeta")) {
+      setAcceptedPaymentMethods(a => [...a, "tarjeta"]);
+    }
+  }, [reglaCobro.tarjetaObligatoria, acceptedPaymentMethods]);
+
   // VARIANTES (color/talla/etc.) — opcional, cualquier vendedor las puede
   // crear en cualquier producto propio. Al crear desde el Catálogo Pro
   // (Mejora B) ya vienen precargadas en product.variants; al editar un
@@ -2335,6 +2452,7 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
         currency, stock: Number(stock) || 0,
         bulkDiscounts: tiers.filter(t => t.min && t.pct).map(t => ({ min: Number(t.min), pct: Number(t.pct) })),
         acceptedCurrencies,
+        acceptedPaymentMethods,
         variants: variantRows.map(r => ({
           sku: r.sku, attributes: r.attributes,
           price: (r.price === "" || r.price == null) ? null : Number(r.price),
@@ -2554,6 +2672,37 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
             <input type="number" value={shipPrice} onChange={e => setShipPrice(e.target.value)} placeholder="Precio del envío" style={inp} />
           </div>
         )}
+
+        {/* CÓMO ACEPTAS EL PAGO — independiente de la entrega, aunque la regla
+            del negocio dependa de ella (ver metodosCobroVendedor). */}
+        <label style={{ ...lbl, marginTop: 14 }}>💳 Cómo aceptas el pago</label>
+        <p style={{ fontSize: 10, color: T3, marginTop: -2, marginBottom: 8, lineHeight: 1.5 }}>
+          {reglaCobro.tarjetaObligatoria
+            ? "Con envío internacional el cobro va siempre por tarjeta a través de la app."
+            : "El comprador elegirá entre lo que actives aquí."}
+        </p>
+        {[
+          { k: "efectivo", ic: "🤝", t: "Efectivo al coordinar", d: "El comprador te paga en mano al entregar" },
+          { k: "tarjeta",  ic: "💳", t: "Tarjeta por la app",     d: "Pago seguro al instante; el dinero va a tu saldo" },
+        ].map(m => {
+          const on = acceptedPaymentMethods.includes(m.k);
+          const fijo = m.k === "tarjeta" && reglaCobro.tarjetaObligatoria;
+          const noDisponible = m.k === "efectivo" && !reglaCobro.efectivoDisponible;
+          return (
+            <div key={m.k} onClick={() => { if (!noDisponible) toggleCobro(m.k); }}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 11, opacity: noDisponible ? 0.45 : 1,
+                border: `1.5px solid ${on && !noDisponible ? G : B}`, background: on && !noDisponible ? (isDark ? "#1a160a" : "#fdf6e3") : "transparent", marginBottom: 8, cursor: noDisponible ? "default" : "pointer" }}>
+              <span style={{ fontSize: 18 }}>{m.ic}</span>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: 12.5, fontWeight: 700, color: T1 }}>
+                  {m.t}{fijo && <span style={{ fontSize: 9, fontWeight: 800, color: T3, marginLeft: 6 }}>OBLIGATORIA</span>}
+                </p>
+                <p style={{ fontSize: 10, color: T3 }}>{noDisponible ? "Solo con entrega local o en persona dentro de Cuba" : m.d}</p>
+              </div>
+              <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${on && !noDisponible ? G : B}`, background: on && !noDisponible ? G : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#000", fontSize: 12, fontWeight: 900, flexShrink: 0 }}>{on && !noDisponible ? "✓" : ""}</div>
+            </div>
+          );
+        })}
         </>}
 
         {canPromote && (
@@ -3754,6 +3903,15 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash, initialCa
     images: [], badge: "", stock: "",
     bulkDiscounts: [], // [{min,pct}]
     acceptedCurrencies: [], // monedas en las que el vendedor acepta cobrar (selección múltiple, opcional)
+    // Formas de cobro aceptadas ('efectivo' y/o 'tarjeta'). Se recuerda la
+    // última selección del vendedor, igual que la provincia y la recogida.
+    acceptedPaymentMethods: (() => {
+      try {
+        const v = JSON.parse(localStorage.getItem(SELLER_PAYMENT_STORAGE_KEY) || "null");
+        const limpios = Array.isArray(v) ? v.filter(m => m === "efectivo" || m === "tarjeta") : [];
+        return limpios.length ? limpios : ["efectivo"];
+      } catch (e) { return ["efectivo"]; }
+    })(),
     shipModes: { local: true, intl: false, persona: false }, // combinables: el vendedor marca las que quiera
     location: "",
     province: (() => { try { return localStorage.getItem("retador_last_province") || ""; } catch (e) { return ""; } })() || user?.profile?.shop_province || "",
@@ -3790,6 +3948,43 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash, initialCa
   const anyShip = form.shipModes.local || form.shipModes.intl || form.shipModes.persona;
   const needsLoc = form.shipModes.local || form.shipModes.persona;
   const hasStock = Number(form.stock) > 0;
+
+  // ── Cómo aceptas el pago ───────────────────────────────────────────────────
+  // Sección independiente de la entrega, pero la regla del negocio depende de
+  // ella: solo en la venta interna en Cuba (vendedor cubano + entrega local o
+  // en persona) existe el efectivo. En cualquier otro caso la tarjeta es
+  // obligatoria y no se puede desmarcar. Añadir tarjeta SIEMPRE se puede.
+  const reglaCobro = metodosCobroVendedor({
+    paisVendedor: user?.profile?.shop_country || "cuba",
+    shipModes: form.shipModes,
+    kind: "product",
+  });
+  const toggleCobro = (metodo) => {
+    const marcado = form.acceptedPaymentMethods.includes(metodo);
+    if (marcado && metodo === "tarjeta" && reglaCobro.tarjetaObligatoria) {
+      flash("💳 Con envío internacional el cobro es siempre con tarjeta");
+      return;
+    }
+    if (marcado && metodo === "efectivo" && !form.acceptedPaymentMethods.includes("tarjeta")) {
+      flash("⚠️ Marca al menos una forma de cobro");
+      return;
+    }
+    if (marcado && metodo === "tarjeta" && !form.acceptedPaymentMethods.includes("efectivo")) {
+      flash("⚠️ Marca al menos una forma de cobro");
+      return;
+    }
+    set("acceptedPaymentMethods", marcado
+      ? form.acceptedPaymentMethods.filter(m => m !== metodo)
+      : [...form.acceptedPaymentMethods, metodo]);
+  };
+  // Si el vendedor cambia la entrega y la venta deja de ser interna, la tarjeta
+  // se marca sola (y el efectivo deja de tener sentido, aunque siga marcado:
+  // el comprador no llegará a verlo — ver metodosPagoDisponibles).
+  useEffect(() => {
+    if (reglaCobro.tarjetaObligatoria && !form.acceptedPaymentMethods.includes("tarjeta")) {
+      set("acceptedPaymentMethods", [...form.acceptedPaymentMethods, "tarjeta"]);
+    }
+  }, [reglaCobro.tarjetaObligatoria, form.acceptedPaymentMethods]);
   // La región (provincia) solo aplica a Cuba — es la única con desglose en la
   // app. Si el vendedor ya eligió España/Estados Unidos como su región, basta
   // con eso: no se le pide nada más. Sin región elegida todavía, se asume
@@ -3812,6 +4007,8 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash, initialCa
     setSaving(true);
     try { if (form.pickupAddress || form.pickupPhone) localStorage.setItem("retador_pickup", JSON.stringify({ address: form.pickupAddress, phone: form.pickupPhone })); } catch (e) {}
     if (form.province) { try { localStorage.setItem("retador_last_province", form.province); } catch (e) {} }
+    // Se recuerda cómo cobra este vendedor para la próxima publicación.
+    try { localStorage.setItem(SELLER_PAYMENT_STORAGE_KEY, JSON.stringify(form.acceptedPaymentMethods)); } catch (e) {}
     const bulkDiscounts = form.bulkDiscounts.filter(t => t.min && t.pct).map(t => ({ min: Number(t.min), pct: Number(t.pct) }));
     await onPublish({ ...form, kind: "product", bulkDiscounts, img: form.images[0] });
     setSaving(false);
@@ -4022,6 +4219,52 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash, initialCa
             </div>
           </div>
         )}
+      </div>
+
+      {/* CÓMO ACEPTAS EL PAGO — sección propia, independiente de la entrega.
+          Aquí el vendedor declara CÓMO cobra: efectivo al coordinar (solo en la
+          venta interna en Cuba) y/o tarjeta por la app. La tarjeta se puede
+          añadir siempre; solo deja de poder quitarse cuando la venta no es
+          interna, porque entonces no hay forma de cobrar en efectivo. */}
+      <div style={sectionStyle}>
+        <div style={sectionTitle}><span>💳</span> Cómo aceptas el pago</div>
+        <p style={{ fontSize: 9.5, color: isDark?"#777":T2, marginTop: -8, marginBottom: 12, lineHeight: 1.5 }}>
+          {reglaCobro.tarjetaObligatoria
+            ? "Con envío internacional el cobro va siempre por tarjeta a través de la app."
+            : "Marca cómo quieres cobrar este producto. El comprador elegirá entre lo que actives."}
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[
+            { key: "efectivo", icon: "🤝", title: "Efectivo al coordinar", desc: "El comprador te paga en mano al entregar." },
+            { key: "tarjeta",  icon: "💳", title: "Tarjeta por la app",    desc: "Pago seguro al instante; recibes el dinero en tu saldo." },
+          ].map(o => {
+            const on = form.acceptedPaymentMethods.includes(o.key);
+            const fijo = o.key === "tarjeta" && reglaCobro.tarjetaObligatoria;
+            const noDisponible = o.key === "efectivo" && !reglaCobro.efectivoDisponible;
+            return (
+              <button key={o.key} className="p" onClick={() => { if (!noDisponible) toggleCobro(o.key); }}
+                style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", width: "100%",
+                  opacity: noDisponible ? 0.45 : 1,
+                  background: on && !noDisponible ? `${G}12` : isDark?"#0e0e0e":CARD,
+                  border: `1.5px solid ${on && !noDisponible ? G : isDark?"#1a1a1a":B}`, borderRadius: 12, padding: "11px 12px" }}>
+                <span style={{ fontSize: 17, flexShrink: 0 }}>{o.icon}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: on && !noDisponible ? G : isDark?"#fff":T1 }}>
+                    {o.title}
+                    {fijo && <span style={{ fontSize: 8.5, fontWeight: 800, color: isDark?"#777":T2, marginLeft: 6 }}>OBLIGATORIA</span>}
+                  </div>
+                  <div style={{ fontSize: 9, color: isDark?"#777":T2, marginTop: 2, lineHeight: 1.4 }}>
+                    {noDisponible ? "Solo disponible con entrega local o en persona dentro de Cuba." : o.desc}
+                  </div>
+                </div>
+                <div style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                  background: on && !noDisponible ? G : "transparent", border: `1.5px solid ${on && !noDisponible ? G : isDark?"#333":B}` }}>
+                  {on && !noDisponible && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4.5l3 3 6-6.5" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* MONEDAS QUE ACEPTAS — selección múltiple, opcional: en qué moneda(s)

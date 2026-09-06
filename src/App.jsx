@@ -457,6 +457,12 @@ function AppShell({ sessionUser, platformStats = null }) {
     if (changes.stock              !== undefined) upd.stock               = Number(changes.stock) || 0;
     if (changes.bulkDiscounts      !== undefined) upd.bulk_discounts      = Array.isArray(changes.bulkDiscounts) ? changes.bulkDiscounts : [];
     if (changes.acceptedCurrencies !== undefined) upd.accepted_currencies = Array.isArray(changes.acceptedCurrencies) ? changes.acceptedCurrencies : [];
+    // Formas de pago aceptadas en este producto ('efectivo' y/o 'tarjeta'). Si
+    // el vendedor las deja todas fuera, la base repone lo mínimo válido.
+    if (changes.acceptedPaymentMethods !== undefined)
+      upd.accepted_payment_methods = (Array.isArray(changes.acceptedPaymentMethods) && changes.acceptedPaymentMethods.length)
+        ? changes.acceptedPaymentMethods
+        : ["efectivo"];
     // "Destacado" (gratis, del propio vendedor) — se ve en el carrusel de
     // Destacados de Inicio de su Tienda. Se cambia con un toque, sin abrir el
     // formulario de edición completo (ver interruptor en Mi Panel → Productos).
@@ -987,13 +993,19 @@ function AppShell({ sessionUser, platformStats = null }) {
       pickup_address: isService ? null : (d.pickupAddress || null),
       pickup_phone: isService ? null : (d.pickupPhone || null),
       // GRUPO 1 — cantidad disponible, descuentos por cantidad y monedas que el
-      // vendedor acepta cobrar (solo productos; NO es método de pago). stock/
-      // accepted_currencies son escritura resiliente: si el backend aún no
-      // tiene esas columnas, se reintenta sin ellas.
+      // vendedor acepta cobrar (solo productos; la moneda NO es el método de
+      // pago). stock/accepted_currencies/accepted_payment_methods son escritura
+      // resiliente: si el backend aún no tiene esas columnas, se reintenta sin
+      // ellas. accepted_payment_methods dice CÓMO cobra ('efectivo' y/o
+      // 'tarjeta'); la base fuerza la tarjeta cuando la venta no es interna en
+      // Cuba, aunque aquí llegue sin marcar.
       ...(isService ? {} : {
         stock: Number(d.stock) || 0,
         bulk_discounts: Array.isArray(d.bulkDiscounts) ? d.bulkDiscounts : [],
         accepted_currencies: Array.isArray(d.acceptedCurrencies) ? d.acceptedCurrencies : [],
+        accepted_payment_methods: (Array.isArray(d.acceptedPaymentMethods) && d.acceptedPaymentMethods.length)
+          ? d.acceptedPaymentMethods
+          : ["efectivo"],
       }),
       // Trazabilidad con el Catálogo Pro (Mejora B): si este producto viene del
       // editor precargado desde un producto del catálogo, queda vinculado.

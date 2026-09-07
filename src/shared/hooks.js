@@ -22,6 +22,39 @@ export function useScrollDir(ref) {
   return dir;
 }
 
+// ── Recuperación al volver de un cobro externo (Stripe Checkout) ────────────
+// Bug real visto ya en varios lugares (BuyModal v208; luego la lista de
+// Compras y el seguimiento del pedido): si el comprador toca "Pagar"/
+// "Reintentar el pago" y sale de Stripe con el botón "atrás" del navegador
+// ANTES de terminar, la app puede volver restaurada exactamente en el
+// estado congelado justo antes de la redirección — el botón se queda
+// "cargando" para siempre. Esto pasa porque, a propósito, el código NUNCA
+// llama a su setter de "cargando: false" justo antes de `window.location.href
+// = checkout_url` (para no permitir un doble toque mientras la navegación
+// está en curso) — así que si esa navegación nunca se completa de verdad
+// (el usuario se arrepintió y volvió), nada más vuelve a desbloquear el
+// botón. Cada pantalla que redirige a un cobro externo debe usar ESTE hook
+// en vez de inventar su propio listener — así la clase entera de bug queda
+// cerrada de una vez, sin depender de acordarse componente por componente.
+//
+// Uso:
+//   const cargandoRef = useRef(false);
+//   useEffect(() => { cargandoRef.current = cargando; }, [cargando]);
+//   useUnstickOnPageRestore(cargandoRef, () => setCargando(false));
+//
+// Solo reacciona a pageshow con persisted=true (restauración real desde el
+// caché de retroceso del navegador) — nunca a un cambio de pestaña/app
+// suelto, que no significa que la navegación a Stripe se haya interrumpido.
+export function useUnstickOnPageRestore(busyRef, onStuck) {
+  const cbRef = useRef(onStuck);
+  cbRef.current = onStuck;
+  useEffect(() => {
+    const alRestaurarPagina = (e) => { if (e.persisted && busyRef.current) cbRef.current(); };
+    window.addEventListener("pageshow", alRestaurarPagina);
+    return () => window.removeEventListener("pageshow", alRestaurarPagina);
+  }, [busyRef]);
+}
+
 // ── PULL-TO-REFRESH real (in-app, no navega) ─────────────────────────────────
 // El gesto de "deslizar hacia abajo para refrescar" en una PWA, sin tocar nada,
 // dispara el PULL-TO-REFRESH NATIVO del navegador: una recarga COMPLETA de la

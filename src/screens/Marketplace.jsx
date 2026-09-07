@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, useUnstickOnPageRestore, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -391,27 +391,20 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   // handle() y el listener de "pageshow" más abajo). Solo aplica a tarjeta:
   // "coordinado" crea el pedido y cierra el modal en el mismo toque.
   const pendingCardOrderRef = useRef(null);
-  // BUG REAL corregido: si el comprador toca "Pagar con tarjeta" y le da
-  // "atrás" DESDE la página de Stripe antes de terminar (sin pasar por
+  // BUG REAL corregido (v208): si el comprador toca "Pagar con tarjeta" y le
+  // da "atrás" DESDE la página de Stripe antes de terminar (sin pasar por
   // success_url/cancel_url), el navegador puede restaurar esta pantalla tal
   // cual estaba justo antes de la redirección — con el botón "cargando" para
   // siempre, porque handle() no vuelve a llamar setLoading(false) a
   // propósito (ver comentario allí). App.jsx ya detecta este mismo caso con
   // su propio "pageshow" y abre la pantalla de espera real (PagoStripeScreen,
-  // por encima de todo) — este listener es la misma idea aplicada aquí
-  // mismo, como red de seguridad: en cuanto la página vuelve a mostrarse
-  // desde el caché de retroceso, si este modal seguía "cargando" se
-  // desbloquea de inmediato, sin esperar ningún temporizador.
-  useEffect(() => {
-    const alRestaurarPagina = (e) => {
-      if (e.persisted && loadingRef.current) {
-        setLoading(false);
-        flash && flash("Volviste antes de terminar el pago — puedes intentarlo de nuevo.");
-      }
-    };
-    window.addEventListener("pageshow", alRestaurarPagina);
-    return () => window.removeEventListener("pageshow", alRestaurarPagina);
-  }, [flash]);
+  // por encima de todo) — useUnstickOnPageRestore es la misma idea aplicada
+  // aquí mismo, como red de seguridad (mismo hook que usan ahora la lista de
+  // Compras y el seguimiento del pedido — ver auditoría v209).
+  useUnstickOnPageRestore(loadingRef, () => {
+    setLoading(false);
+    flash && flash("Volviste antes de terminar el pago — puedes intentarlo de nuevo.");
+  });
   // initialQty: precarga desde el Carrito (Bloque 3) la cantidad que ya
   // había guardada en esa línea — el resto del flujo sigue exactamente igual
   // que comprando directo desde la ficha del producto.

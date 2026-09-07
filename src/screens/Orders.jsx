@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, submitOrderReview, useAt, useR, PullIndicator, usePullToRefresh, createStripeCheckout } from "../shared/index.js";
+import { G, Ic, MODALIDAD_LABELS, SHIP_LABELS, money, submitOrderReview, useAt, useR, PullIndicator, usePullToRefresh, createStripeCheckout, useUnstickOnPageRestore } from "../shared/index.js";
 
 // Un pedido con tarjeta que TODAVÍA no confirma pago (ni por payment_status ni
 // por held_amount) — ya sea recién creado o abandonado en Stripe Checkout.
@@ -16,6 +16,15 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   const [payOpen, setPayOpen] = useState(false);
   const [retryingCard, setRetryingCard] = useState(false);
   const [cancelingCard, setCancelingCard] = useState(false);
+  // AUDITORÍA v209 — este botón también abre Stripe Checkout: mismo riesgo de
+  // quedarse "cargando" si el comprador vuelve con "atrás" antes de terminar
+  // (ver useUnstickOnPageRestore en shared/hooks.js). Antes de esta ronda el
+  // seguimiento del pedido no tenía NINGÚN botón de reintentar/cancelar —
+  // por eso tampoco tenía este problema; ahora que se agrega, se corrige
+  // desde el principio, junto con los otros 2 lugares que ya lo tenían.
+  const retryingCardRef = useRef(false);
+  useEffect(() => { retryingCardRef.current = retryingCard; }, [retryingCard]);
+  useUnstickOnPageRestore(retryingCardRef, () => setRetryingCard(false));
   if (!o) return null;
   // Reabre el cobro con tarjeta para ESTE mismo pedido (nunca crea uno nuevo)
   // — mismo mecanismo que el botón "Reintentar el pago" de PagoStripeScreen.
@@ -76,7 +85,28 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   // el fulfillment YA llegó al último paso real (Entregado) de su cadena.
   const catalogProDelivered = isCatalogPro && o.catalogProSortOrder != null && (o.catalogProSteps || []).length > 0
     && o.catalogProSortOrder >= Math.max(...o.catalogProSteps.map(s => s.sortOrder));
-  const paymentDone = isCatalogPro ? catalogProDelivered : isCompleted;
+  const deliveryDone = isCatalogPro ? catalogProDelivered : isCompleted;
+  // BUG REAL corregido: "Pagado"/"Total a pagar" usaba deliveryDone (si YA
+  // se entregó), no si el PAGO se confirmó — un pedido de tarjeta cancelado
+  // sin pagar y uno pagado de verdad se veían exactamente igual (ninguno
+  // "entregado" todavía). Para tarjeta, lo real es paymentStatus/held_amount;
+  // para pago coordinado, sigue siendo la entrega la señal (no hay retención
+  // en custodia que consultar).
+  const cardConfirmed = o.paymentMethod === "tarjeta" && (o.paymentStatus === "confirmado" || o.heldAmount != null);
+  const paymentDone = o.paymentMethod === "tarjeta" ? cardConfirmed : deliveryDone;
+  // El pago con tarjeta manda sobre CUALQUIER OTRA coreografía de entrega —
+  // catálogo pro o no. BUG REAL corregido: antes esto solo se aplicaba
+  // dentro del bloque "!isCatalogPro" (Progreso genérico); un pedido de
+  // Catálogo Pro (el único tipo de producto que hoy vende con tarjeta) con
+  // pago pendiente o cancelado seguía mostrando "Estado del envío" con el
+  // primer paso ("Pedido confirmado") en dorado, exactamente igual que uno
+  // pagado de verdad — no había forma de distinguirlos.
+  const cardPending = isCardPending(o);
+  const cardExpired = isCardExpired(o);
+  const cardBlocksDelivery = cardPending || cardExpired;
+  // Igual que viewerIsSeller (arriba), con el matiz de la coreografía: sin
+  // ninguna señal directa de comprador, se asume comprador por descarte.
+  const viewerIsBuyerReal = (!!user?.id && (o.buyer_id === user.id || o.buyerId === user.id)) || (o.buyerId != null && o.buyerId === user?.id) || (!!o.buyerName && o.buyerName === me) || !viewerIsSeller;
   const totalPagar = o.shipType === "paquete" ? Number(o.shipPrice || 0) : Number(o.amount || 0) + Number(o.shipPrice || 0);
   // Guarda cada reseña de PERSONA de verdad en seller_reviews, ligada a ESTE
   // pedido (order_id = o.id) — SIEMPRE un INSERT nuevo, nunca upsert: cada
@@ -141,6 +171,34 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
           </div>
         </div>
 
+        {/* Pago con tarjeta pendiente o cancelado — manda sobre CUALQUIER
+            estado de entrega (Catálogo Pro o genérico): si el pago nunca se
+            confirmó, no tiene sentido mostrar ningún avance de envío. Mismas
+            acciones que ya existían en la lista de Compras (reabrir Stripe
+            para este MISMO pedido / cancelarlo de verdad), ahora también
+            aquí en el seguimiento. */}
+        {cardBlocksDelivery && (
+          <div style={{ background: card, border: `1px solid ${B}`, borderRadius: 16, padding: "14px", marginBottom: 12 }}>
+            <div style={{ background: soft, border: `1px solid ${B}`, borderRadius: 13, padding: "12px 14px", marginBottom: viewerIsBuyerReal ? 12 : 0, fontSize: 12, color: T1, fontWeight: 600, lineHeight: 1.5 }}>
+              {cardExpired
+                ? "❌ No se completó el pago a tiempo y el pedido se canceló automáticamente. Puedes crear uno nuevo cuando quieras."
+                : viewerIsBuyerReal
+                  ? "💳 Todavía no se confirma tu pago con tarjeta. Si saliste de Stripe antes de terminar, puedes reintentarlo."
+                  : "Esperando que el comprador complete el pago con tarjeta."}
+            </div>
+            {cardPending && viewerIsBuyerReal && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <button className="p" onClick={retryCardPayment} disabled={retryingCard} style={{ width: "100%", background: G, color: "#000", border: "none", borderRadius: 13, padding: "14px", fontSize: 13, fontWeight: 800, opacity: retryingCard ? .6 : 1 }}>
+                  {retryingCard ? "Abriendo el pago…" : "Reintentar el pago"}
+                </button>
+                <button className="p" onClick={cancelCardPayment} disabled={cancelingCard} style={{ width: "100%", background: "transparent", color: "#ef4444", border: "1px solid #ef444455", borderRadius: 13, padding: "14px", fontSize: 13, fontWeight: 800, opacity: cancelingCard ? .6 : 1 }}>
+                  {cancelingCard ? "Cancelando…" : "Cancelar pedido"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Estado de fulfillment del Catálogo Pro (solo si este pedido es de un
             producto que viene de ahí) — lista progresiva con la cadena REAL
             de pasos (5 con centro logístico si el pedido fue a Cuba, 4 más
@@ -148,8 +206,9 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
             "Progreso" genérica que no aplica aquí, pero sin botones de
             confirmación manual ni mención de mensajero. SIEMPRE el texto
             público ya sanitizado de order_status_map, nunca el proveedor
-            real ni su ubicación. */}
-        {isCatalogPro && (
+            real ni su ubicación. Se oculta mientras el pago con tarjeta no
+            se confirme (ver bloque de arriba). */}
+        {isCatalogPro && !cardBlocksDelivery && (
           <div style={{ background: card, border: `1px solid ${B}`, borderRadius: 16, padding: "13px 15px 6px", marginBottom: 12 }}>
             <p style={{ fontSize: 9.5, fontWeight: 700, color: T2, textTransform: "uppercase", letterSpacing: .3, marginBottom: 9 }}>📦 Estado del envío</p>
             {(() => { const maxOrder = Math.max(1, ...(o.catalogProSteps || []).map(s => s.sortOrder)); return (o.catalogProSteps || []).map((st, i) => {
@@ -221,7 +280,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
         {o.modalidad !== "cargo" && <p style={{ fontSize: 10.5, color: T2, lineHeight: 1.5, marginBottom: 8 }}>{md.desc}.</p>}
         <div style={{ background: soft, border: `1px solid ${B}`, borderRadius: 13, marginBottom: 14, overflow: "hidden" }}>
           <button type="button" onClick={() => setPayOpen(v => !v)} className="p" style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: "12px 13px", cursor: "pointer", textAlign: "left" }}>
-            <span style={{ fontSize: 11.5, fontWeight: 700, color: T1 }}>{paymentDone ? "Pagado" : "Total a pagar"}</span>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: T1 }}>{paymentDone ? "Total pagado" : "Total a pagar"}</span>
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 14, fontWeight: 900, color: G }}>{money(totalPagar, cur)}</span>
               <span style={{ transform: payOpen ? "rotate(180deg)" : "none", transition: "transform .2s", color: T3, fontSize: 12 }}>⌄</span>
@@ -266,8 +325,10 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
             tiene (viene directo de CJ vía el hub de Daniel) — esos pasos
             nunca avanzan y el botón de confirmación no aplica, así que toda
             esta sección se oculta y el estado real ya se muestra arriba en
-            "Estado del envío". */}
-        {!isCatalogPro && <>
+            "Estado del envío". Tampoco tiene sentido mientras el pago con
+            tarjeta no se confirme — eso ya se muestra en el bloque de
+            arriba (cardBlocksDelivery). */}
+        {!isCatalogPro && !cardBlocksDelivery && <>
         <p style={{ fontSize: 10, fontWeight: 700, color: T2, letterSpacing: .4, marginBottom: 12, textTransform: "uppercase" }}>Progreso</p>
         <div style={{ background: card, border: `1px solid ${B}`, borderRadius: 16, padding: "15px 15px 6px", marginBottom: 16 }}>
           {flow.map((st, i) => {
@@ -295,8 +356,10 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
 
         {/* Coreografía 3 partes: confirmaciones por rol + aviso */}
         {(() => {
-          const isSeller = (!!user?.id && (o.seller_id === user.id || o.sellerId === user.id)) || (!!me && o.sellerName === me);
-          const viewerIsBuyer = (!!user?.id && (o.buyer_id === user.id || o.buyerId === user.id)) || (o.buyerId != null && o.buyerId === user?.id) || (!!o.buyerName && o.buyerName === me) || !isSeller;
+          // viewerIsSeller/viewerIsBuyerReal ya se calcularon arriba (también
+          // los usa el bloque de pago con tarjeta pendiente/cancelado).
+          const isSeller = viewerIsSeller;
+          const viewerIsBuyer = viewerIsBuyerReal;
           const isLocal = (o.shipType || o.shipMode) === "local";
           const cash = (o.payMethod || o.payment || "efectivo").toString().toLowerCase().includes("efect") || !o.payMethod;
           const notConfirmed = (o.stepIdx || 0) < 1 && !o.sellerConfirmed;
@@ -310,20 +373,11 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
           // SIEMPRE por ship_mode: persona/intl jamás hablan de mensajero.
           const mode = (o.shipType || o.shipMode) === "persona" ? "persona" : ((o.shipType || o.shipMode) === "intl" ? "intl" : "local");
           let nudge = null, actions = [];
-          // El pago con tarjeta manda sobre cualquier otra coreografía: si
-          // todavía no se confirma (o expiró sin confirmarse), nada de la
-          // coordinación de entrega tiene sentido todavía.
-          if (isCardExpired(o)) {
-            nudge = "❌ No se completó el pago a tiempo y el pedido se canceló automáticamente. Puedes crear uno nuevo cuando quieras.";
-          } else if (isCardPending(o)) {
-            nudge = viewerIsBuyer
-              ? "💳 Todavía no se confirma tu pago con tarjeta. Si saliste de Stripe antes de terminar, puedes reintentarlo."
-              : "Esperando que el comprador complete el pago con tarjeta.";
-            if (viewerIsBuyer) {
-              actions.push(btn(retryingCard ? "Abriendo el pago…" : "Reintentar el pago", retryCardPayment));
-              actions.push(btn(cancelingCard ? "Cancelando…" : "Cancelar pedido", cancelCardPayment, "danger"));
-            }
-          } else if (mode === "local" && o.feeApproval === "pending") {
+          // El caso de pago con tarjeta pendiente/cancelado ya se maneja en
+          // el bloque de arriba (cardBlocksDelivery) — este IIFE ni se monta
+          // en ese caso (ver el guard "!cardBlocksDelivery" que envuelve
+          // "Progreso"), así que aquí ya no hace falta repetirlo.
+          if (mode === "local" && o.feeApproval === "pending") {
             // El COMPRADOR ve la propuesta y decide; el vendedor solo se entera.
             const prop = Math.round(o.proposedFee || 0), orig = Math.round(o.deliveryCost || o.baseFee || o.shipPrice || 0);
             if (!isSeller) {
@@ -457,6 +511,14 @@ export function OrdersScreen({ user, me, onBack, flash, orders = [], seenIds = {
   // mecanismo que en PagoStripeScreen/OrderDetailScreen: reabre el cobro para
   // ESE order_id, nunca crea uno nuevo.
   const [retryingId, setRetryingId] = useState(null);
+  // BUG REAL corregido (auditoría v209): esta era la tarjeta de la lista de
+  // Compras que se quedaba "cargando" para siempre al volver de Stripe con
+  // "atrás" — el único de los cuatro lugares que redirigen a Stripe que NO
+  // tenía ningún listener de recuperación. Mismo hook que ahora usan
+  // BuyModal, PagoStripeScreen y el seguimiento del pedido.
+  const retryingIdRef = useRef(null);
+  useEffect(() => { retryingIdRef.current = retryingId; }, [retryingId]);
+  useUnstickOnPageRestore(retryingIdRef, () => setRetryingId(null));
   const retryCardPaymentFromList = async (o, e) => {
     e?.stopPropagation?.();
     setRetryingId(o.id);

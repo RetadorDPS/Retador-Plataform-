@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { CheckCircle2, XCircle, Clock3, ShoppingBag } from "lucide-react";
-import { G, Spin, money, useAt, getOrderPaymentState, createStripeCheckout } from "../shared/index.js";
+import { G, Spin, money, useAt, getOrderPaymentState, createStripeCheckout, useUnstickOnPageRestore } from "../shared/index.js";
 
 // ═════════════════════════════════════════════════════════════════════════
 // PANTALLA DE RETORNO DE STRIPE CHECKOUT
@@ -31,6 +31,8 @@ export function PagoStripeScreen({ orderId, resultado, onVerPedido, onIrAlInicio
   const [intentos, setIntentos] = useState(0);
   const [noEncontrado, setNoEncontrado] = useState(false);
   const [reintentandoPago, setReintentandoPago] = useState(false);
+  const reintentandoPagoRef = useRef(false);
+  useEffect(() => { reintentandoPagoRef.current = reintentandoPago; }, [reintentandoPago]);
   const timerRef = useRef(null);
   const inicioRef = useRef(Date.now());
   const cancelado = resultado === "cancelado";
@@ -83,6 +85,13 @@ export function PagoStripeScreen({ orderId, resultado, onVerPedido, onIrAlInicio
       window.removeEventListener("pageshow", alRestaurarPagina);
     };
   }, [orderId]);
+
+  // AUDITORÍA v209 — este mismo "Reintentar el pago" abre Stripe otra vez
+  // (mismo patrón que BuyModal, la lista de Compras y el seguimiento del
+  // pedido), así que tiene EL MISMO riesgo de quedarse "cargando" si el
+  // comprador vuelve con "atrás" antes de terminar. El listener de arriba ya
+  // vuelve a consultar el pedido, pero no reseteaba este botón en concreto.
+  useUnstickOnPageRestore(reintentandoPagoRef, () => setReintentandoPago(false));
 
   const reintentar = async () => { setBuscando(true); await consultar(); };
 

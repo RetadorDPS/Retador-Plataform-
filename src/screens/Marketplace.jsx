@@ -384,6 +384,34 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   const platformCfg = usePlatformCfg(); // tarifa local desde la config GLOBAL del backend
   const liveLocalBase = estimateDeliveryFee(platformCfg, null) || 150;
   const [loading, setLoading] = useState(false);
+  const loadingRef = useRef(false);
+  useEffect(() => { loadingRef.current = loading; }, [loading]);
+  // Pedido de tarjeta YA creado en esta sesión del modal, a la espera de
+  // pagarse — para no duplicarlo si hay que reabrir Stripe de nuevo (ver
+  // handle() y el listener de "pageshow" más abajo). Solo aplica a tarjeta:
+  // "coordinado" crea el pedido y cierra el modal en el mismo toque.
+  const pendingCardOrderRef = useRef(null);
+  // BUG REAL corregido: si el comprador toca "Pagar con tarjeta" y le da
+  // "atrás" DESDE la página de Stripe antes de terminar (sin pasar por
+  // success_url/cancel_url), el navegador puede restaurar esta pantalla tal
+  // cual estaba justo antes de la redirección — con el botón "cargando" para
+  // siempre, porque handle() no vuelve a llamar setLoading(false) a
+  // propósito (ver comentario allí). App.jsx ya detecta este mismo caso con
+  // su propio "pageshow" y abre la pantalla de espera real (PagoStripeScreen,
+  // por encima de todo) — este listener es la misma idea aplicada aquí
+  // mismo, como red de seguridad: en cuanto la página vuelve a mostrarse
+  // desde el caché de retroceso, si este modal seguía "cargando" se
+  // desbloquea de inmediato, sin esperar ningún temporizador.
+  useEffect(() => {
+    const alRestaurarPagina = (e) => {
+      if (e.persisted && loadingRef.current) {
+        setLoading(false);
+        flash && flash("Volviste antes de terminar el pago — puedes intentarlo de nuevo.");
+      }
+    };
+    window.addEventListener("pageshow", alRestaurarPagina);
+    return () => window.removeEventListener("pageshow", alRestaurarPagina);
+  }, [flash]);
   // initialQty: precarga desde el Carrito (Bloque 3) la cantidad que ya
   // había guardada en esa línea — el resto del flujo sigue exactamente igual
   // que comprando directo desde la ficha del producto.
@@ -602,10 +630,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     : 0;
   // Total real del/los producto(s) elegido(s) — grandTotal si hay carrito
   // múltiple, total simple si es una sola línea (comportamiento de siempre).
-  // buyerTotal suma el envío internacional del Catálogo Pro cuando aplica —
-  // ese es el número que el comprador debe ver como "lo que va a pagar".
   const productTotal = isMulti ? grandTotal : total;
-  const buyerTotal = Math.round((productTotal + (isCatalogPro ? catalogProShipTotal : 0)) * 100) / 100;
 
   const SHIP_META = {
     local:   { icon: "🛵", label: "Delivery local",      desc: "Un mensajero te lo lleva" },
@@ -615,6 +640,23 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   const sm = product.shipModes || { local: true };
   const availModes = ["local", "intl", "persona"].filter(k => sm[k]);
   const [shipMode, setShipMode] = useState(availModes[0] || "local");
+  // Si cambia la cantidad o la forma de entrega, el pedido de tarjeta
+  // pendiente (si había uno) ya no refleja lo que el comprador quiere pagar
+  // ahora — se olvida, así el próximo toque en "Pagar con tarjeta" crea uno
+  // nuevo con los datos correctos en vez de reabrir el viejo.
+  useEffect(() => { pendingCardOrderRef.current = null; }, [qty, shipMode]);
+
+  // buyerTotal es el número que el comprador ve como "lo que va a pagar" Y el
+  // que de verdad se le cobra por tarjeta — deben ser SIEMPRE el mismo. El
+  // envío solo se suma cuando el modo es 'intl' (Catálogo Pro o envío
+  // internacional propio): ahí no existe forma de pagarlo en efectivo, así
+  // que va junto con el producto desde el principio, mismo criterio que usa
+  // stripe-create-checkout en el backend. En 'local' el domicilio se paga
+  // aparte, en efectivo, al mensajero — nunca se suma aquí ni se cobra por
+  // tarjeta (cobrarlo dos veces sería el bug al revés). En 'persona' no hay
+  // costo de envío.
+  const cardShipCost = shipMode === "intl" ? (isCatalogPro ? catalogProShipTotal : parseFloat(product.shippingPrice || 0)) : 0;
+  const buyerTotal = Math.round((productTotal + cardShipCost) * 100) / 100;
 
   // Formas de pago REALES de este producto: intersección entre lo que el
   // vendedor declaró aceptar y lo que permite la regla de venta interna en
@@ -665,46 +707,53 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   const handle = async () => {
     if (!paymentMethod) return;
     setLoading(true);
-    let order;
-    try {
-      const modalidad = shipMode === "intl" ? "cargo" : "local"; // exterior(cargo) vs local; el dueño afina conectado/cargo después
-      let delivery;
-      if (shipMode === "persona") delivery = { mode: "persona" };
-      else if (shipMode === "local") delivery = { mode: "local", name: realName, nick: del.nick.trim() || undefined, phone: del.phone, address: del.addr, ref: del.ref, pickup: product.seller_name || "Vendedor", pickupAddress: product.pickupAddress || product.sellerAddress || product.location || "", pickupPhone: product.pickupPhone || product.sellerPhone || product.seller_phone || "" };
-      else if (isCatalogPro) delivery = { mode: "intl", country: destCountry, recipient: { name: del.name, phone: del.phone, country: destCountry, ...(destCountry === "CU" ? { province: del.prov } : {}), city: del.city, address: del.addr }, origin: "Exterior" };
-      else delivery = { mode: "intl", recipient: { name: del.name, phone: del.phone, province: del.prov, city: del.city, address: del.addr }, origin: product.origin || "Exterior", transport: product.shippingType || "standard" };
-      // Para Catálogo Pro el backend IGNORA lo que mandemos acá y fuerza
-      // shipMode='intl'/shipPrice real (get_catalog_pro_shipping_quote) —
-      // esto es solo para que el registro local/optimista muestre algo
-      // razonable mientras llega la respuesta real de la base.
-      const shipPrice = isCatalogPro ? catalogProShipTotal
-        : shipMode === "intl" ? parseFloat(product.shippingPrice || 0)
-        : shipMode === "local" ? liveLocalBase : 0;
-      const shipTo = shipMode === "intl" ? "empresa de envíos" : shipMode === "local" ? "mensajero" : null;
-      const common = {
-        productId: product.id, shipMode, modalidad, shipPrice, shipTo, delivery,
-        paymentMethod,
-      };
-      order = isMulti
-        ? await conTiempoLimite(createOrderMulti({
-            ...common,
-            title: product.title, image: variant?.image || product.img || product.image,
-            lines: [
-              { variantId: variant?.id || null, qty },
-              ...cartLines.map(l => ({ variantId: l.variantId, qty: l.qty })),
-            ],
-          }))
-        : await conTiempoLimite(createOrder({
-            ...common,
-            title: product.title, image: variant?.image || product.img || product.image, cat: product.cat,
-            sellerId: product.seller_id, sellerName: product.seller_name,
-            buyerId: user?.id, buyerName: user?.name, qty, unitPrice: unitPriceWithDisc, amount: total, currency: cur,
-            variantId: variant?.id || null,
-          }));
-    } catch (e) {
-      flash("❌ " + (e.message || "No se pudo crear el pedido"));
-      setLoading(false);
-      return;
+    // Si ya habíamos creado un pedido de tarjeta para esto mismo (p.ej. el
+    // comprador volvió con "atrás" desde Stripe antes de terminar y el botón
+    // se desbloqueó — ver el listener de "pageshow" más arriba), se
+    // reutiliza el MISMO pedido en vez de crear uno segundo: create_order
+    // no sabe que ya existe uno y lo duplicaría si lo llamáramos de nuevo.
+    let order = paymentMethod === "tarjeta" ? pendingCardOrderRef.current : null;
+    if (!order) {
+      try {
+        const modalidad = shipMode === "intl" ? "cargo" : "local"; // exterior(cargo) vs local; el dueño afina conectado/cargo después
+        let delivery;
+        if (shipMode === "persona") delivery = { mode: "persona" };
+        else if (shipMode === "local") delivery = { mode: "local", name: realName, nick: del.nick.trim() || undefined, phone: del.phone, address: del.addr, ref: del.ref, pickup: product.seller_name || "Vendedor", pickupAddress: product.pickupAddress || product.sellerAddress || product.location || "", pickupPhone: product.pickupPhone || product.sellerPhone || product.seller_phone || "" };
+        else if (isCatalogPro) delivery = { mode: "intl", country: destCountry, recipient: { name: del.name, phone: del.phone, country: destCountry, ...(destCountry === "CU" ? { province: del.prov } : {}), city: del.city, address: del.addr }, origin: "Exterior" };
+        else delivery = { mode: "intl", recipient: { name: del.name, phone: del.phone, province: del.prov, city: del.city, address: del.addr }, origin: product.origin || "Exterior", transport: product.shippingType || "standard" };
+        // Para Catálogo Pro el backend IGNORA lo que mandemos acá y fuerza
+        // shipMode='intl'/shipPrice real (get_catalog_pro_shipping_quote) —
+        // esto es solo para que el registro local/optimista muestre algo
+        // razonable mientras llega la respuesta real de la base.
+        const shipPrice = isCatalogPro ? catalogProShipTotal
+          : shipMode === "intl" ? parseFloat(product.shippingPrice || 0)
+          : shipMode === "local" ? liveLocalBase : 0;
+        const shipTo = shipMode === "intl" ? "empresa de envíos" : shipMode === "local" ? "mensajero" : null;
+        const common = {
+          productId: product.id, shipMode, modalidad, shipPrice, shipTo, delivery,
+          paymentMethod,
+        };
+        order = isMulti
+          ? await conTiempoLimite(createOrderMulti({
+              ...common,
+              title: product.title, image: variant?.image || product.img || product.image,
+              lines: [
+                { variantId: variant?.id || null, qty },
+                ...cartLines.map(l => ({ variantId: l.variantId, qty: l.qty })),
+              ],
+            }))
+          : await conTiempoLimite(createOrder({
+              ...common,
+              title: product.title, image: variant?.image || product.img || product.image, cat: product.cat,
+              sellerId: product.seller_id, sellerName: product.seller_name,
+              buyerId: user?.id, buyerName: user?.name, qty, unitPrice: unitPriceWithDisc, amount: total, currency: cur,
+              variantId: variant?.id || null,
+            }));
+      } catch (e) {
+        flash("❌ " + (e.message || "No se pudo crear el pedido"));
+        setLoading(false);
+        return;
+      }
     }
 
     if (paymentMethod !== "tarjeta") {
@@ -713,6 +762,9 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
       setLoading(false);
       return;
     }
+
+    // Se recuerda para no duplicarlo si hay que reabrir Stripe otra vez.
+    pendingCardOrderRef.current = order;
 
     // El pedido YA existe (arriba) — de aquí en más solo se manda su id.
     // El precio, la moneda y el vendedor los reconstruye el backend leyendo
@@ -973,7 +1025,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
                     {row("Total del producto", "", productTotal, true)}
                     <div style={{ fontSize: 10, color: T3, marginTop: 8, lineHeight: 1.5 }}>+ <b>{cupFmt(shipCost)}</b> de domicilio (estimado), que pagas <b>al mensajero en efectivo (CUP)</b> al recibir. Si la distancia resulta mayor, te avisaremos para <b>aprobar el nuevo total antes</b> de que el mensajero salga.</div>
                   </>
-                : row("Total a pagar", "", productTotal + shipCost, true)}
+                : row("Total a pagar", "", buyerTotal, true)}
             </div>;
           })()}
 

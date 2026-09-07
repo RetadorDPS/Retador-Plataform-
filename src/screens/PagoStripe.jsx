@@ -124,7 +124,14 @@ export function PagoStripeScreen({ orderId, resultado, onVerPedido, onIrAlInicio
     icono = <CheckCircle2 size={46} color="#22C55E" />;
     titulo = "¡Pago confirmado!";
     detalle = "Tu dinero quedó en custodia segura. El vendedor preparará tu pedido para el envío.";
-    if (order?.amount != null) extra = money(order.amount, order.currency);
+    // BUG REAL corregido: mostraba order.amount (solo el producto, $196.05 en
+    // el pedido real de Daniel) en vez de lo que Stripe cobró de verdad
+    // ($267.02, producto + envío). held_amount YA es el total real retenido
+    // — lo fija stripe_mark_order_paid() con el mismo criterio que usa el
+    // resto del flujo (buyerTotal en BuyModal, "Total pagado" en el
+    // seguimiento) desde el fix del Bug 1 de la ronda anterior.
+    if (order?.held_amount != null) extra = money(order.held_amount, order.currency);
+    else if (order?.amount != null) extra = money(order.amount, order.currency);
   } else if (interrumpido) {
     icono = <XCircle size={46} color="#ef4444" />;
     titulo = "No se completó el pago";

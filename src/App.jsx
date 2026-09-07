@@ -187,6 +187,23 @@ export default function App() {
   // AppShell ya sabe abrir directo el producto/perfil (App.jsx lee
   // "?openProduct="/"?openProfile=" al montar).
   useEffect(() => { if (sessionUser && deepLink) setEntered(true); }, [sessionUser, deepLink]);
+  // Mismo salto automático que el de arriba, pero para quien vuelve de Stripe
+  // Checkout: esa vuelta SIEMPRE es una recarga completa de la página (Stripe
+  // redirige de verdad, no es navegación interna), así que "entered" arranca
+  // en false igual que en cualquier carga fresca. Sin este efecto, había que
+  // tocar "Entrar a RETADOR" a mano antes de poder ver "¡Pago confirmado!" (o
+  // "Pago cancelado"), aunque el pedido ya estuviera resuelto — AppShell, que
+  // es quien de verdad lee "?pago=&pedido=" y muestra esa pantalla, ni
+  // siquiera llega a montarse hasta que "entered" es true.
+  const [volviendoDeStripe] = useState(() => {
+    try {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get("pago") && q.get("pedido")) return true;
+      if (sessionStorage.getItem("retador_pago_pendiente")) return true;
+    } catch (e) {}
+    return false;
+  });
+  useEffect(() => { if (sessionUser && volviendoDeStripe) setEntered(true); }, [sessionUser, volviendoDeStripe]);
   // Sin sesión, viendo un producto/perfil en modo invitado: si toca "Iniciar
   // sesión", NO se dispara Google directo desde ahí — se muestra la MISMA
   // bienvenida de siempre (stats reales, botón "Entrar a RETADOR"), un solo
@@ -214,8 +231,18 @@ export default function App() {
   useEffect(() => {
     let alive = true;
     loadSessionUser().then(u => { if (alive) setSessionUser(u); });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session?.user) { setSessionUser(null); return; }
+    // BUG REAL corregido — redirecciones no solicitadas a la bienvenida: antes,
+    // CUALQUIER evento de auth sin sesión (incluido uno transitorio, p.ej. justo
+    // al volver de Stripe Checkout mientras el token todavía se revalidaba)
+    // vaciaba sessionUser de inmediato SIN volver a confirmar con el backend.
+    // Eso apagaba "entered" (más abajo) y con él TODA la app (AppShell) — se
+    // llevaba puesta cualquier pantalla que estuviera abierta encima, incluida
+    // "¡Pago confirmado!" — aunque la sesión real siguiera intacta. Ahora cada
+    // evento solo dispara una RE-VERIFICACIÓN real (loadSessionUser hace su
+    // propio getSession() + perfil): si de verdad no hay sesión, esto también
+    // resuelve null y el cierre de sesión sigue funcionando igual; si fue un
+    // evento pasajero, la sesión real gana y la app no se mueve de donde está.
+    const { data: sub } = supabase.auth.onAuthStateChange(() => {
       loadSessionUser().then(u => { if (alive) setSessionUser(u); });
     });
     return () => { alive = false; sub?.subscription?.unsubscribe?.(); };

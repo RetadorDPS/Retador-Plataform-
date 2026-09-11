@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -4501,6 +4501,22 @@ function CatalogPublishedTab({ toast }) {
     setArchiving(false);
   };
 
+  // "🔝 Top": destaca el producto arriba del catálogo que ven los vendedores
+  // Pro/Premium. Se cambia con un toque, sin abrir el detalle ni confirmar
+  // (es reversible al instante). La fila se actualiza en el acto y después se
+  // recarga para que el orden real del listado también se reacomode.
+  const [topping, setTopping] = useState(null);
+  const toggleTop = async (p) => {
+    setTopping(p.id);
+    try {
+      await catalogProSetTop(p.id, !p.is_top);
+      setRows(prev => (prev || []).map(r => r.id === p.id ? { ...r, is_top: !p.is_top } : r));
+      toast(p.is_top ? `Quitado de Top: ${p.title}` : `🔝 Destacado: ${p.title}`);
+      load();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo cambiar el destacado')); }
+    setTopping(null);
+  };
+
   // "Eliminar definitivamente" (solo sobre un producto YA archivado): primero
   // se trae en vivo cuántos vendedores lo tienen agregado a su tienda, para
   // que el admin confirme viendo esa lista real, nunca a ciegas.
@@ -4535,9 +4551,20 @@ function CatalogPublishedTab({ toast }) {
               <div key={p.id} className="mc" style={{ cursor: 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12, opacity: p.status === 'archived' ? .55 : 1 }} onClick={() => setOpenId(p.id)}>
                 <CatalogImg src={p.images?.[0]} width={48} height={48} radius={8} iconSize={20} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{p.title}</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                    {p.is_top && <span style={{ marginRight: 5 }}>🔝</span>}{p.title}
+                  </div>
                   <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>{(p.pricing || []).length} variante(s) · desde {money(p.recommended_price)} · {(p.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
                 </div>
+                {p.status !== 'archived' && (
+                  <button className="btn sm" disabled={topping === p.id}
+                    style={p.is_top
+                      ? { background: 'var(--ac)', color: '#000', border: '1px solid var(--ac)' }
+                      : { background: 'transparent', color: 'var(--tx3)', border: '1px solid var(--bd)' }}
+                    onClick={e => { e.stopPropagation(); toggleTop(p); }}>
+                    {topping === p.id ? '…' : (p.is_top ? '🔝 Top' : 'Destacar')}
+                  </button>
+                )}
                 {p.status !== 'archived'
                   ? <button className="btn sm" style={{ background: 'transparent', color: 'var(--rd)', border: '1px solid var(--rd)' }} onClick={e => { e.stopPropagation(); setToArchive(p); }}>Despublicar</button>
                   : <button className="btn sm" style={{ background: 'transparent', color: 'var(--rd)', border: '1px solid var(--rd)' }} onClick={e => { e.stopPropagation(); askDeleteFinal(p); }}>Eliminar definitivamente</button>}

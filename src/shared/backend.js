@@ -2450,13 +2450,24 @@ export const getOrderStatusMap = async () => {
 // ── Catálogo Pro visto por el VENDEDOR (Pro/Premium) — SOLO columnas
 // seguras: nunca costo real de CJ, costo de envío ni margen de RETADOR.
 // recommended_price es "tu costo" (lo que RETADOR le cobra al vendedor).
+// Los marcados "🔝 Top" por el admin (is_top) van primero; dentro de cada
+// grupo se conserva el orden de siempre (lo más recién publicado arriba), así
+// destacar uno NO reordena el resto del catálogo.
 export const catalogProSellerCatalog = async () => {
   const { data, error } = await supabase.from("catalog_pro_products")
-    .select("id, title, title_en, description, images, category, recommended_price, why_it_sells, published_at, variants")
+    .select("id, title, title_en, description, images, category, recommended_price, why_it_sells, published_at, variants, is_top")
     .eq("status", "activo")
+    .order("is_top", { ascending: false })
     .order("published_at", { ascending: false });
   if (error) { console.error("catalogProSellerCatalog:", error.message); return []; }
   return data || [];
+};
+
+// Marca/desmarca un producto del catálogo curado como "🔝 Top" (solo admin:
+// lo cubre la policy admin_actualiza_catalogo → can_manage_catalog_pro()).
+export const catalogProSetTop = async (id, isTop) => {
+  const { error } = await supabase.from("catalog_pro_products").update({ is_top: !!isTop }).eq("id", id);
+  if (error) { console.error("catalogProSetTop:", error.message); throw error; }
 };
 
 // Selector de variantes de la "Vista a fondo" (Mejora B): SOLO sku, atributos

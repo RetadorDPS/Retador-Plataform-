@@ -1484,11 +1484,17 @@ function CatalogoProSeller({ C, ac, onOpenCatalogDraft, user }) {
             const suggested = Math.round(cost * (1 + SUGGESTED_MARGIN_PCT / 100) * 100) / 100;
             const profit = Math.round((suggested - cost) * 100) / 100;
             return (
-              <div key={p.id} onClick={() => setViewing(p)} style={{ borderRadius:13, background:C.s2, border:`1px solid ${C.b}`, overflow:"hidden", cursor:"pointer" }}>
-                <div style={{ height:110, background:`linear-gradient(140deg,${C.s3},${C.d})`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
+              <div key={p.id} onClick={() => setViewing(p)} style={{ borderRadius:13, background:C.s2, border:`1px solid ${p.is_top ? ac : C.b}`, overflow:"hidden", cursor:"pointer" }}>
+                <div style={{ height:110, background:`linear-gradient(140deg,${C.s3},${C.d})`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", position:"relative" }}>
                   {p.images?.[0]
                     ? <img src={p.images[0]} loading="lazy" decoding="async" referrerPolicy="no-referrer" style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e => { e.target.style.display = "none"; }}/>
                     : <span style={{ fontSize:36, opacity:.5 }}>📦</span>}
+                  {/* Marca "Top" de RETADOR: los que Daniel destaca desde el panel
+                      admin (is_top) ya vienen primero en la lista — esto es la
+                      señal visual de por qué están arriba. */}
+                  {p.is_top && (
+                    <span style={{ position:"absolute", top:7, left:7, background:ac, color:"#000", fontSize:9.5, fontWeight:900, padding:"3px 7px", borderRadius:999, letterSpacing:.3 }}>🔝 TOP</span>
+                  )}
                 </div>
                 <div style={{ padding:11 }}>
                   <div style={{ fontSize:12, fontWeight:600, color:C.t, marginBottom:9, lineHeight:1.35, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{p.title}</div>

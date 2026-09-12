@@ -2338,6 +2338,42 @@ export const catalogProImport = async (pid, variantSkus) => {
   return data;
 };
 
+// ── IMPORTADOR INTELIGENTE (vendedor Pro/Premium) ───────────────────────────
+// La vista previa es la MISMA función que usa el panel admin (cj-import-preview,
+// solo lectura): no se duplicó nada, solo se amplió su permiso a los planes
+// Pro/Premium. Desde v212 ya no trae el stock de todas las variantes — cada
+// variante llega con stock_pendiente y su stock real se pide aparte, solo
+// cuando el vendedor la selecciona de verdad.
+export const cjVariantStock = async (vids) => {
+  const lista = Array.isArray(vids) ? vids : [vids];
+  const { data, error } = await supabase.functions.invoke("cj-variant-stock", { body: { vids: lista } });
+  if (error) { console.error("cjVariantStock:", error.message); throw error; }
+  if (data?.error) throw new Error(data.error);
+  return data?.stock || {};
+};
+
+// Crea el producto del vendedor a partir del enlace del proveedor. Solo se
+// manda QUÉ variantes quiere y A CUÁNTO las vende: el COSTO lo vuelve a leer
+// el servidor del proveedor en ese momento, nunca se envía desde aquí.
+export const cjSellerImport = async ({ pid, variantes, cat, subcat, province }) => {
+  const { data, error } = await supabase.functions.invoke("cj-seller-import", {
+    body: { pid, variantes, cat, subcat, province },
+  });
+  if (error) { console.error("cjSellerImport:", error.message); throw error; }
+  if (data?.error) throw new Error(data.error);
+  return data;
+};
+
+// Lo que el vendedor ya importó por su cuenta (su propio costo y margen: la
+// policy solo le deja ver sus filas).
+export const cjSellerImports = async () => {
+  const { data, error } = await supabase.from("seller_direct_products")
+    .select("id, title, images, provider, provider_pid, created_at, product_id, pricing:seller_direct_pricing(variant_sku, attributes, cost_product, sale_price, profit_estimate, cost_shipping_to_hub, shipping_status)")
+    .order("created_at", { ascending: false });
+  if (error) { console.error("cjSellerImports:", error.message); return []; }
+  return data || [];
+};
+
 // Staging: cada producto trae ya embebidas sus filas de costeo por variante
 // (catalog_pro_variant_pricing, ligadas por staging_id vía la relación real).
 export const catalogProListStaging = async () => {
@@ -2446,6 +2482,46 @@ export const getOrderStatusMap = async () => {
   if (error) { console.error("getOrderStatusMap:", error.message); return []; }
   return data || [];
 };
+
+// ── Enlaces de producto de CJ ───────────────────────────────────────────────
+// Vive aquí (y no dentro de una pantalla) porque lo usan DOS: el panel admin
+// del Catálogo Pro y el Importador Inteligente del vendedor. Un solo sitio
+// donde reconocer los formatos de enlace, para que arreglar uno los arregle
+// en los dos.
+// CJ usa MÁS de un formato real de enlace de producto — confirmados los dos:
+//   · Escritorio: .../product/{slug}-p-{id}.html  (id = snowflake largo,
+//     ej. 1446033730216005632 — el MISMO valor que usamos como pid)
+//   · Móvil:      m.cjdropshipping.com/product/details/{id}  (sin "-p-" en
+//     absoluto — este formato es el que rompía la extracción anterior)
+// El pid de CJ NO siempre es numérico: también viene en formato UUID
+// (ej. 85CFCA0F-94CD-4513-99D6-37B1DACC1290 — confirmado real contra
+// /product/query y listV2, ambos lo aceptan igual que el numérico). El
+// patrón anterior solo reconocía dígitos y fallaba en silencio con estos
+// enlaces — ahora se reconoce el mismo formato UUID en TODOS los patrones
+// (details/, respaldo suelto), no solo en ?pid=.
+// "candidatos": el/los pid que el patrón -p-/details//?pid= identifica
+// directo (se usan sin verificar, son patrones ya confirmados reales).
+// "respaldo": cualquier otro número largo o UUID suelto en la URL — estos SÍ
+// se validan de verdad contra cj-import-preview antes de usarse, uno por
+// uno, para no mandar al admin a un preview con un pid inventado.
+export const CJ_PID_UUID_RE = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}';
+export function extractCjPidCandidates(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return { candidatos: [], respaldo: [] };
+  const candidatos = [];
+  for (const m of s.matchAll(/-p-(\d{5,25})/gi)) candidatos.push(m[1]);
+  for (const m of s.matchAll(new RegExp(`-p-(${CJ_PID_UUID_RE})`, 'gi'))) candidatos.push(m[1]);
+  for (const m of s.matchAll(new RegExp(`/product/details/(${CJ_PID_UUID_RE})`, 'gi'))) candidatos.push(m[1]);
+  for (const m of s.matchAll(/\/product\/details\/(\d{5,25})/gi)) candidatos.push(m[1]);
+  for (const m of s.matchAll(/[?&]pid=([A-Za-z0-9-]{6,40})/gi)) candidatos.push(m[1]);
+  const yaEncontrados = new Set(candidatos.map(c => c.toLowerCase()));
+  const respaldoNumerico = s.match(/\d{9,25}/g) || [];
+  const respaldoUuid = s.match(new RegExp(CJ_PID_UUID_RE, 'gi')) || [];
+  const respaldo = [...new Set([...respaldoNumerico, ...respaldoUuid])]
+    .filter(n => !yaEncontrados.has(n.toLowerCase()))
+    .sort((a, b) => b.length - a.length);
+  return { candidatos: [...new Set(candidatos)], respaldo };
+}
 
 // ── Catálogo Pro visto por el VENDEDOR (Pro/Premium) — SOLO columnas
 // seguras: nunca costo real de CJ, costo de envío ni margen de RETADOR.

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -3561,41 +3561,6 @@ function CatalogImg({ src, width = 48, height = width, radius = 8, iconSize, sty
     return <div style={{ ...box, background: 'var(--bg2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: iconSize || 20 }}>📦</div>;
   }
   return <img src={src} alt="" referrerPolicy="no-referrer" style={{ ...box, objectFit: 'cover' }} onError={() => { console.error('CatalogImg: no cargó', src); setBroken(true); }} />;
-}
-
-// CJ usa MÁS de un formato real de enlace de producto — confirmados los dos:
-//   · Escritorio: .../product/{slug}-p-{id}.html  (id = snowflake largo,
-//     ej. 1446033730216005632 — el MISMO valor que usamos como pid)
-//   · Móvil:      m.cjdropshipping.com/product/details/{id}  (sin "-p-" en
-//     absoluto — este formato es el que rompía la extracción anterior)
-// El pid de CJ NO siempre es numérico: también viene en formato UUID
-// (ej. 85CFCA0F-94CD-4513-99D6-37B1DACC1290 — confirmado real contra
-// /product/query y listV2, ambos lo aceptan igual que el numérico). El
-// patrón anterior solo reconocía dígitos y fallaba en silencio con estos
-// enlaces — ahora se reconoce el mismo formato UUID en TODOS los patrones
-// (details/, respaldo suelto), no solo en ?pid=.
-// "candidatos": el/los pid que el patrón -p-/details//?pid= identifica
-// directo (se usan sin verificar, son patrones ya confirmados reales).
-// "respaldo": cualquier otro número largo o UUID suelto en la URL — estos SÍ
-// se validan de verdad contra cj-import-preview antes de usarse, uno por
-// uno, para no mandar al admin a un preview con un pid inventado.
-const CJ_PID_UUID_RE = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}';
-function extractCjPidCandidates(raw) {
-  const s = String(raw || '').trim();
-  if (!s) return { candidatos: [], respaldo: [] };
-  const candidatos = [];
-  for (const m of s.matchAll(/-p-(\d{5,25})/gi)) candidatos.push(m[1]);
-  for (const m of s.matchAll(new RegExp(`-p-(${CJ_PID_UUID_RE})`, 'gi'))) candidatos.push(m[1]);
-  for (const m of s.matchAll(new RegExp(`/product/details/(${CJ_PID_UUID_RE})`, 'gi'))) candidatos.push(m[1]);
-  for (const m of s.matchAll(/\/product\/details\/(\d{5,25})/gi)) candidatos.push(m[1]);
-  for (const m of s.matchAll(/[?&]pid=([A-Za-z0-9-]{6,40})/gi)) candidatos.push(m[1]);
-  const yaEncontrados = new Set(candidatos.map(c => c.toLowerCase()));
-  const respaldoNumerico = s.match(/\d{9,25}/g) || [];
-  const respaldoUuid = s.match(new RegExp(CJ_PID_UUID_RE, 'gi')) || [];
-  const respaldo = [...new Set([...respaldoNumerico, ...respaldoUuid])]
-    .filter(n => !yaEncontrados.has(n.toLowerCase()))
-    .sort((a, b) => b.length - a.length);
-  return { candidatos: [...new Set(candidatos)], respaldo };
 }
 
 // Confirmación simple reutilizable (Eliminar Staging / Despublicar) — mismo

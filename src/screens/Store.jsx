@@ -25,7 +25,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy, ShoppingBag, Link2, Sparkles,
 } from "lucide-react";
-import { useAt, useR, useCatalog, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, attrLabelText, groupVariantAttrs, resolveVariantBy, extractCjPidCandidates, catalogProPreview, cjVariantStock, cjSellerImport, cjSellerImports } from "../shared/index.js";
+import { useAt, useR, useCatalog, money, getPlans, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, attrLabelText, groupVariantAttrs, resolveVariantBy, extractCjPidCandidates, catalogProPreview, cjVariantStock, cjSellerImport, cjSellerImports } from "../shared/index.js";
 // recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
 // se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
 // nunca de entrada para todos (la mayoría son compradores que ni la ven).
@@ -1256,7 +1256,21 @@ function Config({ cfg, onUpdateConfig, C, ac, flash }) {
 }
 
 /* ── 9) SUSCRIPCIÓN — plan real + Pro gratis (compartir/referidos) ──────── */
-function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
+function Billing({ user, myPlan: myPlanProp, plans: plansProp, C, ac, flash, onPlanRequested }) {
+  // La app carga los planes UNA vez al arrancar (App.jsx) y nunca los vuelve
+  // a pedir — si el admin cambia un precio o activa una promo mientras la
+  // sesión ya estaba abierta, esa copia en memoria queda vieja. Esta pantalla
+  // se monta de nuevo cada vez que el usuario entra a "Suscripción", así que
+  // pide la fila real de plans aquí mismo, sin depender de recargar la app.
+  const [plans, setPlans] = useState(plansProp);
+  useEffect(() => {
+    let alive = true;
+    getPlans().then(p => { if (alive) setPlans(p); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  // Mismo motivo: el precio/nombre del plan propio también viene de esa
+  // copia vieja (myPlan prop) — se recalcula contra los planes recién leídos.
+  const myPlan = plans.find(p => p.id === myPlanProp?.id) || myPlanProp;
   const [pending, setPending] = useState(null);
   const [promoOpen, setPromoOpen] = useState(false);
   const [promoTab, setPromoTab] = useState("compartir");
@@ -1340,7 +1354,7 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
                 </div>
                 <div style={{ fontSize:11, color:C.m }}>{pl.max_products} productos · {Number(pl.commission_pct)}% comisión</div>
               </div>
-              <div style={{ textAlign:"right" }}>
+              <div style={{ textAlign:"right", flexShrink:0 }}>
                 {hasPromo ? (
                   <>
                     <div style={{ fontSize:11.5, color:C.m, textDecoration:"line-through" }}>{Number(pl.price)===0?"Gratis":money(pl.price, pl.currency)}</div>
@@ -1355,6 +1369,15 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
                 )}
               </div>
             </div>
+            {Array.isArray(pl.features) && pl.features.length > 0 && (
+              <div style={{ marginBottom:12, display:"flex", flexDirection:"column", gap:5 }}>
+                {pl.features.map((f, i) => (
+                  <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:7, fontSize:12, color:C.t }}>
+                    <span style={{ color:"#19C37D", flexShrink:0 }}>✓</span>{f}
+                  </div>
+                ))}
+              </div>
+            )}
             {!active && (
               pending?.plan === pl.id
                 ? <div style={{ width:"100%", marginTop:8, padding:8, borderRadius:8, background:C.s3, color:C.m, fontSize:12, textAlign:"center" }}>🕐 Solicitud en revisión</div>

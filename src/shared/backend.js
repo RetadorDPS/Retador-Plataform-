@@ -2020,10 +2020,20 @@ export const adminReviewPlan = async (requestId, approve) => {
 // se guarda contra esta misma tabla, con una sola función de guardado.
 export const adminListPlanLimits = async () => {
   const { data, error } = await supabase.from("plans")
-    .select("id, name, price, currency, max_products, commission_pct, promo_price, promo_label, promo_active")
+    .select("id, name, price, currency, max_products, commission_pct, promo_price, promo_label, promo_active, features")
     .order("price", { ascending: true });
   if (error) { console.error("adminListPlanLimits:", error.message); return []; }
   return data || [];
+};
+// Lista de beneficios en texto libre por plan (plans.features) — el admin
+// decide qué escribir, nunca un texto inventado por el código.
+export const adminSetPlanFeatures = async (planId, features) => {
+  const { data, error } = await supabase.rpc("admin_set_plan_features", {
+    p_plan_id: planId,
+    p_features: features || [],
+  });
+  if (error) { console.error("adminSetPlanFeatures:", error.message); throw error; }
+  return data;
 };
 // patch: { maxProducts, price, name, promoPrice, promoLabel, promoActive } — cualquiera
 // puede omitirse (queda igual: admin_update_plan usa coalesce con el valor actual).
@@ -2047,7 +2057,7 @@ export const adminUpdatePlan = async (planId, patch = {}) => {
 // promoción (si el admin la activó) para que Suscripción y "Solicitar plan"
 // puedan mostrar el precio promocional tal cual está en la base.
 export const getPlans = async () => {
-  const { data, error } = await supabase.from("plans").select("id, name, max_products, price, currency, commission_pct, can_customize, promo_price, promo_label, promo_active").eq("active", true).order("price", { ascending: true });
+  const { data, error } = await supabase.from("plans").select("id, name, max_products, price, currency, commission_pct, can_customize, promo_price, promo_label, promo_active, features").eq("active", true).order("price", { ascending: true });
   if (error) { console.error("getPlans:", error.message); return []; }
   return data || [];
 };

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -2442,12 +2442,16 @@ function Economia({toast, data={}, ro}){
         promoActive: !!r.promo_active,
         promoPrice: r.promo_price!=null ? String(r.promo_price) : '',
         promoLabel: r.promo_label || '',
+        features: Array.isArray(r.features) ? r.features : [],
       }; });
       setLimDraft(d);
     }).catch(()=>setLimits([]));
   },[]);
   useEffect(()=>{ loadLimits(); },[loadLimits]);
   const setLim=(id,k,v)=>setLimDraft(d=>({...d,[id]:{...d[id],[k]:v}}));
+  const addFeature=(id)=>setLimDraft(d=>({...d,[id]:{...d[id],features:[...(d[id]?.features||[]),'']}}));
+  const setFeature=(id,i,v)=>setLimDraft(d=>({...d,[id]:{...d[id],features:(d[id]?.features||[]).map((f,idx)=>idx===i?v:f)}}));
+  const removeFeature=(id,i)=>setLimDraft(d=>({...d,[id]:{...d[id],features:(d[id]?.features||[]).filter((_,idx)=>idx!==i)}}));
   const saveLimits=async ()=>{
     if (ro) { toast('Solo lectura — sin permiso para modificar'); return; }
     setSavingLim(true);
@@ -2467,6 +2471,7 @@ function Economia({toast, data={}, ro}){
           promoPrice: d.promoActive ? Number(d.promoPrice) : null,
           promoLabel: d.promoActive ? (d.promoLabel?.trim() || null) : null,
         });
+        await adminSetPlanFeatures(p.id, (d.features||[]).map(f=>f.trim()).filter(Boolean));
       }
       toast('Planes guardados');
       loadLimits();
@@ -2793,6 +2798,17 @@ function Economia({toast, data={}, ro}){
                 <input value={d.promoLabel ?? ''} disabled={ro} readOnly={ro} onChange={e=>setLim(p.id,'promoLabel',e.target.value)} placeholder='Ej: "¡Gratis hoy!", "50% de lanzamiento"'
                   style={{flex:'1 1 180px',minWidth:0,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:7,padding:'7px 10px',color:'var(--tx)',fontSize:12,outline:'none',opacity:ro?.6:1}}/>
               </>}
+            </div>
+            <div style={{marginTop:11,paddingTop:11,borderTop:'1px solid var(--bd)'}}>
+              <div style={{fontSize:11,fontWeight:600,color:'var(--tx2)',marginBottom:7}}>Beneficios (se muestran junto al plan)</div>
+              {(d.features||[]).map((f,i)=>(
+                <div key={i} style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+                  <input value={f} disabled={ro} readOnly={ro} onChange={e=>setFeature(p.id,i,e.target.value)} placeholder='Ej: "Tienda personalizable"'
+                    style={{flex:1,minWidth:0,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:7,padding:'7px 10px',color:'var(--tx)',fontSize:12,outline:'none',opacity:ro?.6:1}}/>
+                  {!ro && <button onClick={()=>removeFeature(p.id,i)} style={{width:28,height:28,flexShrink:0,borderRadius:7,border:'1px solid var(--bd2)',background:'var(--bg)',color:'var(--tx3)',fontSize:13,cursor:'pointer'}}>✕</button>}
+                </div>
+              ))}
+              {!ro && <button onClick={()=>addFeature(p.id)} style={{fontSize:11,fontWeight:700,color:'var(--ac)',background:'none',border:'none',cursor:'pointer',padding:'4px 0'}}>+ Agregar beneficio</button>}
             </div>
           </div>;
         })}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlanLimit, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -2387,9 +2387,6 @@ function Economia({toast, data={}, ro}){
     toast('Tasa de cambio guardada');
   };
   const usdEur = (Number(t.eurCup)>0) ? (Number(t.usdCup)/Number(t.eurCup)) : 0;
-  const [pl, setPl] = useState(()=> (cfg.plans||[]).map(p=>({...p})));
-  const setPlan=(i,k,v)=>setPl(arr=>arr.map((p,j)=>j===i?{...p,[k]:v}:p));
-  const savePlans=()=>{ if (ro) { toast('Solo lectura — sin permiso para modificar'); return; } data.onCfg && data.onCfg({ plans: pl.map(p=>({...p, price:Number(p.price)||0, promoPrice:Number(p.promoPrice)||0})) }); toast('Planes guardados'); };
 
   // ── "Pro gratis por compartir" (promo_settings, punto F) — interruptor real
   // + enlaces requeridos por mes. request_plan_promo (backend) ya lee esta
@@ -2418,31 +2415,60 @@ function Economia({toast, data={}, ro}){
     setSavingPromoS(false);
   };
 
-  // ── Límite REAL de productos por plan (tabla plans, la que hace cumplir de
-  // verdad el candado enforce_product_limit al publicar) — es un dato aparte
-  // de cfg.plans de arriba (que es solo el texto/precio de marketing).
-  const LIMIT_ORDER=[{id:'gratis',label:'Gratis'},{id:'pro',label:'Pro'},{id:'premium',label:'Premium'}];
+  // ── PLANES — edición REAL contra la tabla `plans` ───────────────────────
+  // BUG REAL encontrado y corregido: este editor y el de "límite de
+  // productos" (más abajo) eran DOS pantallas separadas — esta escribía
+  // nombre/precio/promo en platform_config.config.plans, un JSON de
+  // marketing que NINGÚN usuario real llega a leer; la otra sí escribía el
+  // límite en la tabla real `plans` (la que hace cumplir de verdad el
+  // candado enforce_product_limit y la que lee getPlans() para mostrarle el
+  // precio a cualquier usuario). El admin cambiaba el precio de Pro a mano,
+  // veía "Planes guardados" y el precio real nunca se movía — confirmado
+  // contra la base: quedó en $22 solo en el JSON, mientras la tabla seguía
+  // en $9.99. Ahora es un solo editor, una sola tabla, una sola función de
+  // guardado (admin_update_plan) para nombre, precio, límite y promoción.
+  const PLAN_ORDER=[{id:'gratis',label:'Gratis'},{id:'pro',label:'Pro'},{id:'premium',label:'Premium'}];
   const [limits, setLimits] = useState(null);      // filas reales de la tabla plans
-  const [limDraft, setLimDraft] = useState({});    // borrador { gratis:'10', pro:'50', premium:'500' }
+  const [limDraft, setLimDraft] = useState({});    // borrador por id: { name, price, maxProducts, promoActive, promoPrice, promoLabel }
   const [savingLim, setSavingLim] = useState(false);
   const loadLimits = useCallback(()=>{
     adminListPlanLimits().then(rows=>{
       setLimits(rows);
-      const d={}; rows.forEach(r=>{ d[r.id]=String(r.max_products); }); setLimDraft(d);
+      const d={};
+      rows.forEach(r=>{ d[r.id]={
+        name: r.name,
+        price: String(r.price),
+        maxProducts: String(r.max_products),
+        promoActive: !!r.promo_active,
+        promoPrice: r.promo_price!=null ? String(r.promo_price) : '',
+        promoLabel: r.promo_label || '',
+      }; });
+      setLimDraft(d);
     }).catch(()=>setLimits([]));
   },[]);
   useEffect(()=>{ loadLimits(); },[loadLimits]);
-  const setLim=(id,v)=>setLimDraft(d=>({...d,[id]:v}));
+  const setLim=(id,k,v)=>setLimDraft(d=>({...d,[id]:{...d[id],[k]:v}}));
   const saveLimits=async ()=>{
     if (ro) { toast('Solo lectura — sin permiso para modificar'); return; }
     setSavingLim(true);
     try {
-      for (const p of LIMIT_ORDER) {
-        const n = parseInt(limDraft[p.id], 10);
-        if (Number.isNaN(n) || n < -1) throw new Error(`Límite inválido para ${p.label} (usa -1 para ilimitado)`);
-        await adminUpdatePlanLimit(p.id, n);
+      for (const p of PLAN_ORDER) {
+        const d = limDraft[p.id]; if (!d) continue;
+        const maxProducts = parseInt(d.maxProducts, 10);
+        if (Number.isNaN(maxProducts) || maxProducts < -1) throw new Error(`Límite inválido para ${p.label} (usa -1 para ilimitado)`);
+        const price = Number(d.price);
+        if (!(price >= 0)) throw new Error(`Precio inválido para ${p.label}`);
+        if (d.promoActive && !(Number(d.promoPrice) >= 0)) throw new Error(`Precio promocional inválido para ${p.label}`);
+        await adminUpdatePlan(p.id, {
+          name: d.name?.trim() || undefined,
+          price,
+          maxProducts,
+          promoActive: d.promoActive,
+          promoPrice: d.promoActive ? Number(d.promoPrice) : null,
+          promoLabel: d.promoActive ? (d.promoLabel?.trim() || null) : null,
+        });
       }
-      toast('Límite de productos guardado');
+      toast('Planes guardados');
       loadLimits();
     } catch (e) { toast('⚠️ ' + (e?.message || 'No se pudo guardar')); }
     setSavingLim(false);
@@ -2735,31 +2761,44 @@ function Economia({toast, data={}, ro}){
       </div>}
     </div>
 
-    {/* ── PLANES ── */}
+    {/* ── PLANES — nombre, precio, límite y promoción, todo contra la tabla
+        real (ver comentario largo junto al estado, arriba). ── */}
     <div className="card cp mb16">
-      <div className="ch" style={{marginBottom:6}}><span className="ct">⭐ Planes</span><span className="bdg bp">precios e info</span></div>
-      <div style={{fontSize:11,color:'var(--tx3)',marginBottom:14}}>Define cada plan: precio, promoción y qué incluye. Es lo que verá el usuario al pedir mejorar su plan.</div>
-      {pl.map((p,i)=><div key={p.id||i} style={{border:'1px solid var(--bd2)',borderRadius:11,padding:'13px',marginBottom:11,background:'var(--bg2)'}}>
-        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
-          <input value={p.name} disabled={ro} readOnly={ro} onChange={e=>setPlan(i,'name',e.target.value)} style={{flex:1,minWidth:0,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px',color:'var(--tx)',fontSize:13,fontWeight:800,outline:'none',opacity:ro?.6:1}}/>
-          <div style={{display:'flex',alignItems:'center',gap:5,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px',opacity:ro?.6:1}}>
-            <span style={{fontSize:12,color:'var(--tx3)'}}>$</span>
-            <input type="number" value={p.price} disabled={ro} readOnly={ro} onChange={e=>setPlan(i,'price',e.target.value)} style={{width:54,background:'none',border:'none',color:'var(--tx)',fontSize:13,fontWeight:700,outline:'none',fontFamily:'var(--mo)'}}/>
-            <span style={{fontSize:10,color:'var(--tx3)'}}>/mes</span>
-          </div>
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,flexWrap:'wrap'}}>
-          <button disabled={ro} onClick={()=>{ if(ro)return; setPlan(i,'promo',!p.promo); }} style={{height:32,padding:'0 12px',borderRadius:7,border:`1px solid ${p.promo?'var(--yw)':'var(--bd2)'}`,background:p.promo?'rgba(245,166,35,.12)':'var(--bg)',color:p.promo?'var(--yw)':'var(--tx3)',fontSize:11,fontWeight:700,cursor:ro?'not-allowed':'pointer',opacity:ro?.6:1}}>{p.promo?'● En promoción':'○ Sin promo'}</button>
-          {p.promo&&<div style={{display:'flex',alignItems:'center',gap:5,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:7,padding:'6px 10px',opacity:ro?.6:1}}>
-            <span style={{fontSize:11,color:'var(--tx3)'}}>Precio promo $</span>
-            <input type="number" value={p.promoPrice} disabled={ro} readOnly={ro} onChange={e=>setPlan(i,'promoPrice',e.target.value)} style={{width:48,background:'none',border:'none',color:'var(--tx)',fontSize:12,fontWeight:700,outline:'none',fontFamily:'var(--mo)'}}/>
-          </div>}
-        </div>
-        <div style={{fontSize:10,color:'var(--tx3)',marginBottom:4,fontWeight:600}}>QUÉ INCLUYE (una línea por beneficio)</div>
-        <textarea value={(p.features||[]).join('\n')} disabled={ro} readOnly={ro} onChange={e=>setPlan(i,'features',e.target.value.split('\n'))} rows={3} style={{width:'100%',background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'8px 10px',color:'var(--tx)',fontSize:12,outline:'none',resize:'vertical',fontFamily:'inherit',lineHeight:1.5,opacity:ro?.6:1}}/>
-      </div>)}
-      {!ro && <div style={{display:'flex',justifyContent:'flex-end',marginTop:4}}>
-        <button className="btn btp" onClick={savePlans} style={{fontWeight:800,padding:'9px 22px'}}>Guardar planes</button>
+      <div className="ch" style={{marginBottom:6}}><span className="ct">⭐ Planes</span><span className="bdg bb">tabla real</span></div>
+      <div style={{fontSize:11,color:'var(--tx3)',marginBottom:14}}>Nombre, precio y cuántos productos activos puede tener publicados un vendedor en cada plan — es el candado real que aplica enforce_product_limit al publicar, y lo que ve cualquier usuario al pedir mejorar su plan.</div>
+      {limits===null
+        ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'16px 6px'}}>Cargando…</div>
+        : PLAN_ORDER.map(p=>{
+          const d = limDraft[p.id] || {};
+          return <div key={p.id} style={{border:'1px solid var(--bd2)',borderRadius:11,padding:'13px',marginBottom:11,background:'var(--bg2)'}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,flexWrap:'wrap'}}>
+              <input value={d.name ?? ''} disabled={ro} readOnly={ro} onChange={e=>setLim(p.id,'name',e.target.value)} style={{flex:'1 1 120px',minWidth:0,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px',color:'var(--tx)',fontSize:13,fontWeight:800,outline:'none',opacity:ro?.6:1}}/>
+              <div style={{display:'flex',alignItems:'center',gap:5,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px',opacity:ro?.6:1}}>
+                <span style={{fontSize:12,color:'var(--tx3)'}}>$</span>
+                <input type="number" value={d.price ?? ''} disabled={ro} readOnly={ro} onChange={e=>setLim(p.id,'price',e.target.value)} style={{width:54,background:'none',border:'none',color:'var(--tx)',fontSize:13,fontWeight:700,outline:'none',fontFamily:'var(--mo)'}}/>
+                <span style={{fontSize:10,color:'var(--tx3)'}}>/mes</span>
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:6,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px',opacity:ro?.6:1}}>
+                <input type="number" value={d.maxProducts ?? ''} disabled={ro} readOnly={ro} onChange={e=>setLim(p.id,'maxProducts',e.target.value)} style={{width:56,background:'none',border:'none',color:'var(--tx)',fontSize:13,fontWeight:700,outline:'none',fontFamily:'var(--mo)',cursor:ro?'not-allowed':'text'}}/>
+                <span style={{fontSize:11,color:'var(--tx3)',whiteSpace:'nowrap'}}>productos</span>
+              </div>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+              <button disabled={ro} onClick={()=>{ if(ro)return; setLim(p.id,'promoActive',!d.promoActive); }} style={{height:32,padding:'0 12px',borderRadius:7,border:`1px solid ${d.promoActive?'var(--yw)':'var(--bd2)'}`,background:d.promoActive?'rgba(245,166,35,.12)':'var(--bg)',color:d.promoActive?'var(--yw)':'var(--tx3)',fontSize:11,fontWeight:700,cursor:ro?'not-allowed':'pointer',opacity:ro?.6:1}}>{d.promoActive?'● Promoción activa':'○ Sin promoción'}</button>
+              {d.promoActive && <>
+                <div style={{display:'flex',alignItems:'center',gap:5,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:7,padding:'6px 10px',opacity:ro?.6:1}}>
+                  <span style={{fontSize:11,color:'var(--tx3)'}}>Precio promo $</span>
+                  <input type="number" value={d.promoPrice ?? ''} disabled={ro} readOnly={ro} onChange={e=>setLim(p.id,'promoPrice',e.target.value)} style={{width:56,background:'none',border:'none',color:'var(--tx)',fontSize:12,fontWeight:700,outline:'none',fontFamily:'var(--mo)'}}/>
+                </div>
+                <input value={d.promoLabel ?? ''} disabled={ro} readOnly={ro} onChange={e=>setLim(p.id,'promoLabel',e.target.value)} placeholder='Ej: "¡Gratis hoy!", "50% de lanzamiento"'
+                  style={{flex:'1 1 180px',minWidth:0,background:'var(--bg)',border:'1px solid var(--bd2)',borderRadius:7,padding:'7px 10px',color:'var(--tx)',fontSize:12,outline:'none',opacity:ro?.6:1}}/>
+              </>}
+            </div>
+          </div>;
+        })}
+      <div style={{fontSize:10,color:'var(--tx3)',marginTop:4}}>-1 en productos significa ilimitado. La promoción es opcional: sin activarla, el usuario ve el precio normal exactamente igual que hoy.</div>
+      {!ro && <div style={{display:'flex',justifyContent:'flex-end',marginTop:12}}>
+        <button className="btn btp" disabled={savingLim||limits===null} onClick={saveLimits} style={{fontWeight:800,padding:'9px 22px'}}>{savingLim?'Guardando…':'Guardar planes'}</button>
       </div>}
     </div>
 
@@ -2791,27 +2830,6 @@ function Economia({toast, data={}, ro}){
           </div>
         </div>
       </>}
-    </div>
-
-    {/* ── LÍMITE REAL DE PRODUCTOS POR PLAN ── */}
-    <div className="card cp mb16">
-      <div className="ch" style={{marginBottom:6}}><span className="ct">📦 Límite de productos por plan</span><span className="bdg bb">candado real</span></div>
-      <div style={{fontSize:11,color:'var(--tx3)',marginBottom:14}}>Cuántos productos activos puede tener publicados un vendedor en cada plan. Esto es lo que de verdad bloquea al publicar (no solo texto informativo).</div>
-      {limits===null
-        ? <div style={{textAlign:'center',color:'var(--tx3)',fontSize:12,padding:'16px 6px'}}>Cargando…</div>
-        : LIMIT_ORDER.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 0',borderBottom:'1px solid rgba(128,128,128,.1)'}}>
-            <div style={{flex:1,fontSize:13,fontWeight:700,color:'var(--tx)'}}>{p.label}</div>
-            <div style={{display:'flex',alignItems:'center',gap:6,background:'var(--bg2)',border:'1px solid var(--bd2)',borderRadius:8,padding:'7px 10px',opacity:ro?.6:1}}>
-              <input type="number" value={limDraft[p.id] ?? ''} disabled={ro} readOnly={ro}
-                onChange={e=>setLim(p.id,e.target.value)}
-                style={{width:64,background:'none',border:'none',color:'var(--tx)',fontSize:13,fontWeight:700,outline:'none',fontFamily:'var(--mo)',cursor:ro?'not-allowed':'text'}}/>
-              <span style={{fontSize:11,color:'var(--tx3)',whiteSpace:'nowrap'}}>productos</span>
-            </div>
-          </div>)}
-      <div style={{fontSize:10,color:'var(--tx3)',marginTop:8}}>-1 significa ilimitado.</div>
-      {!ro && <div style={{display:'flex',justifyContent:'flex-end',marginTop:12}}>
-        <button className="btn btp" disabled={savingLim||limits===null} onClick={saveLimits} style={{fontWeight:800,padding:'9px 22px'}}>{savingLim?'Guardando…':'Guardar límites'}</button>
-      </div>}
     </div>
 
     <div className="g2 mb16">

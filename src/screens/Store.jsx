@@ -1320,8 +1320,18 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
       {plans.map(pl => {
         const active = pl.id === myPlan?.id;
         const r = toRgb(ac);
+        // Precio promocional (plans.promo_price/promo_label/promo_active,
+        // editado desde el panel admin › Economía › Planes) — si el admin no
+        // la activó, promo_active viene false/null y esto queda exactamente
+        // como antes, sin ningún cambio visual.
+        const hasPromo = pl.promo_active && pl.promo_price != null;
         return (
           <div key={pl.id} style={{ borderRadius:16, border:`1px solid ${active?ac:C.b}`, background:active?`rgba(${r},0.06)`:C.s2, padding:18, marginBottom:10 }}>
+            {hasPromo && (
+              <div style={{ display:"inline-flex", alignItems:"center", gap:5, background:"rgba(245,158,11,.14)", border:"1px solid rgba(245,158,11,.4)", borderRadius:20, padding:"3px 10px", fontSize:10, fontWeight:800, color:"#F59E0B", marginBottom:9 }}>
+                🔥 {pl.promo_label || "Promoción"}
+              </div>
+            )}
             <div style={{ display:"flex", justifyContent:"space-between", marginBottom:12 }}>
               <div>
                 <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:2 }}>
@@ -1331,8 +1341,18 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
                 <div style={{ fontSize:11, color:C.m }}>{pl.max_products} productos · {Number(pl.commission_pct)}% comisión</div>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize:20, fontWeight:800, color:C.t }}>{Number(pl.price)===0?"Gratis":money(pl.price, pl.currency)}</div>
-                {Number(pl.price)>0 && <div style={{ fontSize:10, color:C.m }}>/mes</div>}
+                {hasPromo ? (
+                  <>
+                    <div style={{ fontSize:11.5, color:C.m, textDecoration:"line-through" }}>{Number(pl.price)===0?"Gratis":money(pl.price, pl.currency)}</div>
+                    <div style={{ fontSize:20, fontWeight:800, color:"#F59E0B" }}>{Number(pl.promo_price)===0?"Gratis":money(pl.promo_price, pl.currency)}</div>
+                    <div style={{ fontSize:10, color:C.m }}>/mes</div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize:20, fontWeight:800, color:C.t }}>{Number(pl.price)===0?"Gratis":money(pl.price, pl.currency)}</div>
+                    {Number(pl.price)>0 && <div style={{ fontSize:10, color:C.m }}>/mes</div>}
+                  </>
+                )}
               </div>
             </div>
             {!active && (

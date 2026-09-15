@@ -2010,26 +2010,44 @@ export const adminReviewPlan = async (requestId, approve) => {
   return data;
 };
 
-// ── LÍMITE REAL de productos por plan (tabla plans, la que lee de verdad el
-// trigger enforce_product_limit al publicar) — NO confundir con cfg.plans
-// (platform_config), que es solo texto/precio de marketing para la pantalla
-// de planes del comprador.
+// ── EDICIÓN REAL de planes (tabla plans — la única fuente de verdad: el
+// trigger enforce_product_limit y la propia getPlans() de abajo leen de
+// aquí). BUG REAL encontrado y corregido: la pantalla de Economía → Planes
+// editaba antes un JSON de marketing aparte (platform_config.config.plans)
+// que nunca se leía en ningún otro sitio — el admin cambiaba el precio, veía
+// "Guardado" y el precio real (el que ve cualquier usuario) nunca se movía.
+// Ahora todo — nombre, precio, límite de productos y la promoción — se lee y
+// se guarda contra esta misma tabla, con una sola función de guardado.
 export const adminListPlanLimits = async () => {
-  const { data, error } = await supabase.from("plans").select("id, name, max_products").order("id");
+  const { data, error } = await supabase.from("plans")
+    .select("id, name, price, currency, max_products, commission_pct, promo_price, promo_label, promo_active")
+    .order("price", { ascending: true });
   if (error) { console.error("adminListPlanLimits:", error.message); return []; }
   return data || [];
 };
-export const adminUpdatePlanLimit = async (planId, maxProducts) => {
-  const { data, error } = await supabase.rpc("admin_update_plan", { p_plan_id: planId, p_max_products: maxProducts });
-  if (error) { console.error("adminUpdatePlanLimit:", error.message); throw error; }
+// patch: { maxProducts, price, name, promoPrice, promoLabel, promoActive } — cualquiera
+// puede omitirse (queda igual: admin_update_plan usa coalesce con el valor actual).
+export const adminUpdatePlan = async (planId, patch = {}) => {
+  const { data, error } = await supabase.rpc("admin_update_plan", {
+    p_plan_id: planId,
+    p_max_products: patch.maxProducts ?? null,
+    p_price: patch.price ?? null,
+    p_name: patch.name ?? null,
+    p_promo_price: patch.promoPrice ?? null,
+    p_promo_label: patch.promoLabel ?? null,
+    p_promo_active: patch.promoActive ?? null,
+  });
+  if (error) { console.error("adminUpdatePlan:", error.message); throw error; }
   return data;
 };
 // ── Misma tabla `plans` de arriba, pero de lectura pública (RLS "planes
 // visibles" ya la deja abierta a cualquiera) — es la fuente ÚNICA para la
 // pantalla de planes del comprador: nombre, precio, límite y comisión reales,
-// sin texto de marketing inventado ni datos desincronizados.
+// sin texto de marketing inventado ni datos desincronizados. Incluye la
+// promoción (si el admin la activó) para que Suscripción y "Solicitar plan"
+// puedan mostrar el precio promocional tal cual está en la base.
 export const getPlans = async () => {
-  const { data, error } = await supabase.from("plans").select("id, name, max_products, price, currency, commission_pct, can_customize").eq("active", true).order("price", { ascending: true });
+  const { data, error } = await supabase.from("plans").select("id, name, max_products, price, currency, commission_pct, can_customize, promo_price, promo_label, promo_active").eq("active", true).order("price", { ascending: true });
   if (error) { console.error("getPlans:", error.message); return []; }
   return data || [];
 };

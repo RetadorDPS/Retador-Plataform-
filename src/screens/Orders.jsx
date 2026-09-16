@@ -107,7 +107,18 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
   // Igual que viewerIsSeller (arriba), con el matiz de la coreografía: sin
   // ninguna señal directa de comprador, se asume comprador por descarte.
   const viewerIsBuyerReal = (!!user?.id && (o.buyer_id === user.id || o.buyerId === user.id)) || (o.buyerId != null && o.buyerId === user?.id) || (!!o.buyerName && o.buyerName === me) || !viewerIsSeller;
-  const totalPagar = o.shipType === "paquete" ? Number(o.shipPrice || 0) : Number(o.amount || 0) + Number(o.shipPrice || 0);
+  // BUG REAL corregido: el domicilio local (o.shipPrice cuando shipType==="local")
+  // es SIEMPRE CUP — la tarifa fija que configura el admin en Economía, pagada en
+  // efectivo al mensajero al recibir, nunca parte del cobro por la app (mismo
+  // criterio que ya usa el resumen de compra en Marketplace.jsx, que SÍ lo
+  // muestra aparte). Sumarlo tal cual a o.amount (USD/EUR del producto) como si
+  // fueran la misma moneda es lo que inflaba el total ($125 + "150" = $275,
+  // cuando el 150 es CUP, no USD). Con envío internacional o "paquete" sí es la
+  // misma moneda del pedido, así que ahí la suma sigue siendo correcta.
+  const isLocalShip = o.shipType === "local";
+  const totalPagar = o.shipType === "paquete" ? Number(o.shipPrice || 0)
+    : isLocalShip ? Number(o.amount || 0)
+    : Number(o.amount || 0) + Number(o.shipPrice || 0);
   // Guarda cada reseña de PERSONA de verdad en seller_reviews, ligada a ESTE
   // pedido (order_id = o.id) — SIEMPRE un INSERT nuevo, nunca upsert: cada
   // pedido completado genera su propia fila y se suma al promedio/contador,
@@ -298,7 +309,7 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
                   </div>
                 );
               })}
-              {o.shipPrice > 0 && (
+              {o.shipPrice > 0 && !isLocalShip && (
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                   <span style={{ fontSize: 11, color: T2 }}>{o.shipType === "paquete" ? "Precio del envío" : "Envío internacional"}</span>
                   <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>{money(o.shipPrice, cur)}</span>
@@ -309,6 +320,13 @@ export function OrderDetailScreen({ order: o, user, me, onBack, onChat, onViewPr
                 <span style={{ fontSize: 12, fontWeight: 800, color: T1 }}>Total</span>
                 <span style={{ fontSize: 13, fontWeight: 900, color: G }}>{money(totalPagar, cur)}</span>
               </div>
+              {/* Domicilio local: SIEMPRE CUP, pagado aparte al mensajero — igual
+                  que el resumen de compra, nunca sumado al total por la app. */}
+              {isLocalShip && o.shipPrice > 0 && (
+                <div style={{ fontSize: 10, color: T3, marginTop: 8, lineHeight: 1.5 }}>
+                  + <b>{Math.round(o.shipPrice).toLocaleString()} CUP</b> de domicilio (estimado), se paga <b>al mensajero en efectivo (CUP)</b> al recibir.
+                </div>
+              )}
               {viewerIsSellerStrict && !viewerLooksBuyer && (
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${B}` }}>
                   <span style={{ fontSize: 11, color: T2 }}>Comisión plataforma ({o.commissionPct || 0}%)</span>

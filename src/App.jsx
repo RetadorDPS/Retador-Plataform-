@@ -2158,7 +2158,12 @@ function AppShell({ sessionUser, platformStats = null }) {
         const contacts = [];
         products.forEach(p => { const n = p.seller_name; if (n && !seen.has(n)) { seen.add(n); contacts.push({ id: "u_" + n, name: n }); } });
         // Órdenes por pagar = las mías aún no pagadas por billetera
-        const payable = orders.filter(o => !o.paidViaWallet).map(o => ({ id: o.id, vendor: o.sellerName || "Vendedor", item: o.title || "Pedido", amount: (Number(o.amount) || 0) + (Number(o.shipPrice) || 0), currency: o.currency || "CUP" }));
+        // BUG REAL corregido: el domicilio local (shipType==="local") es CUP en
+        // efectivo al mensajero, nunca parte del cobro por la app — sumarlo aquí
+        // como si fuera la misma moneda que o.amount inflaba lo que se muestra
+        // como pendiente de pago por billetera (mismo bug que en Seguimiento del
+        // pedido y en las facturas de Ajustes).
+        const payable = orders.filter(o => !o.paidViaWallet).map(o => ({ id: o.id, vendor: o.sellerName || "Vendedor", item: o.title || "Pedido", amount: o.shipType === "local" ? (Number(o.amount) || 0) : (Number(o.amount) || 0) + (Number(o.shipPrice) || 0), currency: o.currency || "CUP" }));
         // Tasas desde el panel de admin (Economía → FX): única fuente de verdad
         const fx = adminCfg.fx || { usdToCup: 400, eurToCup: 430 };
         const usdCup = Number(fx.usdToCup) || 400, eurCup = Number(fx.eurToCup) || 430;

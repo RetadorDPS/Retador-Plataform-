@@ -50,6 +50,15 @@ function pageHtml({ title, description, image, url, redirectTo }) {
   // para navegar). Quitando el meta-refresh y dejando SOLO la redirección por
   // JavaScript, los rastreadores (que no ejecutan JS) se quedan leyendo estas
   // etiquetas reales, y las personas reales igual son enviadas al instante.
+  // Punto C del reporte: esta página estática NO necesita verse como la app
+  // (solo existe el instante antes de redirigir), pero si se ve rota/fea en
+  // vez de neutra es peor que no hacer nada. Antes era solo el texto
+  // "Redirigiendo a RETADOR…" sin ningún estilo — con CSS lento o bloqueado
+  // (típico de navegadores in-app de redes sociales) eso se ve como texto
+  // pelado sobre fondo blanco. Ahora lleva su CSS mínimo INLINE en el propio
+  // <head> (nunca depende de un archivo externo) con los mismos colores que
+  // usa el resto de la app (#080808 de fondo, dorado de acento), así el
+  // estado de espera se ve limpio y de marca pase lo que pase con la red.
   return `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -62,9 +71,16 @@ function pageHtml({ title, description, image, url, redirectTo }) {
 <meta property="og:url" content="${esc(url)}">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#080808;color:#f0f0f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+  .w{text-align:center;padding:24px;}
+  .s{width:34px;height:34px;margin:0 auto 14px;border-radius:50%;border:3px solid #262626;border-top-color:#FFC01E;animation:g .8s linear infinite;}
+  @keyframes g{to{transform:rotate(360deg);}}
+  p{font-size:13px;color:#888;margin:0;}
+</style>
 <script>location.replace(${JSON.stringify(redirectTo)});</script>
 </head>
-<body>Redirigiendo a RETADOR…</body>
+<body><div class="w"><div class="s"></div><p>Redirigiendo a RETADOR…</p></div></body>
 </html>`;
 }
 

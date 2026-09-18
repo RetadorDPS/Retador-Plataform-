@@ -653,6 +653,11 @@ function AppShell({ sessionUser, platformStats = null }) {
       courierAdjustMaxPct: 30,
       surgeActive: false, surgeIntervalMin: 30, surgeStepPct: 15, surgeCapPct: 60,
       rates: { "España": { aereo: 12, maritimo: 5 }, "Estados Unidos": { aereo: 14, maritimo: 6 } },
+      // Tarifa global del tramo hub→Cuba ($/libra) — la lee en vivo el
+      // Importador Inteligente (cj-seller-import) al costear cada variante
+      // que un vendedor importa. Un solo valor por ahora; el día que haya
+      // varias agencias con tarifas distintas, esto se vuelve una lista.
+      catalogProHubRate: 1.99,
       fx: { usdToCup: 400, eurToCup: 430 },
       promos: [{ id: 1, text: "Envío gratis en tu primer pedido", active: true }],
       plans: [

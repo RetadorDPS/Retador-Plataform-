@@ -25,7 +25,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy, ShoppingBag, Link2, Sparkles,
 } from "lucide-react";
-import { useAt, useR, useCatalog, money, getPlans, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, attrLabelText, groupVariantAttrs, resolveVariantBy, extractCjPidCandidates, catalogProPreview, cjVariantStock, cjSellerImport, cjSellerImports } from "../shared/index.js";
+import { useAt, useR, useCatalog, money, getPlans, usePlatformCfg, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, attrLabelText, groupVariantAttrs, resolveVariantBy, extractCjPidCandidates, catalogProPreview, cjVariantStock, cjSellerImport, cjSellerImports } from "../shared/index.js";
 // recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
 // se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
 // nunca de entrada para todos (la mayoría son compradores que ni la ven).
@@ -1644,6 +1644,12 @@ function ImportadorInteligente({ C, ac, user, flash }) {
 // vista a fondo del Catálogo Pro.
 function ImportadorFicha({ ficha, C, ac, user, flash, onCerrar, onImportado }) {
   const { cats, subcats } = useCatalog();
+  // Tarifa global $/lb del tramo hub→Cuba (Economía → Envíos internacionales,
+  // "Catálogo Pro y Importador Inteligente"), leída en VIVO — si el admin la
+  // cambia, usePlatformCfg() la trae actualizada al instante (platform_config
+  // tiene su propio realtime en App.jsx), sin recargar esta pantalla.
+  const hubRate = Number(usePlatformCfg().catalogProHubRate) || 1.99;
+  const envioEstimado = (pesoGramos) => pesoGramos == null ? null : Math.round((Number(pesoGramos) / 453.592) * hubRate * 100) / 100;
   const [elegidas, setElegidas] = useState({}); // sku -> { pct, precio }
   const [stock, setStock] = useState({});       // vid -> stock real (bajo demanda)
   const [cargandoStock, setCargandoStock] = useState({});
@@ -1803,6 +1809,16 @@ function ImportadorFicha({ ficha, C, ac, user, flash, onCerrar, onImportado }) {
                   </div>
                 </div>
               )}
+              {marcada && (() => {
+                const est = envioEstimado(v.weightGrams);
+                return (
+                  <div style={{ fontSize:10, color:C.m, marginTop:8, paddingTop:8, borderTop:`1px solid ${C.b}` }}>
+                    {est != null
+                      ? <>✈️ Envío estimado a Cuba: <b style={{ color:C.t }}>{money(est, "USD")}</b> (${hubRate.toFixed(2)}/lb · {(Number(v.weightGrams) / 453.592).toFixed(2)} lb) — lo paga el comprador aparte, no se lo cobres a él en tu margen.</>
+                      : "Este proveedor no informó el peso — no se puede estimar el envío a Cuba para esta variante."}
+                  </div>
+                );
+              })()}
             </div>
           );
         })}

@@ -2358,6 +2358,10 @@ function Economia({toast, data={}, ro}){
     // combinado — configurable acá, nunca hardcodeado en el código.
     catalogProHubDaysMin: cfg.catalogProHubDaysMin ?? 8,
     catalogProHubDaysMax: cfg.catalogProHubDaysMax ?? 15,
+    // Tarifa global $/lb del tramo hub→Cuba — la lee en vivo el Importador
+    // Inteligente (vendedores Pro/Premium) al costear cada variante que
+    // importan, para mostrar el estimado de envío ANTES de fijar el margen.
+    catalogProHubRate: cfg.catalogProHubRate ?? 1.99,
   });
   const set=(k,v)=>setT(s=>({...s,[k]:v}));
   const saveTarifas=(override={})=>{
@@ -2376,6 +2380,7 @@ function Economia({toast, data={}, ro}){
       rates: { 'España':{aereo:Number(t.esAereo)||0,maritimo:Number(t.esMar)||0}, 'Estados Unidos':{aereo:Number(t.usAereo)||0,maritimo:Number(t.usMar)||0} },
       catalogProHubDaysMin: Number(t.catalogProHubDaysMin)||0,
       catalogProHubDaysMax: Number(t.catalogProHubDaysMax)||0,
+      catalogProHubRate: Number(t.catalogProHubRate)||0,
       promoActive: t.promoActive === true,
       promoCost: Number(t.promoCost)||0,
     });
@@ -2731,10 +2736,13 @@ function Economia({toast, data={}, ro}){
         {field('EE.UU. → Cuba · Marítimo', numInput('usMar','USD/lb','$'))}
       </div>
 
-      <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',margin:'4px 0 10px'}}>Catálogo Pro — tramo final (hub→Cuba)</div>
+      <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',margin:'4px 0 10px'}}>Catálogo Pro y Importador Inteligente — tramo final (hub→Cuba)</div>
       <div className="g2" style={{marginBottom:8}}>
         {field('Días mínimos', numInput('catalogProHubDaysMin','días',''), 'Se suma al tránsito real de CJ para el rango que ve el comprador en productos modo Cuba.')}
         {field('Días máximos', numInput('catalogProHubDaysMax','días',''))}
+      </div>
+      <div className="g2" style={{marginBottom:8}}>
+        {field('Tarifa hub → Cuba', numInput('catalogProHubRate','USD/lb','$'), 'Global por ahora (una sola agencia). El Importador Inteligente la lee en vivo al costear cada producto que un vendedor importa — cambiarla aquí se aplica de inmediato, sin tocar código.')}
       </div>
 
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginTop:16,flexWrap:'wrap'}}>

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conectando AliExpress…</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#080808;color:#f0f0f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+  .w{text-align:center;padding:24px;}
+  .s{width:34px;height:34px;margin:0 auto 14px;border-radius:50%;border:3px solid #262626;border-top-color:#FFC01E;animation:g .8s linear infinite;}
+  @keyframes g{to{transform:rotate(360deg);}}
+  p{font-size:13px;color:#888;margin:0;}
+</style>
+<!--
+  GitHub Pages es hosting estático puro (sin servidor ni rewrites): esta
+  página existe SOLO para que la Callback URL real registrada en AliExpress
+  (https://retadormarketplace.es/aliexpress/callback) tenga algo que servir.
+  AliExpress redirige aquí el navegador de Daniel con "?code=..." en la URL;
+  esta página reenvía esa misma query string, tal cual, a la Edge Function
+  real de Supabase que hace el intercambio por access_token/refresh_token.
+  Es una navegación completa (location.replace), no un fetch — así no hace
+  falta configurar CORS en la Edge Function.
+-->
+<script>
+  location.replace("https://qsxtjuhueqdxoduyroli.supabase.co/functions/v1/aliexpress-callback" + location.search);
+</script>
+</head>
+<body><div class="w"><div class="s"></div><p>Conectando con AliExpress…</p></div></body>
+</html>

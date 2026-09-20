@@ -9,12 +9,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>RETADOR</title>
 
-    <!-- PWA: manifest + tema oscuro + íconos. Rutas relativas: la app vive en un
-         subdirectorio de GitHub Pages (/Retador-Plataform-/). -->
-    <!-- ?v=13: rompe la caché del manifest viejo (fullscreen) que el service worker
-         antiguo servía al reinstalar; así la instalación SIEMPRE lee este manifest
-         (standalone, con reloj y barra de estado visibles). -->
-    <link rel="manifest" href="manifest.webmanifest?v=14" />
+    <!-- PWA: manifest + tema oscuro + íconos. Rutas relativas: la app se sirve
+         desde la raíz de retadormarketplace.es (antes vivía en el subdirectorio
+         /Retador-Plataform-/ de GitHub Pages — ver vite.config.js). -->
+    <!-- ?v=15: rompe la caché del manifest viejo (id/start_url/scope con el
+         subdirectorio del repo, que ya no existe en el dominio propio) que el
+         navegador pudiera tener guardado; así la instalación SIEMPRE lee este
+         manifest con scope "/" real. -->
+    <link rel="manifest" href="manifest.webmanifest?v=15" />
     <!-- Color inicial de las barras del sistema — DOS etiquetas con media
          query (estándar, sin JS) para que coincida con el tema real del
          SISTEMA desde el primer byte, sin esperar a que corra ningún script

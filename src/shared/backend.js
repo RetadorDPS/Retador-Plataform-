@@ -11,7 +11,7 @@ import { supabase } from "./supabase.js";
 // título/precio o foto/nombre/bio) para que WhatsApp/Facebook/Twitter
 // muestren la vista previa de verdad, y redirige a quien la abre directo
 // adentro de la app (App.jsx lee "?openProduct="/"?openProfile=" al arrancar).
-const APP_BASE_URL = "https://retadordps.github.io/Retador-Plataform-";
+const APP_BASE_URL = "https://retadormarketplace.es";
 export const shareLink = (type, id) => `${APP_BASE_URL}/share/${type === "profile" ? "perfil" : "producto"}/${encodeURIComponent(id)}.html`;
 // Enlace fijo (mismo patrón, sin id) de la página "hazte Pro gratis"
 // (public/share/hazte-pro.html) — el que cualquier usuario copia/comparte

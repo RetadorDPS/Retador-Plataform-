@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 
 const SUPABASE_URL = "https://qsxtjuhueqdxoduyroli.supabase.co";
 const SUPABASE_KEY = "sb_publishable_VbX-xBAVLKl_SnrkOTxc2w_oTe5-1Va";
-const APP_URL = "https://retadordps.github.io/Retador-Plataform-"; // ⚠️ ajustar si cambia el dominio
+const APP_URL = "https://retadormarketplace.es"; // dominio propio (antes retadordps.github.io/Retador-Plataform-)
 const DEFAULT_IMAGE = `${APP_URL}/icons/icon-512.png`;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

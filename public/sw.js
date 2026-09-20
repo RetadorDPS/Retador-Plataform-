@@ -7,8 +7,8 @@
 //   · Otros orígenes (Supabase, imágenes externas): NO se tocan → van directo a la red.
 // No interfiere con el login de Google, el perfil, los productos ni las tasas.
 // ─────────────────────────────────────────────────────────────────────────────
-const CACHE = "retador-pwa-v216";
-const START = self.registration.scope; // p.ej. https://retadordps.github.io/Retador-Plataform-/
+const CACHE = "retador-pwa-v217";
+const START = self.registration.scope; // p.ej. https://retadormarketplace.es/
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
@@ -69,7 +69,7 @@ self.addEventListener("fetch", (event) => {
 // NOTIFICACIONES PUSH REALES (llegan aunque la app esté cerrada).
 // El backend (Edge Function 'send-push') dispara esto en cada notificación nueva.
 // ─────────────────────────────────────────────────────────────────────────────
-const ICON = self.registration.scope + "icons/icon-192.png"; // respeta la subcarpeta de GitHub Pages
+const ICON = self.registration.scope + "icons/icon-192.png"; // respeta el scope real (hoy "/", el dominio propio)
 // El ícono chico de la barra de estado (Android) lo arma el SO a partir del canal
 // alfa: icon-192.png es RGB opaco (sin transparencia real) → salía un cuadrado feo.
 // badge-mono.png es la MARCA aislada (blanco sólido) sobre fondo TRANSPARENTE real.

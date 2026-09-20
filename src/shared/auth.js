@@ -2,7 +2,7 @@ import { supabase } from "./supabase.js";
 
 // ── AUTENTICACIÓN REAL (Supabase Auth con Google) ────────────────────────────
 // URL pública de la app (a donde Google devuelve tras el login).
-export const APP_URL = "https://retadordps.github.io/Retador-Plataform-/";
+export const APP_URL = "https://retadormarketplace.es/";
 
 // Entrar / registrarse con Google (una sola opción, sin cambiar de cuenta).
 export async function signInWithGoogle() {

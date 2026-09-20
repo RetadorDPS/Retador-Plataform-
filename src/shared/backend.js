@@ -2393,13 +2393,34 @@ export const cjSellerImport = async ({ pid, variantes, cat, subcat, province }) 
 };
 
 // Lo que el vendedor ya importó por su cuenta (su propio costo y margen: la
-// policy solo le deja ver sus filas).
+// policy solo le deja ver sus filas). Ya es genérico por proveedor (lee
+// "provider" de cada fila) — sirve igual para lo importado de CJ y de
+// AliExpress, sin ningún cambio.
 export const cjSellerImports = async () => {
   const { data, error } = await supabase.from("seller_direct_products")
     .select("id, title, images, provider, provider_pid, created_at, product_id, pricing:seller_direct_pricing(variant_sku, attributes, cost_product, sale_price, profit_estimate, cost_shipping_to_hub, shipping_status)")
     .order("created_at", { ascending: false });
   if (error) { console.error("cjSellerImports:", error.message); return []; }
   return data || [];
+};
+
+// ── AliExpress (Dropshipping API oficial) — mismo contrato que las
+// funciones de CJ de arriba, sobre las Edge Functions ali-import-preview /
+// ali-seller-import.
+export const aliImportPreview = async (pid) => {
+  const { data, error } = await supabase.functions.invoke("ali-import-preview", { body: { pid } });
+  if (error) { console.error("aliImportPreview:", error.message); throw error; }
+  if (data?.error) throw new Error(data.error);
+  return data;
+};
+
+export const aliSellerImport = async ({ pid, variantes, cat, subcat, province }) => {
+  const { data, error } = await supabase.functions.invoke("ali-seller-import", {
+    body: { pid, variantes, cat, subcat, province },
+  });
+  if (error) { console.error("aliSellerImport:", error.message); throw error; }
+  if (data?.error) throw new Error(data.error);
+  return data;
 };
 
 // Staging: cada producto trae ya embebidas sus filas de costeo por variante
@@ -2547,6 +2568,25 @@ export function extractCjPidCandidates(raw) {
   const respaldoUuid = s.match(new RegExp(CJ_PID_UUID_RE, 'gi')) || [];
   const respaldo = [...new Set([...respaldoNumerico, ...respaldoUuid])]
     .filter(n => !yaEncontrados.has(n.toLowerCase()))
+    .sort((a, b) => b.length - a.length);
+  return { candidatos: [...new Set(candidatos)], respaldo };
+}
+
+// Enlaces reales de producto de AliExpress: "aliexpress.com/item/<id>.html"
+// (con o sin ".html", en cualquier subdominio de idioma — es.aliexpress.com,
+// vi.aliexpress.com, m.aliexpress.com... — confirmado buscando enlaces
+// reales antes de escribir este regex). El id es siempre numérico. Los
+// enlaces cortos de la app (s.click.aliexpress.com/...) no traen el id en
+// la URL — no se intenta resolverlos aquí, el vendedor tiene que pegar el
+// enlace largo del producto.
+export function extractAliPidCandidates(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return { candidatos: [], respaldo: [] };
+  const candidatos = [];
+  for (const m of s.matchAll(/\/item\/(\d{6,20})/gi)) candidatos.push(m[1]);
+  const yaEncontrados = new Set(candidatos);
+  const respaldo = [...new Set(s.match(/\d{6,20}/g) || [])]
+    .filter(n => !yaEncontrados.has(n))
     .sort((a, b) => b.length - a.length);
   return { candidatos: [...new Set(candidatos)], respaldo };
 }

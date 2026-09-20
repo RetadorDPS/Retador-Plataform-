@@ -25,7 +25,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy, ShoppingBag, Link2, Sparkles,
 } from "lucide-react";
-import { useAt, useR, useCatalog, money, getPlans, usePlatformCfg, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, attrLabelText, groupVariantAttrs, resolveVariantBy, extractCjPidCandidates, catalogProPreview, cjVariantStock, cjSellerImport, cjSellerImports } from "../shared/index.js";
+import { useAt, useR, useCatalog, money, getPlans, usePlatformCfg, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, attrLabelText, groupVariantAttrs, resolveVariantBy, extractCjPidCandidates, catalogProPreview, cjVariantStock, cjSellerImport, cjSellerImports, extractAliPidCandidates, aliImportPreview, aliSellerImport } from "../shared/index.js";
 // recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
 // se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
 // nunca de entrada para todos (la mayoría son compradores que ni la ven).
@@ -1518,7 +1518,7 @@ function mapCjCategoryToRetador(cjCategoryText, cats, subcatsMap) {
 // ═══════════════════════════════════════════════════════════════════════════
 const PROVEEDORES = [
   { id: "cj", nombre: "CJdropshipping", pistas: ["cjdropshipping"], activo: true },
-  { id: "aliexpress", nombre: "AliExpress", pistas: ["aliexpress"], activo: false },
+  { id: "aliexpress", nombre: "AliExpress", pistas: ["aliexpress"], activo: true },
 ];
 
 function detectarProveedor(enlace) {
@@ -1540,7 +1540,30 @@ function ImportadorInteligente({ C, ac, user, flash }) {
     const texto = enlace.trim();
     if (!texto) { flash("Pega el enlace del producto"); return; }
     const prov = detectarProveedor(texto);
-    if (prov && !prov.activo) { flash(`Todavía no se puede importar de ${prov.nombre}`); return; }
+    if (!prov) { flash("⚠️ Enlace no reconocido — por ahora solo se admiten enlaces de CJdropshipping o AliExpress"); return; }
+    if (!prov.activo) { flash(`Todavía no se puede importar de ${prov.nombre}`); return; }
+
+    // AliExpress: el enlace real trae el product_id exacto en la URL
+    // (/item/<id>.html) — normalmente un único candidato, así que un error
+    // de negocio real (p.ej. "no disponible para importar") se muestra tal
+    // cual, sin que un reintento silencioso lo tape con un mensaje genérico.
+    if (prov.id === "aliexpress") {
+      const { candidatos, respaldo } = extractAliPidCandidates(texto);
+      const aProbar = [...candidatos, ...respaldo.slice(0, 1)];
+      if (aProbar.length === 0) { flash("⚠️ No se pudo identificar el producto en ese enlace"); return; }
+      setBuscando(true);
+      try {
+        const data = await aliImportPreview(aProbar[0]);
+        setBuscando(false);
+        if (data?.pid) setFicha(data);
+        else flash("⚠️ No se pudo identificar el producto en ese enlace");
+      } catch (e) {
+        setBuscando(false);
+        flash("⚠️ " + (e.message || "No se pudo traer el producto"));
+      }
+      return;
+    }
+
     // Mismo reconocimiento de enlaces que usa el panel admin (vive en
     // shared/backend.js justo para no tener dos copias).
     const { candidatos, respaldo } = extractCjPidCandidates(texto);
@@ -1559,7 +1582,7 @@ function ImportadorInteligente({ C, ac, user, flash }) {
     }
     setBuscando(false);
     if (!encontrada) { flash("⚠️ No se pudo identificar el producto en ese enlace"); return; }
-    setFicha(encontrada);
+    setFicha({ ...encontrada, provider: "cj" });
   };
 
   if (ficha) {
@@ -1675,7 +1698,10 @@ function ImportadorFicha({ ficha, C, ac, user, flash, onCerrar, onImportado }) {
     const costo = Number(v.price) || 0;
     const precio = Math.round(costo * (1 + MARGEN_SUGERIDO / 100) * 100) / 100;
     setElegidas(prev => ({ ...prev, [sku]: { pct: String(MARGEN_SUGERIDO), precio: String(precio) } }));
-    if (v.vid && stock[v.vid] === undefined) {
+    // El stock "bajo demanda" (cj-variant-stock) es un mecanismo propio de
+    // CJ — AliExpress ya trae el stock real resuelto en la vista previa
+    // (ver ali-import-preview), así que aquí no hay nada más que pedir.
+    if (ficha.provider !== "aliexpress" && v.vid && stock[v.vid] === undefined) {
       setCargandoStock(prev => ({ ...prev, [v.vid]: true }));
       try {
         const res = await cjVariantStock([String(v.vid)]);
@@ -1705,7 +1731,8 @@ function ImportadorFicha({ ficha, C, ac, user, flash, onCerrar, onImportado }) {
     if (payload.some(v => !(v.sale_price > 0))) { flash("Revisa los precios: todos deben ser mayores que cero"); return; }
     setImportando(true);
     try {
-      const res = await cjSellerImport({ pid: ficha.pid, variantes: payload, cat, subcat: subcat || undefined });
+      const importarDe = ficha.provider === "aliexpress" ? aliSellerImport : cjSellerImport;
+      const res = await importarDe({ pid: ficha.pid, variantes: payload, cat, subcat: subcat || undefined });
       flash(`✅ "${res.producto.title}" ya está en tu tienda`);
       onImportado();
     } catch (e) {
@@ -1724,7 +1751,7 @@ function ImportadorFicha({ ficha, C, ac, user, flash, onCerrar, onImportado }) {
     <div>
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
         <button onClick={onCerrar} style={{ background:C.s2, border:`1px solid ${C.b}`, color:C.t, borderRadius:8, padding:"7px 12px", fontSize:11.5, fontWeight:700, cursor:"pointer" }}>‹ Volver</button>
-        <span style={{ fontSize:11, color:C.m }}>Producto traído de CJdropshipping</span>
+        <span style={{ fontSize:11, color:C.m }}>Producto traído de {ficha.provider === "aliexpress" ? "AliExpress" : "CJdropshipping"}</span>
       </div>
 
       <div style={{ height:190, borderRadius:12, overflow:"hidden", background:C.s3, marginBottom:8 }}>
@@ -1768,7 +1795,9 @@ function ImportadorFicha({ ficha, C, ac, user, flash, onCerrar, onImportado }) {
           const sku = String(v.sku);
           const marcada = Boolean(elegidas[sku]);
           const costo = Number(v.price) || 0;
-          const st = v.vid ? stock[v.vid] : undefined;
+          // AliExpress trae el stock real ya resuelto en la vista previa
+          // (v.stock) — no pasa por el mecanismo "bajo demanda" de CJ.
+          const st = ficha.provider === "aliexpress" ? v.stock : (v.vid ? stock[v.vid] : undefined);
           const atributos = Object.values(v.attributes || {}).join(" · ") || v.attrs || sku;
           return (
             <div key={sku} style={{ background:C.s2, border:`1px solid ${marcada ? ac : C.b}`, borderRadius:11, padding:10 }}>

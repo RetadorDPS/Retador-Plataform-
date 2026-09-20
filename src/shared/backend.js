@@ -2366,6 +2366,16 @@ export const catalogProImport = async (pid, variantSkus) => {
   return data;
 };
 
+// Import admin al Catálogo Pro curado, para AliExpress — mismo contrato que
+// catalogProImport (CJ) pero contra ali-import-product. variantSkus vacío/
+// omitido importa TODAS las variantes reales del producto (usado por el lote).
+export const catalogProImportAli = async (pid, variantSkus) => {
+  const { data, error } = await supabase.functions.invoke("ali-import-product", { body: { pid, variant_skus: variantSkus?.length ? variantSkus : undefined } });
+  if (error) { console.error("catalogProImportAli:", error.message); throw error; }
+  if (data?.error) throw new Error(data.error);
+  return data;
+};
+
 // ── IMPORTADOR INTELIGENTE (vendedor Pro/Premium) ───────────────────────────
 // La vista previa es la MISMA función que usa el panel admin (cj-import-preview,
 // solo lectura): no se duplicó nada, solo se amplió su permiso a los planes

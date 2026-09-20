@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProImportAli, aliImportPreview, extractAliPidCandidates, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -20,6 +20,44 @@ const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;4
   --pp:#a78bfa;--ppb:rgba(167,139,250,0.08);
   --fn:'Sora',sans-serif;--mo:'JetBrains Mono',monospace;
 }
+
+/* ── Piel premium del Catálogo Pro (crema/blanco/naranja) ──────────────────
+   Redefine las MISMAS variables de arriba, solo dentro de .cpro-skin: toda
+   tarjeta/botón/badge/tabla que ya usa var(--bg)/var(--tx)/var(--ac) etc. se
+   retema sola, sin tocar ninguno de los componentes existentes. Solo cambia
+   la piel visual — la lógica de Buscar/Staging/Publicado sigue intacta. */
+.omni .cpro-skin{
+  --bg:#F7F1E3;--bg1:#FFFFFF;--bg2:#F2E9D6;--bg3:#EBDFC5;
+  --bd:rgba(120,95,55,0.14);--bd2:rgba(120,95,55,0.22);
+  --tx:#2A2117;--tx2:#6B5D48;--tx3:#A3927A;
+  --ac:#E86A2C;--ac2:#F08A50;--ag:rgba(232,106,44,0.14);
+  --gn:#3E9B62;--gnb:rgba(62,155,98,0.10);
+  --rd:#D6503A;--rdb:rgba(214,80,58,0.10);
+  --yw:#C98A25;--ywb:rgba(201,138,37,0.10);
+  --pp:#8C6FB8;--ppb:rgba(140,111,184,0.10);
+}
+.omni .cpro-skin{background:var(--bg)}
+.omni .cpro-skin .card,.omni .cpro-skin .mc{border-radius:20px;box-shadow:0 1px 3px rgba(120,95,55,.06)}
+.omni .cpro-skin .cp{padding:22px}
+.omni .cpro-skin .btn{border-radius:12px;font-weight:700}
+.omni .cpro-skin .btp:hover{box-shadow:0 4px 16px rgba(232,106,44,.28)}
+.omni .cpro-skin .inp{border-radius:11px;background:var(--bg1);padding:9px 13px}
+.omni .cpro-skin .tabs{background:var(--bg2);border-radius:13px;padding:4px}
+.omni .cpro-skin .tab{border-radius:10px;font-weight:700}
+.omni .cpro-skin .tab.on{background:var(--bg1);box-shadow:0 1px 3px rgba(120,95,55,.12)}
+.omni .cpro-skin .bdg{border-radius:20px;font-weight:700}
+/* Chip de proveedor del buscador unificado — mismo lenguaje que las demás
+   tarjetas (blanco + borde suave, naranja cuando está activo). */
+.omni .cpro-skin .provchip{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:14px;font-size:12.5px;font-weight:700;cursor:pointer;background:var(--bg1);border:1.5px solid var(--bd2);color:var(--tx2);transition:all .15s}
+.omni .cpro-skin .provchip.on{background:var(--ag);border-color:var(--ac);color:var(--ac)}
+/* Tarjeta de resultado seleccionable (checkbox propio, nunca navega sola). */
+.omni .cpro-skin .rescard{position:relative;cursor:pointer}
+.omni .cpro-skin .rescheck{position:absolute;top:10px;left:10px;width:24px;height:24px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;background:rgba(255,255,255,.92);border:1.5px solid var(--bd2);color:transparent;z-index:2;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.omni .cpro-skin .rescheck.on{background:var(--ac);border-color:var(--ac);color:#fff}
+.omni .cpro-skin .rescard.sel{outline:2px solid var(--ac);outline-offset:-2px}
+/* Barra fija de selección — mismo patrón sticky de la barra de compra. */
+.omni .cpro-skin .selbar{position:sticky;bottom:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--tx);color:var(--bg1);padding:14px 20px;border-radius:18px;box-shadow:0 8px 30px rgba(0,0,0,.25);margin-top:16px;z-index:20}
+.omni .cpro-skin .selbar b{color:#fff}
 .omni{height:100%;background:var(--bg);color:var(--tx);font-family:var(--fn);font-size:14px;overflow:hidden}
 .omni ::-webkit-scrollbar{width:4px;height:4px}
 .omni ::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:4px}
@@ -3622,7 +3660,14 @@ function SimpleConfirm({ title, msg, confirmLabel = 'Eliminar', color = 'var(--r
   );
 }
 
-function CatalogSearchTab({ toast, ro, onOpenPreview }) {
+// Buscador unificado CJ + AliExpress. Ambos proveedores pueden estar activos
+// a la vez (chips). Los resultados de CJ salen en tarjetas seleccionables
+// (checkbox propio); AliExpress, por ahora, solo admite pegar un enlace
+// directo — cada enlace confirmado se agrega igual a la selección del lote.
+// La etiqueta de proveedor solo se ve aquí (admin) — nunca en tienda/compra.
+function CatalogSearchTab({ toast, ro, onOpenPreview, selected, onToggleSelect, isSelected }) {
+  const [cjOn, setCjOn] = useState(true);
+  const [aliOn, setAliOn] = useState(false);
   const [keyWord, setKeyWord] = useState('');
   const [country, setCountry] = useState('US');
   const [page, setPage] = useState(1);
@@ -3630,6 +3675,8 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
   const [loading, setLoading] = useState(false);
   const [linkInput, setLinkInput] = useState('');
   const [checkingLink, setCheckingLink] = useState(false);
+  const [aliLinkInput, setAliLinkInput] = useState('');
+  const [checkingAliLink, setCheckingAliLink] = useState(false);
 
   const doSearch = async (p = 1) => {
     if (!keyWord.trim()) { toast('Escribe algo para buscar'); return; }
@@ -3641,7 +3688,7 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
 
   const doImportFromLink = async () => {
     const { candidatos, respaldo } = extractCjPidCandidates(linkInput);
-    if (candidatos.length > 0) { onOpenPreview(candidatos[0]); return; }
+    if (candidatos.length > 0) { onOpenPreview(candidatos[0], 'cj'); return; }
     if (respaldo.length === 0) { toast('⚠️ No se pudo identificar el producto en ese enlace'); return; }
     // Ningún patrón conocido (-p-, /product/details/, ?pid=) hizo match —
     // como último recurso, probamos los números largos sueltos de la URL
@@ -3656,55 +3703,115 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
       } catch (_e) { /* seguir con el siguiente candidato */ }
     }
     setCheckingLink(false);
-    if (encontrado) onOpenPreview(encontrado);
+    if (encontrado) onOpenPreview(encontrado, 'cj');
     else toast('⚠️ No se pudo identificar el producto en ese enlace');
+  };
+
+  // AliExpress: confirma el enlace contra ds.product.get real (vía la misma
+  // caché de 6h que usa el vendedor) y agrega el producto DIRECTO a la
+  // selección del lote — no hace falta abrir el detalle para poder
+  // importarlo (ali-import-product ya trae todas las variantes reales de
+  // una sola vez). El admin puede tocar la tarjeta después para revisarla.
+  const doAddAliFromLink = async () => {
+    const { candidatos, respaldo } = extractAliPidCandidates(aliLinkInput);
+    const intentos = candidatos.length ? candidatos : respaldo.slice(0, 3);
+    if (intentos.length === 0) { toast('⚠️ No se pudo identificar el producto en ese enlace'); return; }
+    setCheckingAliLink(true);
+    let encontrado = null;
+    for (const pid of intentos) {
+      try {
+        const data = await aliImportPreview(pid);
+        if (data && !data.error && data.pid) { encontrado = data; break; }
+      } catch (_e) { /* seguir con el siguiente candidato */ }
+    }
+    setCheckingAliLink(false);
+    if (!encontrado) { toast('⚠️ No se pudo identificar el producto en ese enlace'); return; }
+    if (isSelected('aliexpress', String(encontrado.pid))) { toast('Ese producto ya está en la selección'); return; }
+    onToggleSelect({
+      provider: 'aliexpress', pid: String(encontrado.pid), title: encontrado.title,
+      image: encontrado.images?.[0] || null, price: encontrado.variants?.[0]?.price ?? null,
+    });
+    setAliLinkInput('');
+    toast(`✅ Agregado a la selección: ${encontrado.title}`);
   };
 
   return (
     <>
       <CatalogQuotaBar />
-      <div className="card cp mb16">
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <input className="inp" style={{ flex: '2 1 220px' }} value={keyWord} disabled={ro} onChange={e => setKeyWord(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') doSearch(1); }} placeholder="Buscar producto en CJ (ej. phone case)…" />
-          <select className="inp" style={{ flex: '1 1 160px' }} value={country} disabled={ro} onChange={e => setCountry(e.target.value)}>
-            {CJ_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.code} · {c.label}</option>)}
-          </select>
-          <button className="btn btp" disabled={ro || loading} onClick={() => doSearch(1)}>{loading ? <span className="spin">↻</span> : '🔎'} Buscar</button>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0' }}>
-          <div style={{ flex: 1, height: 1, background: 'var(--bd)' }} />
-          <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--tx3)' }}>O PEGAR ENLACE</span>
-          <div style={{ flex: 1, height: 1, background: 'var(--bd)' }} />
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <input className="inp" style={{ flex: '1 1 260px' }} value={linkInput} disabled={ro} onChange={e => setLinkInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') doImportFromLink(); }} placeholder="Pegar enlace de producto CJ (cjdropshipping.com/product/... o m.cjdropshipping.com/...)…" />
-          <button className="btn btg" disabled={ro || checkingLink || !linkInput.trim()} onClick={doImportFromLink}>{checkingLink ? <span className="spin">↻</span> : '🔗'} Ver producto</button>
-        </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <div className={`provchip ${cjOn ? 'on' : ''}`} onClick={() => setCjOn(v => !v)}>{cjOn ? '✓' : ''} CJ</div>
+        <div className={`provchip ${aliOn ? 'on' : ''}`} onClick={() => setAliOn(v => !v)}>{aliOn ? '✓' : ''} AliExpress</div>
       </div>
+
+      {cjOn && (
+        <div className="card cp mb16">
+          <div className="ct" style={{ marginBottom: 10 }}>CJdropshipping</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input className="inp" style={{ flex: '2 1 220px' }} value={keyWord} disabled={ro} onChange={e => setKeyWord(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') doSearch(1); }} placeholder="Buscar producto en CJ (ej. phone case)…" />
+            <select className="inp" style={{ flex: '1 1 160px' }} value={country} disabled={ro} onChange={e => setCountry(e.target.value)}>
+              {CJ_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.code} · {c.label}</option>)}
+            </select>
+            <button className="btn btp" disabled={ro || loading} onClick={() => doSearch(1)}>{loading ? <span className="spin">↻</span> : '🔎'} Buscar</button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0' }}>
+            <div style={{ flex: 1, height: 1, background: 'var(--bd)' }} />
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--tx3)' }}>O PEGAR ENLACE</span>
+            <div style={{ flex: 1, height: 1, background: 'var(--bd)' }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input className="inp" style={{ flex: '1 1 260px' }} value={linkInput} disabled={ro} onChange={e => setLinkInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') doImportFromLink(); }} placeholder="Pegar enlace de producto CJ (cjdropshipping.com/product/... o m.cjdropshipping.com/...)…" />
+            <button className="btn btg" disabled={ro || checkingLink || !linkInput.trim()} onClick={doImportFromLink}>{checkingLink ? <span className="spin">↻</span> : '🔗'} Ver producto</button>
+          </div>
+        </div>
+      )}
+
+      {aliOn && (
+        <div className="card cp mb16">
+          <div className="ct" style={{ marginBottom: 10 }}>AliExpress</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', opacity: .5 }}>
+            <input className="inp" style={{ flex: 1 }} disabled placeholder="Buscar por palabra — Próximamente (hace falta la app de Afiliados)" />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0' }}>
+            <div style={{ flex: 1, height: 1, background: 'var(--bd)' }} />
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--tx3)' }}>PEGAR ENLACE</span>
+            <div style={{ flex: 1, height: 1, background: 'var(--bd)' }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input className="inp" style={{ flex: '1 1 260px' }} value={aliLinkInput} disabled={ro} onChange={e => setAliLinkInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') doAddAliFromLink(); }} placeholder="Pegar enlace de producto AliExpress (aliexpress.com/item/...)…" />
+            <button className="btn btg" disabled={ro || checkingAliLink || !aliLinkInput.trim()} onClick={doAddAliFromLink}>{checkingAliLink ? <span className="spin">↻</span> : '➕'} Agregar a la selección</button>
+          </div>
+        </div>
+      )}
 
       {loading && <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Buscando en CJ…</div>}
 
-      {!loading && results && (
+      {cjOn && !loading && results && (
         <>
           <div className="ssub">{(results.totalRecords || 0).toLocaleString('es-ES')} resultados reales · página {page} de {results.totalPages || 1}{results.source === 'cache' ? ' · desde caché (20 min)' : ''}</div>
           <div className="g3">
-            {(results.products || []).map(p => (
-              <div key={p.id} className="mc" style={{ cursor: 'pointer', padding: 0, overflow: 'hidden' }} onClick={() => onOpenPreview(p.id)}>
-                <CatalogImg src={p.bigImage} width="100%" height={120} radius={0} iconSize={32} />
-                <div style={{ padding: '10px 12px' }}>
-                  <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--tx2)', lineHeight: 1.4, marginBottom: 5 }}>{p.nameEn}</div>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>${p.sellPrice}</div>
-                  <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
-                    <span className="bdg bx">👁 {p.listedNum ?? 0} vendedor(es)</span>
-                    {p.verifiedWarehouse
-                      ? <span className="bdg bg">✅ Stock verificado en {CJ_COUNTRIES.find(c => c.code === country)?.label || country}</span>
-                      : <span className="bdg bx">⏳ Stock sin verificar en {CJ_COUNTRIES.find(c => c.code === country)?.label || country}</span>}
+            {(results.products || []).map(p => {
+              const sel = isSelected('cj', String(p.id));
+              return (
+                <div key={p.id} className={`mc rescard ${sel ? 'sel' : ''}`} style={{ padding: 0, overflow: 'hidden' }} onClick={() => onOpenPreview(p.id, 'cj')}>
+                  <span className={`rescheck ${sel ? 'on' : ''}`} onClick={e => { e.stopPropagation(); onToggleSelect({ provider: 'cj', pid: String(p.id), title: p.nameEn, image: p.bigImage, price: p.sellPrice }); }}>✓</span>
+                  <CatalogImg src={p.bigImage} width="100%" height={120} radius={0} iconSize={32} />
+                  <div style={{ padding: '10px 12px' }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--tx2)', lineHeight: 1.4, marginBottom: 5 }}>{p.nameEn}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>${p.sellPrice}</div>
+                    <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+                      <span className="bdg bx">👁 {p.listedNum ?? 0} vendedor(es)</span>
+                      {p.verifiedWarehouse
+                        ? <span className="bdg bg">✅ Stock verificado en {CJ_COUNTRIES.find(c => c.code === country)?.label || country}</span>
+                        : <span className="bdg bx">⏳ Stock sin verificar en {CJ_COUNTRIES.find(c => c.code === country)?.label || country}</span>}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           {(results.products || []).length === 0 && <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '24px 6px' }}>Sin resultados para esa búsqueda en {country}.</div>}
           {results.totalPages > 1 && (
@@ -3714,6 +3821,24 @@ function CatalogSearchTab({ toast, ro, onOpenPreview }) {
               <button className="btn sm" disabled={page >= results.totalPages || loading} onClick={() => doSearch(page + 1)} style={{ opacity: page >= results.totalPages ? .4 : 1 }}>Siguiente ›</button>
             </div>
           )}
+        </>
+      )}
+
+      {selected.length > 0 && (
+        <>
+          <div className="ssub" style={{ marginTop: 18 }}>Seleccionados para el lote</div>
+          <div className="g3">
+            {selected.map(it => (
+              <div key={`${it.provider}:${it.pid}`} className="mc rescard sel" style={{ padding: 0, overflow: 'hidden' }} onClick={() => onOpenPreview(it.pid, it.provider)}>
+                <span className="rescheck on" onClick={e => { e.stopPropagation(); onToggleSelect(it); }}>✓</span>
+                <CatalogImg src={it.image} width="100%" height={100} radius={0} iconSize={26} />
+                <div style={{ padding: '8px 10px' }}>
+                  <span className={`bdg ${it.provider === 'aliexpress' ? 'bb' : 'by'}`} style={{ marginBottom: 4 }}>{it.provider === 'aliexpress' ? 'AliExpress' : 'CJ'}</span>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tx2)', lineHeight: 1.35, marginTop: 4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{it.title}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </>
       )}
     </>
@@ -3791,21 +3916,22 @@ function VariantAttributeSelector({ variants, selectedAttrs, onChange, disabled 
   );
 }
 
-function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
+function CatalogPreviewScreen({ pid, provider = 'cj', toast, ro, onBack, onImported }) {
   const [data, setData] = useState(undefined); // undefined = cargando
   const [chosenSkus, setChosenSkus] = useState([]);
   const [importing, setImporting] = useState(false);
+  const isAli = provider === 'aliexpress';
 
   useEffect(() => {
     setData(undefined); setChosenSkus([]);
-    catalogProPreview(pid).then(setData)
+    (isAli ? aliImportPreview(pid) : catalogProPreview(pid)).then(setData)
       .catch(e => { toast('⚠️ ' + (e.message || 'No se pudo cargar el preview')); setData(null); });
-  }, [pid]);
+  }, [pid, isAli]);
 
   const toggleChosen = sku => setChosenSkus(s => s.includes(sku) ? s.filter(x => x !== sku) : s.concat(sku));
-  // "Con stock" = stock YA verificado contra CJ y mayor que 0 — nunca las
-  // que quedaron sin verificar (null), para no incluir a ciegas algo que
-  // pudiera estar agotado de verdad.
+  // "Con stock" = stock YA verificado (CJ lo confirma bajo demanda, AliExpress
+  // ya lo trae real en el mismo preview) y mayor que 0 — nunca las que
+  // quedaron sin verificar (null), para no incluir a ciegas algo agotado.
   const withStockSkus = useMemo(() => (data?.variants || []).filter(v => v.stock != null && v.stock > 0).map(v => v.sku), [data]);
   const selectAllWithStock = () => setChosenSkus(withStockSkus);
   const deselectAll = () => setChosenSkus([]);
@@ -3814,14 +3940,15 @@ function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
     if (chosenSkus.length === 0) { toast('Elige al menos una variante'); return; }
     setImporting(true);
     try {
-      await catalogProImport(pid, chosenSkus);
+      if (isAli) await catalogProImportAli(pid, chosenSkus);
+      else await catalogProImport(pid, chosenSkus);
       toast(`✅ Producto importado con ${chosenSkus.length} variante(s) — revísalo en Staging`);
       onImported();
     } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo importar')); }
     setImporting(false);
   };
 
-  if (data === undefined) return <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '40px 6px' }}>Cargando variantes reales de CJ (puede tardar ~20-30s con muchas variantes: se piden una por una para que CJ no falle)…</div>;
+  if (data === undefined) return <div style={{ textAlign: 'center', color: 'var(--tx3)', fontSize: 12, padding: '40px 6px' }}>Cargando variantes reales de {isAli ? 'AliExpress' : 'CJ'}{isAli ? '' : ' (puede tardar ~20-30s con muchas variantes: se piden una por una para que CJ no falle)'}…</div>;
   if (data === null) return <div style={{ textAlign: 'center', padding: '40px 6px' }}><button className="btn btg" onClick={onBack}>‹ Volver a la búsqueda</button></div>;
 
   return (
@@ -3831,8 +3958,9 @@ function CatalogPreviewScreen({ pid, toast, ro, onBack, onImported }) {
         <div style={{ display: 'flex', gap: 12 }}>
           <CatalogImg src={data.images?.[0]} width={64} height={64} radius={8} iconSize={26} />
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)' }}>{data.title}</div>
-            <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>{data.category} · {data.variants.length} variantes reales · {data.listedNum ?? 0} listados</div>
+            <span className={`bdg ${isAli ? 'bb' : 'by'}`} style={{ marginBottom: 6 }}>{isAli ? 'AliExpress' : 'CJ'}</span>
+            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--tx)', marginTop: 4 }}>{data.title}</div>
+            <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>{data.category} · {data.variants.length} variantes reales{data.listedNum != null ? ` · ${data.listedNum} listados` : ''}</div>
           </div>
         </div>
       </div>
@@ -4366,7 +4494,11 @@ function CatalogStagingTab({ toast, ro }) {
                 <CatalogImg src={p.images?.[0]} width={48} height={48} radius={8} iconSize={20} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{p.title}</div>
-                  <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>{(p.pricing || []).length} variante(s) · costo desde {money(p.cost_product)}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span className={`bdg ${p.provider === 'aliexpress' ? 'bb' : 'by'}`}>{p.provider === 'aliexpress' ? 'AliExpress' : 'CJ'}</span>
+                    {(p.pricing || []).length} variante(s) · costo desde {money(p.cost_product)}
+                    {p.title_en && p.title === p.title_en && <span className="bdg br">🔤 Traducir</span>}
+                  </div>
                 </div>
                 {!ro && <button className="btn sm" style={{ background: 'transparent', color: 'var(--rd)', border: '1px solid var(--rd)' }} onClick={e => { e.stopPropagation(); setToDelete(p); }}>🗑</button>}
                 <span style={{ fontSize: 12, color: 'var(--tx3)' }}>Revisar →</span>
@@ -4561,7 +4693,10 @@ function CatalogPublishedTab({ toast }) {
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
                     {p.is_top && <span style={{ marginRight: 5 }}>🔝</span>}{p.title}
                   </div>
-                  <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2 }}>{(p.pricing || []).length} variante(s) · desde {money(p.recommended_price)} · {(p.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--tx3)', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span className={`bdg ${p.provider === 'aliexpress' ? 'bb' : 'by'}`}>{p.provider === 'aliexpress' ? 'AliExpress' : 'CJ'}</span>
+                    {(p.pricing || []).length} variante(s) · desde {money(p.recommended_price)} · {(p.sellable_regions || []).join(', ') || 'sin regiones marcadas'}
+                  </div>
                 </div>
                 {p.status !== 'archived' && (
                   <button className="btn sm" disabled={topping === p.id}
@@ -4609,9 +4744,183 @@ function CatalogPublishedTab({ toast }) {
   );
 }
 
+// Costo real medido en puntos de CJ por producto importado en el flujo de
+// un solo producto (preview + import + fletes) — ver cj-import-product/
+// cj-import-preview. AliExpress no consume esta cuota (API distinta, sin
+// límite diario medido todavía) así que nunca entra en esta cuenta.
+const CJ_POINTS_PER_PRODUCT_ESTIMATE = 15;
+
+function BatchImportModal({ items, toast, onClose, onDone }) {
+  const [queue, setQueue] = useState(items);
+  const [quota, setQuota] = useState(undefined);
+  const [margin, setMargin] = useState(30);
+  const [perItemMargin, setPerItemMargin] = useState(() => Object.fromEntries(items.map(it => [`${it.provider}:${it.pid}`, ''])));
+  const [adjustIndividually, setAdjustIndividually] = useState(false);
+  const [phase, setPhase] = useState('confirm'); // confirm | running | done
+  const [statuses, setStatuses] = useState(() => Object.fromEntries(items.map(it => [`${it.provider}:${it.pid}`, { status: 'pending' }])));
+  const [onlyProblems, setOnlyProblems] = useState(false);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => { catalogProQuotaStatus().then(setQuota).catch(() => setQuota(null)); }, []);
+
+  const cjCount = queue.filter(it => it.provider === 'cj').length;
+  const estimatedPoints = cjCount * CJ_POINTS_PER_PRODUCT_ESTIMATE;
+  const remaining = quota?.remaining ?? null;
+  const insufficient = remaining != null && estimatedPoints > remaining && cjCount > 0;
+  const cjThatFit = insufficient ? Math.max(0, Math.floor(remaining / CJ_POINTS_PER_PRODUCT_ESTIMATE)) : cjCount;
+
+  const shrinkToFit = () => {
+    let kept = 0;
+    const next = queue.filter(it => {
+      if (it.provider !== 'cj') return true;
+      kept++;
+      return kept <= cjThatFit;
+    });
+    setQueue(next);
+    toast(`Se dejaron ${cjThatFit} de ${cjCount} productos de CJ para hoy — los de AliExpress se mantienen todos.`);
+  };
+
+  const marginFor = (key) => Number(perItemMargin[key]) > 0 ? Number(perItemMargin[key]) : margin;
+
+  const importOne = async (item) => {
+    const key = `${item.provider}:${item.pid}`;
+    const mPct = marginFor(key);
+    try {
+      let staging;
+      if (item.provider === 'cj') {
+        const preview = await catalogProPreview(item.pid);
+        const skus = (preview?.variants || []).filter(v => v.stock != null && v.stock > 0).map(v => v.sku);
+        if (skus.length === 0) throw new Error('Ninguna variante con stock verificado');
+        const res = await catalogProImport(item.pid, skus);
+        staging = res?.staging; var pricingRows = res?.pricing || [];
+      } else {
+        const res = await catalogProImportAli(item.pid);
+        staging = res?.staging; pricingRows = res?.pricing || [];
+      }
+      for (const r of pricingRows) {
+        const cost = Number(r.cost_product) || 0;
+        const recommended = Math.round((cost * (1 + mPct / 100)) * 100) / 100;
+        const profit = Math.round((recommended - cost) * 100) / 100;
+        await catalogProUpdateVariantPricing(r.id, { margin_pct: mPct, margin_fixed: 0, recommended_price: recommended, profit_estimate: profit });
+      }
+      const needsTranslate = item.provider === 'cj' && !!staging?.title_en && staging.title === staging.title_en;
+      return needsTranslate
+        ? { status: 'warning', message: 'Gemini no tradujo el título — quedó en inglés (etiqueta 🔤 Traducir en Staging)' }
+        : { status: 'ok', message: null };
+    } catch (e) {
+      return { status: 'failed', message: e?.message || 'Falló la importación' };
+    }
+  };
+
+  const start = async () => {
+    setPhase('running'); setRunning(true);
+    for (const item of queue) {
+      const key = `${item.provider}:${item.pid}`;
+      setStatuses(s => ({ ...s, [key]: { status: 'importing' } }));
+      const result = await importOne(item); // uno a la vez, nunca en paralelo
+      setStatuses(s => ({ ...s, [key]: result }));
+    }
+    setRunning(false); setPhase('done');
+  };
+
+  const counts = queue.reduce((acc, it) => {
+    const st = statuses[`${it.provider}:${it.pid}`]?.status || 'pending';
+    acc[st] = (acc[st] || 0) + 1;
+    return acc;
+  }, {});
+  const visibleQueue = onlyProblems ? queue.filter(it => ['warning', 'failed'].includes(statuses[`${it.provider}:${it.pid}`]?.status)) : queue;
+  const STATUS_ICON = { pending: '⏳', importing: '↻', ok: '✅', warning: '⚠️', failed: '❌' };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 900, padding: 20 }}>
+      <div style={{ background: 'var(--bg1)', border: '1px solid var(--bd2)', borderRadius: 20, padding: 22, maxWidth: 520, width: '100%', maxHeight: '86vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--tx)', marginBottom: 4 }}>Importar {queue.length} producto(s) en lote</div>
+
+        {phase === 'confirm' && (
+          <>
+            {quota === undefined && <div style={{ fontSize: 11.5, color: 'var(--tx3)', margin: '10px 0' }}>Calculando cuota real de CJ disponible hoy…</div>}
+            {cjCount > 0 && quota && (
+              <div style={{ fontSize: 11.5, color: insufficient ? 'var(--rd)' : 'var(--tx2)', margin: '10px 0', padding: '10px 12px', borderRadius: 10, background: insufficient ? 'var(--rdb)' : 'var(--bg2)' }}>
+                {cjCount} producto(s) de CJ · consumen ~{estimatedPoints} puntos (quedan {quota.remaining.toLocaleString('es-ES')} hoy).
+                {insufficient && <div style={{ marginTop: 6, fontWeight: 700 }}>⚠️ Hoy caben {cjThatFit} de los {cjCount} seleccionados de CJ.</div>}
+              </div>
+            )}
+            {insufficient && (
+              <button className="btn btg sm" style={{ marginBottom: 10 }} onClick={shrinkToFit}>Importar solo lo que alcanza hoy ({cjThatFit} de CJ + {queue.length - cjCount} de AliExpress)</button>
+            )}
+
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--tx2)', marginBottom: 6 }}>Margen general</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <input className="inp" type="number" style={{ maxWidth: 100 }} value={margin} onChange={e => setMargin(Number(e.target.value) || 0)} />
+              <span style={{ fontSize: 12, color: 'var(--tx3)' }}>% sobre el costo real — se aplica a todos salvo que ajustes uno puntual abajo.</span>
+            </div>
+            <button className="btn btg sm" style={{ marginBottom: 10 }} onClick={() => setAdjustIndividually(v => !v)}>{adjustIndividually ? '▾' : '▸'} Ajustar productos puntuales</button>
+
+            <div style={{ maxHeight: 260, overflowY: 'auto', marginBottom: 14 }}>
+              {queue.map(it => {
+                const key = `${it.provider}:${it.pid}`;
+                return (
+                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--bd)' }}>
+                    <CatalogImg src={it.image} width={32} height={32} radius={7} iconSize={14} />
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: 'var(--tx2)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{it.title}</div>
+                    <span className={`bdg ${it.provider === 'aliexpress' ? 'bb' : 'by'}`}>{it.provider === 'aliexpress' ? 'AliExpress' : 'CJ'}</span>
+                    {adjustIndividually && (
+                      <input className="inp" type="number" placeholder={String(margin)} style={{ width: 60 }}
+                        value={perItemMargin[key]} onChange={e => setPerItemMargin(p => ({ ...p, [key]: e.target.value }))} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: 'flex', gap: 9 }}>
+              <button className="btn btg" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancelar</button>
+              <button className="btn btp" style={{ flex: 1, justifyContent: 'center' }} disabled={queue.length === 0} onClick={start}>Confirmar e importar</button>
+            </div>
+          </>
+        )}
+
+        {(phase === 'running' || phase === 'done') && (
+          <>
+            {phase === 'done' && (
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tx2)', margin: '10px 0' }}>
+                {counts.ok || 0} importados bien, {counts.warning || 0} con advertencia, {counts.failed || 0} fallaron.
+                {(counts.warning || counts.failed) > 0 && (
+                  <button className="btn btg sm" style={{ marginLeft: 10 }} onClick={() => setOnlyProblems(v => !v)}>{onlyProblems ? 'Ver todos' : 'Ver solo con problemas'}</button>
+                )}
+              </div>
+            )}
+            <div style={{ maxHeight: 340, overflowY: 'auto', margin: '10px 0' }}>
+              {visibleQueue.map(it => {
+                const key = `${it.provider}:${it.pid}`;
+                const st = statuses[key] || { status: 'pending' };
+                return (
+                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--bd)' }}>
+                    <span style={{ fontSize: 15, width: 20, textAlign: 'center' }} className={st.status === 'importing' ? 'spin' : ''}>{STATUS_ICON[st.status]}</span>
+                    <CatalogImg src={it.image} width={32} height={32} radius={7} iconSize={14} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11.5, color: 'var(--tx2)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{it.title}</div>
+                      {st.message && <div style={{ fontSize: 10.5, color: st.status === 'failed' ? 'var(--rd)' : 'var(--yw)', marginTop: 2 }}>{st.message}</div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <button className="btn btp" style={{ width: '100%', justifyContent: 'center' }} disabled={running} onClick={() => onDone()}>
+              {running ? <span className="spin">↻</span> : (phase === 'done' ? 'Ir a Staging' : 'Importando…')}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CatalogoPro({ toast, ro }) {
   const [tab, setTab] = useState('buscar');
-  const [previewPid, setPreviewPid] = useState(null);
+  const [previewTarget, setPreviewTarget] = useState(null); // { pid, provider } | null
+  const [selected, setSelected] = useState([]); // [{provider, pid, title, image, price}]
+  const [showBatchModal, setShowBatchModal] = useState(false);
   // Conteo real de pedidos pendientes de gestionar — vive aquí (no solo
   // dentro de la pestaña) para que se vea como badge en la pestaña misma
   // aunque el admin esté viendo otra sección del Catálogo Pro.
@@ -4622,30 +4931,45 @@ function CatalogoPro({ toast, ro }) {
   useEffect(() => { refreshPendingCount(); }, [refreshPendingCount]);
 
   useEffect(() => {
-    if (!previewPid) return;
-    return pushBackHandler(() => setPreviewPid(null));
-  }, [previewPid]);
+    if (!previewTarget) return;
+    return pushBackHandler(() => setPreviewTarget(null));
+  }, [previewTarget]);
+
+  const isSelected = (provider, pid) => selected.some(s => s.provider === provider && s.pid === pid);
+  const toggleSelect = (item) => setSelected(s => isSelected(item.provider, item.pid) ? s.filter(x => !(x.provider === item.provider && x.pid === item.pid)) : s.concat(item));
 
   return (
-    <>
+    <div className="cpro-skin">
       <div className="stit">Catálogo Pro</div>
-      <div className="ssub">Catálogo interno de dropshipping (CJdropshipping) para Pro/Premium — fase 1, fulfillment manual.</div>
+      <div className="ssub">Catálogo interno de dropshipping (CJ + AliExpress) para Pro/Premium — fase 1, fulfillment manual.</div>
       {ro && <div style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 10, background: 'var(--bg2)', border: '1px solid var(--bd2)', fontSize: 12, fontWeight: 700, color: 'var(--tx2)' }}>👁 Solo lectura — sin permiso para importar ni publicar.</div>}
 
       <div className="tabs" style={{ maxWidth: 420 }}>
         {[['buscar', 'Buscar'], ['staging', 'Staging'], ['publicado', 'Publicado'], ['pedidos', 'Pedidos por gestionar']].map(([k, l]) =>
-          <div key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => { setTab(k); setPreviewPid(null); }}>
+          <div key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => { setTab(k); setPreviewTarget(null); }}>
             {l}{k === 'pedidos' && pendingCount > 0 && <span className="bdg bg" style={{ marginLeft: 6 }}>{pendingCount}</span>}
           </div>)}
       </div>
 
-      {tab === 'buscar' && (previewPid
-        ? <CatalogPreviewScreen pid={previewPid} toast={toast} ro={ro} onBack={() => setPreviewPid(null)} onImported={() => { setPreviewPid(null); setTab('staging'); }} />
-        : <CatalogSearchTab toast={toast} ro={ro} onOpenPreview={setPreviewPid} />)}
+      {tab === 'buscar' && (previewTarget
+        ? <CatalogPreviewScreen pid={previewTarget.pid} provider={previewTarget.provider} toast={toast} ro={ro} onBack={() => setPreviewTarget(null)} onImported={() => { setPreviewTarget(null); setTab('staging'); }} />
+        : <CatalogSearchTab toast={toast} ro={ro} onOpenPreview={(pid, provider) => setPreviewTarget({ pid: String(pid), provider })}
+            selected={selected} onToggleSelect={toggleSelect} isSelected={isSelected} />)}
       {tab === 'staging' && <CatalogStagingTab toast={toast} ro={ro} />}
       {tab === 'publicado' && <CatalogPublishedTab toast={toast} />}
       {tab === 'pedidos' && <CatalogPendingOrdersTab toast={toast} ro={ro} onChange={refreshPendingCount} />}
-    </>
+
+      {tab === 'buscar' && !previewTarget && !ro && selected.length > 0 && (
+        <div className="selbar">
+          <b>{selected.length} seleccionado(s)</b>
+          <button className="btn btp" onClick={() => setShowBatchModal(true)}>Configurar margen e importar</button>
+        </div>
+      )}
+      {showBatchModal && (
+        <BatchImportModal items={selected} toast={toast} onClose={() => setShowBatchModal(false)}
+          onDone={() => { setShowBatchModal(false); setSelected([]); setTab('staging'); }} />
+      )}
+    </div>
   );
 }
 

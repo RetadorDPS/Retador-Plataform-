@@ -36,7 +36,16 @@ const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;4
   --yw:#C98A25;--ywb:rgba(201,138,37,0.10);
   --pp:#8C6FB8;--ppb:rgba(140,111,184,0.10);
 }
-.omni .cpro-skin{background:var(--bg)}
+/* BUG REAL visto en producción: .cpro-skin es un div normal dentro de .cnt
+   (que tiene padding propio) — su alto antes dependía SOLO de su contenido,
+   así que con pocos productos (o ninguno) el fondo crema no llegaba ni a los
+   bordes ni al piso de la pantalla, dejando ver el negro de .omni alrededor.
+   margin negativo = -padding de .cnt (cancela el padding para llegar a los
+   bordes reales) + padding propio equivalente (mismo respiro visual de
+   siempre) + min-height:100% (ocupa TODO el alto real de .cnt, con o sin
+   contenido — .cnt sí tiene una altura real vía flexbox, no es "auto"). */
+.omni .cpro-skin{background:var(--bg);min-height:100%;box-sizing:border-box;margin:-22px;padding:22px}
+.omni.nar .cpro-skin{margin:-14px;padding:14px}
 .omni .cpro-skin .card,.omni .cpro-skin .mc{border-radius:20px;box-shadow:0 1px 3px rgba(120,95,55,.06)}
 .omni .cpro-skin .cp{padding:22px}
 .omni .cpro-skin .btn{border-radius:12px;font-weight:700}

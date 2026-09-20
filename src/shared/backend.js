@@ -813,8 +813,18 @@ const compressImage = (file, maxSide = 1280, quality = 0.82) => new Promise((res
 // siempre. Las tarjetas de lista (thumbUrlOf) piden la miniatura por
 // convención y, si no existe (fotos de ANTES de este cambio), el <img> cae
 // solo a la foto completa de siempre (onError) — cero fotos rotas.
+// BUG REAL (visto con los primeros productos de AliExpress agregados a una
+// tienda): esta convención de "-thumb" es SOLO para lo que uploadImage() sube
+// al Storage propio de RETADOR (genera el archivo miniatura al publicar). Las
+// fotos importadas de CJ/AliExpress viven en el CDN del proveedor
+// (cjdropshipping.com / alicdn.com) y esa miniatura NUNCA existe ahí — antes
+// esta función igual intentaba "foto-thumb.jpg" para CUALQUIER URL, esa
+// petición fallaba (404) y encadenaba a un onError roto en algunas tarjetas
+// (ver PCard). Ahora solo reescribe URLs que de verdad son de nuestro propio
+// Storage; cualquier otra URL (de un proveedor externo) se deja tal cual.
 export const thumbUrlOf = (url) => {
   if (!url || typeof url !== "string") return url;
+  if (!url.includes(".supabase.co/storage/")) return url;
   const m = /^(.*)\.(jpe?g|png|webp)(\?.*)?$/i.exec(url);
   if (!m) return url;
   return `${m[1]}-thumb.${m[2]}${m[3] || ""}`;

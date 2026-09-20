@@ -1870,22 +1870,36 @@ function ImportadorFicha({ ficha, C, ac, user, flash, onCerrar, onImportado }) {
   );
 }
 
+// Buscador LOCAL del catálogo ya importado — filtra solo por nombre entre lo
+// que ya está visible en esta lista, sin llamar a CJ ni AliExpress (cero
+// costo de cuota). Ignora may/minúsculas y acentos.
+const normalizaTexto = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
 function CatalogoProSeller({ C, ac, onOpenCatalogDraft, user }) {
   const [rows, setRows] = useState(undefined); // undefined=cargando · null=error
   const [viewing, setViewing] = useState(null);
+  const [q, setQ] = useState("");
   const { cats, subcats } = useCatalog();
   const load = () => { catalogProSellerCatalog().then(setRows).catch(() => setRows(null)); };
   useEffect(() => { load(); }, []);
 
+  const qNorm = normalizaTexto(q.trim());
+  const filtered = qNorm ? (rows || []).filter(p => normalizaTexto(p.title).includes(qNorm)) : rows;
+
   return (
     <div>
       <SHdr title="Catálogo" sub="Productos ya importados y revisados por RETADOR — listos para vender" ac={ac} C={C}/>
+      {rows && rows.length > 0 && (
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar en el catálogo por nombre…"
+          style={{ width:"100%", padding:"10px 13px", borderRadius:10, border:`1px solid ${C.b}`, background:C.s2, color:C.t, fontSize:13, marginBottom:12, outline:"none" }} />
+      )}
       {rows === undefined && <div style={{ padding:40, textAlign:"center", color:C.m, fontSize:13 }}>Cargando…</div>}
       {rows === null && <div style={{ padding:40, textAlign:"center", color:C.err, fontSize:13 }}>No se pudo cargar el catálogo.</div>}
       {rows && rows.length === 0 && <div style={{ padding:40, textAlign:"center", color:C.m, fontSize:13 }}>Todavía no hay productos publicados en el catálogo.</div>}
-      {rows && rows.length > 0 && (
+      {rows && rows.length > 0 && filtered.length === 0 && <div style={{ padding:40, textAlign:"center", color:C.m, fontSize:13 }}>Ningún producto coincide con "{q}".</div>}
+      {filtered && filtered.length > 0 && (
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-          {rows.map(p => {
+          {filtered.map(p => {
             const cost = Number(p.recommended_price) || 0;
             const suggested = Math.round(cost * (1 + SUGGESTED_MARGIN_PCT / 100) * 100) / 100;
             const profit = Math.round((suggested - cost) * 100) / 100;

@@ -875,7 +875,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
 
           <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
             <div style={{ width: 54, height: 54, borderRadius: 14, background: "#1a1a1a", overflow: "hidden", flexShrink: 0 }}>
-              {(variant?.image || product.img || product.image) && <img src={variant?.image || product.img || product.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
+              {(variant?.image || product.img || product.image) && <img src={variant?.image || product.img || product.image} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontSize: 13, fontWeight: 700, color: T1 }}>{product.title}</p>
@@ -922,7 +922,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
               {cartLinesCalc.map((l, i) => (
                 <div key={l.variantId} style={{ display: "flex", alignItems: "center", gap: 8, background: soft, border: `1px solid ${B}`, borderRadius: 11, padding: "9px 11px", marginBottom: 7 }}>
                   <div style={{ width: 34, height: 34, borderRadius: 8, background: "#1a1a1a", overflow: "hidden", flexShrink: 0 }}>
-                    {l.image && <img src={l.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
+                    {l.image && <img src={l.image} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 2}. {Object.values(l.attrs || {}).join(" / ") || "Variante"}</div>
@@ -2199,7 +2199,7 @@ function PCard({ p, onClick, isFav, onFav, view = "grid" }) {
             se acerca a la pantalla — antes las ~18+ fotos de la Tienda se
             pedían TODAS de una vez al entrar, aunque la mayoría quedara fuera
             de la vista. Nunca cambia qué se ve, solo CUÁNDO se pide. */}
-        <img src={thumbImg} alt={p.title} loading="lazy" decoding="async"
+        <img src={thumbImg} alt={p.title} loading="lazy" decoding="async" referrerPolicy="no-referrer"
           style={{ width: "100%", ...(view === "muro" ? { height: "auto", display: "block" } : { height: "100%", objectFit: "cover" }), transition: "transform .3s" }}
           onError={e => { if (e.target.src !== img) e.target.src = img; else e.target.src = "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400"; }} />
         {flag && <div style={{ position: "absolute", bottom: 7, left: 7, fontSize: 14, filter: "drop-shadow(0 1px 2px rgba(0,0,0,.6))" }}>{flag}</div>}
@@ -2531,7 +2531,7 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
           {imgs.map((src, i) => (
             <div key={i} style={{ position: "relative", width: 76, height: 76, borderRadius: 10, overflow: "hidden", border: `1px solid ${B}` }}>
-              <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
+              <img src={src} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
               <button onClick={() => setImgs(prev => prev.filter((_, j) => j !== i))} style={{ position: "absolute", top: 2, right: 2, width: 20, height: 20, borderRadius: "50%", border: "none", background: "rgba(0,0,0,.7)", color: "#fff", fontSize: 12, cursor: "pointer", lineHeight: 1 }}>×</button>
               {i === 0 && <span style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,.6)", color: "#fff", fontSize: 8, textAlign: "center", padding: "1px 0" }}>Principal</span>}
             </div>
@@ -2914,7 +2914,7 @@ function ProductImageViewer({ images = [], index = 0, setIndex, onClose, title, 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 9000, background: "#000", overflow: "hidden", touchAction: "none" }}
       onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}>
-      <img src={list[index] || CAROUSEL_FALLBACK} alt="" draggable={false}
+      <img src={list[index] || CAROUSEL_FALLBACK} alt="" draggable={false} referrerPolicy="no-referrer"
         onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }}
         style={{ position: "absolute", inset: 0, margin: "auto", maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
           transform: `translate(${z.tx}px, ${z.ty}px) scale(${z.scale})`, transition: g.current.mode ? "none" : "transform .2s ease", pointerEvents: "none", userSelect: "none" }} />
@@ -3233,7 +3233,7 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
           {imgs.map((src, idx) => (
             <button key={idx} onClick={() => setImgIdx(idx)} aria-label={`Foto ${idx + 1}`}
               style={{ flexShrink: 0, width: 52, height: 52, borderRadius: 10, overflow: "hidden", padding: 0, cursor: "pointer", background: "#161616", border: idx === imgIdx ? `2px solid ${G}` : `1px solid ${B}`, opacity: idx === imgIdx ? 1 : 0.72, transition: "opacity .2s, border-color .2s" }}>
-              <img src={src || CAROUSEL_FALLBACK} alt="" onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              <img src={src || CAROUSEL_FALLBACK} alt="" referrerPolicy="no-referrer" onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
             </button>
           ))}
         </div>
@@ -3622,7 +3622,7 @@ export function CartScreen({ user, onBack, flash, onChange }) {
                 return (
                   <div key={line.id} style={{ display: "flex", gap: 10, background: isDark ? "#0d0d0d" : CARD, border: `1px solid ${B}`, borderRadius: 14, padding: 12, marginBottom: 8 }}>
                     <div style={{ width: 56, height: 56, borderRadius: 11, background: "#1a1a1a", overflow: "hidden", flexShrink: 0 }}>
-                      {img && <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
+                      {img && <img src={img} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: 12.5, fontWeight: 700, color: T1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{line.product.title}</p>
@@ -4076,7 +4076,7 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash, initialCa
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 3)},1fr)`, gap: 8, marginBottom: 12 }}>
             {form.images.map((img, i) => (
               <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: isDark?"#141414":CARD }}>
-                <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
+                <img src={img} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
                 <button onClick={() => removeImage(i)} className="p" style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,.85)", border: "none", borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", color: isDark?"#fff":T1, fontSize: 12, fontWeight: 700 }}>×</button>
                 {i === 0 && <div style={{ position: "absolute", bottom: 4, left: 4, background: G, color: "#000", fontSize: 9, fontWeight: 800, padding: "3px 7px", borderRadius: 4 }}>PRINCIPAL</div>}
               </div>
@@ -4434,7 +4434,7 @@ function PublishServiceForm({ onClose, onBack, onPublish, user, flash }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 12 }}>
             {form.images.map((img, i) => (
               <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: isDark?"#141414":CARD }}>
-                <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
+                <img src={img} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
                 <button onClick={() => removeImage(i)} className="p" style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,.85)", border: "none", borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", color: isDark?"#fff":T1, fontSize: 12, fontWeight: 700 }}>×</button>
                 {i === 0 && <div style={{ position: "absolute", bottom: 4, left: 4, background: G, color: "#000", fontSize: 9, fontWeight: 800, padding: "3px 7px", borderRadius: 4 }}>PRINCIPAL</div>}
               </div>

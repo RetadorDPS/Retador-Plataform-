@@ -523,7 +523,12 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   // para la cantidad EXACTA de cada línea (debounced, para no golpear la
   // cotización en cada tecla) y se guarda junto con la cantidad para la que
   // vale, así nunca se muestra ni se cobra un número de otra cantidad.
-  const isCatalogPro = product.source_type === 'catalog_pro';
+  // BUG REAL corregido: esto solo era true para 'catalog_pro' — un producto
+  // cj_direct (o aliexpress_direct) tomaba el camino de abajo (shipPrice del
+  // cliente / product.shippingPrice, que el Importador nunca llena) y
+  // cobraba $0 de envío real siempre. Los tres proveedores de importación
+  // directa cotizan real de la misma forma (ver cj-buyer-freight-quote).
+  const isCatalogPro = ['catalog_pro', 'cj_direct', 'aliexpress_direct'].includes(product.source_type);
   // El DESTINO ya no es un modo fijo del producto — lo elige el comprador en
   // cada compra. 'CU' activa la ruta vía nuestro hub (tiempo combinado,
   // igual que siempre); cualquier otro país real de CJ_COUNTRIES es envío
@@ -2382,7 +2387,7 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
   // vendedor deba escribir — se cotiza real por pedido según el destino
   // que elija el comprador (ver BuyModal), así que ni se pide ni bloquea
   // publicar por faltar ese campo.
-  const isCatalogPro = !!product.source_catalog_id;
+  const isCatalogPro = !!product.source_catalog_id || ['cj_direct', 'aliexpress_direct'].includes(product.source_type);
   // Categoría de servicio: propia (config.serviceCats), texto libre guardado en
   // `subcat` — nunca en `cat` (esa tiene FK a categories, categorías de producto).
   const serviceCats = (Array.isArray(pCfg.serviceCats) && pCfg.serviceCats.length) ? pCfg.serviceCats : DEFAULT_SERVICE_CATS;
@@ -3085,7 +3090,7 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
   // su región es Cuba, o no ha elegido región todavía, se mantiene el
   // estimado hacia Cuba de siempre. El comprador puede elegir cualquier otro
   // país real al momento de comprar, donde se recotiza con su destino exacto.
-  const isCatalogPro = p.source_type === 'catalog_pro';
+  const isCatalogPro = ['catalog_pro', 'cj_direct', 'aliexpress_direct'].includes(p.source_type);
   const SHOP_COUNTRY_TO_CJ = { eeuu: 'US', espana: 'ES', cuba: 'CU' };
   const SHOP_COUNTRY_LABEL = { eeuu: 'Estados Unidos', espana: 'España', cuba: 'Cuba' };
   const buyerShopCountry = user?.profile?.shop_country || null;

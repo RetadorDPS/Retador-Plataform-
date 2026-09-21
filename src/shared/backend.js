@@ -2443,6 +2443,18 @@ export const aliImportPreview = async (pid) => {
   if (data?.error) throw new Error(data.error);
   return data;
 };
+// Sigue en el servidor la redirección real de un enlace corto de AliExpress
+// (a.aliexpress.com/_XXXXX, s.click.aliexpress.com/..., star.aliexpress.com/
+// share/...) — el navegador del admin no puede seguirla de forma fiable
+// (bloqueos CORS/anti-bot reales del lado de AliExpress). Devuelve la URL
+// final real (la que ya trae el id en /item/... o ?productId=...), lista
+// para volver a pasarla por extractAliPidCandidates.
+export const resolveAliShortLink = async (url) => {
+  const { data, error } = await supabase.functions.invoke("ali-resolve-link", { body: { url } });
+  if (error) { console.error("resolveAliShortLink:", error.message); throw error; }
+  if (data?.error) throw new Error(data.error);
+  return data?.finalUrl || null;
+};
 
 export const aliSellerImport = async ({ pid, variantes, cat, subcat, province }) => {
   const { data, error } = await supabase.functions.invoke("ali-seller-import", {

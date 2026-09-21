@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProImportAli, aliImportPreview, extractAliPidCandidates, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProImportAli, aliImportPreview, extractAliPidCandidates, resolveAliShortLink, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -3722,7 +3722,7 @@ function CatalogSearchTab({ toast, ro, onOpenPreview, selected, onToggleSelect, 
   // importarlo (ali-import-product ya trae todas las variantes reales de
   // una sola vez). El admin puede tocar la tarjeta después para revisarla.
   const doAddAliFromLink = async () => {
-    const { candidatos, respaldo, esAliExpress } = extractAliPidCandidates(aliLinkInput);
+    let { candidatos, respaldo, esAliExpress } = extractAliPidCandidates(aliLinkInput);
     // BUG REAL corregido: antes, si había candidatos de alta confianza
     // (/item/, /i/) se probaban SOLO esos — si los 3 fallaban nunca se
     // probaba el respaldo, aunque el id real estuviera ahí. Ahora se prueban
@@ -3730,12 +3730,28 @@ function CatalogSearchTab({ toast, ro, onOpenPreview, selected, onToggleSelect, 
     // total), así un enlace real con parámetros de tracking de por medio
     // sigue teniendo una oportunidad real. Si el enlace ni siquiera es de
     // dominio aliexpress, se avisa eso en vez de un genérico "no se pudo".
+    setCheckingAliLink(true);
+    // BUG REAL corregido: un enlace CORTO de AliExpress (a.aliexpress.com/_...,
+    // el que da el botón "Compartir" del Dropshipping Center — confirmado con
+    // un enlace real de Daniel) no trae el id en ningún lado de la URL visible
+    // — es una redirección. Antes, esto caía directo a "no se pudo
+    // identificar" sin intentar nada más. Ahora, si es reconocible como
+    // AliExpress pero no se encontró ningún id, se sigue la redirección real
+    // en el servidor (ali-resolve-link) y se vuelve a extraer sobre la URL
+    // final — confirmado real: a.aliexpress.com/_EzUBPJg resuelve a
+    // aliexpress.com/item/1005012061024508.html.
+    if (candidatos.length === 0 && respaldo.length === 0 && esAliExpress) {
+      try {
+        const finalUrl = await resolveAliShortLink(aliLinkInput);
+        if (finalUrl) ({ candidatos, respaldo, esAliExpress } = extractAliPidCandidates(finalUrl));
+      } catch (_e) { /* si no se pudo seguir la redirección, sigue sin candidatos */ }
+    }
     const intentos = [...new Set([...candidatos, ...respaldo])].slice(0, 6);
     if (intentos.length === 0) {
+      setCheckingAliLink(false);
       toast(esAliExpress ? '⚠️ No se pudo identificar el producto en ese enlace' : '⚠️ Ese enlace no parece ser de AliExpress');
       return;
     }
-    setCheckingAliLink(true);
     let encontrado = null;
     for (const pid of intentos) {
       try {

@@ -3722,9 +3722,19 @@ function CatalogSearchTab({ toast, ro, onOpenPreview, selected, onToggleSelect, 
   // importarlo (ali-import-product ya trae todas las variantes reales de
   // una sola vez). El admin puede tocar la tarjeta después para revisarla.
   const doAddAliFromLink = async () => {
-    const { candidatos, respaldo } = extractAliPidCandidates(aliLinkInput);
-    const intentos = candidatos.length ? candidatos : respaldo.slice(0, 3);
-    if (intentos.length === 0) { toast('⚠️ No se pudo identificar el producto en ese enlace'); return; }
+    const { candidatos, respaldo, esAliExpress } = extractAliPidCandidates(aliLinkInput);
+    // BUG REAL corregido: antes, si había candidatos de alta confianza
+    // (/item/, /i/) se probaban SOLO esos — si los 3 fallaban nunca se
+    // probaba el respaldo, aunque el id real estuviera ahí. Ahora se prueban
+    // los de alta confianza primero y LUEGO el respaldo (hasta 6 intentos en
+    // total), así un enlace real con parámetros de tracking de por medio
+    // sigue teniendo una oportunidad real. Si el enlace ni siquiera es de
+    // dominio aliexpress, se avisa eso en vez de un genérico "no se pudo".
+    const intentos = [...new Set([...candidatos, ...respaldo])].slice(0, 6);
+    if (intentos.length === 0) {
+      toast(esAliExpress ? '⚠️ No se pudo identificar el producto en ese enlace' : '⚠️ Ese enlace no parece ser de AliExpress');
+      return;
+    }
     setCheckingAliLink(true);
     let encontrado = null;
     for (const pid of intentos) {
@@ -4624,6 +4634,14 @@ function CatalogPublishedTab({ toast }) {
   const [archiving, setArchiving] = useState(false);
   const [toDeleteFinal, setToDeleteFinal] = useState(null); // { product, impact: undefined|array }
   const [deletingFinal, setDeletingFinal] = useState(false);
+  // BUG REAL corregido: este estado vivía DESPUÉS del "if (open) return..."
+  // de abajo — un Hook nunca puede depender de una condición (regla real de
+  // React), así que al tocar cualquier producto (CJ o AliExpress, daba
+  // igual) este componente dejaba de llamar este useState a mitad de
+  // render, React detectaba el cambio real de orden de Hooks entre un
+  // render y el siguiente y tiraba la pantalla entera en blanco/negro con
+  // un error real en consola — exactamente el bug que reportó Daniel.
+  const [topping, setTopping] = useState(null);
   const load = useCallback(() => {
     catalogProListPublished().then(setRows).catch(e => { console.error('catalogProListPublished:', e); setRows(null); });
   }, []);
@@ -4653,7 +4671,6 @@ function CatalogPublishedTab({ toast }) {
   // Pro/Premium. Se cambia con un toque, sin abrir el detalle ni confirmar
   // (es reversible al instante). La fila se actualiza en el acto y después se
   // recarga para que el orden real del listado también se reacomode.
-  const [topping, setTopping] = useState(null);
   const toggleTop = async (p) => {
     setTopping(p.id);
     try {

@@ -535,8 +535,8 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   // directo de CJ, sin pasar por el hub. Por defecto arranca en Cuba (el
   // destino más común de esta app) — el comprador siempre puede cambiarlo.
   const [destCountry, setDestCountry] = useState('CU');
-  const [primaryShipQuote, setPrimaryShipQuote] = useState({ qty: null, country: null, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: false });
-  const [cartShipQuotes, setCartShipQuotes] = useState({}); // { [variantId]: { qty, country, total_price, aging, is_slow, days_min, days_max, loading, failed } }
+  const [primaryShipQuote, setPrimaryShipQuote] = useState({ qty: null, country: null, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: false, reason: null });
+  const [cartShipQuotes, setCartShipQuotes] = useState({}); // { [variantId]: { qty, country, total_price, aging, is_slow, days_min, days_max, loading, failed, reason } }
   // BUG REAL ya visto (Daniel, 2-3 veces seguidas): el envío de una variante
   // se mostraba como $0 un instante al agregar/cambiar cantidad. Causa
   // exacta: getCatalogProBuyerFreightQuote() traga cualquier error real de
@@ -558,14 +558,22 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
         if (cancelled) return;
         if (r?.applicable === false) {
           if (attempt < 3) { timer = setTimeout(() => fetchQuote(attempt + 1), 900); return; }
-          setPrimaryShipQuote(q => ({ ...q, loading: false, failed: true }));
+          setPrimaryShipQuote(q => ({ ...q, loading: false, failed: true, reason: null }));
           return;
         }
-        setPrimaryShipQuote({ qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false });
+        // status:'no_disponible' llega con applicable:true y total_price:0 —
+        // NUNCA es una cotización real de $0, es el backend diciendo "no se
+        // puede cobrar esto real" (ver reason). Tratarlo igual que un fallo:
+        // nunca se muestra ni se cobra $0 como si fuera envío gratis.
+        if (r?.status === 'no_disponible') {
+          setPrimaryShipQuote({ qty, country: destCountry, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: true, reason: r?.reason || null });
+          return;
+        }
+        setPrimaryShipQuote({ qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false, reason: null });
       }).catch(() => {
         if (cancelled) return;
         if (attempt < 3) { timer = setTimeout(() => fetchQuote(attempt + 1), 900); return; }
-        setPrimaryShipQuote(q => ({ ...q, loading: false, failed: true }));
+        setPrimaryShipQuote(q => ({ ...q, loading: false, failed: true, reason: null }));
       });
     };
     timer = setTimeout(() => fetchQuote(0), 600);
@@ -590,14 +598,21 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
         if (cancelled) return;
         if (r?.applicable === false) {
           if (attempt < 3) { timers.push(setTimeout(() => fetchLine(l, attempt + 1), 900)); return; }
-          setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { ...(qs[l.variantId] || {}), loading: false, failed: true } }));
+          setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { ...(qs[l.variantId] || {}), loading: false, failed: true, reason: null } }));
           return;
         }
-        setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { qty: l.qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false } }));
+        // Mismo bug real corregido que en la línea principal: status:
+        // 'no_disponible' nunca es un $0 real — se trata como fallo, con el
+        // motivo real del backend, nunca como envío gratis.
+        if (r?.status === 'no_disponible') {
+          setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { qty: l.qty, country: destCountry, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: true, reason: r?.reason || null } }));
+          return;
+        }
+        setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { qty: l.qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false, reason: null } }));
       }).catch(() => {
         if (cancelled) return;
         if (attempt < 3) { timers.push(setTimeout(() => fetchLine(l, attempt + 1), 900)); return; }
-        setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { ...(qs[l.variantId] || {}), loading: false, failed: true } }));
+        setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { ...(qs[l.variantId] || {}), loading: false, failed: true, reason: null } }));
       });
     };
     const t = setTimeout(() => { cartLines.forEach(l => fetchLine(l, 0)); }, 600);
@@ -960,16 +975,23 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
           )}
 
           {/* El comprador elige el país de destino AQUÍ, antes de ver el total
-              — Cuba primero (vía nuestro hub, tiempo combinado), debajo el
-              resto de países reales donde CJ envía directo. Precio y tiempo
-              se recotizan en vivo (con debounce) cada vez que cambia. */}
+              — Cuba primero (vía nuestro hub, tiempo combinado). El resto de
+              la lista depende del proveedor REAL de este producto: CJ envía
+              directo a todo CJ_COUNTRIES, pero AliExpress hoy solo tiene
+              cotización real confirmada hacia Cuba (ver investigación real en
+              cj-buyer-freight-quote) — mostrarle a un comprador de AliExpress
+              la lista de CJ era el bug real que hacía ver $0 en cualquier
+              país que no fuera Cuba. */}
           {isCatalogPro && (
             <div style={{ marginBottom: 12 }}>
               <label style={lbl}>¿A qué país lo enviamos?</label>
               <select style={{ ...inp, appearance: "none", cursor: "pointer" }} value={destCountry} onChange={e => setDestCountry(e.target.value)}>
                 <option value="CU">🇨🇺 Cuba</option>
-                {CJ_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                {product.catalogProvider !== "aliexpress" && CJ_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
               </select>
+              {product.catalogProvider === "aliexpress" && (
+                <p style={{ fontSize: 10, color: T2, marginTop: 4 }}>Este producto es de AliExpress — por ahora solo tenemos envío real confirmado a Cuba.</p>
+              )}
             </div>
           )}
 
@@ -987,7 +1009,17 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
               {catalogProShipDays && (
                 <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>Llega en {catalogProShipDays.days_min} a {catalogProShipDays.days_max} días</p>
               )}
-              {destCountry === "CU" && <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>🇨🇺 Envío disponible a Cuba</p>}
+              {/* BUG REAL corregido: cuando el backend responde
+                  status:'no_disponible' (ej. AliExpress a un país que no es
+                  Cuba, o un producto real sin cobertura confirmada) sigue
+                  viniendo con applicable:true y total_price:0 — antes eso se
+                  guardaba como si fuera una cotización real de $0 (envío
+                  "gratis" falso). Ahora se muestra el motivo REAL que manda
+                  el backend, nunca un precio inventado. */}
+              {shipQuoteFailed && (primaryShipQuote.reason || Object.values(cartShipQuotes).find(q => q?.reason)?.reason) && (
+                <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>{primaryShipQuote.reason || Object.values(cartShipQuotes).find(q => q?.reason)?.reason}</p>
+              )}
+              {destCountry === "CU" && shipQuoteReady && <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>🇨🇺 Envío disponible a Cuba</p>}
             </div>
           )}
 

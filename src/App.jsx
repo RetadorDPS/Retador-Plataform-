@@ -2229,16 +2229,16 @@ function AppShell({ sessionUser, platformStats = null }) {
             <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 18, overflow: "hidden" }}>
               <div style={{ height: 90, background: "linear-gradient(135deg,#6EE7B7,#67E8F9)", position: "relative", display: "flex", alignItems: "center", padding: "0 18px", overflow: "hidden" }}>
                 <span style={{ position: "absolute", right: 2, bottom: -26, fontSize: 104, fontWeight: 800, color: "rgba(4,35,26,.16)", lineHeight: 1, pointerEvents: "none", fontFamily: "Georgia, serif" }}>Ω</span>
-                <span style={{ fontSize: 38, position: "relative" }}>🔗</span>
+                <span style={{ fontSize: 38, position: "relative" }}>✨</span>
                 <span style={{ position: "absolute", top: 12, right: 12, fontSize: 10, fontWeight: 800, color: "#064e3b", background: "rgba(255,255,255,.85)", borderRadius: 100, padding: "3px 9px" }}>⚡ PREMIUM</span>
               </div>
               <div style={{ padding: "16px 18px 18px" }}>
-                <h2 style={{ fontSize: 17, fontWeight: 800, color: t1, marginBottom: 6 }}>Importador Inteligente</h2>
+                <h2 style={{ fontSize: 17, fontWeight: 800, color: t1, marginBottom: 6 }}>Creador Inteligente</h2>
                 <p style={{ fontSize: 13, lineHeight: 1.55, color: t2, marginBottom: 14 }}>
-                  Llena tu tienda en segundos. Pega el enlace de un producto de <b style={{ color: t1 }}>AliExpress</b> y se importa solo con fotos, precio y características — o describe tu producto y la <b style={{ color: t1 }}>IA</b> te arma una publicación elegante, lista para vender, con tu margen de ganancia ya calculado.
+                  Describe tu producto y la <b style={{ color: t1 }}>IA</b> te arma una publicación elegante, lista para vender, con tu margen de ganancia ya calculado.
                 </p>
                 <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 16 }}>
-                  {["Importa por URL", "Crea con IA", "Calcula tu ganancia"].map(f => (
+                  {["Crea con IA", "Calcula tu ganancia"].map(f => (
                     <span key={f} style={{ fontSize: 11, fontWeight: 600, color: t2, background: dark ? "#1c1c22" : "#f1f5f9", borderRadius: 8, padding: "5px 10px" }}>✓ {f}</span>
                   ))}
                 </div>

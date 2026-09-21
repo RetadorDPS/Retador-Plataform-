@@ -2,30 +2,6 @@ import { useState, useEffect, useRef, createContext, useContext, useCallback, us
 
 const ProductToolsApp = (() => {
 
-const PLATFORMS = [
-  { id: "aliexpress", name: "AliExpress", emoji: "🛒", available: true },
-  { id: "temu",       name: "Temu",       emoji: "🏷️", available: false },
-  { id: "alibaba",    name: "Alibaba",    emoji: "🏢", available: false },
-  { id: "amazon",     name: "Amazon",     emoji: "📦", available: false },
-  { id: "shein",      name: "Shein",      emoji: "👗", available: false },
-];
-const detectPlatform = (url = "") => {
-  const u = url.toLowerCase();
-  if (u.includes("aliexpress")) return PLATFORMS[0];
-  if (u.includes("temu"))       return PLATFORMS[1];
-  if (u.includes("alibaba"))    return PLATFORMS[2];
-  if (u.includes("amazon"))     return PLATFORMS[3];
-  if (u.includes("shein"))      return PLATFORMS[4];
-  return null;
-};
-const IMP_STEPS = [
-  "Resolviendo enlace",
-  "Leyendo página del producto",
-  "Extrayendo datos reales",
-  "Procesando variantes",
-  "Organizando especificaciones",
-  "Generando borrador",
-];
 const CRE_STEPS = [
   "Analizando producto con IA",
   "Buscando datos reales del mercado",
@@ -90,20 +66,6 @@ const STYLE = `@import url('https://fonts.googleapis.com/css2?family=Sora:wght@3
 .ptwrap .pill{background:var(--s2);border:1px solid var(--bd);border-radius:var(--rs);padding:7px 11px;text-align:center;min-width:58px;}
 .ptwrap .pill-v{font-size:14px;font-weight:700;color:var(--ac);font-family:var(--m);}
 .ptwrap .pill-l{font-size:9px;color:var(--tx3);text-transform:uppercase;letter-spacing:.05em;margin-top:1px;}
-.ptwrap /* TABS — fixed,.ptwrap no overflow */
-.tabs{display:flex;flex-wrap:wrap;background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:3px;margin-bottom:20px;width:100%;}
-.ptwrap .tab{
-  flex:1 1 auto;min-width:max-content;display:flex;align-items:center;justify-content:center;gap:6px;
-  padding:9px 8px;border-radius:9px;
-  font-size:12px;font-weight:600;color:var(--tx2);
-  cursor:pointer;transition:all .2s;border:none;background:transparent;font-family:var(--f);
-  white-space:nowrap;overflow:visible;
-}
-.ptwrap .tab:hover{color:var(--tx);}
-.ptwrap .tab.on{background:var(--s3);color:var(--tx);box-shadow:0 2px 10px rgba(0,0,0,.4);}
-.ptwrap .tab-dot{width:6px;height:6px;border-radius:50%;background:var(--tx3);flex-shrink:0;transition:background .2s;}
-.ptwrap .tab.on .tab-dot{background:var(--ac);}
-.ptwrap .tab-badge{background:var(--acd);border:1px solid var(--bda);color:var(--ac);font-size:9px;font-weight:700;padding:1px 5px;border-radius:100px;flex-shrink:0;}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
 .ptwrap /* CARDS */
 .card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:16px 18px;width:100%;}
@@ -210,20 +172,6 @@ const STYLE = `@import url('https://fonts.googleapis.com/css2?family=Sora:wght@3
 .ptwrap .toast.ok{border-color:var(--bda);}
 @keyframes si{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:none}}
 .ptwrap .spin-sm{width:12px;height:12px;border:2px solid var(--bd);border-top-color:var(--ac);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;}
-.ptwrap /* ── IMPORTADOR ── */
-.plat-strip{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;align-items:center;}
-.ptwrap .plat-lbl{font-size:10px;color:var(--tx3);white-space:nowrap;}
-.ptwrap .plat-chip{display:flex;align-items:center;gap:4px;background:var(--s2);border:1px solid var(--bd);border-radius:100px;padding:3px 8px;font-size:10px;color:var(--tx2);white-space:nowrap;}
-.ptwrap .plat-chip.hit{border-color:var(--ac);color:var(--ac);background:var(--acd);}
-.ptwrap .irow{display:flex;gap:7px;align-items:stretch;flex-wrap:wrap;}
-.ptwrap .url-in{flex:1;min-width:0;background:var(--s2);border:1px solid var(--bd);border-radius:var(--rs);padding:10px 12px;color:var(--tx);font-family:var(--m);font-size:11px;outline:none;transition:border-color .2s;}
-.ptwrap .url-in::placeholder{color:var(--tx3);font-family:var(--f);font-size:12px;}
-.ptwrap .url-in:focus{border-color:var(--bda);}
-.ptwrap .det{display:flex;align-items:center;gap:4px;white-space:nowrap;background:var(--s2);border:1px solid var(--bd);border-radius:var(--rs);padding:9px 10px;font-size:10px;color:var(--tx2);}
-.ptwrap .det.hit{border-color:var(--ac);color:var(--ac);background:var(--acd);}
-.ptwrap .anl-btn{background:var(--ac);color:#000;border:none;border-radius:var(--rs);padding:10px 18px;font-family:var(--f);font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;transition:all .2s;}
-.ptwrap .anl-btn:hover{background:#a7f3d0;transform:translateY(-1px);}
-.ptwrap .anl-btn:disabled{opacity:.35;cursor:not-allowed;transform:none;}
 .ptwrap .hint{font-size:10px;color:var(--tx3);margin-top:7px;line-height:1.6;}
 .ptwrap .feat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:12px;}
 @keyframes fu{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
@@ -362,219 +310,6 @@ function MarginCalc({ initCost, initCurrency, onUse }) {
         )}
       </div>
     </div>
-  );
-}
-
-/* ─── IMPORTADOR ────────────────────────────────────────────── */
-function Importador({ onPublish }) {
-  const [phase, setPhase]     = useState("input");
-  const [url, setUrl]         = useState("");
-  const [stepIdx, setStepIdx] = useState(-1);
-  const [done, setDone]       = useState([]);
-  const [product, setProduct] = useState(null);
-  const [edited, setEdited]   = useState(null);
-  const [imgIdx, setImgIdx]   = useState(0);
-  const [selVar, setSelVar]   = useState({});
-  const [newTag, setNewTag]   = useState("");
-  const [err, setErr]         = useState(null);
-
-  const detPlat = detectPlatform(url);
-  const pct = Math.round((done.length / IMP_STEPS.length) * 100);
-  const adv = i => setStepIdx(i);
-  const comp = i => setDone(d => [...d, i]);
-
-  const analyse = async () => {
-    if (!url.trim()) return;
-    const plat = detectPlatform(url);
-    if (!plat || !plat.available) { setErr({ kind: "unsupported", name: plat?.name }); setPhase("error"); return; }
-    setErr(null); setPhase("analysis"); setDone([]);
-    // Motor real: extraer el ID del producto de AliExpress
-    const idMatch = url.match(/\/item\/(\d+)/) || url.match(/(\d{8,})/);
-    const productId = idMatch ? idMatch[1] : null;
-    for (let i = 0; i < IMP_STEPS.length; i++) {
-      adv(i); await sleep([500,900,700,500,500,400][i]); comp(i);
-    }
-    // Llamada al backend de importación (AliExpress Dropshipping API).
-    // Cuando el backend exista, devuelve el producto real y entra al preview.
-    try {
-      const res = await fetch("/api/import/aliexpress", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, productId }),
-      });
-      if (!res.ok) throw new Error("backend-" + res.status);
-      const data = await res.json();
-      setProduct(data); setEdited({ ...data });
-      setSelVar({}); setImgIdx(0); setPhase("preview");
-    } catch (e) {
-      // El motor está listo; falta conectar el backend de importación.
-      setErr({ kind: "backend", productId }); setPhase("error");
-    }
-  };
-
-  const field = (k,v) => setEdited(p=>({...p,[k]:v}));
-  const rmTag = t => setEdited(p=>({...p,tags:p.tags.filter(x=>x!==t)}));
-  const addTag = () => { if(!newTag.trim()) return; setEdited(p=>({...p,tags:[...p.tags,newTag.trim()]})); setNewTag(""); };
-  const reset = () => { setPhase("input"); setUrl(""); setProduct(null); setEdited(null); setDone([]); };
-  const p = edited || product;
-  const margin = p?.suggestedPrice && p?.originPrice
-    ? (((p.suggestedPrice-p.originPrice)/p.suggestedPrice)*100).toFixed(0) : 0;
-
-  if (phase === "analysis") return (
-    <div className="anl-wrap">
-      <div className="anl-card">
-        <div className="anl-icon">🔗</div>
-        <h2 className="anl-title">Analizando enlace</h2>
-        <p className="anl-sub">Extrayendo datos de <strong style={{color:"var(--ac)"}}>{detPlat?.name||"la tienda"}</strong></p>
-        <div className="step-list">
-          {IMP_STEPS.map((s,i)=>{
-            const isDone=done.includes(i); const isOn=stepIdx===i&&!isDone;
-            return (
-              <div key={i} className={`step ${isOn?"on":""}`}>
-                <div className={`sico ${isDone?"done":isOn?"run":"pend"}`}>{isDone?"✓":isOn?"◌":"·"}</div>
-                <div className="slbl">{s}</div>
-              </div>
-            );
-          })}
-        </div>
-        <div className="prog"><div className="prog-fill" style={{width:`${pct}%`}}/></div>
-        <div className="prog-pct">{pct}% completado</div>
-      </div>
-    </div>
-  );
-
-  if (phase === "error") return (
-    <div className="anl-wrap">
-      <div className="anl-card">
-        <div className="anl-icon">{err?.kind === "unsupported" ? "🚫" : "🔌"}</div>
-        <h2 className="anl-title">{err?.kind === "unsupported" ? "Tienda no disponible" : "Motor listo · falta el servidor"}</h2>
-        <p className="anl-sub">
-          {err?.kind === "unsupported"
-            ? <>Por ahora solo se importa desde <strong style={{color:"var(--ac)"}}>AliExpress</strong>.{err?.name ? ` ${err.name} todavía no está disponible.` : ""}</>
-            : <>El importador leyó el enlace{err?.productId ? <> (producto <strong style={{color:"var(--ac)"}}>#{err.productId}</strong>)</> : ""} y quedó listo para traer los datos reales. Falta conectar el backend de AliExpress, que se construye en la siguiente fase.</>}
-        </p>
-        <button className="anl-btn" style={{marginTop:18}} onClick={reset}>← Volver</button>
-      </div>
-    </div>
-  );
-
-  if (phase === "preview" && p) return (
-    <>
-      <div className="prev-wrap">
-        <div className="prev-topbar">
-          <button className="back-btn" onClick={reset}>← Nuevo enlace</button>
-          <div className="q-badge"><div className="q-dot"/>{p.importQuality}% calidad</div>
-          <div className="mchips">
-            <div className="mchip">📸 {p.images.length} imgs</div>
-            <div className="mchip">🎨 {p.variants.reduce((a,v)=>a+v.options.length,0)} vars</div>
-            <div className="mchip">⚙️ {p.attributes.length} attrs</div>
-          </div>
-        </div>
-        {p.sourceNote && <div className="src-note">🔍 <em>Fuente:</em> {p.sourceNote}</div>}
-        <div className="stack">
-          <div className="gal">
-            <div className="gal-main">
-              <img src={p.images[imgIdx]} alt="product"
-                onError={e=>{e.target.src="https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?w=500&q=80";}}/>
-            </div>
-            {p.images.length>1&&<div className="gal-thumbs">
-              {p.images.map((img,i)=>(
-                <div key={i} className={`thumb ${i===imgIdx?"on":""}`} onClick={()=>setImgIdx(i)}>
-                  <img src={img} alt="" onError={e=>{e.target.style.display="none"}}/>
-                </div>
-              ))}
-            </div>}
-            <div className="gal-foot"><span><em>{p.images.length}</em> imágenes</span><span>hover=zoom</span></div>
-          </div>
-          <div className="card">
-            <div className="card-ttl">Información del producto</div>
-            <div className="frow"><div className="flbl">Título</div><textarea className="fin ttl" value={p.title} onChange={e=>field("title",e.target.value)}/></div>
-            <div className="frow"><div className="flbl">Descripción</div><textarea className="fin dsc" value={p.description} onChange={e=>field("description",e.target.value)}/></div>
-            <div className="twin">
-              <div className="frow" style={{marginBottom:0}}><div className="flbl">Marca</div><input className="fin" value={p.brand||""} onChange={e=>field("brand",e.target.value)}/></div>
-              <div className="frow" style={{marginBottom:0}}><div className="flbl">SKU</div><input className="fin" style={{fontFamily:"var(--m)",fontSize:11}} value={p.sku||""} onChange={e=>field("sku",e.target.value)}/></div>
-            </div>
-            <div className="frow" style={{marginTop:10}}><div className="flbl">Categoría</div><input className="fin" value={p.category||""} onChange={e=>field("category",e.target.value)}/></div>
-          </div>
-          <div className="card">
-            <div className="card-ttl">Precios</div>
-            <div className="price-grid">
-              <div className="pbox"><div className="pbox-lbl">Precio origen</div><div className="pbox-val dim">{p.originPrice?.toFixed(2)}<span className="pbox-cur"> {p.currency}</span></div><div className="pmeta">{p.platform}</div></div>
-              <div className="pbox hi"><div className="pbox-lbl">Precio sugerido</div><div className="pbox-val bright">{p.suggestedPrice?.toFixed(2)}<span className="pbox-cur"> {p.currency}</span></div><div className="pmeta">Margen: <em>{margin}%</em></div></div>
-            </div>
-            <div className="twin">
-              <div><div className="flbl">Precio venta</div><input className="fin" type="number" defaultValue={p.suggestedPrice} step="0.01"/></div>
-              <div><div className="flbl">Inventario</div><input className="fin" type="number" defaultValue={10}/></div>
-            </div>
-          </div>
-          {p.variants.length>0&&<div className="card">
-            <div className="card-ttl">Variantes</div>
-            {p.variants.map(g=>(
-              <div key={g.type} className="vgroup">
-                <div className="vg-lbl">{g.type}</div>
-                <div className="vopts">
-                  {g.options.map(o=>(
-                    <button key={o.value} className={`vbtn ${selVar[g.type]===o.value?"on":""}`}
-                      onClick={()=>setSelVar(s=>({...s,[g.type]:o.value}))}>
-                      {o.color&&<div className="cdot" style={{background:o.color}}/>}{o.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>}
-          <div className="card">
-            <div className="card-ttl">Especificaciones</div>
-            <div className="attrs-grid">
-              {p.attributes.map(a=><div key={a.key} className="attr"><div className="attr-k">{a.key}</div><div className="attr-v">{a.val}</div></div>)}
-            </div>
-          </div>
-          <div className="card">
-            <div className="card-ttl">Etiquetas</div>
-            <div className="tags">
-              {p.tags.map(t=><div key={t} className="tag">#{t}<span className="tag-x" onClick={()=>rmTag(t)}>×</span></div>)}
-              <input className="tag-in" placeholder="+ agregar" value={newTag} onChange={e=>setNewTag(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTag()}/>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="act-bar">
-        <span className="act-info">Listo · {new Date().toLocaleDateString("es-MX",{day:"numeric",month:"long"})}</span>
-        <button className="btn-g" onClick={reset}>Cancelar</button>
-        <button className="btn-s">Guardar borrador</button>
-        <button className="btn-p" onClick={() => onPublish && onPublish(p)}>⚡ Importar</button>
-      </div>
-    </>
-  );
-
-  return (
-    <>
-      <div className="plat-strip">
-        <span className="plat-lbl">Compatible:</span>
-        {PLATFORMS.map(pl=>(
-          <div key={pl.id} className={`plat-chip ${pl.available?(detPlat?.id===pl.id?"hit":""):"soon"}`}><span>{pl.emoji}</span>{pl.name}{!pl.available&&<span style={{opacity:.7,marginLeft:2}}>· pronto</span>}</div>
-        ))}
-        <div className="plat-chip">🔮 +más</div>
-      </div>
-      <div className="card" style={{marginBottom:11}}>
-        <div className="card-ttl">Enlace del producto</div>
-        <div className="irow">
-          <input className="url-in" value={url} onChange={e=>setUrl(e.target.value)}
-            placeholder="https://www.amazon.es/dp/... · aliexpress.com/item/..."
-            onKeyDown={e=>e.key==="Enter"&&url.trim()&&analyse()}/>
-          <div className={`det ${detPlat?"hit":""}`}>{detPlat?<><span>{detPlat.emoji}</span>{detPlat.name}</>:"⬅ enlace"}</div>
-          <button className="anl-btn" onClick={analyse} disabled={!url.trim()}>Analizar →</button>
-        </div>
-        <div className="hint">💡 Pega la URL completa desde la barra del navegador.</div>
-      </div>
-      <div className="feat-row">
-        {[["🔗","Cualquier enlace","URLs directas y enlaces cortos de todas las plataformas."],
-          ["⚙️","Variantes auto","Colores, tallas y capacidades detectados."],
-          ["✏️","Editor inline","Ajusta todo antes de publicar."]].map(([ic,tt,ds])=>(
-          <div key={tt} className="feat-card"><div className="feat-ic">{ic}</div><div className="feat-tt">{tt}</div><div className="feat-ds">{ds}</div></div>
-        ))}
-      </div>
-    </>
   );
 }
 
@@ -873,7 +608,6 @@ Devuelve ÚNICAMENTE este JSON:
 
 /* ─── ROOT ──────────────────────────────────────────────────── */
 function PT_Root({ onPublish, onClose, canUse }) {
-  const [tab, setTab] = useState("importador");
   const [toasts, setToasts] = useState([]);
 
   useEffect(() => {
@@ -901,8 +635,8 @@ function PT_Root({ onPublish, onClose, canUse }) {
           <div className="hdr-left">
             <button onClick={onClose} style={{background:'transparent',border:'1px solid var(--bd)',color:'var(--tx2)',borderRadius:8,padding:'6px 12px',fontSize:12,fontWeight:600,cursor:'pointer',marginBottom:10,fontFamily:'var(--f)'}}>‹ Volver a RETADOR</button>
             <div className="hdr-badge">⚡ Plan Premium</div>
-            <h1 className="hdr-title">Importador <em>Inteligente</em></h1>
-            <p className="hdr-sub">Importa desde AliExpress o crea publicaciones desde cero con IA.</p>
+            <h1 className="hdr-title">Creador <em>Inteligente</em></h1>
+            <p className="hdr-sub">Crea publicaciones desde cero con IA.</p>
           </div>
           <div className="hdr-pills" style={{display:'none'}}>
             <div className="pill"><div className="pill-v">2</div><div className="pill-l">Tools</div></div>
@@ -910,23 +644,8 @@ function PT_Root({ onPublish, onClose, canUse }) {
           </div>
         </div>
 
-        {/* Tabs — full width, no overflow */}
-        <div className="tabs">
-          <button className={`tab ${tab==="importador"?"on":""}`} onClick={()=>setTab("importador")}>
-            <div className="tab-dot"/>
-            🔗 Importador Inteligente
-            <span className="tab-badge">URL</span>
-          </button>
-          <button className={`tab ${tab==="creador"?"on":""}`} onClick={()=>setTab("creador")}>
-            <div className="tab-dot"/>
-            ✨ Creador Inteligente
-            <span className="tab-badge">IA</span>
-          </button>
-        </div>
-
         {/* Content */}
-        {tab === "importador" && <Importador onPublish={onPublish}/>}
-        {tab === "creador"    && <Creador onPublish={onPublish}/>}
+        <Creador onPublish={onPublish}/>
       </div>
     </div>
     </div>

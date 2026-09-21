@@ -251,13 +251,23 @@ export const mapProduct = (p) => {
     // si aparece en el carrusel de Destacados de Inicio de SU Tienda. Distinto de
     // `badge` (etiqueta de texto) y de `promoted` (promoción pagada/admin).
     storeFeatured: !!p.store_featured,
+    // Proveedor real de envío: 'aliexpress' (aliexpress_direct, o catalog_pro
+    // curado con provider='aliexpress') vs 'cj' (todo lo demás con envío
+    // internacional real) — decide qué países mostrar en el selector del
+    // comprador (ver CJ_COUNTRIES / catalogProProvider en Marketplace.jsx).
+    catalogProvider: p.source_type === "aliexpress_direct" ? "aliexpress" : (p.source_catalog?.provider || "cj"),
   };
 };
 // SELECT compartido por toda consulta que arma tarjetas de producto: trae el
 // vendedor EN EL MISMO viaje (products.seller_id → profiles.id, FK real:
 // products_seller_id_fkey) — nunca una segunda consulta aparte para saber si
 // el vendedor está verificado.
-const PRODUCT_SELECT = "*, seller:profiles!seller_id(is_verified, full_name, avatar_url, shop_country)";
+// source_catalog: solo el provider real ('cj'|'aliexpress') del producto
+// curado de Catálogo Pro del que viene esta publicación (FK real
+// products_source_catalog_id_fkey) — lo necesita el selector de país del
+// comprador para saber si este producto puede cotizar envío a cualquier país
+// (CJ) o solo a Cuba por ahora (AliExpress, ver cj-buyer-freight-quote).
+const PRODUCT_SELECT = "*, seller:profiles!seller_id(is_verified, full_name, avatar_url, shop_country), source_catalog:catalog_pro_products!products_source_catalog_id_fkey(provider)";
 // SELECT liviano SOLO para el feed público (loadProducts/loadServices): trae
 // nada más las columnas que la tarjeta de lista, la búsqueda y los filtros/
 // orden realmente leen (confirmado revisando cada uso real en Marketplace.jsx
@@ -2592,23 +2602,34 @@ export function extractCjPidCandidates(raw) {
   return { candidatos: [...new Set(candidatos)], respaldo };
 }
 
-// Enlaces reales de producto de AliExpress: "aliexpress.com/item/<id>.html"
-// (con o sin ".html", en cualquier subdominio de idioma — es.aliexpress.com,
-// vi.aliexpress.com, m.aliexpress.com... — confirmado buscando enlaces
-// reales antes de escribir este regex). El id es siempre numérico. Los
-// enlaces cortos de la app (s.click.aliexpress.com/...) no traen el id en
-// la URL — no se intenta resolverlos aquí, el vendedor tiene que pegar el
-// enlace largo del producto.
+// Enlaces reales de producto de AliExpress. BUG REAL corregido (Daniel pegó
+// un enlace real de la búsqueda normal y no pasó nada): esta función solo
+// reconocía "/item/<id>.html" — pero un enlace copiado desde la búsqueda
+// normal de la app (no el Dropshipping Center) a veces trae la ruta corta
+// real "/i/<id>.html" (la que usa el botón "Compartir"), o el id solo en un
+// parámetro de la URL (?productId=<id> / &itemId=<id>, típico de enlaces de
+// campaña/redirección) — ninguno de los dos hacía match aquí, así que el
+// producto caía siempre al "respaldo" (cualquier número suelto de 6 a 20
+// dígitos), y con un enlace real cargado de parámetros de tracking (sesión,
+// timestamp, aff_trace_key...) el id verdadero casi nunca queda entre los 3
+// primeros candidatos que se llegaban a probar — se agotaban los 3 intentos
+// con basura y recién ENTONCES avisaba "no disponible", lo que Daniel vio
+// como que "no pasó nada". Ahora: más patrones reales reconocidos primero
+// (alta confianza, se prueban todos), más intentos de respaldo, y se avisa
+// aparte cuando el enlace ni siquiera es de dominio aliexpress — así SIEMPRE
+// hay un intento real o un mensaje claro, nunca silencio.
 export function extractAliPidCandidates(raw) {
   const s = String(raw || '').trim();
-  if (!s) return { candidatos: [], respaldo: [] };
+  if (!s) return { candidatos: [], respaldo: [], esAliExpress: false };
+  const esAliExpress = /aliexpress\.[a-z.]{2,8}\//i.test(s) || /(^|[./])aliexpress\.(com|us|ru|es|pl)\b/i.test(s);
   const candidatos = [];
-  for (const m of s.matchAll(/\/item\/(\d{6,20})/gi)) candidatos.push(m[1]);
+  for (const m of s.matchAll(/\/(?:item|i)\/(\d{6,20})(?:[.?/]|$)/gi)) candidatos.push(m[1]);
+  for (const m of s.matchAll(/[?&](?:productId|itemId|product_id|item_id)=(\d{6,20})\b/gi)) candidatos.push(m[1]);
   const yaEncontrados = new Set(candidatos);
   const respaldo = [...new Set(s.match(/\d{6,20}/g) || [])]
     .filter(n => !yaEncontrados.has(n))
     .sort((a, b) => b.length - a.length);
-  return { candidatos: [...new Set(candidatos)], respaldo };
+  return { candidatos: [...new Set(candidatos)], respaldo, esAliExpress };
 }
 
 // ── Catálogo Pro visto por el VENDEDOR (Pro/Premium) — SOLO columnas

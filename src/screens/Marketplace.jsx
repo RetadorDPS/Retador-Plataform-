@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, useUnstickOnPageRestore, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, catalogProCountryCoverage, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, useUnstickOnPageRestore, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -529,12 +529,49 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   // cobraba $0 de envío real siempre. Los tres proveedores de importación
   // directa cotizan real de la misma forma (ver cj-buyer-freight-quote).
   const isCatalogPro = ['catalog_pro', 'cj_direct', 'aliexpress_direct'].includes(product.source_type);
+  // Cobertura real por país — SOLO existe para productos del Catálogo Pro
+  // curado por el admin (source_type 'catalog_pro', con source_catalog_id
+  // real apuntando a catalog_pro_products). Los productos de "Importador
+  // Inteligente" (cj_direct/aliexpress_direct) no pasan por esta tabla —
+  // coverage queda vacío y todo el bloque de abajo se comporta EXACTAMENTE
+  // igual que antes (lista genérica), sin romper nada de lo que ya funciona.
+  const [coverage, setCoverage] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    if (product.source_type === 'catalog_pro' && product.source_catalog_id) {
+      catalogProCountryCoverage({ productId: product.source_catalog_id }).then(rows => { if (alive) setCoverage(rows || []); });
+    } else {
+      setCoverage([]);
+    }
+    return () => { alive = false; };
+  }, [product.source_type, product.source_catalog_id]);
+  const hasCoverageData = coverage.length > 0;
+  const cuCoverageRow = coverage.find(c => c.country_code === 'CU') || null;
   // El DESTINO ya no es un modo fijo del producto — lo elige el comprador en
   // cada compra. 'CU' activa la ruta vía nuestro hub (tiempo combinado,
   // igual que siempre); cualquier otro país real de CJ_COUNTRIES es envío
   // directo de CJ, sin pasar por el hub. Por defecto arranca en Cuba (el
   // destino más común de esta app) — el comprador siempre puede cambiarlo.
   const [destCountry, setDestCountry] = useState('CU');
+  // Lista real de países que el comprador puede elegir. Si YA hay cobertura
+  // real verificada guardada (AliExpress automática o CJ con el botón
+  // manual), se muestran SOLO los países con cobertura confirmada — nunca la
+  // lista genérica. Si no hay verificación todavía, se mantiene el
+  // comportamiento de siempre (lista genérica de CJ_COUNTRIES, o solo Cuba
+  // para AliExpress sin verificar).
+  const selectableCountries = hasCoverageData
+    ? (() => {
+        const confirmed = coverage.filter(c => c.available).map(c => c.country_code);
+        // Red de seguridad real: un producto verificado sin NINGÚN país
+        // confirmado (caso raro) nunca deja el selector vacío — cae a Cuba.
+        return confirmed.length > 0 ? confirmed : ['CU'];
+      })()
+    : (product.catalogProvider === 'aliexpress' ? ['CU'] : ['CU', ...CJ_COUNTRIES.map(c => c.code)]);
+  const countryLabel = (code) => code === 'CU' ? '🇨🇺 Cuba' : (CJ_COUNTRIES.find(c => c.code === code)?.label || code);
+  useEffect(() => {
+    if (selectableCountries.length && !selectableCountries.includes(destCountry)) setDestCountry(selectableCountries[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectableCountries.join(',')]);
   const [primaryShipQuote, setPrimaryShipQuote] = useState({ qty: null, country: null, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: false, reason: null });
   const [cartShipQuotes, setCartShipQuotes] = useState({}); // { [variantId]: { qty, country, total_price, aging, is_slow, days_min, days_max, loading, failed, reason } }
   // BUG REAL ya visto (Daniel, 2-3 veces seguidas): el envío de una variante
@@ -974,23 +1011,29 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
             </div>
           )}
 
-          {/* El comprador elige el país de destino AQUÍ, antes de ver el total
-              — Cuba primero (vía nuestro hub, tiempo combinado). El resto de
-              la lista depende del proveedor REAL de este producto: CJ envía
-              directo a todo CJ_COUNTRIES, pero AliExpress hoy solo tiene
-              cotización real confirmada hacia Cuba (ver investigación real en
-              cj-buyer-freight-quote) — mostrarle a un comprador de AliExpress
-              la lista de CJ era el bug real que hacía ver $0 en cualquier
-              país que no fuera Cuba. */}
+          {/* El comprador elige el país de destino AQUÍ, antes de ver el total.
+              Si el producto YA tiene cobertura real verificada (tabla
+              catalog_pro_country_coverage), la lista muestra SOLO los países
+              con cobertura confirmada — nunca una lista genérica. Si no hay
+              verificación todavía, se mantiene el comportamiento de siempre:
+              CJ envía directo a todo CJ_COUNTRIES, AliExpress solo tiene
+              cotización real confirmada hacia Cuba (ver selectableCountries
+              arriba) — nada se rompe para productos sin verificar. */}
           {isCatalogPro && (
             <div style={{ marginBottom: 12 }}>
               <label style={lbl}>¿A qué país lo enviamos?</label>
               <select style={{ ...inp, appearance: "none", cursor: "pointer" }} value={destCountry} onChange={e => setDestCountry(e.target.value)}>
-                <option value="CU">🇨🇺 Cuba</option>
-                {product.catalogProvider !== "aliexpress" && CJ_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                {selectableCountries.map(code => <option key={code} value={code}>{countryLabel(code)}</option>)}
               </select>
-              {product.catalogProvider === "aliexpress" && (
+              {!hasCoverageData && product.catalogProvider === "aliexpress" && (
                 <p style={{ fontSize: 10, color: T2, marginTop: 4 }}>Este producto es de AliExpress — por ahora solo tenemos envío real confirmado a Cuba.</p>
+              )}
+              {hasCoverageData && (
+                <p style={{ fontSize: 10, color: T2, marginTop: 4 }}>
+                  {cuCoverageRow?.available === false
+                    ? "Este producto no tiene envío confirmado a Cuba — solo se muestran los países con cobertura real verificada."
+                    : "Cobertura verificada — solo se muestran los países con envío real confirmado."}
+                </p>
               )}
             </div>
           )}
@@ -3123,6 +3166,22 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
   // estimado hacia Cuba de siempre. El comprador puede elegir cualquier otro
   // país real al momento de comprar, donde se recotiza con su destino exacto.
   const isCatalogPro = ['catalog_pro', 'cj_direct', 'aliexpress_direct'].includes(p.source_type);
+  // Cobertura real por país — solo existe para productos del Catálogo Pro
+  // curado por el admin (ver mismo criterio en BuyModal). Si el producto no
+  // tiene verificación todavía, coverage queda vacío y no se muestra nada
+  // aquí — la ficha se ve EXACTAMENTE igual que antes.
+  const [coverage, setCoverage] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    if (p.source_type === 'catalog_pro' && p.source_catalog_id) {
+      catalogProCountryCoverage({ productId: p.source_catalog_id }).then(rows => { if (alive) setCoverage(rows || []); });
+    } else {
+      setCoverage([]);
+    }
+    return () => { alive = false; };
+  }, [p.source_type, p.source_catalog_id]);
+  const cuCoverageRow = coverage.find(c => c.country_code === 'CU') || null;
+  const otherCoverageAvailable = coverage.filter(c => c.country_code !== 'CU' && c.available).length;
   const SHOP_COUNTRY_TO_CJ = { eeuu: 'US', espana: 'ES', cuba: 'CU' };
   const SHOP_COUNTRY_LABEL = { eeuu: 'Estados Unidos', espana: 'España', cuba: 'Cuba' };
   const buyerShopCountry = user?.profile?.shop_country || null;
@@ -3431,6 +3490,24 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
             producto los recalcula el trigger del backend, nunca el frontend. */}
         <ProductReviews product={p} user={user} flash={flash} requireAuth={requireAuth} />
       </div>
+
+      {/* Cobertura real por país — visible ANTES del botón "Comprar ahora",
+          como mínimo si hay envío a Cuba. Solo aparece si el producto YA
+          tiene verificación real guardada (ver coverage arriba); un producto
+          sin verificar no muestra nada aquí, igual que siempre. */}
+      {isCatalogPro && coverage.length > 0 && (
+        <div style={{ margin: "0 18px 14px", borderRadius: 13, padding: "12px 14px", background: cuCoverageRow?.available ? "rgba(34,197,94,.12)" : "rgba(239,68,68,.12)", border: `1px solid ${cuCoverageRow?.available ? "rgba(34,197,94,.35)" : "rgba(239,68,68,.35)"}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>{cuCoverageRow?.available ? "✅" : "❌"}</span>
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: cuCoverageRow?.available ? "#22C55E" : "#ef4444" }}>
+              {cuCoverageRow?.available ? "Envío a Cuba disponible" : "Sin envío a Cuba"}
+            </span>
+          </div>
+          {otherCoverageAvailable > 0 && (
+            <p style={{ fontSize: 10, color: T2, marginTop: 6 }}>También tiene envío real confirmado a {otherCoverageAvailable} país{otherCoverageAvailable === 1 ? "" : "es"} más — elige el destino al comprar.</p>
+          )}
+        </div>
+      )}
 
       {/* Acciones — sistema plano (Bloque 1): el CTA principal queda solo en
           su fila, dominante por separación y color; las acciones secundarias

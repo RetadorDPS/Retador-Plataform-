@@ -2480,6 +2480,27 @@ export const catalogProUpdateStagingRegions = async (id, sellableRegions) => {
   return data;
 };
 
+// Verificación real de cobertura por país para un producto de CJ (botón
+// manual "Verificar cobertura real", Staging o Publicado — nunca automático,
+// ver costo real en puntos abajo). Cotiza freightCalculate real a los ~10
+// países candidatos usando la variante más barata como referencia — 10
+// llamadas fijas (100 puntos), no una por cada variante del producto (ver
+// decisión de diseño real, con evidencia, en cj-verify-coverage).
+export const CATALOG_PRO_COVERAGE_COUNTRIES_COUNT = 10;
+export const CATALOG_PRO_COVERAGE_POINTS_PER_CALL = 10;
+export const catalogProVerifyCoverage = async ({ stagingId, productId }) =>
+  invokeEdgeFunction("cj-verify-coverage", stagingId ? { staging_id: stagingId } : { product_id: productId });
+
+// Cobertura real por país ya guardada (AliExpress al importar, o CJ vía el
+// botón manual) — se lee igual sea de un producto en Staging o Publicado.
+export const catalogProCountryCoverage = async ({ stagingId, productId }) => {
+  let q = supabase.from("catalog_pro_country_coverage").select("country_code, available, price, days_min, days_max, method, reason, quoted_at");
+  q = stagingId ? q.eq("staging_id", stagingId) : q.eq("product_id", productId);
+  const { data, error } = await q;
+  if (error) { console.error("catalogProCountryCoverage:", error.message); return []; }
+  return data || [];
+};
+
 // Copia el producto de staging → catalog_pro_products (+ sus filas de precio
 // por variante) en una sola operación atómica del lado del servidor.
 export const catalogProPublish = async (stagingId) => {

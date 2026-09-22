@@ -25,7 +25,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy, ShoppingBag, Link2, Sparkles,
 } from "lucide-react";
-import { useAt, useR, useCatalog, money, getPlans, usePlatformCfg, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, attrLabelText, groupVariantAttrs, resolveVariantBy } from "../shared/index.js";
+import { useAt, useR, useCatalog, money, getPlans, usePlatformCfg, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, catalogProCountryCoverage, attrLabelText, groupVariantAttrs, resolveVariantBy } from "../shared/index.js";
 // recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
 // se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
 // nunca de entrada para todos (la mayoría son compradores que ni la ven).
@@ -1595,6 +1595,19 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
   const [pricePct, setPricePct] = useState(String(SUGGESTED_MARGIN_PCT));
   const [price, setPrice] = useState(String(Math.round(flatCost * (1 + SUGGESTED_MARGIN_PCT / 100) * 100) / 100));
   const [busy, setBusy] = useState(false);
+  // Cobertura real por país (AliExpress: automática al importar; CJ: solo si
+  // el admin ya usó el botón manual "Verificar cobertura real"). Si el
+  // producto no tiene ninguna fila todavía (ej. CJ viejo sin verificar), este
+  // arreglo queda vacío y el resto de la pantalla se comporta EXACTAMENTE
+  // como antes — no se rompe nada de lo que ya funcionaba.
+  const [coverage, setCoverage] = useState([]);
+  const [showAllCountries, setShowAllCountries] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    catalogProCountryCoverage({ productId: product.id }).then(rows => { if (alive) setCoverage(rows || []); });
+    return () => { alive = false; };
+  }, [product.id]);
 
   useEffect(() => {
     setVariants(undefined); setSelectedAttrs({});
@@ -1642,6 +1655,13 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
   // muestra al vendedor (decisión explícita), junto a "tu costo"/"tu
   // ganancia", nunca destacado ni oculto.
   const cubaShipping = activeVariant?.cost_hub_to_destination != null ? Number(activeVariant.cost_hub_to_destination) : null;
+  // Resumen de cobertura real para el vendedor — ver decisión de diseño
+  // junto al bloque que lo renderiza más abajo (se ADVIERTE, no se bloquea).
+  const hasCoverageData = coverage.length > 0;
+  const cuCoverage = coverage.find(c => c.country_code === "CU") || null;
+  const cuDisponible = cuCoverage?.available === true;
+  const otherCoverage = coverage.filter(c => c.country_code !== "CU");
+  const otherAvailableCount = otherCoverage.filter(c => c.available).length;
   // Proyección simple (no garantía): ganancia por unidad × escalones fijos
   // de ventas, se recalcula en vivo con el precio que el vendedor edite.
   const perUnitProfit = Math.max(0, profit);
@@ -1808,6 +1828,43 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
           <div style={{ fontSize:10, color:C.m, marginTop:7 }}>Estimado según tu precio de venta actual — no es una garantía.</div>
         </div>
         {priceNum > 0 && priceNum < cost && <div style={{ fontSize:11.5, color:C.err, marginBottom:14 }}>Tu precio de venta no puede ser menor a tu costo ({money(cost, "USD")})</div>}
+
+        {/* Cobertura real por país — solo se muestra si el producto YA tiene
+            verificación real guardada (AliExpress automática, o CJ con el
+            botón manual). Un producto sin verificar no muestra este bloque y
+            se comporta igual que siempre (sin romper nada). DECISIÓN: se
+            ADVIERTE de forma prominente cuando falta envío a Cuba, pero NO se
+            bloquea "Añadir a mi tienda" — el producto puede tener cobertura
+            real a otros países (España, etc.) y RETADOR vende a ambos. */}
+        {hasCoverageData && (
+          <div style={{ borderRadius:10, padding:"12px 13px", marginBottom:14, background: cuDisponible ? `${C.ok}14` : `${C.err}14`, border:`1px solid ${cuDisponible ? C.ok : C.err}40` }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ fontSize:16 }}>{cuDisponible ? "✅" : "❌"}</span>
+              <span style={{ fontSize:12.5, fontWeight:800, color: cuDisponible ? C.ok : C.err }}>
+                {cuDisponible ? "Envío a Cuba disponible" : "Sin envío a Cuba"}
+              </span>
+            </div>
+            {!cuDisponible && (
+              <div style={{ fontSize:11, color:C.m, lineHeight:1.5, marginTop:6 }}>
+                {cuCoverage?.reason || "Este producto no tiene cobertura real confirmada hacia Cuba por ahora."} Puedes agregarlo igual para venderlo en los países donde sí hay cobertura confirmada.
+              </div>
+            )}
+            {otherCoverage.length > 0 && (
+              <button type="button" onClick={() => setShowAllCountries(v => !v)} style={{ marginTop:8, background:"none", border:"none", padding:0, fontSize:11, fontWeight:700, color:C.m, cursor:"pointer", textDecoration:"underline" }}>
+                {showAllCountries ? "Ocultar países" : `Ver los ${otherCoverage.length} países verificados`} ({otherAvailableCount} con cobertura real)
+              </button>
+            )}
+            {showAllCountries && (
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:8 }}>
+                {otherCoverage.map(c => (
+                  <span key={c.country_code} style={{ fontSize:10.5, fontWeight:700, padding:"4px 8px", borderRadius:7, background:C.s1, color: c.available ? C.ok : C.m }}>
+                    {c.available ? "✅" : "—"} {c.country_code}{c.available && c.price != null ? ` · ${money(c.price, "USD")}` : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div style={{ display:"flex", gap:9 }}>
           <button onClick={onClose} style={{ flex:1, padding:12, borderRadius:10, border:`1px solid ${C.b}`, background:"transparent", color:C.m, fontSize:13, fontWeight:700, cursor:"pointer" }}>Cancelar</button>

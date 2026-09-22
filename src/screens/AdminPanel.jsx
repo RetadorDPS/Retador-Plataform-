@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProImportAli, aliImportPreview, extractAliPidCandidates, resolveAliShortLink, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProImportAli, aliImportPreview, extractAliPidCandidates, resolveAliShortLink, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProVerifyCoverage, catalogProCountryCoverage, CATALOG_PRO_COVERAGE_COUNTRIES_COUNT, CATALOG_PRO_COVERAGE_POINTS_PER_CALL, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -3618,20 +3618,36 @@ function CatalogQuotaBar() {
   );
 }
 
-// Mercados de venta (sellable_regions) — manual y SIN relación con el país de
-// stock de CJ: un producto verificado en US puede marcarse vendible en Cuba.
-function RegionChecklist({ selected, onToggle, disabled }) {
+// Mercados de venta (sellable_regions) — manual, pero ahora puede venir con
+// cobertura REAL confirmada (ver catalog_pro_country_coverage): AliExpress
+// la calcula sola al importar, CJ vía el botón "Verificar cobertura real".
+// Un país verificado muestra su precio/tiempo real (✅ verde); uno verificado
+// SIN cobertura real muestra el motivo real (⚠️ rojo); uno sin verificar
+// nunca se ve como si tuviera datos reales — queda neutro, igual que antes.
+function RegionChecklist({ selected, onToggle, disabled, coverage }) {
+  const covByCode = coverage || {};
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
       {CJ_COUNTRIES.map(c => {
         const on = selected.includes(c.code);
+        const cov = covByCode[c.code];
+        const verified = cov?.available === true;
+        const verifiedUnavailable = cov?.available === false;
+        const dias = cov?.days_min != null ? (cov.days_max && cov.days_max !== cov.days_min ? `${cov.days_min}-${cov.days_max}` : `${cov.days_min}`) : null;
         return (
           <button key={c.code} type="button" disabled={disabled} onClick={() => onToggle(c.code)}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, cursor: disabled ? 'not-allowed' : 'pointer',
-              background: on ? 'var(--ag)' : 'var(--bg2)', border: `1px solid ${on ? 'var(--ac)' : 'var(--bd2)'}`, color: 'var(--tx)', fontSize: 11.5, fontWeight: 600, opacity: disabled ? .6 : 1 }}>
-            <span style={{ width: 14, height: 14, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 900,
-              background: on ? 'var(--ac)' : 'transparent', border: `1.5px solid ${on ? 'var(--ac)' : 'var(--bd2)'}`, color: '#fff', flexShrink: 0 }}>{on ? '✓' : ''}</span>
-            {c.code} · {c.label}
+            title={verified ? `Verificado real: ${money(cov.price)}${dias ? ` · ${dias} días` : ''}` : verifiedUnavailable ? `No disponible: ${cov.reason || 'sin detalle'}` : undefined}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, padding: '6px 10px', borderRadius: 8, cursor: disabled ? 'not-allowed' : 'pointer',
+              background: on ? 'var(--ag)' : 'var(--bg2)',
+              border: `1px solid ${verified ? 'var(--gn)' : verifiedUnavailable ? 'var(--rd)' : (on ? 'var(--ac)' : 'var(--bd2)')}`,
+              color: 'var(--tx)', fontSize: 11.5, fontWeight: 600, opacity: disabled ? .6 : 1 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 14, height: 14, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 900,
+                background: on ? 'var(--ac)' : 'transparent', border: `1.5px solid ${on ? 'var(--ac)' : 'var(--bd2)'}`, color: '#fff', flexShrink: 0 }}>{on ? '✓' : ''}</span>
+              {c.code} · {c.label}{verified ? ' ✅' : verifiedUnavailable ? ' ⚠️' : ''}
+            </span>
+            {verified && <span style={{ fontSize: 9.5, color: 'var(--gn)', fontWeight: 700 }}>{money(cov.price)}{dias ? ` · ${dias} días` : ''}</span>}
+            {verifiedUnavailable && <span style={{ fontSize: 9.5, color: 'var(--rd)', fontWeight: 700 }}>no disponible</span>}
           </button>
         );
       })}
@@ -4254,6 +4270,42 @@ function RefreshCostButton({ pricingIds, toast, onApplied }) {
   );
 }
 
+// Verificación real de cobertura por país — botón manual, SOLO para CJ (para
+// AliExpress la cobertura ya se calcula sola al importar, ver ali-import-
+// product). Muestra el costo REAL en puntos antes de ejecutar nada — nunca
+// gasta cuota sin que el admin lo confirme viendo el número real primero.
+function VerifyCoverageButton({ stagingId, productId, provider, toast, onApplied }) {
+  const [confirming, setConfirming] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  if (provider === 'aliexpress') return null;
+  const puntos = CATALOG_PRO_COVERAGE_COUNTRIES_COUNT * CATALOG_PRO_COVERAGE_POINTS_PER_CALL;
+
+  const run = async () => {
+    setVerifying(true);
+    try {
+      const res = await catalogProVerifyCoverage({ stagingId, productId });
+      const disponibles = (res.coverage || []).filter(c => c.available).length;
+      toast(`✅ Cobertura real verificada — ${disponibles} de ${CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países confirmados`);
+      onApplied();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo verificar la cobertura real')); }
+    setVerifying(false); setConfirming(false);
+  };
+
+  return (
+    <>
+      <button className="btn btg sm" disabled={verifying} onClick={() => setConfirming(true)}>
+        {verifying ? <span className="spin">↻</span> : '🌍'} Verificar cobertura real
+      </button>
+      {confirming && (
+        <SimpleConfirm title="¿Verificar cobertura real?" confirmLabel={verifying ? 'Verificando…' : 'Verificar'} color="var(--ac)" busy={verifying}
+          onCancel={() => setConfirming(false)} onConfirm={run}
+          msg={<>Se va a consultar el costo y tiempo REAL de envío a {CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países candidatos (usando la variante más barata como referencia, para no agotar la cuota en productos con muchas variantes) — esto cuesta <b style={{ color: 'var(--tx)' }}>{puntos} puntos reales</b> de tu cuota diaria de CJ ({CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países × {CATALOG_PRO_COVERAGE_POINTS_PER_CALL} puntos). Los países confirmados se marcan solos en Mercados de venta.</>}
+        />
+      )}
+    </>
+  );
+}
+
 // Tarifas precargadas del tramo Phoenix→Cuba (agencia del socio de Daniel,
 // cobra por libra de peso) — el admin siempre puede escribir una tarifa
 // personalizada distinta, nunca queda limitado a estas dos.
@@ -4270,6 +4322,17 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
   const [hubMethod, setHubMethod] = useState('aereo');
   const [hubRateInput, setHubRateInput] = useState(String(HUB_RATE_PRESETS.aereo));
   const [applyingHub, setApplyingHub] = useState(false);
+  // Cobertura real por país (AliExpress al importar, o CJ vía "Verificar
+  // cobertura real") — se guarda aparte de sellable_regions (que sigue
+  // siendo la selección manual real que ve/edita el admin); esto es solo lo
+  // que ya se confirmó real, para pintarlo encima del checklist.
+  const [coverage, setCoverage] = useState({});
+  const loadCoverage = useCallback(() => {
+    catalogProCountryCoverage({ stagingId: product.id }).then(rows => {
+      setCoverage(Object.fromEntries((rows || []).map(r => [r.country_code, r])));
+    }).catch(() => setCoverage({}));
+  }, [product.id]);
+  useEffect(() => { loadCoverage(); }, [loadCoverage]);
 
   const rows = (product.pricing || []).map(p => {
     const draft = edits[p.id] || {};
@@ -4372,6 +4435,7 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
         <button className="btn btg sm" onClick={onBack}>‹ Volver a Staging</button>
         {!ro && <RefreshCostButton pricingIds={rows.map(r => r.id)} toast={toast} onApplied={onPublished} />}
+        {!ro && <VerifyCoverageButton stagingId={product.id} provider={product.provider} toast={toast} onApplied={() => { onPublished(); loadCoverage(); }} />}
       </div>
       <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} videoUrl={product.video_url} videoPosterUrl={product.video_poster_url} />
       <div className="ssub" style={{ marginTop: -4 }}>{rows.length} variante(s) · {product.listed_num ?? 0} listados en CJ</div>
@@ -4479,7 +4543,7 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
       <div className="card cp mb16">
         <div className="ch"><span className="ct">Mercados de venta</span></div>
         <div style={{ fontSize: 11, color: 'var(--tx3)', marginBottom: 10 }}>Independiente del país donde {product.provider === 'aliexpress' ? 'AliExpress' : 'CJ'} tiene el stock — decide tú en dónde se puede vender este producto.</div>
-        <RegionChecklist selected={regions} onToggle={toggleRegion} disabled={ro} />
+        <RegionChecklist selected={regions} onToggle={toggleRegion} disabled={ro} coverage={coverage} />
       </div>
 
       {!ro && <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -4612,11 +4676,20 @@ function StorePreviewScreen({ product }) {
 function CatalogPublishedDetail({ product, toast, onBack, onUpdated }) {
   const [view, setView] = useState('costeo');
   const rows = (product.pricing || []).map(p => ({ ...p, costBase: Number(p.cost_product) || 0 }));
+  const [coverage, setCoverage] = useState({});
+  const loadCoverage = useCallback(() => {
+    catalogProCountryCoverage({ productId: product.id }).then(cRows => {
+      setCoverage(Object.fromEntries((cRows || []).map(r => [r.country_code, r])));
+    }).catch(() => setCoverage({}));
+  }, [product.id]);
+  useEffect(() => { loadCoverage(); }, [loadCoverage]);
+  const regions = product.sellable_regions || [];
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
         <button className="btn btg sm" onClick={onBack}>‹ Volver a Publicado</button>
         <RefreshCostButton pricingIds={rows.map(r => r.id)} toast={toast} onApplied={onUpdated} />
+        <VerifyCoverageButton productId={product.id} provider={product.provider} toast={toast} onApplied={() => { onUpdated(); loadCoverage(); }} />
       </div>
       <div className="tabs" style={{ maxWidth: 320 }}>
         {[['costeo', 'Costeo (interno)'], ['tienda', 'Vista de tienda']].map(([k, l]) =>
@@ -4626,7 +4699,10 @@ function CatalogPublishedDetail({ product, toast, onBack, onUpdated }) {
       {view === 'tienda' ? <StorePreviewScreen product={product} /> : (
         <>
           <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} videoUrl={product.video_url} videoPosterUrl={product.video_poster_url} />
-          <div className="ssub" style={{ marginTop: -4 }}>{rows.length} variante(s) · {(product.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
+          <div className="card cp mb16">
+            <div className="ch"><span className="ct">Mercados de venta</span></div>
+            <RegionChecklist selected={regions} onToggle={() => {}} disabled coverage={coverage} />
+          </div>
           <div className="card">
             <div className="tw">
               <table>

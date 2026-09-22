@@ -2370,6 +2370,20 @@ export const CJ_COUNTRIES = [
   { code: "JP", label: "Japón" },
 ];
 
+// Nombre real y completo de un país a partir de su código. Se usa en TODA
+// pantalla que muestre cobertura: al comprador y al vendedor nunca se les
+// enseña un código suelto ("US", "FR") — siempre el nombre entendible.
+export const countryNameOf = (code) =>
+  code === "CU" ? "Cuba" : (CJ_COUNTRIES.find(c => c.code === code)?.label || code);
+
+// Región guardada del comprador (profiles.shop_country) → código real de
+// país. Es la MISMA correspondencia en toda la app: la ficha del producto,
+// el selector de país del checkout y el resumen de cobertura tienen que
+// hablar siempre de la misma región, nunca uno de Cuba y otro de su país.
+export const SHOP_COUNTRY_TO_CODE = { eeuu: "US", espana: "ES", cuba: "CU" };
+export const buyerCountryCodeOf = (user) =>
+  SHOP_COUNTRY_TO_CODE[user?.profile?.shop_country] || "CU";
+
 export const catalogProSearch = async (keyWord, page = 1, countryCode = "US") =>
   invokeEdgeFunction("cj-search", { keyWord, page, countryCode });
 
@@ -2494,7 +2508,7 @@ export const catalogProVerifyCoverage = async ({ stagingId, productId }) =>
 // Cobertura real por país ya guardada (AliExpress al importar, o CJ vía el
 // botón manual) — se lee igual sea de un producto en Staging o Publicado.
 export const catalogProCountryCoverage = async ({ stagingId, productId }) => {
-  let q = supabase.from("catalog_pro_country_coverage").select("country_code, available, price, days_min, days_max, method, reason, quoted_at");
+  let q = supabase.from("catalog_pro_country_coverage").select("country_code, available, price, price_kind, days_min, days_max, method, reason, quoted_at");
   q = stagingId ? q.eq("staging_id", stagingId) : q.eq("product_id", productId);
   const { data, error } = await q;
   if (error) { console.error("catalogProCountryCoverage:", error.message); return []; }

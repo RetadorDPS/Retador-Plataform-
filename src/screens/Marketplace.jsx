@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, catalogProCountryCoverage, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, useUnstickOnPageRestore, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, catalogProCountryCoverage, countryNameOf, buyerCountryCodeOf, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, useUnstickOnPageRestore, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -549,10 +549,12 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   const cuCoverageRow = coverage.find(c => c.country_code === 'CU') || null;
   // El DESTINO ya no es un modo fijo del producto — lo elige el comprador en
   // cada compra. 'CU' activa la ruta vía nuestro hub (tiempo combinado,
-  // igual que siempre); cualquier otro país real de CJ_COUNTRIES es envío
-  // directo de CJ, sin pasar por el hub. Por defecto arranca en Cuba (el
-  // destino más común de esta app) — el comprador siempre puede cambiarlo.
-  const [destCountry, setDestCountry] = useState('CU');
+  // igual que siempre); cualquier otro país es envío directo, sin hub.
+  // Arranca en la REGIÓN REAL GUARDADA del comprador (profiles.shop_country),
+  // no en Cuba fija: antes, alguien con su tienda en España abría el diálogo
+  // y lo primero que veía era "Cuba" (bug real reportado). Siempre puede
+  // cambiarlo.
+  const [destCountry, setDestCountry] = useState(() => buyerCountryCodeOf(user));
   // Lista real de países que el comprador puede elegir. Si YA hay cobertura
   // real verificada guardada, se muestran SOLO los países con cobertura
   // confirmada — nunca la lista genérica.
@@ -575,7 +577,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
         return confirmed.length > 0 ? confirmed : ['CU'];
       })()
     : ['CU', ...CJ_COUNTRIES.map(c => c.code)];
-  const countryLabel = (code) => code === 'CU' ? '🇨🇺 Cuba' : (CJ_COUNTRIES.find(c => c.code === code)?.label || code);
+  const countryLabel = (code) => code === 'CU' ? '🇨🇺 Cuba' : countryNameOf(code);
   useEffect(() => {
     if (selectableCountries.length && !selectableCountries.includes(destCountry)) setDestCountry(selectableCountries[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1053,8 +1055,15 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
                   configurable; a cualquier otro país es el tránsito real de
                   CJ tal cual) — nunca se calcula ni se inventa un rango aquí
                   en el frontend. */}
+              {/* Cuando el estimado real es un solo número (AliExpress da un
+                  único día por país, no un rango) se dice "en 7 días", nunca
+                  "en 7 a 7 días". */}
               {catalogProShipDays && (
-                <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>Llega en {catalogProShipDays.days_min} a {catalogProShipDays.days_max} días</p>
+                <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>
+                  Llega en {catalogProShipDays.days_min === catalogProShipDays.days_max
+                    ? catalogProShipDays.days_min
+                    : `${catalogProShipDays.days_min} a ${catalogProShipDays.days_max}`} días
+                </p>
               )}
               {/* BUG REAL corregido: cuando el backend responde
                   status:'no_disponible' (ej. AliExpress a un país que no es
@@ -3100,7 +3109,9 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
   const scrollDir = useScrollDir(scrollRef);
   const backHidden = scrollDir === "down";
   // Fotos del producto (todas), índice actual y visor a pantalla completa.
-  const imgs = (p.images && p.images.length) ? p.images : (p.image ? [p.image] : (p.img ? [p.img] : []));
+  // baseImgs = las de la galería del producto; `imgs` (más abajo, cuando ya
+  // se conocen las variantes) les suma las fotos propias de cada variante.
+  const baseImgs = (p.images && p.images.length) ? p.images : (p.image ? [p.image] : (p.img ? [p.img] : []));
   const [imgIdx, setImgIdx] = useState(0);
   const [viewerOpen, setViewerOpen] = useState(false);
   useEffect(() => { setImgIdx(0); setViewerOpen(false); }, [p.id]);
@@ -3153,13 +3164,24 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
   const { labels: variantLabels, valuesByLabel: variantValuesByLabel } = useMemo(() => groupVariantAttrs(variants || []), [variants]);
   const activeVariant = useMemo(() => ((variants && variants.length) ? resolveVariantBy(variants, selectedAttrs) : null), [variants, selectedAttrs]);
   const displayPrice = activeVariant && activeVariant.price != null ? activeVariant.price : p.price;
-  // La foto principal salta a la de la variante elegida, si tiene una propia
-  // entre las fotos ya subidas del producto.
+  // BUG REAL corregido (reportado por Daniel): en un producto de AliExpress,
+  // elegir otro color NO cambiaba la foto; en CJ sí. Causa real confirmada
+  // con datos de producción: la foto de cada variante de CJ SIEMPRE está
+  // dentro de la galería del producto (4 de 4 reales), y la de AliExpress
+  // NUNCA lo está (0 de 4) — y el salto de foto se hacía buscando esa imagen
+  // DENTRO de la galería, así que en AliExpress no se encontraba nunca y no
+  // pasaba nada. Ahora la galería incluye también las fotos propias de las
+  // variantes, así que el salto funciona igual para los dos proveedores (y
+  // además esas fotos quedan visibles en las miniaturas y en el visor).
+  const imgs = useMemo(() => {
+    const extra = (variants || []).map(v => v.image).filter(Boolean).filter(src => !baseImgs.includes(src));
+    return [...baseImgs, ...new Set(extra)];
+  }, [baseImgs.join("|"), variants]);
   useEffect(() => {
     if (!activeVariant?.image) return;
     const idx = imgs.indexOf(activeVariant.image);
     if (idx >= 0) setImgIdx(idx);
-  }, [activeVariant?.image]);
+  }, [activeVariant?.image, imgs]);
 
   // Estimado de envío ANTES de comprar (visible en la ficha, no solo dentro
   // del diálogo de pago) — se cotiza hacia la REGIÓN REAL guardada del
@@ -3185,13 +3207,19 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
     return () => { alive = false; };
   }, [p.source_type, p.source_catalog_id]);
   const cuCoverageRow = coverage.find(c => c.country_code === 'CU') || null;
-  const otherCoverageAvailable = coverage.filter(c => c.country_code !== 'CU' && c.available).length;
-  const SHOP_COUNTRY_TO_CJ = { eeuu: 'US', espana: 'ES', cuba: 'CU' };
-  const SHOP_COUNTRY_LABEL = { eeuu: 'Estados Unidos', espana: 'España', cuba: 'Cuba' };
-  const buyerShopCountry = user?.profile?.shop_country || null;
-  const buyerDestCode = SHOP_COUNTRY_TO_CJ[buyerShopCountry] || 'CU';
-  const buyerDestLabel = SHOP_COUNTRY_LABEL[buyerShopCountry] || null;
+  const buyerDestCode = buyerCountryCodeOf(user);
+  const buyerDestLabel = countryNameOf(buyerDestCode);
+  // Cobertura real hacia la REGIÓN DEL COMPRADOR — es la que manda en el
+  // resumen principal. Cuba solo se menciona aparte (y nunca contradiciendo
+  // este resumen) cuando la región del comprador no es Cuba.
+  const buyerCoverageRow = coverage.find(c => c.country_code === buyerDestCode) || null;
+  const otherCoverageAvailable = coverage.filter(c => c.country_code !== buyerDestCode && c.available).length;
   const [shipEstimate, setShipEstimate] = useState(null);
+  // Días reales hacia su región: primero la cotización en vivo, y si esa no
+  // trae días, los de la verificación real de cobertura. Nunca se inventa un
+  // número: si ninguna de las dos fuentes lo tiene, no se muestra el tiempo.
+  const buyerDaysMin = shipEstimate?.days_min ?? buyerCoverageRow?.days_min ?? null;
+  const buyerDaysMax = shipEstimate?.days_max ?? buyerCoverageRow?.days_max ?? null;
   useEffect(() => {
     setShipEstimate(null);
     if (!isCatalogPro || !p.id) return;
@@ -3377,15 +3405,23 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
 
         {isCatalogPro && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", background: `${G}12`, border: `1px solid ${G}30`, borderRadius: 100, padding: "5px 11px", marginBottom: 12, width: "fit-content" }}>
-            {buyerDestCode === "CU" ? (
-              <>
-                <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>✈️ Envío disponible a Cuba y a otros países</span>
-                {shipEstimate?.days_min != null && <span style={{ fontSize: 10.5, color: T2 }}>· a Cuba llega en {shipEstimate.days_min} a {shipEstimate.days_max} días</span>}
-              </>
+            {/* El resumen SIEMPRE habla de la región real guardada del
+                comprador, nunca de Cuba por defecto. Si la verificación real
+                dice que a SU región no llega, se le dice claro en vez de
+                prometerle un envío que no existe. */}
+            {buyerCoverageRow && !buyerCoverageRow.available ? (
+              <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>
+                ⚠️ Sin envío directo a {buyerDestLabel}
+                {otherCoverageAvailable > 0 ? ` — disponible a otros ${otherCoverageAvailable} países` : ""}
+              </span>
             ) : (
               <>
-                <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>✈️ Envío disponible a {buyerDestLabel || "tu país"} y a otros países</span>
-                {shipEstimate?.days_min != null && <span style={{ fontSize: 10.5, color: T2 }}>— a {buyerDestLabel} llega en {shipEstimate.days_min} a {shipEstimate.days_max} días</span>}
+                <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>✈️ Envío disponible a {buyerDestLabel} y a otros países</span>
+                {buyerDaysMin != null && (
+                  <span style={{ fontSize: 10.5, color: T2 }}>
+                    — a {buyerDestLabel} llega en {buyerDaysMin === buyerDaysMax ? `${buyerDaysMin}` : `${buyerDaysMin} a ${buyerDaysMax}`} días
+                  </span>
+                )}
               </>
             )}
           </div>
@@ -3500,15 +3536,25 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
           tiene verificación real guardada (ver coverage arriba); un producto
           sin verificar no muestra nada aquí, igual que siempre. */}
       {isCatalogPro && coverage.length > 0 && (
-        <div style={{ margin: "0 18px 14px", borderRadius: 13, padding: "12px 14px", background: cuCoverageRow?.available ? "rgba(34,197,94,.12)" : "rgba(239,68,68,.12)", border: `1px solid ${cuCoverageRow?.available ? "rgba(34,197,94,.35)" : "rgba(239,68,68,.35)"}` }}>
+        <div style={{ margin: "0 18px 14px", borderRadius: 13, padding: "12px 14px", background: buyerCoverageRow?.available ? "rgba(34,197,94,.12)" : "rgba(239,68,68,.12)", border: `1px solid ${buyerCoverageRow?.available ? "rgba(34,197,94,.35)" : "rgba(239,68,68,.35)"}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 16 }}>{cuCoverageRow?.available ? "✅" : "❌"}</span>
-            <span style={{ fontSize: 12.5, fontWeight: 800, color: cuCoverageRow?.available ? "#22C55E" : "#ef4444" }}>
-              {cuCoverageRow?.available ? "Envío a Cuba disponible" : "Sin envío a Cuba"}
+            <span style={{ fontSize: 16 }}>{buyerCoverageRow?.available ? "✅" : "❌"}</span>
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: buyerCoverageRow?.available ? "#22C55E" : "#ef4444" }}>
+              {buyerCoverageRow?.available
+                ? `Envío a ${buyerDestLabel} disponible${buyerDaysMin != null ? ` — llega en ${buyerDaysMin === buyerDaysMax ? buyerDaysMin : `${buyerDaysMin} a ${buyerDaysMax}`} días` : ""}`
+                : `Sin envío a ${buyerDestLabel}`}
             </span>
           </div>
+          {/* Nota aparte sobre Cuba (mercado principal de RETADOR) — SOLO si
+              la región del comprador no es Cuba, para que nunca reemplace ni
+              contradiga el resumen de arriba. */}
+          {buyerDestCode !== "CU" && cuCoverageRow && (
+            <p style={{ fontSize: 10.5, color: T2, marginTop: 6 }}>
+              {cuCoverageRow.available ? "🇨🇺 También tiene envío confirmado a Cuba." : "🇨🇺 Este producto no tiene envío a Cuba."}
+            </p>
+          )}
           {otherCoverageAvailable > 0 && (
-            <p style={{ fontSize: 10, color: T2, marginTop: 6 }}>También tiene envío real confirmado a {otherCoverageAvailable} país{otherCoverageAvailable === 1 ? "" : "es"} más — elige el destino al comprar.</p>
+            <p style={{ fontSize: 10, color: T2, marginTop: 6 }}>Envío real confirmado a {otherCoverageAvailable} país{otherCoverageAvailable === 1 ? "" : "es"} más — elige el destino al comprar.</p>
           )}
         </div>
       )}

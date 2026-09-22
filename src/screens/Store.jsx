@@ -25,7 +25,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy, ShoppingBag, Link2, Sparkles,
 } from "lucide-react";
-import { useAt, useR, useCatalog, money, getPlans, usePlatformCfg, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, catalogProCountryCoverage, attrLabelText, groupVariantAttrs, resolveVariantBy } from "../shared/index.js";
+import { useAt, useR, useCatalog, money, getPlans, usePlatformCfg, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, catalogProCountryCoverage, countryNameOf, attrLabelText, groupVariantAttrs, resolveVariantBy } from "../shared/index.js";
 // recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
 // se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
 // nunca de entrada para todos (la mayoría son compradores que ni la ven).
@@ -1854,13 +1854,30 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
                 {showAllCountries ? "Ocultar países" : `Ver los ${otherCoverage.length} países verificados`} ({otherAvailableCount} con cobertura real)
               </button>
             )}
+            {/* Nombre completo del país y qué significa cada número — antes
+                salían códigos sueltos ("US", "FR") y una cifra sin etiqueta
+                que no dejaba claro si era el envío o el precio del producto
+                (bug real reportado). El significado viene guardado en
+                price_kind: en CJ el número es el ENVÍO, en AliExpress es el
+                precio del producto YA PUESTO en ese país. */}
             {showAllCountries && (
-              <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:8 }}>
-                {otherCoverage.map(c => (
-                  <span key={c.country_code} style={{ fontSize:10.5, fontWeight:700, padding:"4px 8px", borderRadius:7, background:C.s1, color: c.available ? C.ok : C.m }}>
-                    {c.available ? "✅" : "—"} {c.country_code}{c.available && c.price != null ? ` · ${money(c.price, "USD")}` : ""}
-                  </span>
-                ))}
+              <div style={{ display:"flex", flexDirection:"column", gap:5, marginTop:8 }}>
+                {otherCoverage.map(c => {
+                  const dias = c.days_min != null
+                    ? ` · llega en ${c.days_min === c.days_max ? c.days_min : `${c.days_min} a ${c.days_max}`} días`
+                    : "";
+                  const importe = c.price == null ? "" :
+                    (c.price_kind === "producto_puesto"
+                      ? ` · precio puesto allí ${money(c.price, "USD")}`
+                      : ` · envío ${money(c.price, "USD")}`);
+                  return (
+                    <div key={c.country_code} style={{ fontSize:11, fontWeight:600, padding:"5px 9px", borderRadius:8, background:C.s1, color: c.available ? C.t : C.m }}>
+                      <span style={{ marginRight:5 }}>{c.available ? "✅" : "—"}</span>
+                      <b style={{ color: c.available ? C.ok : C.m }}>{countryNameOf(c.country_code)}</b>
+                      {c.available ? <span style={{ color:C.m }}>{importe}{dias}</span> : <span style={{ color:C.m }}> · sin envío</span>}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

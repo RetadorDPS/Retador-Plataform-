@@ -1,5 +1,30 @@
 import { supabase } from "./supabase.js";
 
+// BUG REAL corregido (Daniel, importando un producto de AliExpress): cuando
+// una Edge Function responde con un status HTTP que no es 2xx, supabase-js
+// SIEMPRE pone en error.message el mismo texto genérico "Edge Function
+// returned a non-2xx status code" — sin importar la causa real (confirmado
+// leyendo el propio SDK, @supabase/functions-js/FunctionsClient.js: es un
+// string fijo del cliente, no algo que mande el servidor). El cuerpo JSON
+// real que la función SÍ manda (con el motivo real del fallo) queda en
+// error.context, la Response cruda todavía sin leer. Este helper reemplaza
+// cada `supabase.functions.invoke(...)` + `if (error) throw error` suelto
+// (repetido en más de una decena de funciones de este archivo) por un solo
+// lugar que siempre intenta leer el error real antes de lanzarlo — así
+// nunca vuelve a quedar un error genérico sin explicación real para el
+// admin/vendedor.
+async function invokeEdgeFunction(name, body) {
+  const { data, error } = await supabase.functions.invoke(name, { body });
+  if (error) {
+    let msg = error.message;
+    try { const errBody = await error.context?.json(); if (errBody?.error) msg = errBody.error; } catch (_e) { /* la Response no traía JSON legible — se usa el mensaje genérico */ }
+    console.error(`${name}:`, msg);
+    throw new Error(msg);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
 // ── Enlace para COMPARTIR (producto/servicio o perfil) ───────────────────────
 // Página ESTÁTICA generada en cada build (scripts/generate-share-pages.mjs),
 // servida por GitHub Pages — NUNCA la Edge Function de Supabase. Confirmado
@@ -1215,21 +1240,8 @@ export const createOrderMulti = async (data) => {
 // coordinado). stripe-create-checkout reconstruye todo lo demás leyendo el
 // pedido real en la base con el service role — si alguien manipulara el
 // precio desde aquí, no tendría ningún efecto: ese dato ni se lee.
-export const createStripeCheckout = async (orderId) => {
-  const { data, error } = await supabase.functions.invoke("stripe-create-checkout", { body: { order_id: orderId } });
-  if (error) {
-    // supabase-js NO expone el mensaje real de un 4xx/5xx en error.message
-    // (siempre dice "Edge Function returned a non-2xx status code") — hay
-    // que leerlo del cuerpo JSON que la función sí manda (error.context es
-    // la Response cruda). Sin esto, un error real de Stripe (p.ej. moneda no
-    // soportada) se vería como un mensaje genérico e inútil para el comprador.
-    let msg = error.message;
-    try { const body = await error.context.json(); if (body?.error) msg = body.error; } catch (e) {}
-    throw new Error(msg);
-  }
-  if (data?.error) throw new Error(data.error);
-  return data; // { checkout_url, transaction_id, reutilizada }
-};
+export const createStripeCheckout = async (orderId) => invokeEdgeFunction("stripe-create-checkout", { order_id: orderId });
+// { checkout_url, transaction_id, reutilizada }
 // Barrido oportunista de pedidos con tarjeta abandonados (30 min sin
 // confirmarse) — mismo patrón que sweepExpiredArchives: sin cron real en
 // este proyecto, se llama silenciosamente al entrar a Mis pedidos. Nunca
@@ -2358,43 +2370,21 @@ export const CJ_COUNTRIES = [
   { code: "JP", label: "Japón" },
 ];
 
-export const catalogProSearch = async (keyWord, page = 1, countryCode = "US") => {
-  const { data, error } = await supabase.functions.invoke("cj-search", { body: { keyWord, page, countryCode } });
-  if (error) { console.error("catalogProSearch:", error.message); throw error; }
-  if (data?.error) throw new Error(data.error);
-  return data;
-};
+export const catalogProSearch = async (keyWord, page = 1, countryCode = "US") =>
+  invokeEdgeFunction("cj-search", { keyWord, page, countryCode });
 
-export const catalogProQuotaStatus = async () => {
-  const { data, error } = await supabase.functions.invoke("cj-quota-status", { body: {} });
-  if (error) { console.error("catalogProQuotaStatus:", error.message); throw error; }
-  if (data?.error) throw new Error(data.error);
-  return data;
-};
+export const catalogProQuotaStatus = async () => invokeEdgeFunction("cj-quota-status", {});
 
-export const catalogProPreview = async (pid) => {
-  const { data, error } = await supabase.functions.invoke("cj-import-preview", { body: { pid } });
-  if (error) { console.error("catalogProPreview:", error.message); throw error; }
-  if (data?.error) throw new Error(data.error);
-  return data;
-};
+export const catalogProPreview = async (pid) => invokeEdgeFunction("cj-import-preview", { pid });
 
-export const catalogProImport = async (pid, variantSkus) => {
-  const { data, error } = await supabase.functions.invoke("cj-import-product", { body: { pid, variant_skus: variantSkus } });
-  if (error) { console.error("catalogProImport:", error.message); throw error; }
-  if (data?.error) throw new Error(data.error);
-  return data;
-};
+export const catalogProImport = async (pid, variantSkus) =>
+  invokeEdgeFunction("cj-import-product", { pid, variant_skus: variantSkus });
 
 // Import admin al Catálogo Pro curado, para AliExpress — mismo contrato que
 // catalogProImport (CJ) pero contra ali-import-product. variantSkus vacío/
 // omitido importa TODAS las variantes reales del producto (usado por el lote).
-export const catalogProImportAli = async (pid, variantSkus) => {
-  const { data, error } = await supabase.functions.invoke("ali-import-product", { body: { pid, variant_skus: variantSkus?.length ? variantSkus : undefined } });
-  if (error) { console.error("catalogProImportAli:", error.message); throw error; }
-  if (data?.error) throw new Error(data.error);
-  return data;
-};
+export const catalogProImportAli = async (pid, variantSkus) =>
+  invokeEdgeFunction("ali-import-product", { pid, variant_skus: variantSkus?.length ? variantSkus : undefined });
 
 // ── IMPORTADOR INTELIGENTE (vendedor Pro/Premium) ───────────────────────────
 // La vista previa es la MISMA función que usa el panel admin (cj-import-preview,
@@ -2404,23 +2394,15 @@ export const catalogProImportAli = async (pid, variantSkus) => {
 // cuando el vendedor la selecciona de verdad.
 export const cjVariantStock = async (vids) => {
   const lista = Array.isArray(vids) ? vids : [vids];
-  const { data, error } = await supabase.functions.invoke("cj-variant-stock", { body: { vids: lista } });
-  if (error) { console.error("cjVariantStock:", error.message); throw error; }
-  if (data?.error) throw new Error(data.error);
+  const data = await invokeEdgeFunction("cj-variant-stock", { vids: lista });
   return data?.stock || {};
 };
 
 // Crea el producto del vendedor a partir del enlace del proveedor. Solo se
 // manda QUÉ variantes quiere y A CUÁNTO las vende: el COSTO lo vuelve a leer
 // el servidor del proveedor en ese momento, nunca se envía desde aquí.
-export const cjSellerImport = async ({ pid, variantes, cat, subcat, province }) => {
-  const { data, error } = await supabase.functions.invoke("cj-seller-import", {
-    body: { pid, variantes, cat, subcat, province },
-  });
-  if (error) { console.error("cjSellerImport:", error.message); throw error; }
-  if (data?.error) throw new Error(data.error);
-  return data;
-};
+export const cjSellerImport = async ({ pid, variantes, cat, subcat, province }) =>
+  invokeEdgeFunction("cj-seller-import", { pid, variantes, cat, subcat, province });
 
 // Lo que el vendedor ya importó por su cuenta (su propio costo y margen: la
 // policy solo le deja ver sus filas). Ya es genérico por proveedor (lee
@@ -2437,12 +2419,7 @@ export const cjSellerImports = async () => {
 // ── AliExpress (Dropshipping API oficial) — mismo contrato que las
 // funciones de CJ de arriba, sobre las Edge Functions ali-import-preview /
 // ali-seller-import.
-export const aliImportPreview = async (pid) => {
-  const { data, error } = await supabase.functions.invoke("ali-import-preview", { body: { pid } });
-  if (error) { console.error("aliImportPreview:", error.message); throw error; }
-  if (data?.error) throw new Error(data.error);
-  return data;
-};
+export const aliImportPreview = async (pid) => invokeEdgeFunction("ali-import-preview", { pid });
 // Sigue en el servidor la redirección real de un enlace corto de AliExpress
 // (a.aliexpress.com/_XXXXX, s.click.aliexpress.com/..., star.aliexpress.com/
 // share/...) — el navegador del admin no puede seguirla de forma fiable
@@ -2450,20 +2427,12 @@ export const aliImportPreview = async (pid) => {
 // final real (la que ya trae el id en /item/... o ?productId=...), lista
 // para volver a pasarla por extractAliPidCandidates.
 export const resolveAliShortLink = async (url) => {
-  const { data, error } = await supabase.functions.invoke("ali-resolve-link", { body: { url } });
-  if (error) { console.error("resolveAliShortLink:", error.message); throw error; }
-  if (data?.error) throw new Error(data.error);
+  const data = await invokeEdgeFunction("ali-resolve-link", { url });
   return data?.finalUrl || null;
 };
 
-export const aliSellerImport = async ({ pid, variantes, cat, subcat, province }) => {
-  const { data, error } = await supabase.functions.invoke("ali-seller-import", {
-    body: { pid, variantes, cat, subcat, province },
-  });
-  if (error) { console.error("aliSellerImport:", error.message); throw error; }
-  if (data?.error) throw new Error(data.error);
-  return data;
-};
+export const aliSellerImport = async ({ pid, variantes, cat, subcat, province }) =>
+  invokeEdgeFunction("ali-seller-import", { pid, variantes, cat, subcat, province });
 
 // Staging: cada producto trae ya embebidas sus filas de costeo por variante
 // (catalog_pro_variant_pricing, ligadas por staging_id vía la relación real).
@@ -2484,12 +2453,8 @@ export const catalogProUpdateVariantPricing = async (id, patch) => {
 // Recalcula el flete real (freightCalculate) para una o varias variantes —
 // se usa automático al importar, y aquí queda disponible para reintentar a
 // mano si alguna quedó "no disponible" (CJ no pudo cotizarla la primera vez).
-export const catalogProCalculateShipping = async (pricingIds) => {
-  const { data, error } = await supabase.functions.invoke("cj-calculate-shipping", { body: { pricing_ids: pricingIds } });
-  if (error) { console.error("catalogProCalculateShipping:", error.message); throw error; }
-  if (data?.error) throw new Error(data.error);
-  return data;
-};
+export const catalogProCalculateShipping = async (pricingIds) =>
+  invokeEdgeFunction("cj-calculate-shipping", { pricing_ids: pricingIds });
 
 // Aplica una tarifa por libra (aérea/rápida/personalizada) del tramo
 // Phoenix→Cuba a un conjunto de variantes de un producto en Staging de una
@@ -2506,12 +2471,8 @@ export const catalogProApplyHubRate = async (pricingIds, rate, method) => {
 // comparación (costo viejo vs nuevo) para que el admin decida; apply=true
 // escribe cost_product/recommended_price/profit_estimate de verdad — el
 // margen que cada variante ya tenía se respeta tal cual.
-export const catalogProRefreshCost = async (pricingIds, apply = false) => {
-  const { data, error } = await supabase.functions.invoke("cj-refresh-cost", { body: { pricing_ids: pricingIds, apply } });
-  if (error) { console.error("catalogProRefreshCost:", error.message); throw error; }
-  if (data?.error) throw new Error(data.error);
-  return data;
-};
+export const catalogProRefreshCost = async (pricingIds, apply = false) =>
+  invokeEdgeFunction("cj-refresh-cost", { pricing_ids: pricingIds, apply });
 
 export const catalogProUpdateStagingRegions = async (id, sellableRegions) => {
   const { data, error } = await supabase.from("catalog_pro_staging").update({ sellable_regions: sellableRegions }).eq("id", id).select().single();
@@ -2632,7 +2593,7 @@ export function extractCjPidCandidates(raw) {
 // hay un intento real o un mensaje claro, nunca silencio.
 export function extractAliPidCandidates(raw) {
   const s = String(raw || '').trim();
-  if (!s) return { candidatos: [], respaldo: [], esAliExpress: false };
+  if (!s) return { candidatos: [], respaldo: [], esAliExpress: false, firstUrl: null };
   const esAliExpress = /aliexpress\.[a-z.]{2,8}\//i.test(s) || /(^|[./])aliexpress\.(com|us|ru|es|pl)\b/i.test(s);
   const candidatos = [];
   for (const m of s.matchAll(/\/(?:item|i)\/(\d{6,20})(?:[.?/]|$)/gi)) candidatos.push(m[1]);
@@ -2641,7 +2602,18 @@ export function extractAliPidCandidates(raw) {
   const respaldo = [...new Set(s.match(/\d{6,20}/g) || [])]
     .filter(n => !yaEncontrados.has(n))
     .sort((a, b) => b.length - a.length);
-  return { candidatos: [...new Set(candidatos)], respaldo, esAliExpress };
+  // BUG REAL corregido: al copiar con "Compartir" desde la app a veces se
+  // pega el bloque de texto completo (título + descripción + el enlace al
+  // final), no el enlace puro. Los regex de arriba ya escanean CUALQUIER
+  // parte del texto, así que un id visible se sigue encontrando igual — pero
+  // un enlace CORTO (sin id visible, ver resolveAliShortLink) necesita la
+  // URL exacta para poder seguir la redirección real, y mandar el bloque
+  // completo como "url" no es una URL válida. Aquí se extrae el primer
+  // fragmento que SÍ parece una URL real de AliExpress dentro del texto
+  // (con o sin "https://" al inicio) para ese caso.
+  const urlMatch = s.match(/(https?:\/\/)?[a-z0-9-]+\.aliexpress\.[a-z.]{2,8}\/[^\s"'<>]*/i);
+  const firstUrl = urlMatch ? (urlMatch[0].startsWith('http') ? urlMatch[0] : `https://${urlMatch[0]}`) : null;
+  return { candidatos: [...new Set(candidatos)], respaldo, esAliExpress, firstUrl };
 }
 
 // ── Catálogo Pro visto por el VENDEDOR (Pro/Premium) — SOLO columnas
@@ -2652,7 +2624,7 @@ export function extractAliPidCandidates(raw) {
 // destacar uno NO reordena el resto del catálogo.
 export const catalogProSellerCatalog = async () => {
   const { data, error } = await supabase.from("catalog_pro_products")
-    .select("id, title, title_en, description, images, category, recommended_price, why_it_sells, published_at, variants, is_top")
+    .select("id, title, title_en, description, images, category, recommended_price, why_it_sells, published_at, variants, is_top, video_url, video_poster_url")
     .eq("status", "activo")
     .order("is_top", { ascending: false })
     .order("published_at", { ascending: false });

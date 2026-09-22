@@ -1696,6 +1696,12 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
       variants: variantRows,
       source_catalog_id: product.id,
       source_type: "catalog_pro",
+      // Video real del producto (si lo trae — ver ali-import-product):
+      // viaja con el resto del borrador para que el editor precargado lo
+      // conserve hasta publicar, aunque no sea un campo que el vendedor
+      // edite a mano.
+      video_url: product.video_url || null,
+      video_poster_url: product.video_poster_url || null,
     });
     setBusy(false);
   };

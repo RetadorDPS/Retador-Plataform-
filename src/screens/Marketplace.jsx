@@ -3271,6 +3271,16 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
         </div>
       )}
 
+      {/* Video real del producto (AliExpress, ver ali-import-product) — solo
+          aparece si el producto de verdad trae uno; reproductor simple con
+          la miniatura real del proveedor como portada, nunca inventada. */}
+      {p.video_url && (
+        <div style={{ padding: "12px 16px 0" }}>
+          <video src={p.video_url} poster={p.video_poster_url || undefined} controls playsInline referrerPolicy="no-referrer"
+            style={{ width: "100%", borderRadius: 12, background: "#000", display: "block" }} />
+        </div>
+      )}
+
       {viewerOpen && <ProductImageViewer images={imgs} index={imgIdx} setIndex={setImgIdx} onClose={() => setViewerOpen(false)} title={p.title} flash={flash} />}
 
       <div style={{ padding: "16px 18px 10px" }}>

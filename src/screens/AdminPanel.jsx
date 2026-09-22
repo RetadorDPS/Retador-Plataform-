@@ -3722,7 +3722,7 @@ function CatalogSearchTab({ toast, ro, onOpenPreview, selected, onToggleSelect, 
   // importarlo (ali-import-product ya trae todas las variantes reales de
   // una sola vez). El admin puede tocar la tarjeta después para revisarla.
   const doAddAliFromLink = async () => {
-    let { candidatos, respaldo, esAliExpress } = extractAliPidCandidates(aliLinkInput);
+    let { candidatos, respaldo, esAliExpress, firstUrl } = extractAliPidCandidates(aliLinkInput);
     // BUG REAL corregido: antes, si había candidatos de alta confianza
     // (/item/, /i/) se probaban SOLO esos — si los 3 fallaban nunca se
     // probaba el respaldo, aunque el id real estuviera ahí. Ahora se prueban
@@ -3739,10 +3739,14 @@ function CatalogSearchTab({ toast, ro, onOpenPreview, selected, onToggleSelect, 
     // AliExpress pero no se encontró ningún id, se sigue la redirección real
     // en el servidor (ali-resolve-link) y se vuelve a extraer sobre la URL
     // final — confirmado real: a.aliexpress.com/_EzUBPJg resuelve a
-    // aliexpress.com/item/1005012061024508.html.
-    if (candidatos.length === 0 && respaldo.length === 0 && esAliExpress) {
+    // aliexpress.com/item/1005012061024508.html. Se manda firstUrl (la URL
+    // exacta ya recortada del texto pegado), no aliLinkInput completo — si
+    // se pegó un bloque de texto largo con el enlace adentro (título +
+    // descripción + enlace, típico de "Compartir"), mandar el bloque entero
+    // como "url" no es una URL válida y el seguimiento fallaba en silencio.
+    if (candidatos.length === 0 && respaldo.length === 0 && esAliExpress && firstUrl) {
       try {
-        const finalUrl = await resolveAliShortLink(aliLinkInput);
+        const finalUrl = await resolveAliShortLink(firstUrl);
         if (finalUrl) ({ candidatos, respaldo, esAliExpress } = extractAliPidCandidates(finalUrl));
       } catch (_e) { /* si no se pudo seguir la redirección, sigue sin candidatos */ }
     }
@@ -4089,7 +4093,7 @@ function pickHeroVariant(pricing) {
 // en cuadrícula. Se usa igual en Staging (arriba de la tabla editable) y en
 // Publicado (arriba de la tabla de solo lectura) — mismos datos reales de
 // catalog_pro_variant_pricing, ningún número inventado.
-function CatalogProductHero({ title, images, category, whyItSells, pricing }) {
+function CatalogProductHero({ title, images, category, whyItSells, pricing, videoUrl, videoPosterUrl }) {
   const hero = pickHeroVariant(pricing);
   // El margen/ganancia se calculan SOLO sobre el costo real del producto en
   // CJ — el envío (ambos tramos) es dato informativo aparte, nunca se suma
@@ -4106,6 +4110,11 @@ function CatalogProductHero({ title, images, category, whyItSells, pricing }) {
   return (
     <div className="card mb16" style={{ overflow: 'hidden' }}>
       <CatalogImg src={images?.[0]} width="100%" height={200} radius={0} iconSize={44} />
+      {/* Video real del producto (AliExpress) — solo si de verdad trae uno. */}
+      {videoUrl && (
+        <video src={videoUrl} poster={videoPosterUrl || undefined} controls playsInline referrerPolicy="no-referrer"
+          style={{ width: '100%', display: 'block', background: '#000' }} />
+      )}
       <div style={{ padding: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--tx)', lineHeight: 1.35, marginBottom: 10 }}>{title}</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -4364,7 +4373,7 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
         <button className="btn btg sm" onClick={onBack}>‹ Volver a Staging</button>
         {!ro && <RefreshCostButton pricingIds={rows.map(r => r.id)} toast={toast} onApplied={onPublished} />}
       </div>
-      <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} />
+      <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} videoUrl={product.video_url} videoPosterUrl={product.video_poster_url} />
       <div className="ssub" style={{ marginTop: -4 }}>{rows.length} variante(s) · {product.listed_num ?? 0} listados en CJ</div>
 
       {shippingPendingRows.length > 0 && (
@@ -4469,7 +4478,7 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
 
       <div className="card cp mb16">
         <div className="ch"><span className="ct">Mercados de venta</span></div>
-        <div style={{ fontSize: 11, color: 'var(--tx3)', marginBottom: 10 }}>Independiente del país donde CJ tiene el stock — decide tú en dónde se puede vender este producto.</div>
+        <div style={{ fontSize: 11, color: 'var(--tx3)', marginBottom: 10 }}>Independiente del país donde {product.provider === 'aliexpress' ? 'AliExpress' : 'CJ'} tiene el stock — decide tú en dónde se puede vender este producto.</div>
         <RegionChecklist selected={regions} onToggle={toggleRegion} disabled={ro} />
       </div>
 
@@ -4577,6 +4586,10 @@ function StorePreviewScreen({ product }) {
           ))}
         </div>
       )}
+      {product.video_url && (
+        <video src={product.video_url} poster={product.video_poster_url || undefined} controls playsInline referrerPolicy="no-referrer"
+          style={{ width: '100%', borderRadius: 12, marginTop: 8, background: '#000', display: 'block' }} />
+      )}
       <div style={{ marginTop: 18 }}>
         <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--tx)', lineHeight: 1.35 }}>{product.title}</div>
         <div style={{ fontSize: 24, fontWeight: 900, color: G, margin: '8px 0 18px' }}>{money(priceToShow)}</div>
@@ -4612,7 +4625,7 @@ function CatalogPublishedDetail({ product, toast, onBack, onUpdated }) {
 
       {view === 'tienda' ? <StorePreviewScreen product={product} /> : (
         <>
-          <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} />
+          <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} videoUrl={product.video_url} videoPosterUrl={product.video_poster_url} />
           <div className="ssub" style={{ marginTop: -4 }}>{rows.length} variante(s) · {(product.sellable_regions || []).join(', ') || 'sin regiones marcadas'}</div>
           <div className="card">
             <div className="tw">

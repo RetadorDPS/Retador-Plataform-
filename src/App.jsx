@@ -1046,6 +1046,11 @@ function AppShell({ sessionUser, platformStats = null }) {
       // products.sale_mode en 'cuba' por defecto, sin que nadie lo use ya
       // para decidir la ruta de envío.
       ...(d.source_catalog_id ? { source_catalog_id: d.source_catalog_id, source_type: d.source_type || "catalog_pro" } : {}),
+      // Video real del producto (AliExpress, ver ali-import-product) — no es
+      // un campo que el formulario deje editar, viaja tal cual desde el
+      // borrador del Catálogo Pro. Ausente en cualquier otro producto.
+      video_url: d.video_url || null,
+      video_poster_url: d.video_poster_url || null,
     };
     let data, missing;
     try {
@@ -2081,7 +2086,7 @@ function AppShell({ sessionUser, platformStats = null }) {
 
       {editProd && (editProd.__isCatalogDraft
         ? <EditProductModal product={editProd} mode="create" onClose={() => setEditProd(null)}
-            onCreate={async (payload) => { setEditProd(null); await handlePublish({ ...payload, source_catalog_id: editProd.source_catalog_id, source_type: "catalog_pro" }); }}
+            onCreate={async (payload) => { setEditProd(null); await handlePublish({ ...payload, source_catalog_id: editProd.source_catalog_id, source_type: "catalog_pro", video_url: editProd.video_url, video_poster_url: editProd.video_poster_url }); }}
             flash={flash} />
         : <EditProductModal product={editProd} onClose={() => setEditProd(null)} onSave={(changes) => { updateProduct(editProd.id, changes); setEditProd(null); }} flash={flash} onPromote={() => { setEditProd(null); promoteFlow(editProd.id); }} />
       )}

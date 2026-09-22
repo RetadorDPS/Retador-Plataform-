@@ -4270,14 +4270,17 @@ function RefreshCostButton({ pricingIds, toast, onApplied }) {
   );
 }
 
-// Verificación real de cobertura por país — botón manual, SOLO para CJ (para
-// AliExpress la cobertura ya se calcula sola al importar, ver ali-import-
-// product). Muestra el costo REAL en puntos antes de ejecutar nada — nunca
-// gasta cuota sin que el admin lo confirme viendo el número real primero.
+// Verificación real de cobertura por país — botón manual para AMBOS
+// proveedores. En AliExpress la cobertura se calcula sola al importar, pero
+// los productos publicados ANTES de que existiera esa verificación se
+// quedaban sin ella para siempre y sin forma de generarla (bug real
+// reportado por Daniel: la cobertura no aparecía por ningún lado). Con CJ
+// cuesta puntos reales de cuota, así que se muestra el número exacto antes
+// de ejecutar nada; con AliExpress no gasta cuota de CJ y se dice así.
 function VerifyCoverageButton({ stagingId, productId, provider, toast, onApplied }) {
   const [confirming, setConfirming] = useState(false);
   const [verifying, setVerifying] = useState(false);
-  if (provider === 'aliexpress') return null;
+  const esAli = provider === 'aliexpress';
   const puntos = CATALOG_PRO_COVERAGE_COUNTRIES_COUNT * CATALOG_PRO_COVERAGE_POINTS_PER_CALL;
 
   const run = async () => {
@@ -4299,7 +4302,9 @@ function VerifyCoverageButton({ stagingId, productId, provider, toast, onApplied
       {confirming && (
         <SimpleConfirm title="¿Verificar cobertura real?" confirmLabel={verifying ? 'Verificando…' : 'Verificar'} color="var(--ac)" busy={verifying}
           onCancel={() => setConfirming(false)} onConfirm={run}
-          msg={<>Se va a consultar el costo y tiempo REAL de envío a {CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países candidatos (usando la variante más barata como referencia, para no agotar la cuota en productos con muchas variantes) — esto cuesta <b style={{ color: 'var(--tx)' }}>{puntos} puntos reales</b> de tu cuota diaria de CJ ({CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países × {CATALOG_PRO_COVERAGE_POINTS_PER_CALL} puntos). Los países confirmados se marcan solos en Mercados de venta.</>}
+          msg={esAli
+            ? <>Se va a consultar la disponibilidad, el precio y el tiempo REAL de envío a {CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países candidatos, más Cuba (vía el hub de EE.UU.). AliExpress responde por producto completo, así que <b style={{ color: 'var(--tx)' }}>no gasta ningún punto</b> de tu cuota de CJ. Los países confirmados se marcan solos en Mercados de venta.</>
+            : <>Se va a consultar el costo y tiempo REAL de envío a {CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países candidatos (usando la variante más barata como referencia, para no agotar la cuota en productos con muchas variantes) — esto cuesta <b style={{ color: 'var(--tx)' }}>{puntos} puntos reales</b> de tu cuota diaria de CJ ({CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países × {CATALOG_PRO_COVERAGE_POINTS_PER_CALL} puntos). Los países confirmados se marcan solos en Mercados de venta.</>}
         />
       )}
     </>

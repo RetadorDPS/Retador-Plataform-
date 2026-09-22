@@ -554,11 +554,19 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   // destino más común de esta app) — el comprador siempre puede cambiarlo.
   const [destCountry, setDestCountry] = useState('CU');
   // Lista real de países que el comprador puede elegir. Si YA hay cobertura
-  // real verificada guardada (AliExpress automática o CJ con el botón
-  // manual), se muestran SOLO los países con cobertura confirmada — nunca la
-  // lista genérica. Si no hay verificación todavía, se mantiene el
-  // comportamiento de siempre (lista genérica de CJ_COUNTRIES, o solo Cuba
-  // para AliExpress sin verificar).
+  // real verificada guardada, se muestran SOLO los países con cobertura
+  // confirmada — nunca la lista genérica.
+  //
+  // BUG REAL corregido (Daniel lo vio en producción): sin verificación, esto
+  // decidía la lista según product.catalogProvider, que sale de un JOIN a
+  // catalog_pro_products… una tabla que el RLS NO deja leer a un comprador.
+  // Para cualquier comprador real ese dato llegaba SIEMPRE en null, así que
+  // catalogProvider caía a 'cj' y se mostraba la lista genérica de 10 países
+  // incluso en productos de AliExpress — el filtro "solo Cuba" nunca se
+  // aplicó en producción, solo parecía funcionar viéndolo como admin. Ya no
+  // se depende de ese dato: sin verificación se ofrece la lista genérica
+  // (para AMBOS proveedores), y el backend cotiza de verdad el país elegido
+  // y responde con el motivo real si ese destino no se puede servir.
   const selectableCountries = hasCoverageData
     ? (() => {
         const confirmed = coverage.filter(c => c.available).map(c => c.country_code);
@@ -566,7 +574,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
         // confirmado (caso raro) nunca deja el selector vacío — cae a Cuba.
         return confirmed.length > 0 ? confirmed : ['CU'];
       })()
-    : (product.catalogProvider === 'aliexpress' ? ['CU'] : ['CU', ...CJ_COUNTRIES.map(c => c.code)]);
+    : ['CU', ...CJ_COUNTRIES.map(c => c.code)];
   const countryLabel = (code) => code === 'CU' ? '🇨🇺 Cuba' : (CJ_COUNTRIES.find(c => c.code === code)?.label || code);
   useEffect(() => {
     if (selectableCountries.length && !selectableCountries.includes(destCountry)) setDestCountry(selectableCountries[0]);
@@ -1015,9 +1023,8 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
               Si el producto YA tiene cobertura real verificada (tabla
               catalog_pro_country_coverage), la lista muestra SOLO los países
               con cobertura confirmada — nunca una lista genérica. Si no hay
-              verificación todavía, se mantiene el comportamiento de siempre:
-              CJ envía directo a todo CJ_COUNTRIES, AliExpress solo tiene
-              cotización real confirmada hacia Cuba (ver selectableCountries
+              verificación todavía, se ofrece la lista completa y el backend
+              cotiza de verdad el país elegido (ver selectableCountries
               arriba) — nada se rompe para productos sin verificar. */}
           {isCatalogPro && (
             <div style={{ marginBottom: 12 }}>
@@ -1025,9 +1032,6 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
               <select style={{ ...inp, appearance: "none", cursor: "pointer" }} value={destCountry} onChange={e => setDestCountry(e.target.value)}>
                 {selectableCountries.map(code => <option key={code} value={code}>{countryLabel(code)}</option>)}
               </select>
-              {!hasCoverageData && product.catalogProvider === "aliexpress" && (
-                <p style={{ fontSize: 10, color: T2, marginTop: 4 }}>Este producto es de AliExpress — por ahora solo tenemos envío real confirmado a Cuba.</p>
-              )}
               {hasCoverageData && (
                 <p style={{ fontSize: 10, color: T2, marginTop: 4 }}>
                   {cuCoverageRow?.available === false

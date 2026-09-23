@@ -23,3 +23,7 @@ Este proyecto tiene acceso real a Supabase mediante conectores MCP. Antes de dec
 ## Contexto del proyecto
 
 RETADOR — marketplace para Cuba/España. App real, ya desplegada en producción (GitHub Pages, `retadordps.github.io/Retador-Plataform-/`), usada por gente real. El despliegue se dispara automáticamente al hacer push a `main` (ver `.github/workflows/deploy.yml`).
+
+## Agentes especializados (`.claude/agents/`)
+
+El repositorio incluye una colección curada de 132 agentes (asistentes especializados) organizados por categoría en `.claude/agents/` (diseño, marketing, ingeniería, producto, soporte, testing, finanzas, ventas, publicidad pagada, seguridad, gestión de proyectos, especializados, académicos y estrategia). Se activan por nombre dentro de una sesión de Claude Code, por ejemplo: "Activa el agente UI Designer y ayúdame con esta pantalla". Ver `.claude/agents/README.md` para el detalle completo de qué contiene cada categoría y por qué se incluyó.

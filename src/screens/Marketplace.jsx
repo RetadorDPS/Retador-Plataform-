@@ -452,7 +452,20 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     else if (product?.id) getAvailableStock(product.id).then(n => { if (alive) setAvailStock(n); }).catch(() => {});
     return () => { alive = false; };
   }, [product?.id, variant?.id]);
-  useEffect(() => { if (availStock != null) setQty(q => Math.max(1, Math.min(q, availStock))); }, [availStock]);
+  // LÍMITE REAL por cliente (problema reportado por Daniel: en la propia
+  // ficha de AliExpress, el Poco F8 Pro dice "Puedes seleccionar uno como
+  // máximo"). Se investigó a fondo el campo real que devuelve ds.product.get
+  // (max_buy_num, purchase_limit, moq y variantes — búsqueda exhaustiva sobre
+  // el JSON crudo, con y sin simplify) y NO existe ningún campo oficial con
+  // ese límite por cliente en la API — confirmado, no es un descuido nuestro.
+  // Mientras esto no se resuelva con más precisión (ej. si AliExpress agrega
+  // el dato más adelante), se topa a 1 unidad máxima por pedido para
+  // CUALQUIER producto de AliExpress: mejor pedir de menos que dejar que se
+  // cree un pedido real, ya cobrado a un comprador cubano, que AliExpress
+  // termine rechazando al procesarlo.
+  const esAliExpress = product.catalogProvider === 'aliexpress';
+  const maxQty = esAliExpress ? 1 : availStock;
+  useEffect(() => { if (maxQty != null) setQty(q => Math.max(1, Math.min(q, maxQty))); }, [availStock, esAliExpress]);
   // Campo de texto para escribir la cantidad directamente (en vez de solo tocar
   // "+" repetido). Estado de texto aparte del número real: así se puede borrar y
   // escribir sin que cada tecla reformatee el campo.
@@ -477,11 +490,11 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     const digits = raw.replace(/[^0-9]/g, "");
     if (digits === "") { setQtyText(""); return; } // permite borrar todo para reescribir
     const n = parseInt(digits, 10);
-    if (availStock != null && n > availStock) {
-      flash(`⚠️ Solo quedan ${availStock} disponibles`);
+    if (maxQty != null && n > maxQty) {
+      flash(esAliExpress ? '⚠️ Este producto de AliExpress permite máximo 1 unidad por pedido' : `⚠️ Solo quedan ${maxQty} disponibles`);
       flashQtyOver();
-      setQty(availStock);
-      setQtyText(String(availStock));
+      setQty(maxQty);
+      setQtyText(String(maxQty));
     } else {
       setQtyText(digits);
       setQty(Math.max(1, n)); // el total se actualiza en vivo con lo que ya es válido
@@ -514,7 +527,9 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     setPickingVariant(false);
   };
   const removeCartLine = (variantId) => setCartLines(ls => ls.filter(l => l.variantId !== variantId));
-  const setCartLineQty = (variantId, n) => setCartLines(ls => ls.map(l => l.variantId === variantId ? { ...l, qty: Math.max(1, n) } : l));
+  // Mismo tope conservador de 1 unidad por producto AliExpress (ver esAliExpress
+  // más arriba) también para cada línea adicional del carrito de variantes.
+  const setCartLineQty = (variantId, n) => setCartLines(ls => ls.map(l => l.variantId === variantId ? { ...l, qty: Math.max(1, esAliExpress ? Math.min(1, n) : n) } : l));
 
   // Catálogo Pro: el envío internacional es real y se cobra aparte. OJO —
   // bug real ya visto: el flete no escala lineal por unidad (CJ real: 1u=
@@ -959,13 +974,15 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
                 onBlur={commitQtyText}
                 onKeyDown={e => { if (e.key === "Enter") { commitQtyText(); e.currentTarget.blur(); } }}
                 style={{ fontSize: 15, fontWeight: 800, color: qtyOver ? "#ef4444" : T1, width: 34, textAlign: "center", background: "none", border: "none", outline: "none", padding: 0, fontFamily: "inherit", transition: "color .2s" }} />
-              <button className="p" disabled={availStock != null && qty >= availStock}
-                onClick={() => setQty(q => availStock != null ? Math.min(availStock, q + 1) : q + 1)}
-                style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${B}`, background: "none", color: (availStock != null && qty >= availStock) ? T3 : T1, fontSize: 18, fontWeight: 700, lineHeight: 1, cursor: (availStock != null && qty >= availStock) ? "not-allowed" : "pointer" }}>+</button>
+              <button className="p" disabled={maxQty != null && qty >= maxQty}
+                onClick={() => setQty(q => maxQty != null ? Math.min(maxQty, q + 1) : q + 1)}
+                style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${B}`, background: "none", color: (maxQty != null && qty >= maxQty) ? T3 : T1, fontSize: 18, fontWeight: 700, lineHeight: 1, cursor: (maxQty != null && qty >= maxQty) ? "not-allowed" : "pointer" }}>+</button>
             </div>
           </div>
           {qtyOver ? (
-            <p style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginBottom: 12 }}>⚠️ Solo quedan {availStock} disponibles</p>
+            <p style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginBottom: 12 }}>{esAliExpress ? '⚠️ Este producto de AliExpress permite máximo 1 unidad por pedido' : `⚠️ Solo quedan ${maxQty} disponibles`}</p>
+          ) : esAliExpress ? (
+            <p style={{ fontSize: 10, color: T3, fontWeight: 500, marginBottom: 12 }}>Máximo 1 unidad por pedido en este producto</p>
           ) : availStock != null && (
             <p style={{ fontSize: 10, color: availStock <= 5 ? G : T3, fontWeight: availStock <= 5 ? 700 : 500, marginBottom: 12 }}>
               {availStock <= 0 ? "⚠️ Sin stock disponible ahora mismo" : availStock <= 5 ? `¡Últimas ${availStock} disponibles!` : `${availStock} disponibles`}
@@ -996,7 +1013,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
                   </div>
                   <button className="p" onClick={() => setCartLineQty(l.variantId, l.qty - 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>−</button>
                   <span style={{ fontSize: 12.5, fontWeight: 800, color: T1, width: 20, textAlign: "center" }}>{l.qty}</span>
-                  <button className="p" disabled={l.stock != null && l.qty >= l.stock} onClick={() => setCartLineQty(l.variantId, l.qty + 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: (l.stock != null && l.qty >= l.stock) ? T3 : T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>+</button>
+                  <button className="p" disabled={esAliExpress ? l.qty >= 1 : (l.stock != null && l.qty >= l.stock)} onClick={() => setCartLineQty(l.variantId, l.qty + 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: (esAliExpress ? l.qty >= 1 : (l.stock != null && l.qty >= l.stock)) ? T3 : T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>+</button>
                   <button className="p" onClick={() => removeCartLine(l.variantId)} aria-label="Quitar" style={{ width: 24, height: 24, borderRadius: 7, border: "none", background: "none", color: T3, fontSize: 15, lineHeight: 1 }}>×</button>
                 </div>
               ))}

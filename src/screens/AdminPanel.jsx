@@ -3773,14 +3773,22 @@ function CatalogSearchTab({ toast, ro, onOpenPreview, selected, onToggleSelect, 
       return;
     }
     let encontrado = null;
+    let ultimoError = null;
     for (const pid of intentos) {
       try {
         const data = await aliImportPreview(pid);
         if (data && !data.error && data.pid) { encontrado = data; break; }
-      } catch (_e) { /* seguir con el siguiente candidato */ }
+      } catch (e) { ultimoError = e; /* seguir con el siguiente candidato */ }
     }
     setCheckingAliLink(false);
-    if (!encontrado) { toast('⚠️ No se pudo identificar el producto en ese enlace'); return; }
+    // BUG REAL corregido: cuando el pid SÍ se identificaba pero AliExpress lo
+    // rechazaba (ej. rsp_code 604 "All SKU Unsaleable" — producto real que
+    // esa cuenta no tiene habilitado para dropshipping), se descartaba el
+    // motivo real ya devuelto por el backend y se mostraba el mismo aviso
+    // genérico que cuando no se hallaba ningún id — confundía "no encontrado"
+    // con "encontrado pero rechazado". Ahora se muestra el motivo real del
+    // último intento cuando lo hay.
+    if (!encontrado) { toast(ultimoError?.message ? `⚠️ ${ultimoError.message}` : '⚠️ No se pudo identificar el producto en ese enlace'); return; }
     if (isSelected('aliexpress', String(encontrado.pid))) { toast('Ese producto ya está en la selección'); return; }
     onToggleSelect({
       provider: 'aliexpress', pid: String(encontrado.pid), title: encontrado.title,

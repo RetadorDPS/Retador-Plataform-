@@ -1093,6 +1093,23 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
                 <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>{primaryShipQuote.reason || Object.values(cartShipQuotes).find(q => q?.reason)?.reason}</p>
               )}
               {destCountry === "CU" && shipQuoteReady && <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>🇨🇺 Envío disponible a Cuba</p>}
+              {/* Stock REAL de la variante elegida, para el país que el comprador
+                  ya eligió arriba — viene de la cobertura ya guardada al
+                  importar/verificar (catalog_pro_country_coverage.stock_by_variant),
+                  nunca se consulta nada en vivo. Reportado por Daniel: el stock
+                  real de AliExpress y CJ es genuinamente distinto por país (ver
+                  la investigación real en ali-import-product) — se muestra el
+                  del país elegido, no un número genérico del producto. */}
+              {variant?.sku && (() => {
+                const covRow = coverage.find(c => c.country_code === destCountry);
+                const stockReal = covRow?.stock_by_variant?.[variant.sku];
+                if (stockReal == null) return null;
+                return (
+                  <p style={{ fontSize: 10, color: stockReal <= 0 ? "#ef4444" : T2, marginTop: 3, fontWeight: stockReal <= 0 ? 700 : 500 }}>
+                    {stockReal <= 0 ? `⚠️ Sin stock real confirmado para ${countryLabel(destCountry)}` : `📦 ${stockReal} disponibles reales en ${countryLabel(destCountry)}`}
+                  </p>
+                );
+              })()}
             </div>
           )}
 
@@ -3443,6 +3460,22 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
             )}
           </div>
         )}
+
+        {/* Stock REAL para la región del comprador (ya guardada, sin
+            consultar nada en vivo) — de la variante que tenga elegida en
+            este momento. Reportado por Daniel: el stock real de AliExpress
+            y CJ es genuinamente distinto por país (ver la investigación
+            real en ali-import-product), así que se muestra el de SU región,
+            nunca un número genérico del producto. */}
+        {isCatalogPro && activeVariant?.sku && buyerCoverageRow?.available && (() => {
+          const stockReal = buyerCoverageRow?.stock_by_variant?.[activeVariant.sku];
+          if (stockReal == null) return null;
+          return (
+            <p style={{ fontSize: 10.5, color: stockReal <= 0 ? "#ef4444" : T2, fontWeight: stockReal <= 0 ? 700 : 500, marginBottom: 10 }}>
+              {stockReal <= 0 ? `⚠️ Sin stock real confirmado para ${buyerDestLabel}` : `📦 ${stockReal} disponibles reales en ${buyerDestLabel}`}
+            </p>
+          );
+        })()}
 
         {/* Selector de variantes (color/talla/etc.), si el producto tiene */}
         {!isService && variantLabels.length > 0 && (

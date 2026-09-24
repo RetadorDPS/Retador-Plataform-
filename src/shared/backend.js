@@ -2502,13 +2502,17 @@ export const catalogProUpdateStagingRegions = async (id, sellableRegions) => {
 // decisión de diseño real, con evidencia, en cj-verify-coverage).
 export const CATALOG_PRO_COVERAGE_COUNTRIES_COUNT = 10;
 export const CATALOG_PRO_COVERAGE_POINTS_PER_CALL = 10;
+// Tope real de seguridad para el STOCK por país de CJ (queryByVid, 10 puntos
+// por variante — nunca un barrido de las 69-96 variantes que puede tener un
+// producto real; mismo tope ya usado en cj-variant-stock).
+export const CATALOG_PRO_COVERAGE_MAX_STOCK_VIDS = 12;
 export const catalogProVerifyCoverage = async ({ stagingId, productId }) =>
   invokeEdgeFunction("cj-verify-coverage", stagingId ? { staging_id: stagingId } : { product_id: productId });
 
 // Cobertura real por país ya guardada (AliExpress al importar, o CJ vía el
 // botón manual) — se lee igual sea de un producto en Staging o Publicado.
 export const catalogProCountryCoverage = async ({ stagingId, productId }) => {
-  let q = supabase.from("catalog_pro_country_coverage").select("country_code, available, price, price_kind, days_min, days_max, method, reason, quoted_at");
+  let q = supabase.from("catalog_pro_country_coverage").select("country_code, available, price, price_kind, days_min, days_max, method, reason, quoted_at, stock_by_variant");
   q = stagingId ? q.eq("staging_id", stagingId) : q.eq("product_id", productId);
   const { data, error } = await q;
   if (error) { console.error("catalogProCountryCoverage:", error.message); return []; }

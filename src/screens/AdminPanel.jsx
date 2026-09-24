@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProImportAli, aliImportPreview, extractAliPidCandidates, resolveAliShortLink, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProVerifyCoverage, catalogProCountryCoverage, CATALOG_PRO_COVERAGE_COUNTRIES_COUNT, CATALOG_PRO_COVERAGE_POINTS_PER_CALL, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProImportAli, aliImportPreview, extractAliPidCandidates, resolveAliShortLink, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProVerifyCoverage, catalogProCountryCoverage, CATALOG_PRO_COVERAGE_COUNTRIES_COUNT, CATALOG_PRO_COVERAGE_POINTS_PER_CALL, CATALOG_PRO_COVERAGE_MAX_STOCK_VIDS, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -3624,6 +3624,18 @@ function CatalogQuotaBar() {
 // Un país verificado muestra su precio/tiempo real (✅ verde); uno verificado
 // SIN cobertura real muestra el motivo real (⚠️ rojo); uno sin verificar
 // nunca se ve como si tuviera datos reales — queda neutro, igual que antes.
+// Stock real total de un país: suma del stock real de cada variante en su
+// mapa stock_by_variant (guardado por ali-import-product/cj-verify-coverage
+// — ver la investigación real completa ahí). null cuando no hay dato real
+// (nunca se muestra un 0 falso).
+function stockTotalDe(cov) {
+  const mapa = cov?.stock_by_variant;
+  if (!mapa || typeof mapa !== 'object') return null;
+  const valores = Object.values(mapa);
+  if (valores.length === 0) return null;
+  return valores.reduce((s, n) => s + (Number(n) || 0), 0);
+}
+
 function RegionChecklist({ selected, onToggle, disabled, coverage }) {
   const covByCode = coverage || {};
   return (
@@ -3634,9 +3646,10 @@ function RegionChecklist({ selected, onToggle, disabled, coverage }) {
         const verified = cov?.available === true;
         const verifiedUnavailable = cov?.available === false;
         const dias = cov?.days_min != null ? (cov.days_max && cov.days_max !== cov.days_min ? `${cov.days_min}-${cov.days_max}` : `${cov.days_min}`) : null;
+        const stockTotal = stockTotalDe(cov);
         return (
           <button key={c.code} type="button" disabled={disabled} onClick={() => onToggle(c.code)}
-            title={verified ? `Verificado real: ${money(cov.price)}${dias ? ` · ${dias} días` : ''}` : verifiedUnavailable ? `No disponible: ${cov.reason || 'sin detalle'}` : undefined}
+            title={verified ? `Verificado real: ${money(cov.price)}${dias ? ` · ${dias} días` : ''}${stockTotal != null ? ` · ${stockTotal} en stock` : ''}` : verifiedUnavailable ? `No disponible: ${cov.reason || 'sin detalle'}` : undefined}
             style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, padding: '6px 10px', borderRadius: 8, cursor: disabled ? 'not-allowed' : 'pointer',
               background: on ? 'var(--ag)' : 'var(--bg2)',
               border: `1px solid ${verified ? 'var(--gn)' : verifiedUnavailable ? 'var(--rd)' : (on ? 'var(--ac)' : 'var(--bd2)')}`,
@@ -3646,7 +3659,12 @@ function RegionChecklist({ selected, onToggle, disabled, coverage }) {
                 background: on ? 'var(--ac)' : 'transparent', border: `1.5px solid ${on ? 'var(--ac)' : 'var(--bd2)'}`, color: '#fff', flexShrink: 0 }}>{on ? '✓' : ''}</span>
               {c.code} · {c.label}{verified ? ' ✅' : verifiedUnavailable ? ' ⚠️' : ''}
             </span>
-            {verified && <span style={{ fontSize: 9.5, color: 'var(--gn)', fontWeight: 700 }}>{money(cov.price)}{dias ? ` · ${dias} días` : ''}</span>}
+            {verified && (
+              <span style={{ fontSize: 9.5, color: 'var(--gn)', fontWeight: 700 }}>
+                {money(cov.price)}{dias ? ` · ${dias} días` : ''}
+                {stockTotal != null ? ` · ${stockTotal <= 0 ? 'sin stock' : `${stockTotal} en stock`}` : ''}
+              </span>
+            )}
             {verifiedUnavailable && <span style={{ fontSize: 9.5, color: 'var(--rd)', fontWeight: 700 }}>no disponible</span>}
           </button>
         );
@@ -4285,18 +4303,26 @@ function RefreshCostButton({ pricingIds, toast, onApplied }) {
 // reportado por Daniel: la cobertura no aparecía por ningún lado). Con CJ
 // cuesta puntos reales de cuota, así que se muestra el número exacto antes
 // de ejecutar nada; con AliExpress no gasta cuota de CJ y se dice así.
-function VerifyCoverageButton({ stagingId, productId, provider, toast, onApplied }) {
+function VerifyCoverageButton({ stagingId, productId, provider, variantCount, toast, onApplied }) {
   const [confirming, setConfirming] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const esAli = provider === 'aliexpress';
-  const puntos = CATALOG_PRO_COVERAGE_COUNTRIES_COUNT * CATALOG_PRO_COVERAGE_POINTS_PER_CALL;
+  const puntosFreight = CATALOG_PRO_COVERAGE_COUNTRIES_COUNT * CATALOG_PRO_COVERAGE_POINTS_PER_CALL;
+  // Además del freight (100 puntos fijos), ahora también se pide el STOCK
+  // real por país de cada variante ya importada (queryByVid, 10 puntos c/u,
+  // acotado a un máximo real de seguridad) — mismo criterio ya usado en
+  // cj-variant-stock, para no agotar la cuota en productos con muchas
+  // variantes.
+  const variantesParaStock = Math.min(variantCount || 0, CATALOG_PRO_COVERAGE_MAX_STOCK_VIDS);
+  const puntosStock = variantesParaStock * CATALOG_PRO_COVERAGE_POINTS_PER_CALL;
+  const puntos = puntosFreight + puntosStock;
 
   const run = async () => {
     setVerifying(true);
     try {
       const res = await catalogProVerifyCoverage({ stagingId, productId });
       const disponibles = (res.coverage || []).filter(c => c.available).length;
-      toast(`✅ Cobertura real verificada — ${disponibles} de ${CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países confirmados`);
+      toast(`✅ Cobertura real verificada — ${disponibles} países confirmados`);
       onApplied();
     } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo verificar la cobertura real')); }
     setVerifying(false); setConfirming(false);
@@ -4311,8 +4337,8 @@ function VerifyCoverageButton({ stagingId, productId, provider, toast, onApplied
         <SimpleConfirm title="¿Verificar cobertura real?" confirmLabel={verifying ? 'Verificando…' : 'Verificar'} color="var(--ac)" busy={verifying}
           onCancel={() => setConfirming(false)} onConfirm={run}
           msg={esAli
-            ? <>Se va a consultar la disponibilidad, el precio y el tiempo REAL de envío a {CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países candidatos, más Cuba (vía el hub de EE.UU.). AliExpress responde por producto completo, así que <b style={{ color: 'var(--tx)' }}>no gasta ningún punto</b> de tu cuota de CJ. Los países confirmados se marcan solos en Mercados de venta.</>
-            : <>Se va a consultar el costo y tiempo REAL de envío a {CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países candidatos (usando la variante más barata como referencia, para no agotar la cuota en productos con muchas variantes) — esto cuesta <b style={{ color: 'var(--tx)' }}>{puntos} puntos reales</b> de tu cuota diaria de CJ ({CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países × {CATALOG_PRO_COVERAGE_POINTS_PER_CALL} puntos). Los países confirmados se marcan solos en Mercados de venta.</>}
+            ? <>Se va a consultar la disponibilidad, el precio, el tiempo Y EL STOCK real de envío a más de 40 países candidatos reales, más Cuba (vía el hub de EE.UU.). AliExpress responde por producto completo, así que <b style={{ color: 'var(--tx)' }}>no gasta ningún punto</b> de tu cuota de CJ. Los países confirmados se marcan solos en Mercados de venta.</>
+            : <>Se va a consultar el costo y tiempo REAL de envío a {CATALOG_PRO_COVERAGE_COUNTRIES_COUNT} países candidatos (usando la variante más barata como referencia) Y el stock real por país de {variantesParaStock} variante(s) ya importada(s) — esto cuesta <b style={{ color: 'var(--tx)' }}>{puntos} puntos reales</b> de tu cuota diaria de CJ ({puntosFreight} de envío + {puntosStock} de stock). Los países confirmados se marcan solos en Mercados de venta.</>}
         />
       )}
     </>
@@ -4448,7 +4474,7 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
         <button className="btn btg sm" onClick={onBack}>‹ Volver a Staging</button>
         {!ro && <RefreshCostButton pricingIds={rows.map(r => r.id)} toast={toast} onApplied={onPublished} />}
-        {!ro && <VerifyCoverageButton stagingId={product.id} provider={product.provider} toast={toast} onApplied={() => { onPublished(); loadCoverage(); }} />}
+        {!ro && <VerifyCoverageButton stagingId={product.id} provider={product.provider} variantCount={rows.length} toast={toast} onApplied={() => { onPublished(); loadCoverage(); }} />}
       </div>
       <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} videoUrl={product.video_url} videoPosterUrl={product.video_poster_url} />
       <div className="ssub" style={{ marginTop: -4 }}>{rows.length} variante(s) · {product.listed_num ?? 0} listados en CJ</div>
@@ -4702,7 +4728,7 @@ function CatalogPublishedDetail({ product, toast, onBack, onUpdated }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
         <button className="btn btg sm" onClick={onBack}>‹ Volver a Publicado</button>
         <RefreshCostButton pricingIds={rows.map(r => r.id)} toast={toast} onApplied={onUpdated} />
-        <VerifyCoverageButton productId={product.id} provider={product.provider} toast={toast} onApplied={() => { onUpdated(); loadCoverage(); }} />
+        <VerifyCoverageButton productId={product.id} provider={product.provider} variantCount={rows.length} toast={toast} onApplied={() => { onUpdated(); loadCoverage(); }} />
       </div>
       <div className="tabs" style={{ maxWidth: 320 }}>
         {[['costeo', 'Costeo (interno)'], ['tienda', 'Vista de tienda']].map(([k, l]) =>

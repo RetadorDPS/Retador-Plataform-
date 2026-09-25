@@ -25,7 +25,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy, ShoppingBag, Link2, Sparkles,
 } from "lucide-react";
-import { useAt, useR, useCatalog, money, getPlans, usePlatformCfg, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, catalogProCountryCoverage, countryNameOf, attrLabelText, groupVariantAttrs, resolveVariantBy, buyerCountryCodeOf, disponibilidadPorRegion, valorVarianteActivo, atributosAlElegir, primeraVarianteDisponible, stockRegionalDe } from "../shared/index.js";
+import { useAt, useR, useCatalog, money, getPlans, usePlatformCfg, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, catalogProMinimosProducto, catalogProCountryCoverage, countryNameOf, attrLabelText, groupVariantAttrs, resolveVariantBy, buyerCountryCodeOf, disponibilidadPorRegion, valorVarianteActivo, atributosAlElegir, primeraVarianteDisponible, stockRegionalDe } from "../shared/index.js";
 // recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
 // se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
 // nunca de entrada para todos (la mayoría son compradores que ni la ven).
@@ -1654,6 +1654,22 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
   }, [variants, varianteVendible, activeVariant]);
   const stockRegionActivo = activeVariant && coverage.length ? stockRegionalDe(coverage, regionVendedor, activeVariant.variant_sku).stock : null;
   const cost = Number(activeVariant?.recommended_price) || flatCost;
+  // Precio mínimo de venta real (lo calcula la base): Tu costo + comisión del
+  // pago con tarjeta + ganancia mínima de RETADOR. Si no llega, se usa Tu costo.
+  const [minimos, setMinimos] = useState({});
+  useEffect(() => {
+    let alive = true;
+    catalogProMinimosProducto(product.id).then(rows => {
+      if (!alive) return;
+      const m = {}; (rows || []).forEach(r => { m[r.variant_sku] = Number(r.precio_minimo); });
+      setMinimos(m);
+    });
+    return () => { alive = false; };
+  }, [product.id]);
+  const minimoVariante = activeVariant?.variant_sku && minimos[activeVariant.variant_sku] != null
+    ? minimos[activeVariant.variant_sku]
+    : (Object.values(minimos).length ? Math.min(...Object.values(minimos)) : cost);
+  const precioMinimo = Math.max(cost, Number(minimoVariante) || 0);
   // El precio de venta sugerido se recalcula cada vez que cambia el COSTO
   // real de la variante activa (al tocar otra variante) — antes se fijaba
   // una sola vez con el costo de la primera y nunca se actualizaba, dejando
@@ -1696,7 +1712,7 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
   const PROJECTION_TIERS = [10, 50, 100];
 
   const addToStore = () => {
-    if (!priceNum || priceNum < cost) { return; }
+    if (!priceNum || priceNum < precioMinimo) { return; }
     setBusy(true);
     const mapped = mapCjCategoryToRetador(product.category, cats, subcats);
     // Variantes REALES (no ya como texto en la descripción): el precio de
@@ -1708,7 +1724,7 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
     const variantRows = (variants || []).map(v => ({
       sku: v.variant_sku,
       attributes: v.attributes,
-      price: Math.round((Number(v.recommended_price) || flatCost) * ratio * 100) / 100,
+      price: Math.max(Math.round((Number(v.recommended_price) || flatCost) * ratio * 100) / 100, Number(minimos[v.variant_sku]) || 0),
       stock: Number(v.stock) || 0,
       image: v.image || null,
     }));
@@ -1815,6 +1831,13 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
           <span style={{ fontSize:12, color:C.m }}>Tu costo{activeVariant ? " (esta variante)" : ""}</span>
           <span style={{ fontSize:15, fontWeight:800, color:C.t }}>{money(cost, "USD")}</span>
         </div>
+        <div style={{ padding:"10px 12px", borderRadius:10, background:C.s3, marginBottom:10 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <span style={{ fontSize:12, color:C.m }}>Precio mínimo de venta</span>
+            <span style={{ fontSize:15, fontWeight:800, color:C.t }}>{money(precioMinimo, "USD")}</span>
+          </div>
+          <div style={{ fontSize:10.5, color:C.m, marginTop:4, lineHeight:1.45 }}>Es tu costo más la comisión del pago con tarjeta y una ganancia mínima para RETADOR. No se puede vender por debajo.</div>
+        </div>
         {cubaShipping != null && regionVendedor === "CU" && (
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:C.s3, marginBottom:10 }}>
             <span style={{ fontSize:12, color:C.m }}>Envío hasta Cuba</span>
@@ -1832,13 +1855,13 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
             <span style={{ color:C.m, fontSize:13, flexShrink:0 }}>→</span>
             <div style={{ position:"relative", flex:1 }}>
               <span style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)", fontSize:13, color:C.m, pointerEvents:"none" }}>$</span>
-              <input type="number" step="0.01" min={cost} value={price} onChange={e => handlePriceChange(e.target.value)}
+              <input type="number" step="0.01" min={precioMinimo} value={price} onChange={e => handlePriceChange(e.target.value)}
                 style={{ ...inpStyle(C), paddingLeft:22 }} title="Precio exacto de venta" />
             </div>
           </div>
         </div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:`${C.ok}18`, marginBottom:10 }}>
-          <span style={{ fontSize:12, color:C.ok, fontWeight:700 }}>Tu ganancia</span>
+          <span style={{ fontSize:12, color:C.ok, fontWeight:700 }}>Tu ganancia <span style={{ fontWeight:500, fontSize:10.5 }}>(antes de la comisión de tu plan)</span></span>
           <span style={{ fontSize:15, fontWeight:800, color:C.ok }}>{money(Math.max(0, profit), "USD")}</span>
         </div>
 
@@ -1856,7 +1879,7 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
           </div>
           <div style={{ fontSize:10, color:C.m, marginTop:7 }}>Estimado según tu precio de venta actual — no es una garantía.</div>
         </div>
-        {priceNum > 0 && priceNum < cost && <div style={{ fontSize:11.5, color:C.err, marginBottom:14 }}>Tu precio de venta no puede ser menor a tu costo ({money(cost, "USD")})</div>}
+        {priceNum > 0 && priceNum < precioMinimo && <div style={{ fontSize:11.5, color:C.err, marginBottom:14 }}>Tu precio de venta no puede ser menor al precio mínimo ({money(precioMinimo, "USD")}): tu costo más la comisión del pago con tarjeta y la ganancia mínima de RETADOR.</div>}
 
         {/* Cobertura real por país — habla de la REGIÓN del vendedor (no de
             Cuba fija) y nunca muestra ningún precio: el costo real puesto en
@@ -1905,7 +1928,7 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
 
         <div style={{ display:"flex", gap:9 }}>
           <button onClick={onClose} style={{ flex:1, padding:12, borderRadius:10, border:`1px solid ${C.b}`, background:"transparent", color:C.m, fontSize:13, fontWeight:700, cursor:"pointer" }}>Cancelar</button>
-          <button onClick={addToStore} disabled={busy || !priceNum || priceNum < cost} style={{ flex:1, padding:12, borderRadius:10, border:"none", background:ac, color:"#000", fontSize:13, fontWeight:800, cursor:"pointer", opacity:(busy || !priceNum || priceNum < cost) ? .6 : 1 }}>Añadir a mi tienda</button>
+          <button onClick={addToStore} disabled={busy || !priceNum || priceNum < precioMinimo} style={{ flex:1, padding:12, borderRadius:10, border:"none", background:ac, color:"#000", fontSize:13, fontWeight:800, cursor:"pointer", opacity:(busy || !priceNum || priceNum < precioMinimo) ? .6 : 1 }}>Añadir a mi tienda</button>
         </div>
       </div>
     </div>

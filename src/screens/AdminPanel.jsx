@@ -2409,6 +2409,11 @@ function Economia({toast, data={}, ro}){
     // Inteligente (vendedores Pro/Premium) al costear cada variante que
     // importan, para mostrar el estimado de envío ANTES de fijar el margen.
     catalogProHubRate: cfg.catalogProHubRate ?? 1.99,
+    // Precio mínimo de venta del Catálogo Pro (v237): comisión real de la
+    // pasarela de pago (% + fijo) y ganancia mínima de RETADOR por unidad.
+    pasarelaComisionPct: cfg.pasarelaComisionPct ?? 4.4,
+    pasarelaComisionFija: cfg.pasarelaComisionFija ?? 0.30,
+    retadorGananciaMinima: cfg.retadorGananciaMinima ?? 1,
   });
   const set=(k,v)=>setT(s=>({...s,[k]:v}));
   const saveTarifas=(override={})=>{
@@ -2428,6 +2433,9 @@ function Economia({toast, data={}, ro}){
       catalogProHubDaysMin: Number(t.catalogProHubDaysMin)||0,
       catalogProHubDaysMax: Number(t.catalogProHubDaysMax)||0,
       catalogProHubRate: Number(t.catalogProHubRate)||0,
+      pasarelaComisionPct: Number(t.pasarelaComisionPct)||0,
+      pasarelaComisionFija: Number(t.pasarelaComisionFija)||0,
+      retadorGananciaMinima: Number(t.retadorGananciaMinima)||0,
       promoActive: t.promoActive === true,
       promoCost: Number(t.promoCost)||0,
     });
@@ -2745,6 +2753,14 @@ function Economia({toast, data={}, ro}){
       <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',margin:'4px 0 10px'}}>Comisión por venta de productos</div>
       <div className="g2" style={{marginBottom:18}}>
         {field('Porcentaje por venta', numInput('commissionPct','%'), 'Se cobra al vendedor sobre cada venta. En 0% no cobra.')}
+      </div>
+
+      <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',margin:'4px 0 10px'}}>Precio mínimo de venta (Catálogo Pro)</div>
+      <div style={{fontSize:10.5,color:'var(--tx3)',marginBottom:10}}>Mínimo por variante = Tu costo + comisión del pago con tarjeta + ganancia mínima de RETADOR. Ningún vendedor puede vender por debajo; si subes estos valores, las copias que queden por debajo se suben solas y se avisa al vendedor.</div>
+      <div className="g2" style={{marginBottom:18}}>
+        {field('Comisión de la pasarela (%)', numInput('pasarelaComisionPct','%'), 'Tarifa estándar publicada de Stripe (2,9 %) + tarjeta internacional (1,5 %). Cámbiala por la de tu contrato.')}
+        {field('Comisión de la pasarela (fijo)', numInput('pasarelaComisionFija','USD','$'), 'Cargo fijo por cobro con tarjeta.')}
+        {field('Ganancia mínima de RETADOR', numInput('retadorGananciaMinima','USD','$'), 'Lo mínimo que RETADOR quiere ganar por unidad vendida.')}
       </div>
 
       <div style={{fontSize:12,fontWeight:700,color:'var(--tx)',margin:'4px 0 10px'}}>⭐ Función Destacar (productos)</div>

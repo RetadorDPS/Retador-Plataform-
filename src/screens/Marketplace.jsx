@@ -379,6 +379,17 @@ const conTiempoLimite = (promesa, ms = CHECKOUT_TIMEOUT_MS) => Promise.race([
   new Promise((_, reject) => setTimeout(() => reject(new Error("Esto está tardando demasiado — inténtalo de nuevo")), ms)),
 ]);
 
+// v237: la cotización del proveedor llega separada en envío, impuestos del
+// país (IVA que el proveedor ya incluye en su precio para ese destino) y
+// ajuste de precio del proveedor para ese destino. El impuesto NUNCA se
+// muestra como "envío". Si el proveedor no manda las partes (CJ), todo el
+// monto es envío, como siempre.
+function partesCotizacion(r) {
+  const total = Number(r?.total_price) || 0;
+  if (r?.envio == null) return { envio: total, impuestos: 0, ajuste: 0 };
+  return { envio: Number(r.envio) || 0, impuestos: Number(r.impuestos) || 0, ajuste: Number(r.ajuste_precio) || 0 };
+}
+
 export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty }) {
   const { S, B, T1, T2, T3, isDark } = useAt();
   const platformCfg = usePlatformCfg(); // tarifa local desde la config GLOBAL del backend
@@ -675,7 +686,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
           setPrimaryShipQuote({ qty, country: destCountry, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: true, reason: r?.reason || null });
           return;
         }
-        setPrimaryShipQuote({ qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false, reason: null, desglose: r?.desglose || null });
+        setPrimaryShipQuote({ qty, country: destCountry, total_price: Number(r?.total_price) || 0, ...partesCotizacion(r), aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false, reason: null, desglose: r?.desglose || null });
       }).catch(() => {
         if (cancelled) return;
         if (attempt < 3) { timer = setTimeout(() => fetchQuote(attempt + 1), 900); return; }
@@ -714,7 +725,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
           setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { qty: l.qty, country: destCountry, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: true, reason: r?.reason || null } }));
           return;
         }
-        setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { qty: l.qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false, reason: null } }));
+        setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { qty: l.qty, country: destCountry, total_price: Number(r?.total_price) || 0, ...partesCotizacion(r), aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false, reason: null } }));
       }).catch(() => {
         if (cancelled) return;
         if (attempt < 3) { timers.push(setTimeout(() => fetchLine(l, attempt + 1), 900)); return; }
@@ -747,6 +758,15 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
         cartLines.reduce((s, l) => s + (cartLineMatch(l) && !cartShipQuotes[l.variantId]?.failed ? cartShipQuotes[l.variantId].total_price : 0), 0)
       ) * 100) / 100
     : 0;
+  const sumaParte = (k) => isCatalogPro
+    ? Math.round((
+        (primaryShipMatch(primaryShipQuote) && !primaryShipQuote.failed ? Number(primaryShipQuote[k]) || 0 : 0) +
+        cartLines.reduce((s, l) => s + (cartLineMatch(l) && !cartShipQuotes[l.variantId]?.failed ? Number(cartShipQuotes[l.variantId]?.[k]) || 0 : 0), 0)
+      ) * 100) / 100
+    : 0;
+  const catalogProEnvio = sumaParte("envio");
+  const catalogProImpuestos = sumaParte("impuestos");
+  const catalogProAjuste = sumaParte("ajuste");
   // Total real del/los producto(s) elegido(s) — grandTotal si hay carrito
   // múltiple, total simple si es una sola línea (comportamiento de siempre).
   const productTotal = isMulti ? grandTotal : total;
@@ -832,6 +852,30 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     // reutiliza el MISMO pedido en vez de crear uno segundo: create_order
     // no sabe que ya existe uno y lo duplicaría si lo llamáramos de nuevo.
     let order = paymentMethod === "tarjeta" ? pendingCardOrderRef.current : null;
+    // REVALIDACIÓN antes de cobrar (v237): se vuelve a consultar al proveedor
+    // precio, stock y envío de cada línea, sin caché. Si algo cambió, se
+    // muestra el total nuevo y el comprador tiene que confirmarlo tocando de
+    // nuevo; nunca se cobra con una cotización vieja.
+    if (!order && isCatalogPro) {
+      const lineas = [{ variantId: variant?.id || null, qty }, ...cartLines.map(l => ({ variantId: l.variantId, qty: l.qty }))];
+      let nuevoTotal = 0;
+      for (const l of lineas) {
+        let r;
+        try { r = await conTiempoLimite(getCatalogProBuyerFreightQuote(product.id, l.variantId, l.qty, destCountry, true)); } catch { r = null; }
+        if (!r || r.applicable === false) { flash("⚠️ No se pudo confirmar con el proveedor el precio, el stock y el envío actuales. Vuelve a intentarlo en unos segundos."); setLoading(false); return; }
+        if (r.status === "no_disponible") { flash("⚠️ " + (r.reason || "Esta opción ya no está disponible con el proveedor.")); setLoading(false); return; }
+        nuevoTotal += Number(r.total_price) || 0;
+        const q = { qty: l.qty, country: destCountry, total_price: Number(r.total_price) || 0, ...partesCotizacion(r), aging: r.aging || null, is_slow: !!r.is_slow, days_min: r.days_min ?? null, days_max: r.days_max ?? null, loading: false, failed: false, reason: null };
+        if (l.variantId === (variant?.id || null) && l.qty === qty) setPrimaryShipQuote(prev => ({ ...q, desglose: r.desglose || prev.desglose || null }));
+        else setCartShipQuotes(qs => ({ ...qs, [l.variantId]: q }));
+      }
+      nuevoTotal = Math.round(nuevoTotal * 100) / 100;
+      if (Math.abs(nuevoTotal - catalogProShipTotal) >= 0.01) {
+        flash(`⚠️ El proveedor cambió el costo de envío e impuestos: antes ${money(catalogProShipTotal, cur)}, ahora ${money(nuevoTotal, cur)}. Revisa el nuevo total y toca de nuevo para confirmar.`);
+        setLoading(false);
+        return;
+      }
+    }
     if (!order) {
       try {
         const modalidad = shipMode === "intl" ? "cargo" : "local"; // exterior(cargo) vs local; el dueño afina conectado/cargo después
@@ -1056,7 +1100,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
                     <div style={{ fontSize: 11, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 2}. {Object.values(l.attrs || {}).join(" / ") || "Variante"}</div>
                     <div style={{ fontSize: 10, color: T2, marginTop: 1 }}>{money(l.subtotal, cur)}{isCatalogPro
                       ? (cartLineMatch(l) && !cartShipQuotes[l.variantId]?.loading
-                          ? (cartShipQuotes[l.variantId]?.failed ? " · no se pudo calcular el envío" : ` · + ${money(cartShipQuotes[l.variantId].total_price, cur)} envío`)
+                          ? (cartShipQuotes[l.variantId]?.failed ? " · no se pudo calcular el envío" : ` · + ${money(cartShipQuotes[l.variantId].envio ?? cartShipQuotes[l.variantId].total_price, cur)} envío${cartShipQuotes[l.variantId].impuestos > 0 ? ` + ${money(cartShipQuotes[l.variantId].impuestos, cur)} impuestos` : ""}${cartShipQuotes[l.variantId].ajuste > 0 ? ` + ${money(cartShipQuotes[l.variantId].ajuste, cur)} ajuste` : ""}`)
                           : " · calculando envío…")
                       : ""}</div>
                   </div>
@@ -1130,8 +1174,21 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
             <div style={{ background: `${G}0d`, border: `1px solid ${G}30`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: 11, color: T2 }}>✈️ Envío internacional{catalogProShipSlow ? " (más lento por el volumen)" : ""}</span>
-                <span style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>{shipQuoteReady ? money(catalogProShipTotal, cur) : shipQuoteFailed ? "no disponible" : "calculando…"}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: T1 }}>{shipQuoteReady ? money(catalogProEnvio, cur) : shipQuoteFailed ? "no disponible" : "calculando…"}</span>
               </div>
+              {/* Impuestos y ajuste van en líneas propias: nunca se llaman "envío". */}
+              {shipQuoteReady && catalogProImpuestos > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 3 }}>
+                  <span style={{ fontSize: 11, color: T2 }}>🧾 IVA y precio local del proveedor</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: T1 }}>{money(catalogProImpuestos, cur)}</span>
+                </div>
+              )}
+              {shipQuoteReady && catalogProAjuste > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 3 }}>
+                  <span style={{ fontSize: 11, color: T2 }}>Ajuste de precio del proveedor para este destino</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: T1 }}>{money(catalogProAjuste, cur)}</span>
+                </div>
+              )}
               {/* days_min/days_max ya vienen combinados desde el backend según
                   el destino elegido (a Cuba incluye el tramo final real y
                   configurable; a cualquier otro país es el tránsito real de
@@ -1215,7 +1272,13 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
             );
             return <div style={{ background: soft, border: `1px solid ${B}`, borderRadius: 12, padding: "12px 13px", marginBottom: 14 }}>
               {row(isMulti ? "Producto (todas las líneas)" : qty > 1 ? `Producto · ×${qty}` : "Producto", "al vendedor", productTotal)}
-              {shipCost > 0 && row(isLocal ? "Domicilio (estimado)" : shipLabel, isLocal ? "al mensajero" : shipWho, shipCost, false, isLocal)}
+              {isCatalogPro
+                ? <>
+                    {catalogProEnvio > 0 && row("Envío internacional", "empresa de envíos", catalogProEnvio)}
+                    {catalogProImpuestos > 0 && row("IVA y precio local del proveedor", "", catalogProImpuestos)}
+                    {catalogProAjuste > 0 && row("Ajuste de precio del proveedor", "", catalogProAjuste)}
+                  </>
+                : shipCost > 0 && row(isLocal ? "Domicilio (estimado)" : shipLabel, isLocal ? "al mensajero" : shipWho, shipCost, false, isLocal)}
               <div style={{ height: 1, background: B, margin: "3px 0 9px" }} />
               {isLocal
                 ? <>
@@ -1282,7 +1345,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
             <p style={{ fontSize: 11.5, color: T1, fontWeight: 700 }}>{product.title}{isMulti ? " y más" : qty > 1 ? ` ×${qty}` : ""}</p>
             {shipMode === "local" && <p style={{ fontSize: 10, color: T2, marginTop: 2 }}>Recogida (vendedor): {product.location || product.seller_name || "Vendedor"}</p>}
             {shipMode === "intl" && !isCatalogPro && <p style={{ fontSize: 10, color: T2, marginTop: 2 }}>Envío {product.shippingType || "standard"} · destino Cuba</p>}
-            {isCatalogPro && <p style={{ fontSize: 10, color: T2, marginTop: 2 }}>Producto {money(productTotal, cur)} + envío {money(catalogProShipTotal, cur)}</p>}
+            {isCatalogPro && <p style={{ fontSize: 10, color: T2, marginTop: 2 }}>Producto {money(productTotal, cur)} + envío {money(catalogProEnvio, cur)}{catalogProImpuestos > 0 ? ` + impuestos ${money(catalogProImpuestos, cur)}` : ""}{catalogProAjuste > 0 ? ` + ajuste ${money(catalogProAjuste, cur)}` : ""}</p>}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 11, marginBottom: 18 }}>

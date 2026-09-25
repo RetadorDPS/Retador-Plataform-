@@ -1298,8 +1298,10 @@ export const getOrderPaymentState = async (orderId) => {
 // decide a qué función de proveedor mandar la petición (CJ o AliExpress).
 // Si quien pregunta es admin, la respuesta trae además `desglose` (tramo al
 // hub + tramo hub→Cuba con peso y tarifa); al comprador nunca le llega.
-export const getCatalogProBuyerFreightQuote = async (productId, variantId, qty, destCountry) => {
-  const { data, error } = await supabase.functions.invoke("catalog-pro-freight-quote", { body: { product_id: productId, variant_id: variantId || null, qty: qty || 1, dest_country: destCountry || null } });
+// fresco=true (v237): revalidación justo antes de cobrar — el proveedor se
+// consulta de nuevo (precio, stock y envío) sin usar el caché.
+export const getCatalogProBuyerFreightQuote = async (productId, variantId, qty, destCountry, fresco = false) => {
+  const { data, error } = await supabase.functions.invoke("catalog-pro-freight-quote", { body: { product_id: productId, variant_id: variantId || null, qty: qty || 1, dest_country: destCountry || null, ...(fresco ? { fresco: true } : {}) } });
   if (error || data?.error) { console.error("getCatalogProBuyerFreightQuote:", error?.message || data?.error); return { total_price: 0, applicable: false, aging: null, is_slow: false, days_min: null, days_max: null }; }
   return data;
 };
@@ -2823,6 +2825,15 @@ export const catalogProSetTop = async (id, isTop) => {
 export const catalogProProductVariants = async (catalogId) => {
   const { data, error } = await supabase.rpc("catalog_pro_product_variants", { p_catalog_id: catalogId });
   if (error) { console.error("catalogProProductVariants:", error.message); throw error; }
+  return data || [];
+};
+
+// Precio mínimo de venta por variante (v237): "Tu costo" + comisión del pago
+// con tarjeta + ganancia mínima de RETADOR. Lo calcula la base con los valores
+// editables de platform_config; la base además bloquea precios menores.
+export const catalogProMinimosProducto = async (catalogId) => {
+  const { data, error } = await supabase.rpc("catalog_pro_minimos_producto", { p_catalog_id: catalogId });
+  if (error) { console.error("catalogProMinimosProducto:", error.message); return []; }
   return data || [];
 };
 

@@ -54,6 +54,7 @@ import { CatModal, NotifPanel, BuyModal, AdvancedSearch, MarketHome, EditProduct
 const OmniPanel = lazy(() => import("./screens/AdminPanel.jsx"));
 const WalletApp = lazy(() => import("./screens/Wallet.jsx"));
 const ProductToolsApp = lazy(() => import("./screens/ProductTools.jsx"));
+const PromoVideoTool = lazy(() => import("./tools/promoVideo/PromoVideoTool.jsx"));
 const CourierFlow = lazy(() => import("./screens/Courier.jsx").then(m => ({ default: m.CourierFlow })));
 const SubastasScreen = lazy(() => import("./screens/Auctions.jsx").then(m => ({ default: m.SubastasScreen })));
 // Relleno neutro mientras se descarga el código de una pantalla cargada bajo
@@ -135,6 +136,7 @@ function AuctionScheduleGate({ schedule, dark = true, children }) {
   );
 }
 import { setThemeColor } from "./pwa/themeColor.js";
+import { getPlanPerks } from "./shared/planPerks.js";
 
 
 // OMNIPANEL — panel admin integrado (CSS aislado bajo .omni)
@@ -580,6 +582,7 @@ function AppShell({ sessionUser, platformStats = null }) {
   const [showWallet, setShowWallet] = useState(false);
   const [showTools, setShowTools] = useState(false);
   const [toolApp, setToolApp] = useState(false);
+  const [promoVideoOpen, setPromoVideoOpen] = useState(false); // Generador de Video Promocional
   const [showCourier, setShowCourier] = useState(false);
   const [showFollowing, setShowFollowing] = useState(false); // pantalla "Siguiendo" (☰ → Siguiendo)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false); // panel lateral del Perfil (☰)
@@ -1315,6 +1318,8 @@ function AppShell({ sessionUser, platformStats = null }) {
     // precargado con todo lo del catálogo. Solo se crea de verdad cuando el
     // vendedor pulsa "Publicar" ahí dentro (handlePublish, más abajo).
     onOpenCatalogDraft: (draft) => setEditProd({ ...draft, __isCatalogDraft: true }),
+    // Acceso directo de Mi Panel → Promociones: abre la MISMA herramienta que Herramientas.
+    onOpenPromoVideo: () => setPromoVideoOpen(true),
   };
   // Perfiles de OTROS vendedores: si su plan real tiene can_customize, se les
   // muestra su Tienda en vez del perfil simple — mismo gate que para mí mismo.
@@ -1444,9 +1449,9 @@ function AppShell({ sessionUser, platformStats = null }) {
   // (Va DESPUÉS de declarar todos los estados de navegación que lee, incl. selOrderId.)
   // Estado de navegación actual (pantallas + modales) y su "firma" para comparar.
   const navSnap = { tab, mScr, pScr, eScr, selProd, selSeller, selOrderId, prodBackTo,
-    plusMenu, showCourier, toolApp, showTools, showAdmin, showWallet, showFollowing, chatOpen, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
+    plusMenu, showCourier, toolApp, promoVideoOpen, showTools, showAdmin, showWallet, showFollowing, chatOpen, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
   const navSig = [tab, mScr, pScr, eScr, (selProd && selProd.id) || selProd || 0, selSeller || 0, selOrderId || 0, prodBackTo || 0,
-    !!plusMenu, !!showCourier, !!toolApp, !!showTools, !!showAdmin, !!showWallet, !!showFollowing, !!chatOpen, !!showNotif, !!showCats, !!pubOpen, !!buyModal, !!confirmCfg, !!editProd].join("|");
+    !!plusMenu, !!showCourier, !!toolApp, !!promoVideoOpen, !!showTools, !!showAdmin, !!showWallet, !!showFollowing, !!chatOpen, !!showNotif, !!showCats, !!pubOpen, !!buyModal, !!confirmCfg, !!editProd].join("|");
 
   const stackRef = useRef([]);      // [{sig, snap}] una entrada por cada paso hacia adelante
   const lastRef = useRef(null);     // {sig, snap} del estado actual
@@ -1456,7 +1461,7 @@ function AppShell({ sessionUser, platformStats = null }) {
   const applySnap = (sn) => {
     setTab(sn.tab); setMScr(sn.mScr); setPScr(sn.pScr); setEScr(sn.eScr);
     setSelProd(sn.selProd); setSelSeller(sn.selSeller); setSelOrderId(sn.selOrderId); setProdBackTo(sn.prodBackTo);
-    setPlusMenu(sn.plusMenu); setShowCourier(sn.showCourier); setToolApp(sn.toolApp); setShowTools(sn.showTools);
+    setPlusMenu(sn.plusMenu); setShowCourier(sn.showCourier); setToolApp(sn.toolApp); setPromoVideoOpen(!!sn.promoVideoOpen); setShowTools(sn.showTools);
     setShowAdmin(sn.showAdmin); setShowWallet(sn.showWallet); setShowFollowing(sn.showFollowing); setChatOpen(sn.chatOpen); setShowNotif(sn.showNotif);
     setShowCats(sn.showCats); setPubOpen(sn.pubOpen); setBuyModal(sn.buyModal); setConfirmCfg(sn.confirmCfg); setEditProd(sn.editProd);
   };
@@ -2247,11 +2252,50 @@ function AppShell({ sessionUser, platformStats = null }) {
               </div>
             </div>
 
+            {/* Generador de Video Promocional — visible para TODOS los planes
+                (gratis incluido). Los gratis exportan con marca de agua. */}
+            <div style={{ marginTop: 14, background: card, border: `1px solid ${bd}`, borderRadius: 18, overflow: "hidden" }}>
+              <div style={{ height: 90, background: "linear-gradient(135deg,#F26B0F,#FFB25B)", position: "relative", display: "flex", alignItems: "center", padding: "0 18px", overflow: "hidden" }}>
+                <span style={{ fontSize: 38, position: "relative" }}>🎬</span>
+                <span style={{ position: "absolute", top: 12, right: 12, fontSize: 10, fontWeight: 800, color: "#7a2e00", background: "rgba(255,255,255,.85)", borderRadius: 100, padding: "3px 9px" }}>PARA TODOS</span>
+              </div>
+              <div style={{ padding: "16px 18px 18px" }}>
+                <h2 style={{ fontSize: 17, fontWeight: 800, color: t1, marginBottom: 6 }}>Video Promocional</h2>
+                <p style={{ fontSize: 13, lineHeight: 1.55, color: t2, marginBottom: 14 }}>
+                  Crea un video vertical para <b style={{ color: t1 }}>Reels, Stories y TikTok</b> con tus productos, precios y reseñas. Elige entre 5 estilos de animación y descárgalo en tu teléfono — todo se genera en tu dispositivo.
+                </p>
+                <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 16 }}>
+                  {["5 estilos", "Tus fotos o emojis", "MP4 1080×1920"].map(f => (
+                    <span key={f} style={{ fontSize: 11, fontWeight: 600, color: t2, background: dark ? "#1c1c22" : "#f1f5f9", borderRadius: 8, padding: "5px 10px" }}>✓ {f}</span>
+                  ))}
+                </div>
+                <button onClick={() => setPromoVideoOpen(true)} style={{ width: "100%", height: 46, borderRadius: 12, border: "none", background: "#F26B0F", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>Abrir herramienta →</button>
+              </div>
+            </div>
+
             <div style={{ marginTop: 14, background: card, border: `1px dashed ${bd}`, borderRadius: 16, padding: "18px", textAlign: "center" }}>
               <span style={{ fontSize: 22, opacity: .5 }}>🧩</span>
               <p style={{ fontSize: 12.5, color: t2, marginTop: 6 }}>Más herramientas en camino.</p>
             </div>
           </div>
+        </div>;
+      })()}
+      {promoVideoOpen && (() => {
+        // Regla de plan en UN solo lugar (getPlanPerks): solo can_customize=true
+        // quita la marca de agua; plan desconocido o sin cargar → con marca.
+        const perks = getPlanPerks(myRealPlan);
+        const dark = effectiveTheme === "dark";
+        return <div style={{ position: "fixed", top: 0, left: 0, zIndex: 4100, width: `calc(100vw / ${densZoom})`, height: `calc(100dvh / ${densZoom})`, overflowY: "auto", WebkitOverflowScrolling: "touch", background: dark ? "#17140F" : "#FAF6EF", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+          <Suspense fallback={<LazyFallback />}>
+            <PromoVideoTool
+              conMarcaDeAgua={perks.conMarcaDeAgua}
+              accentDeMarca={perks.esPago ? (storeCfg?.accent || null) : null}
+              nombreTienda={perks.esPago ? (storeCfg?.name || "").trim() : ""}
+              dark={dark}
+              onClose={() => setPromoVideoOpen(false)}
+              onOpenPlans={() => { setPromoVideoOpen(false); setShowTools(false); setTab("perfil"); setPScr("profile-full"); setAutoOpenPlans(true); }}
+            />
+          </Suspense>
         </div>;
       })()}
       {showCourier && (() => {

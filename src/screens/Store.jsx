@@ -1088,7 +1088,7 @@ function Diseno({ cfg, products, onUpdateConfig, C, ac, flash, profileRealName }
 }
 
 /* ── 7) PROMOCIONES ────────────────────────────────────────────────────── */
-function Promos({ cfg, products, onUpdateProduct, C, ac }) {
+function Promos({ cfg, products, onUpdateProduct, onOpenPromoVideo, C, ac }) {
   const [code, setCode] = useState("");
   const [disc, setDisc] = useState("");
   // RETADOR no tiene todavía un sistema de códigos de descuento persistido —
@@ -1118,6 +1118,18 @@ function Promos({ cfg, products, onUpdateProduct, C, ac }) {
   return (
     <div>
       <SHdr title="Promociones" sub="Descuentos y ofertas activas" ac={ac} C={C}/>
+      {/* Acceso directo al Generador de Video Promocional: abre la MISMA
+          herramienta que vive en Herramientas (no es una copia). */}
+      {onOpenPromoVideo && (
+        <Card C={C} style={{ marginBottom:20, display:"flex", alignItems:"center", gap:12 }}>
+          <div style={{ width:42, height:42, borderRadius:12, background:`rgba(${toRgb(ac)},0.14)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>🎬</div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:14, fontWeight:800, color:C.t }}>Video promocional</div>
+            <div style={{ fontSize:11, color:C.m, marginTop:2 }}>Crea un video para Reels, Stories y TikTok con tu color de marca y sin marca de agua.</div>
+          </div>
+          <button onClick={onOpenPromoVideo} style={{ padding:"9px 13px", borderRadius:9, border:"none", background:ac, color:"#000", fontSize:12, fontWeight:800, cursor:"pointer", flexShrink:0 }}>Crear video</button>
+        </Card>
+      )}
       <Card C={C} style={{ marginBottom:20 }}>
         <div style={{ fontSize:14, fontWeight:800, marginBottom:4, color:C.t }}>Códigos de descuento</div>
         <div style={{ fontSize:11, color:C.m, marginBottom:14 }}>Aún no hay un sistema de cupones persistido en RETADOR — estos códigos se guardan solo en esta sesión.</div>
@@ -2119,7 +2131,7 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
     if (sec === "analytics")  return <Analytics products={products} orders={orders} C={C} ac={ac}/>;
     if (sec === "customers")  return <Clientes orders={orders} C={C} ac={ac}/>;
     if (sec === "design")     return <Diseno cfg={cfg} products={products} onUpdateConfig={api.onUpdateConfig} C={C} ac={ac} flash={notify} profileRealName={profileRealName}/>;
-    if (sec === "promotions") return <Promos cfg={cfg} products={products} onUpdateProduct={api.onUpdateProduct} C={C} ac={ac}/>;
+    if (sec === "promotions") return <Promos cfg={cfg} products={products} onUpdateProduct={api.onUpdateProduct} onOpenPromoVideo={api.onOpenPromoVideo} C={C} ac={ac}/>;
     if (sec === "settings")   return <Config cfg={cfg} onUpdateConfig={api.onUpdateConfig} C={C} ac={ac} flash={notify}/>;
     if (sec === "billing")    return <Billing user={user} myPlan={myPlan} plans={plans} C={C} ac={ac} flash={notify} onPlanRequested={api.onPlanRequested}/>;
     return null;

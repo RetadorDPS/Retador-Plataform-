@@ -1025,6 +1025,12 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
           </div>
           {qtyOver ? (
             <p style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginBottom: 12 }}>{avisoTope}</p>
+          ) : topeEsLimite ? (
+            // El tope viene del límite por pedido, no de que queden pocas
+            // unidades: decir "¡Últimas 1 disponibles!" sería falso.
+            <p style={{ fontSize: 10, color: T3, fontWeight: 600, marginBottom: 12 }}>
+              Máximo {limitePedido} {limitePedido === 1 ? "unidad" : "unidades"} por pedido en este producto
+            </p>
           ) : maxQty != null && (
             <p style={{ fontSize: 10, color: maxQty <= 5 ? G : T3, fontWeight: maxQty <= 5 ? 700 : 500, marginBottom: 12 }}>
               {maxQty <= 0 ? "⚠️ Sin stock disponible ahora mismo" : maxQty <= 5 ? `¡Últimas ${maxQty} disponibles!` : `${maxQty} disponibles`}

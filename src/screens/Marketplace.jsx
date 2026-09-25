@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, catalogProCountryCoverage, countryNameOf, buyerCountryCodeOf, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, useUnstickOnPageRestore, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, catalogProCountryCoverage, countryNameOf, buyerCountryCodeOf, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, useUnstickOnPageRestore, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, stockRegionalDe, varianteDisponibleEn, disponibilidadPorRegion, valorVarianteActivo, atributosAlElegir, primeraVarianteDisponible, varianteSkuDe, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -452,84 +452,6 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     else if (product?.id) getAvailableStock(product.id).then(n => { if (alive) setAvailStock(n); }).catch(() => {});
     return () => { alive = false; };
   }, [product?.id, variant?.id]);
-  // LÍMITE REAL por cliente (problema reportado por Daniel: en la propia
-  // ficha de AliExpress, el Poco F8 Pro dice "Puedes seleccionar uno como
-  // máximo"). Se investigó a fondo el campo real que devuelve ds.product.get
-  // (max_buy_num, purchase_limit, moq y variantes — búsqueda exhaustiva sobre
-  // el JSON crudo, con y sin simplify) y NO existe ningún campo oficial con
-  // ese límite por cliente en la API — confirmado, no es un descuido nuestro.
-  // Mientras esto no se resuelva con más precisión (ej. si AliExpress agrega
-  // el dato más adelante), se topa a 1 unidad máxima por pedido para
-  // CUALQUIER producto de AliExpress: mejor pedir de menos que dejar que se
-  // cree un pedido real, ya cobrado a un comprador cubano, que AliExpress
-  // termine rechazando al procesarlo.
-  const esAliExpress = product.catalogProvider === 'aliexpress';
-  const maxQty = esAliExpress ? 1 : availStock;
-  useEffect(() => { if (maxQty != null) setQty(q => Math.max(1, Math.min(q, maxQty))); }, [availStock, esAliExpress]);
-  // Campo de texto para escribir la cantidad directamente (en vez de solo tocar
-  // "+" repetido). Estado de texto aparte del número real: así se puede borrar y
-  // escribir sin que cada tecla reformatee el campo.
-  // OJO — bug real ya visto DOS veces: validar solo al salir del campo (blur)
-  // deja una ventana real donde la persona escribe "100", NO toca nada más, y
-  // mira una pantalla que se ve perfectamente normal (campo en 100, sin aviso,
-  // "Continuar" habilitado) — recién al tocar Continuar aparecía el rechazo del
-  // backend. Por eso la validación es EN VIVO, letra por letra (onChange), no
-  // en el blur: apenas el número escrito supera el stock, se avisa, se pone en
-  // rojo un instante y se topa al máximo real, todo en el mismo instante.
-  const [qtyText, setQtyText] = useState(String(qty));
-  const [qtyOver, setQtyOver] = useState(false); // true = acaba de toparse (borde rojo momentáneo)
-  const qtyOverTimer = useRef(null);
-  useEffect(() => { setQtyText(String(qty)); }, [qty]);
-  useEffect(() => () => clearTimeout(qtyOverTimer.current), []);
-  const flashQtyOver = () => {
-    setQtyOver(true);
-    clearTimeout(qtyOverTimer.current);
-    qtyOverTimer.current = setTimeout(() => setQtyOver(false), 1600);
-  };
-  const handleQtyInput = (raw) => {
-    const digits = raw.replace(/[^0-9]/g, "");
-    if (digits === "") { setQtyText(""); return; } // permite borrar todo para reescribir
-    const n = parseInt(digits, 10);
-    if (maxQty != null && n > maxQty) {
-      flash(esAliExpress ? '⚠️ Este producto de AliExpress permite máximo 1 unidad por pedido' : `⚠️ Solo quedan ${maxQty} disponibles`);
-      flashQtyOver();
-      setQty(maxQty);
-      setQtyText(String(maxQty));
-    } else {
-      setQtyText(digits);
-      setQty(Math.max(1, n)); // el total se actualiza en vivo con lo que ya es válido
-    }
-  };
-  // Red de seguridad al salir del campo: solo cubre vacío/0 (el tope por arriba
-  // ya se resuelve en vivo en cada tecla, nunca llega inválido hasta acá).
-  const commitQtyText = () => {
-    const n = parseInt(qtyText, 10);
-    if (!Number.isFinite(n) || n < 1) { setQty(1); setQtyText("1"); }
-  };
-  // Descuento por cantidad (SOLO vista previa — el total real lo calcula el backend).
-  const discPct = bulkDiscountPctFor(qty, product.bulkDiscounts);
-  const unitPriceWithDisc = discPct > 0 ? price * (1 - discPct / 100) : price;
-  const total = unitPriceWithDisc * qty;
-
-  // Líneas adicionales del carrito (Bloque 2) — cada una con su propio
-  // descuento por cantidad, igual que la línea principal de arriba.
-  const cartLinesCalc = cartLines.map(l => {
-    const d = bulkDiscountPctFor(l.qty, product.bulkDiscounts);
-    const unit = d > 0 ? l.price * (1 - d / 100) : l.price;
-    return { ...l, unitWithDisc: unit, subtotal: Math.round(unit * l.qty * 100) / 100 };
-  });
-  const isMulti = cartLines.length > 0;
-  const grandTotal = Math.round((total + cartLinesCalc.reduce((s, l) => s + l.subtotal, 0)) * 100) / 100;
-
-  const addCartLine = (v) => {
-    if (!v || v.id === variant?.id || cartLines.some(l => l.variantId === v.id)) return;
-    setCartLines(ls => [...ls, { variantId: v.id, attrs: v.attributes, image: v.image, price: v.price != null ? Number(v.price) : (Number(product.price) || 0), stock: v.stock, qty: 1 }]);
-    setPickingVariant(false);
-  };
-  const removeCartLine = (variantId) => setCartLines(ls => ls.filter(l => l.variantId !== variantId));
-  // Mismo tope conservador de 1 unidad por producto AliExpress (ver esAliExpress
-  // más arriba) también para cada línea adicional del carrito de variantes.
-  const setCartLineQty = (variantId, n) => setCartLines(ls => ls.map(l => l.variantId === variantId ? { ...l, qty: Math.max(1, esAliExpress ? Math.min(1, n) : n) } : l));
 
   // Catálogo Pro: el envío internacional es real y se cobra aparte. OJO —
   // bug real ya visto: el flete no escala lineal por unidad (CJ real: 1u=
@@ -584,19 +506,125 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   // se depende de ese dato: sin verificación se ofrece la lista genérica
   // (para AMBOS proveedores), y el backend cotiza de verdad el país elegido
   // y responde con el motivo real si ese destino no se puede servir.
-  const selectableCountries = hasCoverageData
-    ? (() => {
-        const confirmed = coverage.filter(c => c.available).map(c => c.country_code);
-        // Red de seguridad real: un producto verificado sin NINGÚN país
-        // confirmado (caso raro) nunca deja el selector vacío — cae a Cuba.
-        return confirmed.length > 0 ? confirmed : ['CU'];
-      })()
-    : ['CU', ...CJ_COUNTRIES.map(c => c.code)];
+  // Países del selector: TODOS los verificados se muestran, pero solo quedan
+  // habilitados los que tienen envío real Y stock real para la combinación
+  // exacta elegida (y para cada línea extra del carrito). Los demás se ven
+  // apagados, sin poder elegirse. Sin verificación guardada se ofrece la
+  // lista genérica y el backend cotiza de verdad el país elegido.
+  const variantesDelPedido = [variant, ...cartLines.map(l => allVariants.find(v => v.id === l.variantId))].filter(Boolean);
+  const paisHabilitado = (code) => {
+    if (!hasCoverageData) return true;
+    const row = coverage.find(c => c.country_code === code);
+    if (!row?.available) return false;
+    return variantesDelPedido.every(v => varianteDisponibleEn(v, coverage, code));
+  };
   const countryLabel = (code) => code === 'CU' ? '🇨🇺 Cuba' : countryNameOf(code);
+  const countryOptions = hasCoverageData
+    ? [...new Set(coverage.map(c => c.country_code))]
+        .map(code => ({ code, on: paisHabilitado(code) }))
+        .sort((a, b) => (a.on === b.on ? countryLabel(a.code).localeCompare(countryLabel(b.code), 'es') : (a.on ? -1 : 1)))
+    : ['CU', ...CJ_COUNTRIES.map(c => c.code)].map(code => ({ code, on: true }));
+  const enabledCountries = countryOptions.filter(o => o.on).map(o => o.code);
+  const regionCompradorCode = buyerCountryCodeOf(user);
+  const regionCompradorSirve = enabledCountries.includes(regionCompradorCode);
+  // Arranca en la región guardada del comprador si tiene cobertura para esta
+  // combinación; si no, en el primer país que sí la tiene.
   useEffect(() => {
-    if (selectableCountries.length && !selectableCountries.includes(destCountry)) setDestCountry(selectableCountries[0]);
+    if (!enabledCountries.length || enabledCountries.includes(destCountry)) return;
+    setDestCountry(regionCompradorSirve ? regionCompradorCode : enabledCountries[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectableCountries.join(',')]);
+  }, [enabledCountries.join(',')]);
+  // LÍMITE REAL de unidades por pedido. Investigado a fondo contra la API
+  // real (ds.product.get, respuesta completa con y sin simplify, v233):
+  // AliExpress NO expone ningún campo de límite de compra por cliente — así
+  // que el tope ya no es un "1" fijo para todo AliExpress (eso bloqueaba
+  // productos que sí permiten 10, 20 o 100). Ahora sale del dato real de CADA
+  // producto: el stock real de la combinación elegida en el país de destino
+  // (cobertura guardada) y el stock disponible del vendedor, el menor de los
+  // dos.
+  const stockRegionalPrincipal = hasCoverageData && variant ? stockRegionalDe(coverage, destCountry, varianteSkuDe(variant)).stock : null;
+  const topes = [availStock, stockRegionalPrincipal].filter(n => n != null && Number.isFinite(Number(n))).map(Number);
+  const maxQty = topes.length ? Math.max(0, Math.min(...topes)) : null;
+  const topeEsRegional = stockRegionalPrincipal != null && maxQty === stockRegionalPrincipal && (availStock == null || stockRegionalPrincipal < availStock);
+  const avisoTope = maxQty != null
+    ? (topeEsRegional ? `⚠️ Solo hay ${maxQty} disponibles reales para ${countryNameOf(destCountry)}` : `⚠️ Solo quedan ${maxQty} disponibles`)
+    : '';
+  useEffect(() => { if (maxQty != null && maxQty > 0) setQty(q => Math.max(1, Math.min(q, maxQty))); }, [maxQty]);
+  const stockLineaEn = (l) => {
+    const v = allVariants.find(x => x.id === l.variantId);
+    const regional = hasCoverageData && v ? stockRegionalDe(coverage, destCountry, varianteSkuDe(v)).stock : null;
+    const t = [l.stock, regional].filter(n => n != null && Number.isFinite(Number(n))).map(Number);
+    return t.length ? Math.min(...t) : null;
+  };
+  // Campo de texto para escribir la cantidad directamente (en vez de solo tocar
+  // "+" repetido). Estado de texto aparte del número real: así se puede borrar y
+  // escribir sin que cada tecla reformatee el campo.
+  // OJO — bug real ya visto DOS veces: validar solo al salir del campo (blur)
+  // deja una ventana real donde la persona escribe "100", NO toca nada más, y
+  // mira una pantalla que se ve perfectamente normal (campo en 100, sin aviso,
+  // "Continuar" habilitado) — recién al tocar Continuar aparecía el rechazo del
+  // backend. Por eso la validación es EN VIVO, letra por letra (onChange), no
+  // en el blur: apenas el número escrito supera el stock, se avisa, se pone en
+  // rojo un instante y se topa al máximo real, todo en el mismo instante.
+  const [qtyText, setQtyText] = useState(String(qty));
+  const [qtyOver, setQtyOver] = useState(false); // true = acaba de toparse (borde rojo momentáneo)
+  const qtyOverTimer = useRef(null);
+  useEffect(() => { setQtyText(String(qty)); }, [qty]);
+  useEffect(() => () => clearTimeout(qtyOverTimer.current), []);
+  const flashQtyOver = () => {
+    setQtyOver(true);
+    clearTimeout(qtyOverTimer.current);
+    qtyOverTimer.current = setTimeout(() => setQtyOver(false), 1600);
+  };
+  const handleQtyInput = (raw) => {
+    const digits = raw.replace(/[^0-9]/g, "");
+    if (digits === "") { setQtyText(""); return; } // permite borrar todo para reescribir
+    const n = parseInt(digits, 10);
+    if (maxQty != null && n > maxQty) {
+      flash(avisoTope);
+      flashQtyOver();
+      setQty(maxQty);
+      setQtyText(String(maxQty));
+    } else {
+      setQtyText(digits);
+      setQty(Math.max(1, n)); // el total se actualiza en vivo con lo que ya es válido
+    }
+  };
+  // Red de seguridad al salir del campo: solo cubre vacío/0 (el tope por arriba
+  // ya se resuelve en vivo en cada tecla, nunca llega inválido hasta acá).
+  const commitQtyText = () => {
+    const n = parseInt(qtyText, 10);
+    if (!Number.isFinite(n) || n < 1) { setQty(1); setQtyText("1"); }
+  };
+  // Descuento por cantidad (SOLO vista previa — el total real lo calcula el backend).
+  const discPct = bulkDiscountPctFor(qty, product.bulkDiscounts);
+  const unitPriceWithDisc = discPct > 0 ? price * (1 - discPct / 100) : price;
+  const total = unitPriceWithDisc * qty;
+
+  // Líneas adicionales del carrito (Bloque 2) — cada una con su propio
+  // descuento por cantidad, igual que la línea principal de arriba.
+  const cartLinesCalc = cartLines.map(l => {
+    const d = bulkDiscountPctFor(l.qty, product.bulkDiscounts);
+    const unit = d > 0 ? l.price * (1 - d / 100) : l.price;
+    return { ...l, unitWithDisc: unit, subtotal: Math.round(unit * l.qty * 100) / 100 };
+  });
+  const isMulti = cartLines.length > 0;
+  const grandTotal = Math.round((total + cartLinesCalc.reduce((s, l) => s + l.subtotal, 0)) * 100) / 100;
+
+  const addCartLine = (v) => {
+    if (!v || v.id === variant?.id || cartLines.some(l => l.variantId === v.id)) return;
+    setCartLines(ls => [...ls, { variantId: v.id, attrs: v.attributes, image: v.image, price: v.price != null ? Number(v.price) : (Number(product.price) || 0), stock: v.stock, qty: 1 }]);
+    setPickingVariant(false);
+  };
+  const removeCartLine = (variantId) => setCartLines(ls => ls.filter(l => l.variantId !== variantId));
+  // Mismo tope real (stock de esa combinación en el país de destino) para
+  // cada línea adicional del carrito de variantes.
+  const setCartLineQty = (variantId, n) => setCartLines(ls => ls.map(l => {
+    if (l.variantId !== variantId) return l;
+    const tope = stockLineaEn(l);
+    return { ...l, qty: Math.max(1, tope != null ? Math.min(tope, n) : n) };
+  }));
+
   const [primaryShipQuote, setPrimaryShipQuote] = useState({ qty: null, country: null, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: false, reason: null });
   const [cartShipQuotes, setCartShipQuotes] = useState({}); // { [variantId]: { qty, country, total_price, aging, is_slow, days_min, days_max, loading, failed, reason } }
   // BUG REAL ya visto (Daniel, 2-3 veces seguidas): el envío de una variante
@@ -980,12 +1008,11 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
             </div>
           </div>
           {qtyOver ? (
-            <p style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginBottom: 12 }}>{esAliExpress ? '⚠️ Este producto de AliExpress permite máximo 1 unidad por pedido' : `⚠️ Solo quedan ${maxQty} disponibles`}</p>
-          ) : esAliExpress ? (
-            <p style={{ fontSize: 10, color: T3, fontWeight: 500, marginBottom: 12 }}>Máximo 1 unidad por pedido en este producto</p>
-          ) : availStock != null && (
-            <p style={{ fontSize: 10, color: availStock <= 5 ? G : T3, fontWeight: availStock <= 5 ? 700 : 500, marginBottom: 12 }}>
-              {availStock <= 0 ? "⚠️ Sin stock disponible ahora mismo" : availStock <= 5 ? `¡Últimas ${availStock} disponibles!` : `${availStock} disponibles`}
+            <p style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginBottom: 12 }}>{avisoTope}</p>
+          ) : maxQty != null && (
+            <p style={{ fontSize: 10, color: maxQty <= 5 ? G : T3, fontWeight: maxQty <= 5 ? 700 : 500, marginBottom: 12 }}>
+              {maxQty <= 0 ? "⚠️ Sin stock disponible ahora mismo" : maxQty <= 5 ? `¡Últimas ${maxQty} disponibles!` : `${maxQty} disponibles`}
+              {topeEsRegional && maxQty > 0 ? ` para ${countryNameOf(destCountry)}` : ""}
             </p>
           )}
 
@@ -1013,14 +1040,14 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
                   </div>
                   <button className="p" onClick={() => setCartLineQty(l.variantId, l.qty - 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>−</button>
                   <span style={{ fontSize: 12.5, fontWeight: 800, color: T1, width: 20, textAlign: "center" }}>{l.qty}</span>
-                  <button className="p" disabled={esAliExpress ? l.qty >= 1 : (l.stock != null && l.qty >= l.stock)} onClick={() => setCartLineQty(l.variantId, l.qty + 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: (esAliExpress ? l.qty >= 1 : (l.stock != null && l.qty >= l.stock)) ? T3 : T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>+</button>
+                  <button className="p" disabled={stockLineaEn(l) != null && l.qty >= stockLineaEn(l)} onClick={() => setCartLineQty(l.variantId, l.qty + 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: (stockLineaEn(l) != null && l.qty >= stockLineaEn(l)) ? T3 : T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>+</button>
                   <button className="p" onClick={() => removeCartLine(l.variantId)} aria-label="Quitar" style={{ width: 24, height: 24, borderRadius: 7, border: "none", background: "none", color: T3, fontSize: 15, lineHeight: 1 }}>×</button>
                 </div>
               ))}
 
               {pickingVariant ? (
                 <div style={{ background: soft, border: `1px solid ${B}`, borderRadius: 12, padding: 11, marginTop: 4 }}>
-                  <VariantPicker allVariants={allVariants} excludeIds={[variant?.id, ...cartLines.map(l => l.variantId)].filter(Boolean)}
+                  <VariantPicker allVariants={allVariants} excludeIds={[variant?.id, ...cartLines.map(l => l.variantId)].filter(Boolean)} isAvailable={v => varianteDisponibleEn(v, coverage, destCountry)}
                     onPick={addCartLine} onCancel={() => setPickingVariant(false)} T1={T1} T2={T2} T3={T3} B={B} G={G} isDark={isDark} />
                 </div>
               ) : (
@@ -1048,14 +1075,26 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
           {isCatalogPro && (
             <div style={{ marginBottom: 12 }}>
               <label style={lbl}>¿A qué país lo enviamos?</label>
-              <select style={{ ...inp, appearance: "none", cursor: "pointer" }} value={destCountry} onChange={e => setDestCountry(e.target.value)}>
-                {selectableCountries.map(code => <option key={code} value={code}>{countryLabel(code)}</option>)}
+              <select style={{ ...inp, appearance: "none", cursor: "pointer" }} value={destCountry} onChange={e => { if (paisHabilitado(e.target.value)) setDestCountry(e.target.value); }}>
+                {countryOptions.map(o => (
+                  <option key={o.code} value={o.code} disabled={!o.on} style={o.on ? undefined : { color: "#8a8a8a" }}>
+                    {countryLabel(o.code)}{o.on ? "" : " — no disponible para esta opción"}
+                  </option>
+                ))}
               </select>
-              {hasCoverageData && (
+              {hasCoverageData && enabledCountries.length === 0 && (
+                <p style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginTop: 4 }}>
+                  Esta combinación no tiene stock real con envío a ningún país ahora mismo — elige otra opción del producto.
+                </p>
+              )}
+              {hasCoverageData && enabledCountries.length > 0 && !regionCompradorSirve && (
                 <p style={{ fontSize: 10, color: T2, marginTop: 4 }}>
-                  {cuCoverageRow?.available === false
-                    ? "Este producto no tiene envío confirmado a Cuba — solo se muestran los países con cobertura real verificada."
-                    : "Cobertura verificada — solo se muestran los países con envío real confirmado."}
+                  Esta opción no tiene stock real con envío a {countryNameOf(regionCompradorCode)} — elige uno de los países disponibles.
+                </p>
+              )}
+              {hasCoverageData && enabledCountries.length > 0 && regionCompradorSirve && (
+                <p style={{ fontSize: 10, color: T2, marginTop: 4 }}>
+                  Solo se pueden elegir los países con stock y envío real para esta opción.
                 </p>
               )}
             </div>
@@ -1294,12 +1333,13 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
 // pasan las variantes YA agregadas (excludeIds) para no dejar elegir una
 // combinación repetida — sumar cantidad se hace en la línea existente, no
 // agregando otra fila igual.
-function VariantPicker({ allVariants, excludeIds, onPick, onCancel, T1, T2, T3, B, G, isDark }) {
+function VariantPicker({ allVariants, excludeIds, isAvailable, onPick, onCancel, T1, T2, T3, B, G, isDark }) {
+  const comprable = isAvailable || (() => true);
   const pickable = allVariants.filter(v => !excludeIds.includes(v.id));
   const { labels, valuesByLabel } = groupVariantAttrs(pickable);
   const [sel, setSel] = useState({});
   const match = labels.length > 0 ? resolveVariantBy(pickable, sel) : null;
-  const ready = labels.every(l => sel[l] != null);
+  const ready = labels.every(l => sel[l] != null) && !!match && comprable(match);
 
   return (
     <div>
@@ -1309,11 +1349,13 @@ function VariantPicker({ allVariants, excludeIds, onPick, onCancel, T1, T2, T3, 
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {valuesByLabel[label].map(value => {
               const isOn = sel[label] === value;
-              const candidate = { ...sel, [label]: value };
-              const exists = pickable.some(v => Object.entries(candidate).every(([l, val]) => (v.attributes || {})[l] === val));
+              // Misma regla que la ficha: activo si hay alguna combinación
+              // comprable (stock y envío real al país elegido) con ese valor;
+              // al tocarlo se salta a la más parecida a lo ya elegido.
+              const exists = valorVarianteActivo(pickable, label, value, comprable);
               return (
                 <button key={value} type="button" disabled={!exists}
-                  onClick={() => setSel(candidate)}
+                  onClick={() => setSel(atributosAlElegir(pickable, sel, label, value, comprable))}
                   style={{ padding: "6px 11px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: exists ? "pointer" : "not-allowed",
                     background: isOn ? G : (isDark ? "#1a1a1a" : "#f5f5f7"), color: isOn ? "#000" : (exists ? T1 : T3),
                     border: `1.5px solid ${isOn ? G : B}`, opacity: exists ? 1 : .4 }}>{value}</button>
@@ -3248,6 +3290,21 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
   // este resumen) cuando la región del comprador no es Cuba.
   const buyerCoverageRow = coverage.find(c => c.country_code === buyerDestCode) || null;
   const otherCoverageAvailable = coverage.filter(c => c.country_code !== buyerDestCode && c.available).length;
+  // Qué combinaciones se pueden comprar para la región del comprador, según
+  // la cobertura real ya guardada (stock y envío por país) — antes de que
+  // toque nada. Misma lógica que el diálogo de compra y la vista del vendedor.
+  const { isAvail: varianteComprable } = useMemo(
+    () => disponibilidadPorRegion(variants || [], coverage, buyerDestCode),
+    [variants, coverage, buyerDestCode]
+  );
+  // Nunca abrir (ni quedarse) con una combinación agotada para su región: si
+  // la elegida no se puede comprar, se salta a la primera que sí.
+  useEffect(() => {
+    if (!variants || !variants.length) return;
+    if (activeVariant && varianteComprable(activeVariant)) return;
+    const v = primeraVarianteDisponible(variants, varianteComprable);
+    if (v && v !== activeVariant) setSelectedAttrs(v.attributes || {});
+  }, [variants, varianteComprable, activeVariant]);
   const [shipEstimate, setShipEstimate] = useState(null);
   // Días reales hacia su región: primero la cotización en vivo, y si esa no
   // trae días, los de la verificación real de cobertura. Nunca se inventa un
@@ -3483,11 +3540,8 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
             {variantLabels.map(label => (
               <AttrChipGroup key={label} label={label} values={variantValuesByLabel[label]}
                 selectedValue={selectedAttrs[label]}
-                isEnabled={value => {
-                  const candidate = { ...selectedAttrs, [label]: value };
-                  return variants.some(v => Object.entries(candidate).every(([l, val]) => (v.attributes || {})[l] === val));
-                }}
-                onPick={value => setSelectedAttrs({ ...selectedAttrs, [label]: value })}
+                isEnabled={value => valorVarianteActivo(variants, label, value, varianteComprable)}
+                onPick={value => setSelectedAttrs(atributosAlElegir(variants, selectedAttrs, label, value, varianteComprable))}
                 T1={T1} T2={T2} T3={T3} B={B} isDark={isDark} />
             ))}
           </div>
@@ -3595,14 +3649,9 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
                 : `Sin envío a ${buyerDestLabel}`}
             </span>
           </div>
-          {/* Nota aparte sobre Cuba (mercado principal de RETADOR) — SOLO si
-              la región del comprador no es Cuba, para que nunca reemplace ni
-              contradiga el resumen de arriba. */}
-          {buyerDestCode !== "CU" && cuCoverageRow && (
-            <p style={{ fontSize: 10.5, color: T2, marginTop: 6 }}>
-              {cuCoverageRow.available ? "🇨🇺 También tiene envío confirmado a Cuba." : "🇨🇺 Este producto no tiene envío a Cuba."}
-            </p>
-          )}
+          {/* Cuba solo se menciona si la región del comprador ES Cuba (ya va
+              en el resumen de arriba): para cualquier otra región no hay
+              ninguna línea sobre Cuba. */}
           {otherCoverageAvailable > 0 && (
             <p style={{ fontSize: 10, color: T2, marginTop: 6 }}>Envío real confirmado a {otherCoverageAvailable} país{otherCoverageAvailable === 1 ? "" : "es"} más — elige el destino al comprar.</p>
           )}

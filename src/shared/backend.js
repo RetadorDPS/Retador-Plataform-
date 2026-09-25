@@ -2370,11 +2370,34 @@ export const CJ_COUNTRIES = [
   { code: "JP", label: "Japón" },
 ];
 
-// Nombre real y completo de un país a partir de su código. Se usa en TODA
-// pantalla que muestre cobertura: al comprador y al vendedor nunca se les
-// enseña un código suelto ("US", "FR") — siempre el nombre entendible.
-export const countryNameOf = (code) =>
-  code === "CU" ? "Cuba" : (CJ_COUNTRIES.find(c => c.code === code)?.label || code);
+// Nombre real y completo de un país a partir de su código — la ÚNICA
+// función de nombres de país del sistema (admin, vendedor y comprador).
+// BUG REAL corregido: solo conocía los 10 países de CJ, así que los países
+// reales de AliExpress salían como código suelto ("IL", "BR"). Cubre todos
+// los países candidatos reales de ambos proveedores y, para cualquier código
+// nuevo que aparezca en el futuro, usa el nombre oficial en español del
+// propio navegador (Intl.DisplayNames) — nunca un código suelto.
+const COUNTRY_NAMES_ES = {
+  CU: "Cuba", US: "Estados Unidos", CN: "China", MX: "México", CA: "Canadá", GB: "Reino Unido",
+  DE: "Alemania", FR: "Francia", AU: "Australia", ES: "España", JP: "Japón", IT: "Italia",
+  BR: "Brasil", KR: "Corea del Sur", NL: "Países Bajos", PL: "Polonia", CH: "Suiza", PT: "Portugal",
+  IE: "Irlanda", SE: "Suecia", DK: "Dinamarca", NO: "Noruega", FI: "Finlandia", CZ: "Chequia",
+  GR: "Grecia", RO: "Rumania", HU: "Hungría", AR: "Argentina", CL: "Chile", CO: "Colombia",
+  PE: "Perú", TH: "Tailandia", VN: "Vietnam", SG: "Singapur", MY: "Malasia", ID: "Indonesia",
+  PH: "Filipinas", IN: "India", TW: "Taiwán", HK: "Hong Kong", AE: "Emiratos Árabes Unidos",
+  SA: "Arabia Saudita", IL: "Israel", ZA: "Sudáfrica", EG: "Egipto", NG: "Nigeria",
+  NZ: "Nueva Zelanda", BE: "Bélgica", AT: "Austria",
+};
+let regionNamesEs = null;
+export const countryNameOf = (code) => {
+  const cc = String(code || "").toUpperCase();
+  if (!cc) return "";
+  if (COUNTRY_NAMES_ES[cc]) return COUNTRY_NAMES_ES[cc];
+  try {
+    if (!regionNamesEs) regionNamesEs = new Intl.DisplayNames(["es"], { type: "region" });
+    return regionNamesEs.of(cc) || cc;
+  } catch { return cc; }
+};
 
 // Región guardada del comprador (profiles.shop_country) → código real de
 // país. Es la MISMA correspondencia en toda la app: la ficha del producto,
@@ -2502,22 +2525,112 @@ export const catalogProUpdateStagingRegions = async (id, sellableRegions) => {
 // decisión de diseño real, con evidencia, en cj-verify-coverage).
 export const CATALOG_PRO_COVERAGE_COUNTRIES_COUNT = 10;
 export const CATALOG_PRO_COVERAGE_POINTS_PER_CALL = 10;
-// Tope real de seguridad para el STOCK por país de CJ (queryByVid, 10 puntos
-// por variante — nunca un barrido de las 69-96 variantes que puede tener un
-// producto real; mismo tope ya usado en cj-variant-stock).
-export const CATALOG_PRO_COVERAGE_MAX_STOCK_VIDS = 12;
+// Tope real de variantes con stock por país de CJ (queryByVid, 10 puntos por
+// variante) — mismo valor que MAX_STOCK_VIDS en cj-verify-coverage.
+export const CATALOG_PRO_COVERAGE_MAX_STOCK_VIDS = 80;
 export const catalogProVerifyCoverage = async ({ stagingId, productId }) =>
   invokeEdgeFunction("cj-verify-coverage", stagingId ? { staging_id: stagingId } : { product_id: productId });
 
-// Cobertura real por país ya guardada (AliExpress al importar, o CJ vía el
-// botón manual) — se lee igual sea de un producto en Staging o Publicado.
+// Cobertura real por país ya guardada — vista pública (comprador/vendedor):
+// SIN el costo real. La base ya no deja leer la columna price a nadie que no
+// sea admin (permiso por columna), así que no se puede pedir aquí.
 export const catalogProCountryCoverage = async ({ stagingId, productId }) => {
-  let q = supabase.from("catalog_pro_country_coverage").select("country_code, available, price, price_kind, days_min, days_max, method, reason, quoted_at, stock_by_variant");
+  let q = supabase.from("catalog_pro_country_coverage").select("country_code, available, days_min, days_max, method, reason, quoted_at, stock_by_variant");
   q = stagingId ? q.eq("staging_id", stagingId) : q.eq("product_id", productId);
   const { data, error } = await q;
   if (error) { console.error("catalogProCountryCoverage:", error.message); return []; }
   return data || [];
 };
+
+// Cobertura con el costo real puesto en cada país — SOLO para el panel admin
+// (la RPC valida el permiso en el servidor).
+export const catalogProCountryCoverageAdmin = async ({ stagingId, productId }) => {
+  const { data, error } = await supabase.rpc("catalog_pro_coverage_admin", { p_staging_id: stagingId || null, p_product_id: productId || null });
+  if (error) { console.error("catalogProCountryCoverageAdmin:", error.message); return []; }
+  return data || [];
+};
+
+// Vuelve a correr el pipeline normal de importación sobre un producto YA
+// publicado (precio real, variantes, cobertura y stock por país) y sincroniza
+// las copias de los vendedores. AliExpress: ali-import-product en modo
+// refresco. CJ: la verificación real de cobertura + stock por país.
+export const catalogProRefreshFromProvider = async (productId, provider) =>
+  provider === "aliexpress"
+    ? invokeEdgeFunction("ali-import-product", { refresh_product_id: productId })
+    : invokeEdgeFunction("cj-verify-coverage", { product_id: productId });
+
+// ── Disponibilidad REAL por región (una sola lógica para todo el sistema) ──
+// Se usa en la ficha del comprador, en el diálogo de compra y en la vista del
+// vendedor, para que las tres pantallas digan siempre lo mismo.
+export const varianteSkuDe = (v) => (v?.sku ?? v?.variant_sku ?? null);
+
+// Stock real de una variante en un país, según la cobertura ya guardada.
+// enviable: true/false si hay dato del país, null si ese país no se verificó.
+// stock: número real, o null si ese país no trae stock por variante.
+export function stockRegionalDe(coverage, countryCode, sku) {
+  const row = (coverage || []).find(c => c.country_code === countryCode);
+  if (!row) return { enviable: null, stock: null };
+  if (!row.available) return { enviable: false, stock: 0 };
+  const s = sku != null ? row.stock_by_variant?.[sku] : undefined;
+  return { enviable: true, stock: s == null ? null : Number(s) };
+}
+
+// ¿Se puede comprar esta variante para ese país? Sin cobertura guardada
+// (productos que no son del Catálogo Pro) manda el stock propio de la
+// variante. Con cobertura: el país tiene que tener envío real, y si trae
+// stock por variante, tiene que ser > 0.
+export function varianteDisponibleEn(v, coverage, countryCode) {
+  const stockPropio = v?.stock == null || Number(v.stock) > 0;
+  if (!coverage || coverage.length === 0) return stockPropio;
+  const { enviable, stock } = stockRegionalDe(coverage, countryCode, varianteSkuDe(v));
+  if (enviable !== true) return false;
+  return stock != null ? stock > 0 : stockPropio;
+}
+
+// Región contra la que se evalúa el selector: la del comprador si al menos
+// una variante se puede enviar allí; si no (ej. el producto no llega a su
+// país), cualquier país con envío real, para que pueda elegir otro destino
+// al comprar.
+export function disponibilidadPorRegion(variants, coverage, regionCode) {
+  const list = variants || [];
+  const hayCobertura = (coverage || []).length > 0;
+  const regionSirve = !hayCobertura || list.length === 0
+    ? true
+    : list.some(v => varianteDisponibleEn(v, coverage, regionCode));
+  const paisesConEnvio = (coverage || []).filter(c => c.available).map(c => c.country_code);
+  const isAvail = (v) => {
+    if (!hayCobertura) return varianteDisponibleEn(v, coverage, regionCode);
+    if (regionSirve) return varianteDisponibleEn(v, coverage, regionCode);
+    return paisesConEnvio.some(cc => varianteDisponibleEn(v, coverage, cc));
+  };
+  return { isAvail, regionSirve };
+}
+
+// Un valor de atributo (ej. "Rojo" en Color) está activo si existe AL MENOS
+// una combinación completa con ese valor que se pueda comprar — no solo la
+// que combina con lo ya elegido. BUG REAL corregido: antes se exigía que
+// combinara con TODO lo ya elegido, así que en el Poco F8 Pro (cada color
+// existe en una sola RAM) estando en "verde · 256GB" quedaban bloqueados
+// "Rojo", "Púrpura" y "512GB" aunque tuvieran stock real.
+export function valorVarianteActivo(variants, label, value, isAvail) {
+  return (variants || []).some(v => (v.attributes || {})[label] === value && isAvail(v));
+}
+
+// Al tocar un valor, se salta a la combinación comprable que MÁS se parezca
+// a lo que ya estaba elegido (cambia solo lo necesario).
+export function atributosAlElegir(variants, selected, label, value, isAvail) {
+  const candidatas = (variants || []).filter(v => (v.attributes || {})[label] === value && isAvail(v));
+  if (candidatas.length === 0) return { ...selected, [label]: value };
+  const coincidencias = (v) => Object.entries(selected || {}).filter(([l, val]) => l !== label && (v.attributes || {})[l] === val).length;
+  const mejor = candidatas.reduce((a, b) => (coincidencias(b) > coincidencias(a) ? b : a), candidatas[0]);
+  return { ...(mejor.attributes || {}) };
+}
+
+// Variante con la que abre la ficha: la primera comprable para la región.
+export function primeraVarianteDisponible(variants, isAvail) {
+  const list = variants || [];
+  return list.find(isAvail) || list[0] || null;
+}
 
 // Copia el producto de staging → catalog_pro_products (+ sus filas de precio
 // por variante) en una sola operación atómica del lado del servidor.

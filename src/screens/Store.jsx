@@ -25,7 +25,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy, ShoppingBag, Link2, Sparkles,
 } from "lucide-react";
-import { useAt, useR, useCatalog, money, getPlans, usePlatformCfg, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, catalogProCountryCoverage, countryNameOf, attrLabelText, groupVariantAttrs, resolveVariantBy } from "../shared/index.js";
+import { useAt, useR, useCatalog, money, getPlans, usePlatformCfg, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, catalogProCountryCoverage, countryNameOf, attrLabelText, groupVariantAttrs, resolveVariantBy, buyerCountryCodeOf, disponibilidadPorRegion, valorVarianteActivo, atributosAlElegir, primeraVarianteDisponible, stockRegionalDe } from "../shared/index.js";
 // recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
 // se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
 // nunca de entrada para todos (la mayoría son compradores que ni la ven).
@@ -1637,6 +1637,22 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
 
   const { labels, valuesByLabel } = useMemo(() => groupVariantAttrs(variants || []), [variants]);
   const activeVariant = useMemo(() => (variants ? resolveVariantBy(variants, selectedAttrs) : null), [variants, selectedAttrs]);
+  // Región real del vendedor (misma función que usa el comprador): todo lo de
+  // esta pantalla — variantes disponibles, stock y envío — habla de SU región,
+  // no de Cuba fija. Misma lógica compartida que la ficha y el checkout.
+  const regionVendedor = buyerCountryCodeOf(user);
+  const regionLabel = countryNameOf(regionVendedor);
+  const { isAvail: varianteVendible } = useMemo(
+    () => disponibilidadPorRegion(variants || [], coverage, regionVendedor),
+    [variants, coverage, regionVendedor]
+  );
+  useEffect(() => {
+    if (!variants || !variants.length) return;
+    if (activeVariant && varianteVendible(activeVariant)) return;
+    const v = primeraVarianteDisponible(variants, varianteVendible);
+    if (v && v !== activeVariant) setSelectedAttrs(v.attributes || {});
+  }, [variants, varianteVendible, activeVariant]);
+  const stockRegionActivo = activeVariant && coverage.length ? stockRegionalDe(coverage, regionVendedor, activeVariant.variant_sku).stock : null;
   const cost = Number(activeVariant?.recommended_price) || flatCost;
   // El precio de venta sugerido se recalcula cada vez que cambia el COSTO
   // real de la variante activa (al tocar otra variante) — antes se fijaba
@@ -1670,9 +1686,9 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
   // Resumen de cobertura real para el vendedor — ver decisión de diseño
   // junto al bloque que lo renderiza más abajo (se ADVIERTE, no se bloquea).
   const hasCoverageData = coverage.length > 0;
-  const cuCoverage = coverage.find(c => c.country_code === "CU") || null;
-  const cuDisponible = cuCoverage?.available === true;
-  const otherCoverage = coverage.filter(c => c.country_code !== "CU");
+  const regionCoverage = coverage.find(c => c.country_code === buyerCountryCodeOf(user)) || null;
+  const regionDisponible = regionCoverage?.available === true;
+  const otherCoverage = coverage.filter(c => c.country_code !== buyerCountryCodeOf(user));
   const otherAvailableCount = otherCoverage.filter(c => c.available).length;
   // Proyección simple (no garantía): ganancia por unidad × escalones fijos
   // de ventas, se recalcula en vivo con el precio que el vendedor edite.
@@ -1778,10 +1794,9 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
                 <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
                   {valuesByLabel[label].map(value => {
                     const isOn = selectedAttrs[label] === value;
-                    const candidate = { ...selectedAttrs, [label]: value };
-                    const exists = variants.some(v => Object.entries(candidate).every(([l, val]) => (v.attributes || {})[l] === val));
+                    const exists = valorVarianteActivo(variants, label, value, varianteVendible);
                     return (
-                      <button key={value} type="button" disabled={!exists} onClick={() => setSelectedAttrs(candidate)}
+                      <button key={value} type="button" disabled={!exists} onClick={() => setSelectedAttrs(atributosAlElegir(variants, selectedAttrs, label, value, varianteVendible))}
                         style={{ padding:"7px 13px", borderRadius:9, fontSize:12, fontWeight:700, cursor:exists ? "pointer" : "not-allowed",
                           background:isOn ? ac : C.s3, color:isOn ? "#000" : (exists ? C.t : C.m), border:`1px solid ${isOn ? ac : C.b}`, opacity:exists ? 1 : .4 }}>{value}</button>
                     );
@@ -1789,7 +1804,9 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
                 </div>
               </div>
             ))}
-            {activeVariant?.stock != null && <div style={{ fontSize:10.5, color:C.m }}>{activeVariant.stock.toLocaleString("es-ES")} en stock</div>}
+            {stockRegionActivo != null
+              ? <div style={{ fontSize:10.5, color: stockRegionActivo > 0 ? C.m : C.err }}>{stockRegionActivo > 0 ? `${stockRegionActivo.toLocaleString("es-ES")} disponibles reales en ${regionLabel}` : `Sin stock real en ${regionLabel}`}</div>
+              : activeVariant?.stock != null && <div style={{ fontSize:10.5, color:C.m }}>{activeVariant.stock.toLocaleString("es-ES")} en stock</div>}
           </div>
         )}
 
@@ -1798,7 +1815,7 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
           <span style={{ fontSize:12, color:C.m }}>Tu costo{activeVariant ? " (esta variante)" : ""}</span>
           <span style={{ fontSize:15, fontWeight:800, color:C.t }}>{money(cost, "USD")}</span>
         </div>
-        {cubaShipping != null && (
+        {cubaShipping != null && regionVendedor === "CU" && (
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", borderRadius:10, background:C.s3, marginBottom:10 }}>
             <span style={{ fontSize:12, color:C.m }}>Envío hasta Cuba</span>
             <span style={{ fontSize:15, fontWeight:800, color:C.t }}>{money(cubaShipping, "USD")}</span>
@@ -1841,24 +1858,26 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
         </div>
         {priceNum > 0 && priceNum < cost && <div style={{ fontSize:11.5, color:C.err, marginBottom:14 }}>Tu precio de venta no puede ser menor a tu costo ({money(cost, "USD")})</div>}
 
-        {/* Cobertura real por país — solo se muestra si el producto YA tiene
-            verificación real guardada (AliExpress automática, o CJ con el
-            botón manual). Un producto sin verificar no muestra este bloque y
-            se comporta igual que siempre (sin romper nada). DECISIÓN: se
-            ADVIERTE de forma prominente cuando falta envío a Cuba, pero NO se
-            bloquea "Añadir a mi tienda" — el producto puede tener cobertura
-            real a otros países (España, etc.) y RETADOR vende a ambos. */}
-        {hasCoverageData && (
-          <div style={{ borderRadius:10, padding:"12px 13px", marginBottom:14, background: cuDisponible ? `${C.ok}14` : `${C.err}14`, border:`1px solid ${cuDisponible ? C.ok : C.err}40` }}>
+        {/* Cobertura real por país — habla de la REGIÓN del vendedor (no de
+            Cuba fija) y nunca muestra ningún precio: el costo real puesto en
+            cada país es solo para el admin (la base ni siquiera lo entrega a
+            un vendedor). DECISIÓN: se ADVIERTE si su región no tiene envío,
+            pero NO se bloquea "Añadir a mi tienda" — puede venderlo a los
+            países donde sí hay cobertura real. */}
+        {hasCoverageData && (() => {
+          const diasDe = (c) => c?.days_min != null ? `${c.days_min === c.days_max ? c.days_min : `${c.days_min} a ${c.days_max}`} días` : null;
+          const diasRegion = diasDe(regionCoverage);
+          return (
+          <div style={{ borderRadius:10, padding:"12px 13px", marginBottom:14, background: regionDisponible ? `${C.ok}14` : `${C.err}14`, border:`1px solid ${regionDisponible ? C.ok : C.err}40` }}>
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-              <span style={{ fontSize:16 }}>{cuDisponible ? "✅" : "❌"}</span>
-              <span style={{ fontSize:12.5, fontWeight:800, color: cuDisponible ? C.ok : C.err }}>
-                {cuDisponible ? "Envío a Cuba disponible" : "Sin envío a Cuba"}
+              <span style={{ fontSize:16 }}>{regionDisponible ? "✅" : "❌"}</span>
+              <span style={{ fontSize:12.5, fontWeight:800, color: regionDisponible ? C.ok : C.err }}>
+                {regionDisponible ? `Envío a ${regionLabel} disponible${diasRegion ? ` — llega en ${diasRegion}` : ""}` : `Sin envío a ${regionLabel}`}
               </span>
             </div>
-            {!cuDisponible && (
+            {!regionDisponible && (
               <div style={{ fontSize:11, color:C.m, lineHeight:1.5, marginTop:6 }}>
-                {cuCoverage?.reason || "Este producto no tiene cobertura real confirmada hacia Cuba por ahora."} Puedes agregarlo igual para venderlo en los países donde sí hay cobertura confirmada.
+                {regionCoverage?.reason || `Este producto no tiene cobertura real confirmada hacia ${regionLabel} por ahora.`} Puedes agregarlo igual para venderlo en los países donde sí hay cobertura confirmada.
               </div>
             )}
             {otherCoverage.length > 0 && (
@@ -1866,34 +1885,23 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
                 {showAllCountries ? "Ocultar países" : `Ver los ${otherCoverage.length} países verificados`} ({otherAvailableCount} con cobertura real)
               </button>
             )}
-            {/* Nombre completo del país y qué significa cada número — antes
-                salían códigos sueltos ("US", "FR") y una cifra sin etiqueta
-                que no dejaba claro si era el envío o el precio del producto
-                (bug real reportado). El significado viene guardado en
-                price_kind: en CJ el número es el ENVÍO, en AliExpress es el
-                precio del producto YA PUESTO en ese país. */}
             {showAllCountries && (
               <div style={{ display:"flex", flexDirection:"column", gap:5, marginTop:8 }}>
-                {otherCoverage.map(c => {
-                  const dias = c.days_min != null
-                    ? ` · llega en ${c.days_min === c.days_max ? c.days_min : `${c.days_min} a ${c.days_max}`} días`
-                    : "";
-                  const importe = c.price == null ? "" :
-                    (c.price_kind === "producto_puesto"
-                      ? ` · precio puesto allí ${money(c.price, "USD")}`
-                      : ` · envío ${money(c.price, "USD")}`);
+                {[...otherCoverage].sort((x, y) => (x.available === y.available ? countryNameOf(x.country_code).localeCompare(countryNameOf(y.country_code), "es") : (x.available ? -1 : 1))).map(c => {
+                  const dias = diasDe(c);
                   return (
                     <div key={c.country_code} style={{ fontSize:11, fontWeight:600, padding:"5px 9px", borderRadius:8, background:C.s1, color: c.available ? C.t : C.m }}>
                       <span style={{ marginRight:5 }}>{c.available ? "✅" : "—"}</span>
                       <b style={{ color: c.available ? C.ok : C.m }}>{countryNameOf(c.country_code)}</b>
-                      {c.available ? <span style={{ color:C.m }}>{importe}{dias}</span> : <span style={{ color:C.m }}> · sin envío</span>}
+                      <span style={{ color:C.m }}>{c.available ? (dias ? ` · llega en ${dias}` : " · disponible") : " · sin envío"}</span>
                     </div>
                   );
                 })}
               </div>
             )}
           </div>
-        )}
+          );
+        })()}
 
         <div style={{ display:"flex", gap:9 }}>
           <button onClick={onClose} style={{ flex:1, padding:12, borderRadius:10, border:`1px solid ${C.b}`, background:"transparent", color:C.m, fontSize:13, fontWeight:700, cursor:"pointer" }}>Cancelar</button>

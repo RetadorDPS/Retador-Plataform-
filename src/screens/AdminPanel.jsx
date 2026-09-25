@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProImportAli, aliImportPreview, extractAliPidCandidates, resolveAliShortLink, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProVerifyCoverage, catalogProCountryCoverage, CATALOG_PRO_COVERAGE_COUNTRIES_COUNT, CATALOG_PRO_COVERAGE_POINTS_PER_CALL, CATALOG_PRO_COVERAGE_MAX_STOCK_VIDS, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProImportAli, aliImportPreview, extractAliPidCandidates, resolveAliShortLink, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProVerifyCoverage, catalogProCountryCoverage, catalogProCountryCoverageAdmin, catalogProRefreshFromProvider, countryNameOf, CATALOG_PRO_COVERAGE_COUNTRIES_COUNT, CATALOG_PRO_COVERAGE_POINTS_PER_CALL, CATALOG_PRO_COVERAGE_MAX_STOCK_VIDS, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -3638,9 +3638,18 @@ function stockTotalDe(cov) {
 
 function RegionChecklist({ selected, onToggle, disabled, coverage }) {
   const covByCode = coverage || {};
+  // Todos los países reales: los verificados (AliExpress llega a 40+), los ya
+  // marcados a mano y los 10 de CJ — antes solo se recorrían los 10 de CJ y
+  // la cobertura real del resto de países de AliExpress no se veía.
+  const codigos = [...new Set([...CJ_COUNTRIES.map(c => c.code), ...Object.keys(covByCode), ...(selected || [])])]
+    .filter(cc => cc !== 'CU')
+    .sort((a, b) => {
+      const va = covByCode[a]?.available === true, vb = covByCode[b]?.available === true;
+      return va === vb ? countryNameOf(a).localeCompare(countryNameOf(b), 'es') : (va ? -1 : 1);
+    });
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-      {CJ_COUNTRIES.map(c => {
+      {codigos.map(code => ({ code, label: countryNameOf(code) })).map(c => {
         const on = selected.includes(c.code);
         const cov = covByCode[c.code];
         const verified = cov?.available === true;
@@ -4345,6 +4354,38 @@ function VerifyCoverageButton({ stagingId, productId, provider, variantCount, to
   );
 }
 
+// Vuelve a correr el pipeline normal de importación de AliExpress sobre un
+// producto YA publicado: precio real vigente, variantes, cobertura y stock
+// real por país — conserva el margen de cada variante y sincroniza las copias
+// que los vendedores ya tienen en sus tiendas (sin tocar su precio de venta).
+function RefreshFromProviderButton({ productId, toast, onApplied }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const res = await catalogProRefreshFromProvider(productId, 'aliexpress');
+      const r = res?.refresh || {};
+      toast(`✅ Actualizado desde AliExpress — ${r.copias_vendedor ?? 0} tienda(s) sincronizada(s)`);
+      onApplied();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo actualizar desde AliExpress')); }
+    setBusy(false); setConfirming(false);
+  };
+  return (
+    <>
+      <button className="btn btg sm" disabled={busy} onClick={() => setConfirming(true)}>
+        {busy ? <span className="spin">↻</span> : '🔄'} Actualizar desde AliExpress
+      </button>
+      {confirming && (
+        <SimpleConfirm title="¿Actualizar desde AliExpress?" confirmLabel={busy ? 'Actualizando…' : 'Actualizar'} color="var(--ac)" busy={busy}
+          onCancel={() => setConfirming(false)} onConfirm={run}
+          msg={<>Se vuelve a leer el producto real en AliExpress (precio vigente, variantes, envío y stock por país) y se aplica al publicado. <b style={{ color: 'var(--tx)' }}>Se conserva el margen</b> de cada variante y las tiendas de los vendedores se sincronizan sin tocar su precio de venta. Tarda alrededor de un minuto.</>}
+        />
+      )}
+    </>
+  );
+}
+
 // Tarifas precargadas del tramo Phoenix→Cuba (agencia del socio de Daniel,
 // cobra por libra de peso) — el admin siempre puede escribir una tarifa
 // personalizada distinta, nunca queda limitado a estas dos.
@@ -4367,7 +4408,7 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
   // que ya se confirmó real, para pintarlo encima del checklist.
   const [coverage, setCoverage] = useState({});
   const loadCoverage = useCallback(() => {
-    catalogProCountryCoverage({ stagingId: product.id }).then(rows => {
+    catalogProCountryCoverageAdmin({ stagingId: product.id }).then(rows => {
       setCoverage(Object.fromEntries((rows || []).map(r => [r.country_code, r])));
     }).catch(() => setCoverage({}));
   }, [product.id]);
@@ -4717,7 +4758,7 @@ function CatalogPublishedDetail({ product, toast, onBack, onUpdated }) {
   const rows = (product.pricing || []).map(p => ({ ...p, costBase: Number(p.cost_product) || 0 }));
   const [coverage, setCoverage] = useState({});
   const loadCoverage = useCallback(() => {
-    catalogProCountryCoverage({ productId: product.id }).then(cRows => {
+    catalogProCountryCoverageAdmin({ productId: product.id }).then(cRows => {
       setCoverage(Object.fromEntries((cRows || []).map(r => [r.country_code, r])));
     }).catch(() => setCoverage({}));
   }, [product.id]);
@@ -4729,6 +4770,7 @@ function CatalogPublishedDetail({ product, toast, onBack, onUpdated }) {
         <button className="btn btg sm" onClick={onBack}>‹ Volver a Publicado</button>
         <RefreshCostButton pricingIds={rows.map(r => r.id)} toast={toast} onApplied={onUpdated} />
         <VerifyCoverageButton productId={product.id} provider={product.provider} variantCount={rows.length} toast={toast} onApplied={() => { onUpdated(); loadCoverage(); }} />
+        {product.provider === 'aliexpress' && <RefreshFromProviderButton productId={product.id} toast={toast} onApplied={() => { onUpdated(); loadCoverage(); }} />}
       </div>
       <div className="tabs" style={{ maxWidth: 320 }}>
         {[['costeo', 'Costeo (interno)'], ['tienda', 'Vista de tienda']].map(([k, l]) =>

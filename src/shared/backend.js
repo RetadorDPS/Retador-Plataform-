@@ -1290,13 +1290,16 @@ export const getOrderPaymentState = async (orderId) => {
 //
 // destCountry lo elige el COMPRADOR en cada compra (ya no un sale_mode fijo
 // del producto): 'CU' activa la ruta vía nuestro hub (Phoenix); cualquier
-// otro país real de CJ_COUNTRIES es envío directo de CJ, sin hub. Siempre
-// obligatorio — nunca se pide sin país. El resultado trae days_min/days_max
-// ya combinados según el destino (en 'CU' incluye el tramo final; en
-// cualquier otro país es el tránsito de CJ tal cual) — mostrar SIEMPRE ese
+// otro país es envío directo del proveedor, sin hub. Siempre obligatorio —
+// nunca se pide sin país. El resultado trae days_min/days_max ya combinados
+// según el destino (en 'CU' incluye el tramo final) — mostrar SIEMPRE ese
 // rango, nunca inventar uno propio en pantalla.
+// v235: se llama al punto central (catalog-pro-freight-quote), que solo
+// decide a qué función de proveedor mandar la petición (CJ o AliExpress).
+// Si quien pregunta es admin, la respuesta trae además `desglose` (tramo al
+// hub + tramo hub→Cuba con peso y tarifa); al comprador nunca le llega.
 export const getCatalogProBuyerFreightQuote = async (productId, variantId, qty, destCountry) => {
-  const { data, error } = await supabase.functions.invoke("cj-buyer-freight-quote", { body: { product_id: productId, variant_id: variantId || null, qty: qty || 1, dest_country: destCountry || null } });
+  const { data, error } = await supabase.functions.invoke("catalog-pro-freight-quote", { body: { product_id: productId, variant_id: variantId || null, qty: qty || 1, dest_country: destCountry || null } });
   if (error || data?.error) { console.error("getCatalogProBuyerFreightQuote:", error?.message || data?.error); return { total_price: 0, applicable: false, aging: null, is_slow: false, days_min: null, days_max: null }; }
   return data;
 };
@@ -2528,8 +2531,10 @@ export const CATALOG_PRO_COVERAGE_POINTS_PER_CALL = 10;
 // Tope real de variantes con stock por país de CJ (queryByVid, 10 puntos por
 // variante) — mismo valor que MAX_STOCK_VIDS en cj-verify-coverage.
 export const CATALOG_PRO_COVERAGE_MAX_STOCK_VIDS = 80;
-export const catalogProVerifyCoverage = async ({ stagingId, productId }) =>
-  invokeEdgeFunction("cj-verify-coverage", stagingId ? { staging_id: stagingId } : { product_id: productId });
+// Cada proveedor verifica su cobertura con su propia función (v235).
+export const catalogProVerifyCoverage = async ({ stagingId, productId, provider }) =>
+  invokeEdgeFunction(provider === "aliexpress" ? "ali-verify-coverage" : "cj-verify-coverage",
+    stagingId ? { staging_id: stagingId } : { product_id: productId });
 
 // Cobertura real por país ya guardada — vista pública (comprador/vendedor):
 // SIN el costo real. La base ya no deja leer la columna price a nadie que no
@@ -2558,6 +2563,24 @@ export const catalogProRefreshFromProvider = async (productId, provider) =>
   provider === "aliexpress"
     ? invokeEdgeFunction("ali-import-product", { refresh_product_id: productId })
     : invokeEdgeFunction("cj-verify-coverage", { product_id: productId });
+
+// Tope real de unidades por pedido: límite propio del producto (AliExpress
+// nace con 1; Daniel lo sube a mano cuando lo comprueba) y stock real de esa
+// variante en el país de destino. El servidor valida lo mismo al crear el
+// pedido. null = sin tope adicional.
+export const catalogProTopePedido = async (productId, variantId, destCountry) => {
+  const { data, error } = await supabase.rpc("catalog_pro_tope_pedido", { p_product_id: productId, p_variant_id: variantId || null, p_dest_country: destCountry || null });
+  if (error) { console.error("catalogProTopePedido:", error.message); return { limite_por_pedido: null, stock_regional: null }; }
+  const fila = Array.isArray(data) ? data[0] : data;
+  return { limite_por_pedido: fila?.limite_por_pedido ?? null, stock_regional: fila?.stock_regional ?? null };
+};
+
+// Admin: fija el límite de unidades por pedido (null = sin límite propio).
+export const catalogProSetLimitePorPedido = async (productId, limite) => {
+  const { data, error } = await supabase.rpc("catalog_pro_set_limite_por_pedido", { p_product_id: productId, p_limite: limite });
+  if (error) { console.error("catalogProSetLimitePorPedido:", error.message); throw error; }
+  return data;
+};
 
 // ── Disponibilidad REAL por región (una sola lógica para todo el sistema) ──
 // Se usa en la ficha del comprador, en el diálogo de compra y en la vista del

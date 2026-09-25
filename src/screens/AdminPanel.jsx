@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, memo } from "react";
-import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProImportAli, aliImportPreview, extractAliPidCandidates, resolveAliShortLink, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProVerifyCoverage, catalogProCountryCoverage, catalogProCountryCoverageAdmin, catalogProRefreshFromProvider, countryNameOf, CATALOG_PRO_COVERAGE_COUNTRIES_COUNT, CATALOG_PRO_COVERAGE_POINTS_PER_CALL, CATALOG_PRO_COVERAGE_MAX_STOCK_VIDS, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
+import { G, systemRating, systemReviews, useCatalog, Avatar, avatarUrlOf, money, supabase, adminDashboardStats, adminListUsers, adminSetVerified, adminSetSuspended, getSellerProductCount, adminListProducts, adminModerateProduct, getProfilesByIds, adminListVerifications, adminReviewVerification, kycSignedUrl, adminListPlanRequests, adminReviewPlan, adminListPlanLimits, adminUpdatePlan, adminSetPlanFeatures, adminListOrders, adminListAdmins, adminListLogs, getAuditLog, adminListPromoted, adminSetPromoted, listLedger, adminMarkCommissionPaid, adminListStaff, adminGrantStaff, adminRevokeStaff, staffPendingCounts, getMyVerification, adminGetProfileById, sendMessage, getOnboardingStats, adminCategoryImpact, adminSubcategoryImpact, adminUpsertCategory, adminDeleteCategory, adminUpsertSubcategory, adminDeleteSubcategory, adminReorderCategories, getPromoSettings, adminUpdatePromoSettings, CJ_COUNTRIES, catalogProSearch, catalogProQuotaStatus, catalogProPreview, catalogProImport, catalogProImportAli, aliImportPreview, extractAliPidCandidates, resolveAliShortLink, catalogProListStaging, catalogProUpdateVariantPricing, catalogProRefreshCost, catalogProUpdateStagingRegions, catalogProPublish, catalogProListPublished, catalogProCalculateShipping, catalogProVerifyCoverage, catalogProCountryCoverage, catalogProCountryCoverageAdmin, catalogProRefreshFromProvider, catalogProSetLimitePorPedido, countryNameOf, CATALOG_PRO_COVERAGE_COUNTRIES_COUNT, CATALOG_PRO_COVERAGE_POINTS_PER_CALL, CATALOG_PRO_COVERAGE_MAX_STOCK_VIDS, catalogProDeleteStaging, catalogProArchivePublished, catalogProSetTop, extractCjPidCandidates, catalogProDeleteImpact, catalogProDeleteDefinitive, catalogProPendingFulfillment, catalogProAdvanceFulfillment, getOrderStatusMap, catalogProApplyHubRate, pushBackHandler } from "../shared/index.js";
 // Editor Visual (renovación): modelo maestros+referencias y render compartido.
 import { SCREENS, FORMATS, CTA_POS, RET_BGS, SCREEN_ANCHORS, mkId, blankMaster, isAnchor, ratioOf, BlockView } from "../shared/index.js";
 
@@ -4329,7 +4329,7 @@ function VerifyCoverageButton({ stagingId, productId, provider, variantCount, to
   const run = async () => {
     setVerifying(true);
     try {
-      const res = await catalogProVerifyCoverage({ stagingId, productId });
+      const res = await catalogProVerifyCoverage({ stagingId, productId, provider });
       const disponibles = (res.coverage || []).filter(c => c.available).length;
       toast(`✅ Cobertura real verificada — ${disponibles} países confirmados`);
       onApplied();
@@ -4514,13 +4514,17 @@ function CatalogStagingDetail({ product, toast, ro, onBack, onPublished }) {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
         <button className="btn btg sm" onClick={onBack}>‹ Volver a Staging</button>
-        {!ro && <RefreshCostButton pricingIds={rows.map(r => r.id)} toast={toast} onApplied={onPublished} />}
+        {/* "Actualizar costo real" le pregunta a CJ: solo para productos de CJ
+            (antes aparecía también en AliExpress y consultaba a CJ con el id
+            de AliExpress — fallaba y gastaba puntos de CJ). */}
+        {!ro && product.provider !== 'aliexpress' && <RefreshCostButton pricingIds={rows.map(r => r.id)} toast={toast} onApplied={onPublished} />}
         {!ro && <VerifyCoverageButton stagingId={product.id} provider={product.provider} variantCount={rows.length} toast={toast} onApplied={() => { onPublished(); loadCoverage(); }} />}
       </div>
       <CatalogProductHero title={product.title} images={product.images} category={product.category} whyItSells={product.why_it_sells} pricing={rows} videoUrl={product.video_url} videoPosterUrl={product.video_poster_url} />
       <div className="ssub" style={{ marginTop: -4 }}>{rows.length} variante(s) · {product.listed_num ?? 0} listados en CJ</div>
 
-      {shippingPendingRows.length > 0 && (
+      {/* Recalcular flete usa cj-calculate-shipping: solo CJ. */}
+      {product.provider !== 'aliexpress' && shippingPendingRows.length > 0 && (
         <div className="card cp mb16" style={{ borderColor: shippingFailedRows.length ? 'var(--rd)' : 'var(--bd2)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ fontSize: 12, color: shippingFailedRows.length ? 'var(--rd)' : 'var(--tx2)' }}>
@@ -4749,6 +4753,90 @@ function StorePreviewScreen({ product }) {
   );
 }
 
+// Límite de unidades por pedido. AliExpress no informa el límite por cliente
+// (suele estar atado al precio con descuento: la 2.ª unidad podría salir a
+// precio de lista), así que todo producto de AliExpress nace con 1. Daniel lo
+// sube aquí cuando lo haya comprobado. Vacío = sin límite propio (manda el
+// stock real). El servidor valida lo mismo al crear el pedido.
+function LimitePorPedidoCard({ product, toast, onSaved }) {
+  const actual = product.max_units_per_order ?? null;
+  const [valor, setValor] = useState(actual == null ? '' : String(actual));
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => { setValor(actual == null ? '' : String(actual)); }, [actual]);
+  const limpio = valor.trim();
+  const nuevo = limpio === '' ? null : Math.floor(Number(limpio));
+  const valido = nuevo === null || (Number.isFinite(nuevo) && nuevo >= 1);
+  const cambiado = nuevo !== actual;
+  const guardar = async () => {
+    setGuardando(true);
+    try {
+      await catalogProSetLimitePorPedido(product.id, nuevo);
+      toast(nuevo == null ? '✅ Sin límite propio — manda el stock real' : `✅ Límite: ${nuevo} unidad(es) por pedido`);
+      onSaved();
+    } catch (e) { toast('⚠️ ' + (e.message || 'No se pudo guardar el límite')); }
+    setGuardando(false);
+  };
+  return (
+    <div className="card cp mb16">
+      <div className="ch"><span className="ct">Límite de unidades por pedido</span></div>
+      <div style={{ fontSize: 12, color: 'var(--tx2)', marginBottom: 10, lineHeight: 1.5 }}>
+        {product.provider === 'aliexpress'
+          ? 'AliExpress no informa cuántas unidades permite por cliente, y ese límite suele ir atado al precio con descuento. Por eso este producto empieza en 1. Súbelo solo si ya comprobaste que AliExpress deja comprar más al mismo precio.'
+          : 'Vacío = sin límite propio: el comprador puede pedir hasta el stock real disponible para su país.'}
+        {' '}Nunca se permite más que el stock real.
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input className="inp" type="number" min="1" step="1" inputMode="numeric" placeholder="Sin límite" value={valor}
+          onChange={e => setValor(e.target.value)} style={{ width: 130 }} aria-label="Máximo de unidades por pedido" />
+        <span style={{ fontSize: 12, color: 'var(--tx3)' }}>unidades por pedido</span>
+        <button className="btn bts sm" disabled={!valido || !cambiado || guardando} onClick={guardar}>
+          {guardando ? <span className="spin">↻</span> : 'Guardar límite'}
+        </button>
+      </div>
+      {!valido && <div style={{ fontSize: 11, color: 'var(--rd)', marginTop: 6 }}>Escribe un número entero de 1 o más, o déjalo vacío.</div>}
+    </div>
+  );
+}
+
+// Desglose del envío a Cuba por variante (solo admin): proveedor → hub de
+// Phoenix → Cuba. Tramo hub→Cuba = peso real × tarifa por libra. El tramo al
+// hub es el guardado al importar; el que se cobra al comprador es la
+// cotización en vivo del mismo tramo (ver el desglose en el diálogo de compra).
+function DesgloseCubaCard({ rows, provider }) {
+  if (!rows?.length) return null;
+  const LB = 453.592;
+  return (
+    <div className="card mb16">
+      <div className="ch" style={{ padding: '14px 16px 0' }}><span className="ct">Envío a Cuba — desglose (interno)</span></div>
+      <div style={{ fontSize: 11.5, color: 'var(--tx3)', padding: '4px 16px 8px' }}>
+        {provider === 'aliexpress' ? 'AliExpress' : 'CJ'} → hub Phoenix (EE. UU.) → Cuba. El comprador solo ve el total.
+      </div>
+      <div className="tw">
+        <table>
+          <thead><tr><th>Variante</th><th>Peso</th><th>Tramo al hub</th><th>Hub → Cuba</th><th>Total a Cuba</th></tr></thead>
+          <tbody>
+            {rows.map(r => {
+              const peso = Number(r.weight_grams) || 0;
+              const tarifa = Number(r.hub_to_destination_rate) || null;
+              const hubCuba = r.cost_hub_to_destination != null ? Number(r.cost_hub_to_destination) : null;
+              const alHub = r.cost_shipping_to_hub != null ? Number(r.cost_shipping_to_hub) : null;
+              return (
+                <tr key={r.id}>
+                  <td style={{ color: 'var(--tx)', fontWeight: 600 }}>{Object.values(r.attributes || {}).join(' · ') || r.variant_sku}</td>
+                  <td>{peso ? `${peso} g (${(peso / LB).toFixed(3)} lb)` : '—'}</td>
+                  <td>{alHub != null ? money(alHub) : 'Sin dato'}</td>
+                  <td>{hubCuba != null && tarifa ? `${money(hubCuba)} (${(peso / LB).toFixed(3)} lb × ${money(tarifa)}/lb)` : 'Sin dato'}</td>
+                  <td style={{ fontWeight: 800 }}>{alHub != null && hubCuba != null ? money(Math.round((alHub + hubCuba) * 100) / 100) : 'Sin dato'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // Mismo detalle que Staging, en solo lectura — para revisar el costeo por
 // variante de un producto YA publicado, sin poder editarlo (eso solo se
 // hace antes de publicar, en Staging). Trae una sub-pestaña "Vista de
@@ -4768,7 +4856,7 @@ function CatalogPublishedDetail({ product, toast, onBack, onUpdated }) {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
         <button className="btn btg sm" onClick={onBack}>‹ Volver a Publicado</button>
-        <RefreshCostButton pricingIds={rows.map(r => r.id)} toast={toast} onApplied={onUpdated} />
+        {product.provider !== 'aliexpress' && <RefreshCostButton pricingIds={rows.map(r => r.id)} toast={toast} onApplied={onUpdated} />}
         <VerifyCoverageButton productId={product.id} provider={product.provider} variantCount={rows.length} toast={toast} onApplied={() => { onUpdated(); loadCoverage(); }} />
         {product.provider === 'aliexpress' && <RefreshFromProviderButton productId={product.id} toast={toast} onApplied={() => { onUpdated(); loadCoverage(); }} />}
       </div>
@@ -4784,6 +4872,8 @@ function CatalogPublishedDetail({ product, toast, onBack, onUpdated }) {
             <div className="ch"><span className="ct">Mercados de venta</span></div>
             <RegionChecklist selected={regions} onToggle={() => {}} disabled coverage={coverage} />
           </div>
+          <LimitePorPedidoCard product={product} toast={toast} onSaved={onUpdated} />
+          <DesgloseCubaCard rows={rows} provider={product.provider} />
           <div className="card">
             <div className="tw">
               <table>

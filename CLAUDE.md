@@ -20,6 +20,31 @@ Al final de CUALQUIER reporte de trabajo realizado en este proyecto, siempre se 
 
 Este proyecto tiene acceso real a Supabase mediante conectores MCP. Antes de declarar un bug "resuelto" o una funcionalidad "verificada", se debe confirmar contra datos y funciones reales de Supabase (no solo simulación o lectura de código sin ejecutar), siempre que sea posible.
 
+## Proveedores: CJ y AliExpress son independientes (obligatorio)
+
+- RETADOR tiene DOS proveedores independientes: **CJ** y **AliExpress**. Todo lo que habla con un proveedor (importar, cotizar envío, stock, tokens) vive en funciones propias de ese proveedor (`cj-*` para CJ, `ali-*` para AliExpress).
+- Un cambio pedido para un proveedor NUNCA modifica funciones, tablas ni lógica del otro. Si parece necesario tocar el otro, se pregunta antes a Daniel.
+- Solo se comparte lo que es igual para todos: checkout, pedidos, comisión, fulfillment y pantallas. Lo compartido recibe datos ya calculados por el proveedor y no llama al proveedor directamente. El punto central (`catalog-pro-freight-quote`) solo decide a qué función de proveedor llamar según el `provider` del producto.
+- Después de cualquier cambio, verificar que el otro proveedor sigue funcionando igual que antes.
+
+## Arreglos en el sistema, nunca parches
+
+- Todo arreglo se hace en el SISTEMA, nunca como parche a un producto. Si hay productos viejos afectados, se hace backfill a todos (catálogo, staging y copias de vendedores).
+
+## Dinero y datos
+
+- El costo real del proveedor nunca lo ve un vendedor ni un comprador (solo el admin).
+- Envío a Cuba: siempre proveedor → hub de Phoenix (EE. UU.) → Cuba. Precio = tramo real al hub + tramo hub→Cuba (tarifa por libra de `platform_config` × peso real). Días = días al hub + rango hub→Cuba.
+- Nunca inventar datos. Si un dato no existe en la API, se dice y se usa la opción más conservadora.
+
+## Presupuesto de llamadas a APIs externas
+
+- No hacer pruebas masivas ni en paralelo contra CJ o AliExpress: en serie, con pausa entre llamadas y con el mínimo necesario. CJ ya congeló el acceso una vez por exceso de llamadas, y AliExpress corta con `AppApiCallLimit` si se llama en paralelo.
+
+## Honestidad en los reportes
+
+- Reportar siempre qué se verificó en la app real, qué solo en datos y qué no se pudo verificar.
+
 ## Contexto del proyecto
 
 RETADOR — marketplace para Cuba/España. App real, ya desplegada en producción (GitHub Pages, `retadordps.github.io/Retador-Plataform-/`), usada por gente real. El despliegue se dispara automáticamente al hacer push a `main` (ver `.github/workflows/deploy.yml`).

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, catalogProCountryCoverage, countryNameOf, buyerCountryCodeOf, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, useUnstickOnPageRestore, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, stockRegionalDe, varianteDisponibleEn, disponibilidadPorRegion, valorVarianteActivo, atributosAlElegir, primeraVarianteDisponible, varianteSkuDe, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, catalogProCountryCoverage, catalogProTopePedido, countryNameOf, buyerCountryCodeOf, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, useUnstickOnPageRestore, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, stockRegionalDe, varianteDisponibleEn, disponibilidadPorRegion, valorVarianteActivo, atributosAlElegir, primeraVarianteDisponible, varianteSkuDe, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -534,26 +534,41 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     setDestCountry(regionCompradorSirve ? regionCompradorCode : enabledCountries[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabledCountries.join(',')]);
-  // LÍMITE REAL de unidades por pedido. Investigado a fondo contra la API
-  // real (ds.product.get, respuesta completa con y sin simplify, v233):
-  // AliExpress NO expone ningún campo de límite de compra por cliente — así
-  // que el tope ya no es un "1" fijo para todo AliExpress (eso bloqueaba
-  // productos que sí permiten 10, 20 o 100). Ahora sale del dato real de CADA
-  // producto: el stock real de la combinación elegida en el país de destino
-  // (cobertura guardada) y el stock disponible del vendedor, el menor de los
-  // dos.
+  // TOPE REAL de unidades por pedido: el menor entre el stock real de la
+  // combinación elegida en el país de destino (cobertura guardada), el stock
+  // disponible del vendedor y el límite por pedido del producto. AliExpress
+  // NO expone ningún campo de límite por cliente (investigado contra la API
+  // real, v233), así que sus productos nacen con límite 1 y Daniel lo sube a
+  // mano desde el panel cuando lo comprueba (v235).
+  // v235: además, el LÍMITE POR PEDIDO del producto (AliExpress nace con 1:
+  // su API no informa el límite por cliente y suele ir atado al precio con
+  // descuento; Daniel lo sube desde el panel cuando lo comprueba). El límite
+  // cuenta el TOTAL de unidades del pedido, incluidas las líneas extra del
+  // carrito. El servidor valida lo mismo al crear el pedido.
+  const [limitePedido, setLimitePedido] = useState(null);
+  useEffect(() => {
+    if (!isCatalogPro) return;
+    let vivo = true;
+    catalogProTopePedido(product.id, null, null).then(t => { if (vivo) setLimitePedido(t.limite_por_pedido); });
+    return () => { vivo = false; };
+  }, [isCatalogPro, product.id]);
+  const unidadesOtrasLineas = cartLines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+  const topeLimite = limitePedido != null ? Math.max(0, limitePedido - unidadesOtrasLineas) : null;
   const stockRegionalPrincipal = hasCoverageData && variant ? stockRegionalDe(coverage, destCountry, varianteSkuDe(variant)).stock : null;
-  const topes = [availStock, stockRegionalPrincipal].filter(n => n != null && Number.isFinite(Number(n))).map(Number);
+  const topes = [availStock, stockRegionalPrincipal, topeLimite].filter(n => n != null && Number.isFinite(Number(n))).map(Number);
   const maxQty = topes.length ? Math.max(0, Math.min(...topes)) : null;
-  const topeEsRegional = stockRegionalPrincipal != null && maxQty === stockRegionalPrincipal && (availStock == null || stockRegionalPrincipal < availStock);
+  const topeEsLimite = topeLimite != null && maxQty === topeLimite && [availStock, stockRegionalPrincipal].every(n => n == null || Number(n) > topeLimite);
+  const topeEsRegional = !topeEsLimite && stockRegionalPrincipal != null && maxQty === stockRegionalPrincipal && (availStock == null || stockRegionalPrincipal < availStock);
+  const avisoLimite = limitePedido != null ? `⚠️ Este producto permite como máximo ${limitePedido} ${limitePedido === 1 ? 'unidad' : 'unidades'} por pedido` : '';
   const avisoTope = maxQty != null
-    ? (topeEsRegional ? `⚠️ Solo hay ${maxQty} disponibles reales para ${countryNameOf(destCountry)}` : `⚠️ Solo quedan ${maxQty} disponibles`)
+    ? (topeEsLimite ? avisoLimite : topeEsRegional ? `⚠️ Solo hay ${maxQty} disponibles reales para ${countryNameOf(destCountry)}` : `⚠️ Solo quedan ${maxQty} disponibles`)
     : '';
   useEffect(() => { if (maxQty != null && maxQty > 0) setQty(q => Math.max(1, Math.min(q, maxQty))); }, [maxQty]);
   const stockLineaEn = (l) => {
     const v = allVariants.find(x => x.id === l.variantId);
     const regional = hasCoverageData && v ? stockRegionalDe(coverage, destCountry, varianteSkuDe(v)).stock : null;
-    const t = [l.stock, regional].filter(n => n != null && Number.isFinite(Number(n))).map(Number);
+    const porLimite = limitePedido != null ? Math.max(0, limitePedido - qty - (unidadesOtrasLineas - (Number(l.qty) || 0))) : null;
+    const t = [l.stock, regional, porLimite].filter(n => n != null && Number.isFinite(Number(n))).map(Number);
     return t.length ? Math.min(...t) : null;
   };
   // Campo de texto para escribir la cantidad directamente (en vez de solo tocar
@@ -613,6 +628,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
 
   const addCartLine = (v) => {
     if (!v || v.id === variant?.id || cartLines.some(l => l.variantId === v.id)) return;
+    if (limitePedido != null && qty + unidadesOtrasLineas >= limitePedido) { flash(avisoLimite); setPickingVariant(false); return; }
     setCartLines(ls => [...ls, { variantId: v.id, attrs: v.attributes, image: v.image, price: v.price != null ? Number(v.price) : (Number(product.price) || 0), stock: v.stock, qty: 1 }]);
     setPickingVariant(false);
   };
@@ -659,7 +675,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
           setPrimaryShipQuote({ qty, country: destCountry, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: true, reason: r?.reason || null });
           return;
         }
-        setPrimaryShipQuote({ qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false, reason: null });
+        setPrimaryShipQuote({ qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false, reason: null, desglose: r?.desglose || null });
       }).catch(() => {
         if (cancelled) return;
         if (attempt < 3) { timer = setTimeout(() => fetchQuote(attempt + 1), 900); return; }
@@ -1050,6 +1066,10 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
                   <VariantPicker allVariants={allVariants} excludeIds={[variant?.id, ...cartLines.map(l => l.variantId)].filter(Boolean)} isAvailable={v => varianteDisponibleEn(v, coverage, destCountry)}
                     onPick={addCartLine} onCancel={() => setPickingVariant(false)} T1={T1} T2={T2} T3={T3} B={B} G={G} isDark={isDark} />
                 </div>
+              ) : limitePedido != null && qty + unidadesOtrasLineas >= limitePedido ? (
+                <p style={{ fontSize: 10.5, color: T2, marginTop: 4 }}>
+                  Este producto permite como máximo {limitePedido} {limitePedido === 1 ? "unidad" : "unidades"} por pedido.
+                </p>
               ) : (
                 <button className="p" onClick={() => setPickingVariant(true)} style={{ width: "100%", textAlign: "center", padding: "10px", borderRadius: 11, border: `1.5px dashed ${B}`, background: "none", color: G, fontSize: 12, fontWeight: 800, cursor: "pointer", marginTop: 4 }}>
                   + Agregar otra variante
@@ -1132,6 +1152,18 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
                 <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>{primaryShipQuote.reason || Object.values(cartShipQuotes).find(q => q?.reason)?.reason}</p>
               )}
               {destCountry === "CU" && shipQuoteReady && <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>🇨🇺 Envío disponible a Cuba</p>}
+              {/* Desglose del envío a Cuba: el servidor SOLO lo manda si quien
+                  compra es admin/staff del Catálogo Pro. El comprador ve el total. */}
+              {destCountry === "CU" && shipQuoteReady && !isMulti && primaryShipQuote.desglose?.tramo_hub != null && (
+                <div style={{ fontSize: 10, color: T2, marginTop: 6, paddingTop: 6, borderTop: `1px dashed ${G}40`, lineHeight: 1.6 }}>
+                  <div style={{ fontWeight: 800, color: T1 }}>Desglose (solo admin)</div>
+                  <div>Tramo al hub de Phoenix: {money(primaryShipQuote.desglose.tramo_hub, cur)}</div>
+                  <div>Tramo hub → Cuba: {money(primaryShipQuote.desglose.tramo_hub_cuba, cur)}
+                    {primaryShipQuote.desglose.peso_lb != null ? ` (${primaryShipQuote.desglose.peso_lb} lb × ${money(primaryShipQuote.desglose.tarifa_libra ?? primaryShipQuote.desglose.tarifa_libra_guardada ?? primaryShipQuote.desglose.tarifa_libra_actual, cur)}/lb${primaryShipQuote.desglose.cantidad > 1 ? ` × ${primaryShipQuote.desglose.cantidad}` : ''})` : ''}
+                  </div>
+                  <div style={{ fontWeight: 700 }}>Total: {money(Math.round((Number(primaryShipQuote.desglose.tramo_hub) + Number(primaryShipQuote.desglose.tramo_hub_cuba)) * 100) / 100, cur)}</div>
+                </div>
+              )}
               {/* Stock REAL de la variante elegida, para el país que el comprador
                   ya eligió arriba — viene de la cobertura ya guardada al
                   importar/verificar (catalog_pro_country_coverage.stock_by_variant),

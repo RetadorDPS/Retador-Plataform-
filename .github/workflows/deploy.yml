@@ -1,11 +1,31 @@
 name: Deploy to GitHub Pages
 
 # Publica la app en GitHub Pages cada vez que se suben cambios a la rama principal.
+#
+# BUG REAL corregido (vista previa de enlaces compartidos rota/inconsistente,
+# a veces "Page not found"): public/share/producto/<id>.html y
+# public/share/perfil/<id>.html los genera generate-share-pages.mjs a partir
+# de los datos REALES de Supabase en ese instante, pero ese script solo
+# corría en el "prebuild" de ESTE workflow — es decir, solo cuando había un
+# cambio de CÓDIGO. Un producto nuevo (o recién aprobado, o con fotos
+# agregadas después) publicado por un vendedor NO dispara ningún deploy, así
+# que su página de vista previa sencillamente no existía todavía — de ahí el
+# "a veces sí, a veces no" (depende de si el producto es de antes o de
+# después del último cambio de código) y el "Page not found" real de GitHub
+# Pages (el archivo de verdad no estaba ahí, no es un problema de
+# mayúsculas/minúsculas: ese texto ("filename case matches the URL") es el
+# aviso genérico que GitHub Pages muestra en CUALQUIER archivo faltante,
+# no una pista específica de este caso). Con este "schedule" el mismo
+# workflow que ya construye y publica la app se repite solo, sin que nadie
+# toque código, así las páginas de vista previa nunca quedan más viejas que
+# este intervalo.
 on:
   push:
     branches:
       - main
   workflow_dispatch:
+  schedule:
+    - cron: "*/20 * * * *"
 
 # Permisos necesarios para que la Action pueda publicar en Pages.
 permissions:

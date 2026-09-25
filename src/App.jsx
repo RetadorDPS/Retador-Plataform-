@@ -656,6 +656,11 @@ function AppShell({ sessionUser, platformStats = null }) {
       courierAdjustMaxPct: 30,
       surgeActive: false, surgeIntervalMin: 30, surgeStepPct: 15, surgeCapPct: 60,
       rates: { "España": { aereo: 12, maritimo: 5 }, "Estados Unidos": { aereo: 14, maritimo: 6 } },
+      // Tarifa global del tramo hub→Cuba ($/libra) — la lee en vivo el
+      // Importador Inteligente (cj-seller-import) al costear cada variante
+      // que un vendedor importa. Un solo valor por ahora; el día que haya
+      // varias agencias con tarifas distintas, esto se vuelve una lista.
+      catalogProHubRate: 1.99,
       fx: { usdToCup: 400, eurToCup: 430 },
       promos: [{ id: 1, text: "Envío gratis en tu primer pedido", active: true }],
       plans: [
@@ -1044,6 +1049,11 @@ function AppShell({ sessionUser, platformStats = null }) {
       // products.sale_mode en 'cuba' por defecto, sin que nadie lo use ya
       // para decidir la ruta de envío.
       ...(d.source_catalog_id ? { source_catalog_id: d.source_catalog_id, source_type: d.source_type || "catalog_pro" } : {}),
+      // Video real del producto (AliExpress, ver ali-import-product) — no es
+      // un campo que el formulario deje editar, viaja tal cual desde el
+      // borrador del Catálogo Pro. Ausente en cualquier otro producto.
+      video_url: d.video_url || null,
+      video_poster_url: d.video_poster_url || null,
     };
     let data, missing;
     try {
@@ -2081,7 +2091,7 @@ function AppShell({ sessionUser, platformStats = null }) {
 
       {editProd && (editProd.__isCatalogDraft
         ? <EditProductModal product={editProd} mode="create" onClose={() => setEditProd(null)}
-            onCreate={async (payload) => { setEditProd(null); await handlePublish({ ...payload, source_catalog_id: editProd.source_catalog_id, source_type: "catalog_pro" }); }}
+            onCreate={async (payload) => { setEditProd(null); await handlePublish({ ...payload, source_catalog_id: editProd.source_catalog_id, source_type: "catalog_pro", video_url: editProd.video_url, video_poster_url: editProd.video_poster_url }); }}
             flash={flash} />
         : <EditProductModal product={editProd} onClose={() => setEditProd(null)} onSave={(changes) => { updateProduct(editProd.id, changes); setEditProd(null); }} flash={flash} onPromote={() => { setEditProd(null); promoteFlow(editProd.id); }} />
       )}
@@ -2163,7 +2173,12 @@ function AppShell({ sessionUser, platformStats = null }) {
         const contacts = [];
         products.forEach(p => { const n = p.seller_name; if (n && !seen.has(n)) { seen.add(n); contacts.push({ id: "u_" + n, name: n }); } });
         // Órdenes por pagar = las mías aún no pagadas por billetera
-        const payable = orders.filter(o => !o.paidViaWallet).map(o => ({ id: o.id, vendor: o.sellerName || "Vendedor", item: o.title || "Pedido", amount: (Number(o.amount) || 0) + (Number(o.shipPrice) || 0), currency: o.currency || "CUP" }));
+        // BUG REAL corregido: el domicilio local (shipType==="local") es CUP en
+        // efectivo al mensajero, nunca parte del cobro por la app — sumarlo aquí
+        // como si fuera la misma moneda que o.amount inflaba lo que se muestra
+        // como pendiente de pago por billetera (mismo bug que en Seguimiento del
+        // pedido y en las facturas de Ajustes).
+        const payable = orders.filter(o => !o.paidViaWallet).map(o => ({ id: o.id, vendor: o.sellerName || "Vendedor", item: o.title || "Pedido", amount: o.shipType === "local" ? (Number(o.amount) || 0) : (Number(o.amount) || 0) + (Number(o.shipPrice) || 0), currency: o.currency || "CUP" }));
         // Tasas desde el panel de admin (Economía → FX): única fuente de verdad
         const fx = adminCfg.fx || { usdToCup: 400, eurToCup: 430 };
         const usdCup = Number(fx.usdToCup) || 400, eurCup = Number(fx.eurToCup) || 430;
@@ -2224,16 +2239,16 @@ function AppShell({ sessionUser, platformStats = null }) {
             <div style={{ background: card, border: `1px solid ${bd}`, borderRadius: 18, overflow: "hidden" }}>
               <div style={{ height: 90, background: "linear-gradient(135deg,#6EE7B7,#67E8F9)", position: "relative", display: "flex", alignItems: "center", padding: "0 18px", overflow: "hidden" }}>
                 <span style={{ position: "absolute", right: 2, bottom: -26, fontSize: 104, fontWeight: 800, color: "rgba(4,35,26,.16)", lineHeight: 1, pointerEvents: "none", fontFamily: "Georgia, serif" }}>Ω</span>
-                <span style={{ fontSize: 38, position: "relative" }}>🔗</span>
+                <span style={{ fontSize: 38, position: "relative" }}>✨</span>
                 <span style={{ position: "absolute", top: 12, right: 12, fontSize: 10, fontWeight: 800, color: "#064e3b", background: "rgba(255,255,255,.85)", borderRadius: 100, padding: "3px 9px" }}>⚡ PREMIUM</span>
               </div>
               <div style={{ padding: "16px 18px 18px" }}>
-                <h2 style={{ fontSize: 17, fontWeight: 800, color: t1, marginBottom: 6 }}>Importador Inteligente</h2>
+                <h2 style={{ fontSize: 17, fontWeight: 800, color: t1, marginBottom: 6 }}>Creador Inteligente</h2>
                 <p style={{ fontSize: 13, lineHeight: 1.55, color: t2, marginBottom: 14 }}>
-                  Llena tu tienda en segundos. Pega el enlace de un producto de <b style={{ color: t1 }}>AliExpress</b> y se importa solo con fotos, precio y características — o describe tu producto y la <b style={{ color: t1 }}>IA</b> te arma una publicación elegante, lista para vender, con tu margen de ganancia ya calculado.
+                  Describe tu producto y la <b style={{ color: t1 }}>IA</b> te arma una publicación elegante, lista para vender, con tu margen de ganancia ya calculado.
                 </p>
                 <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 16 }}>
-                  {["Importa por URL", "Crea con IA", "Calcula tu ganancia"].map(f => (
+                  {["Crea con IA", "Calcula tu ganancia"].map(f => (
                     <span key={f} style={{ fontSize: 11, fontWeight: 600, color: t2, background: dark ? "#1c1c22" : "#f1f5f9", borderRadius: 8, padding: "5px 10px" }}>✓ {f}</span>
                   ))}
                 </div>

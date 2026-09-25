@@ -1,6 +1,6 @@
 # Generador de Video Promocional — RETADOR
 
-**Estado:** INTEGRADO en RETADOR desde la v213 (ver "Integración en RETADOR" justo abajo).
+**Estado:** INTEGRADO en RETADOR desde la v233 (ver "Integración en RETADOR" justo abajo).
 Las secciones siguientes son el historial del prototipo y se conservan tal cual.
 
 Prototipo funcional actual (artifact publicado, standalone, mismo link en cada versión):
@@ -12,7 +12,7 @@ Acercamiento, Noria horizontal, Escenas secuenciales, Antes/Después, Mosaico de
 lista para sumar más, incluido el color de marca real del vendedor más adelante.
 
 
-## Integración en RETADOR (v213)
+## Integración en RETADOR (v233)
 
 ### Dónde vive
 - **Entrada principal:** ☰ Menú → **Herramientas** → tarjeta "Video Promocional"

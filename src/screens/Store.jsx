@@ -25,7 +25,7 @@ import {
   LayoutDashboard, Bell, Eye, Plus, Zap, Check, Users, ChevronLeft, ChevronRight, Edit2, Trash2,
   Search, X, Upload, GripVertical, ChevronDown, Grid, List, Save, Star, Share2, Copy, ShoppingBag, Link2, Sparkles,
 } from "lucide-react";
-import { useAt, useR, useCatalog, money, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, attrLabelText, groupVariantAttrs, resolveVariantBy, extractCjPidCandidates, catalogProPreview, cjVariantStock, cjSellerImport, cjSellerImports } from "../shared/index.js";
+import { useAt, useR, useCatalog, money, getPlans, usePlatformCfg, getMyPlanRequest, submitPlanRequest, requestPlanPromo, submitSellerReview, getMySellerReview, deleteSellerReview, AvatarUser, toggleFollow, thumbUrlOf, shareLink, getPromoSettings, adminUpdatePromoSettings, hazteProLink, catalogProSellerCatalog, catalogProProductVariants, catalogProCountryCoverage, countryNameOf, attrLabelText, groupVariantAttrs, resolveVariantBy } from "../shared/index.js";
 // recharts (pesada) separada en su propio chunk — ver StoreCharts.jsx: solo
 // se descarga cuando un vendedor Pro abre de verdad Resumen o Estadísticas,
 // nunca de entrada para todos (la mayoría son compradores que ni la ven).
@@ -1268,7 +1268,21 @@ function Config({ cfg, onUpdateConfig, C, ac, flash }) {
 }
 
 /* ── 9) SUSCRIPCIÓN — plan real + Pro gratis (compartir/referidos) ──────── */
-function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
+function Billing({ user, myPlan: myPlanProp, plans: plansProp, C, ac, flash, onPlanRequested }) {
+  // La app carga los planes UNA vez al arrancar (App.jsx) y nunca los vuelve
+  // a pedir — si el admin cambia un precio o activa una promo mientras la
+  // sesión ya estaba abierta, esa copia en memoria queda vieja. Esta pantalla
+  // se monta de nuevo cada vez que el usuario entra a "Suscripción", así que
+  // pide la fila real de plans aquí mismo, sin depender de recargar la app.
+  const [plans, setPlans] = useState(plansProp);
+  useEffect(() => {
+    let alive = true;
+    getPlans().then(p => { if (alive) setPlans(p); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  // Mismo motivo: el precio/nombre del plan propio también viene de esa
+  // copia vieja (myPlan prop) — se recalcula contra los planes recién leídos.
+  const myPlan = plans.find(p => p.id === myPlanProp?.id) || myPlanProp;
   const [pending, setPending] = useState(null);
   const [promoOpen, setPromoOpen] = useState(false);
   const [promoTab, setPromoTab] = useState("compartir");
@@ -1332,8 +1346,18 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
       {plans.map(pl => {
         const active = pl.id === myPlan?.id;
         const r = toRgb(ac);
+        // Precio promocional (plans.promo_price/promo_label/promo_active,
+        // editado desde el panel admin › Economía › Planes) — si el admin no
+        // la activó, promo_active viene false/null y esto queda exactamente
+        // como antes, sin ningún cambio visual.
+        const hasPromo = pl.promo_active && pl.promo_price != null;
         return (
           <div key={pl.id} style={{ borderRadius:16, border:`1px solid ${active?ac:C.b}`, background:active?`rgba(${r},0.06)`:C.s2, padding:18, marginBottom:10 }}>
+            {hasPromo && (
+              <div style={{ display:"inline-flex", alignItems:"center", gap:5, background:"rgba(245,158,11,.14)", border:"1px solid rgba(245,158,11,.4)", borderRadius:20, padding:"3px 10px", fontSize:10, fontWeight:800, color:"#F59E0B", marginBottom:9 }}>
+                🔥 {pl.promo_label || "Promoción"}
+              </div>
+            )}
             <div style={{ display:"flex", justifyContent:"space-between", marginBottom:12 }}>
               <div>
                 <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:2 }}>
@@ -1342,11 +1366,30 @@ function Billing({ user, myPlan, plans, C, ac, flash, onPlanRequested }) {
                 </div>
                 <div style={{ fontSize:11, color:C.m }}>{pl.max_products} productos · {Number(pl.commission_pct)}% comisión</div>
               </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize:20, fontWeight:800, color:C.t }}>{Number(pl.price)===0?"Gratis":money(pl.price, pl.currency)}</div>
-                {Number(pl.price)>0 && <div style={{ fontSize:10, color:C.m }}>/mes</div>}
+              <div style={{ textAlign:"right", flexShrink:0 }}>
+                {hasPromo ? (
+                  <>
+                    <div style={{ fontSize:11.5, color:C.m, textDecoration:"line-through" }}>{Number(pl.price)===0?"Gratis":money(pl.price, pl.currency)}</div>
+                    <div style={{ fontSize:20, fontWeight:800, color:"#F59E0B" }}>{Number(pl.promo_price)===0?"Gratis":money(pl.promo_price, pl.currency)}</div>
+                    <div style={{ fontSize:10, color:C.m }}>/mes</div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize:20, fontWeight:800, color:C.t }}>{Number(pl.price)===0?"Gratis":money(pl.price, pl.currency)}</div>
+                    {Number(pl.price)>0 && <div style={{ fontSize:10, color:C.m }}>/mes</div>}
+                  </>
+                )}
               </div>
             </div>
+            {Array.isArray(pl.features) && pl.features.length > 0 && (
+              <div style={{ marginBottom:12, display:"flex", flexDirection:"column", gap:5 }}>
+                {pl.features.map((f, i) => (
+                  <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:7, fontSize:12, color:C.t }}>
+                    <span style={{ color:"#19C37D", flexShrink:0 }}>✓</span>{f}
+                  </div>
+                ))}
+              </div>
+            )}
             {!active && (
               pending?.plan === pl.id
                 ? <div style={{ width:"100%", marginTop:8, padding:8, borderRadius:8, background:C.s3, color:C.m, fontSize:12, textAlign:"center" }}>🕐 Solicitud en revisión</div>
@@ -1476,340 +1519,36 @@ function mapCjCategoryToRetador(cjCategoryText, cats, subcatsMap) {
   return { cat: "", subcat: "" };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// IMPORTADOR INTELIGENTE — el vendedor pega un enlace del proveedor, ve el
-// costo y el envío REALES, pone su margen y publica el producto en su tienda.
-//
-// Separado de "Catálogo" a propósito: ahí está lo que curó RETADOR, aquí lo
-// que el vendedor trae por su cuenta. El costo nunca se escribe desde esta
-// pantalla — lo lee el servidor del proveedor al confirmar (ver
-// cj-seller-import), así que lo que se manda es solo qué variantes y a cuánto.
-// ═══════════════════════════════════════════════════════════════════════════
-const PROVEEDORES = [
-  { id: "cj", nombre: "CJdropshipping", pistas: ["cjdropshipping"], activo: true },
-  { id: "aliexpress", nombre: "AliExpress", pistas: ["aliexpress"], activo: false },
-];
-
-function detectarProveedor(enlace) {
-  const s = String(enlace || "").toLowerCase();
-  return PROVEEDORES.find(p => p.pistas.some(h => s.includes(h))) || null;
-}
-
-function ImportadorInteligente({ C, ac, user, flash }) {
-  const [enlace, setEnlace] = useState("");
-  const [buscando, setBuscando] = useState(false);
-  const [ficha, setFicha] = useState(null);      // vista previa del proveedor
-  const [mios, setMios] = useState(undefined);   // lo ya importado por este vendedor
-  const proveedor = detectarProveedor(enlace);
-
-  const cargarMios = () => { cjSellerImports().then(setMios).catch(() => setMios(null)); };
-  useEffect(() => { cargarMios(); }, []);
-
-  const abrir = async () => {
-    const texto = enlace.trim();
-    if (!texto) { flash("Pega el enlace del producto"); return; }
-    const prov = detectarProveedor(texto);
-    if (prov && !prov.activo) { flash(`Todavía no se puede importar de ${prov.nombre}`); return; }
-    // Mismo reconocimiento de enlaces que usa el panel admin (vive en
-    // shared/backend.js justo para no tener dos copias).
-    const { candidatos, respaldo } = extractCjPidCandidates(texto);
-    const aProbar = [...candidatos, ...respaldo.slice(0, 3)];
-    if (aProbar.length === 0) { flash("⚠️ No se pudo identificar el producto en ese enlace"); return; }
-    setBuscando(true);
-    let encontrada = null;
-    for (const pid of aProbar) {
-      try {
-        const data = await catalogProPreview(pid);
-        if (data?.pid) { encontrada = data; break; }
-      } catch (e) {
-        // Si el proveedor cortó por cuota, no tiene sentido seguir probando.
-        if (String(e.message || "").includes("límite de consultas")) { flash("⚠️ " + e.message); setBuscando(false); return; }
-      }
-    }
-    setBuscando(false);
-    if (!encontrada) { flash("⚠️ No se pudo identificar el producto en ese enlace"); return; }
-    setFicha(encontrada);
-  };
-
-  if (ficha) {
-    return <ImportadorFicha ficha={ficha} C={C} ac={ac} user={user} flash={flash}
-      onCerrar={() => setFicha(null)}
-      onImportado={() => { setFicha(null); setEnlace(""); cargarMios(); }} />;
-  }
-
-  return (
-    <div>
-      <SHdr title="Importador Inteligente" sub="Pega el enlace de un producto del proveedor y publícalo en tu tienda con tu propio margen" ac={ac} C={C}/>
-
-      <div style={{ background:C.s2, border:`1px solid ${C.b}`, borderRadius:13, padding:14, marginBottom:16 }}>
-        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-          <div style={{ flex:"1 1 240px", position:"relative", minWidth:0 }}>
-            <Link2 size={14} color={C.m} style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)" }}/>
-            <input value={enlace} onChange={e => setEnlace(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") abrir(); }}
-              placeholder="https://cjdropshipping.com/product/…"
-              style={{ width:"100%", padding:"11px 11px 11px 32px", borderRadius:9, border:`1px solid ${C.b}`, background:C.s3, color:C.t, fontSize:12.5, boxSizing:"border-box" }}/>
-          </div>
-          <button onClick={abrir} disabled={buscando}
-            style={{ padding:"11px 18px", borderRadius:9, border:"none", background:ac, color:"#000", fontSize:12.5, fontWeight:800, cursor:"pointer", opacity:buscando?.6:1, whiteSpace:"nowrap" }}>
-            {buscando ? "Leyendo…" : "Traer producto"}
-          </button>
-        </div>
-
-        <div style={{ display:"flex", gap:7, flexWrap:"wrap", marginTop:11, alignItems:"center" }}>
-          {PROVEEDORES.map(p => {
-            const activo = proveedor?.id === p.id;
-            return (
-              <span key={p.id} style={{ fontSize:10.5, fontWeight:700, padding:"4px 9px", borderRadius:999,
-                background: activo ? `${ac}22` : C.s3, color: activo ? ac : C.m,
-                border:`1px solid ${activo ? ac : C.b}` }}>
-                {p.nombre}{!p.activo && " · pronto"}
-              </span>
-            );
-          })}
-          {proveedor && !proveedor.activo && (
-            <span style={{ fontSize:10.5, color:C.err }}>Ese enlace es de {proveedor.nombre}, que aún no está disponible.</span>
-          )}
-        </div>
-      </div>
-
-      <div style={{ fontSize:12, fontWeight:800, color:C.t, marginBottom:9 }}>Lo que ya importaste</div>
-      {mios === undefined && <div style={{ padding:26, textAlign:"center", color:C.m, fontSize:12.5 }}>Cargando…</div>}
-      {mios === null && <div style={{ padding:26, textAlign:"center", color:C.err, fontSize:12.5 }}>No se pudo cargar tu historial.</div>}
-      {mios && mios.length === 0 && (
-        <div style={{ padding:"26px 18px", textAlign:"center", color:C.m, fontSize:12.5, background:C.s2, border:`1px dashed ${C.b}`, borderRadius:12 }}>
-          Todavía no has importado nada. Pega un enlace arriba para empezar.
-        </div>
-      )}
-      {mios && mios.length > 0 && (
-        <div style={{ display:"flex", flexDirection:"column", gap:9 }}>
-          {mios.map(f => {
-            const filas = f.pricing || [];
-            const costo = filas.length ? Math.min(...filas.map(x => Number(x.cost_product) || 0)) : 0;
-            const venta = filas.length ? Math.min(...filas.map(x => Number(x.sale_price) || 0)) : 0;
-            return (
-              <div key={f.id} style={{ display:"flex", gap:11, alignItems:"center", background:C.s2, border:`1px solid ${C.b}`, borderRadius:11, padding:10 }}>
-                {f.images?.[0]
-                  ? <img src={f.images[0]} loading="lazy" referrerPolicy="no-referrer" style={{ width:44, height:44, borderRadius:8, objectFit:"cover", flexShrink:0 }} onError={e => { e.target.style.display = "none"; }}/>
-                  : <div style={{ width:44, height:44, borderRadius:8, background:C.s3, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>📦</div>}
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:12, fontWeight:700, color:C.t, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>{f.title}</div>
-                  <div style={{ fontSize:10.5, color:C.m, marginTop:2 }}>
-                    {filas.length} variante(s) · tu costo desde {money(costo, "USD")} · vendes desde {money(venta, "USD")}
-                  </div>
-                </div>
-                {!f.product_id && <span style={{ fontSize:10, color:C.err, fontWeight:700 }}>sin publicar</span>}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Paso 2: la ficha traída del proveedor — variantes a elegir, costo real y el
-// control doble de margen (% y precio exacto), el mismo patrón que ya usa la
-// vista a fondo del Catálogo Pro.
-function ImportadorFicha({ ficha, C, ac, user, flash, onCerrar, onImportado }) {
-  const { cats, subcats } = useCatalog();
-  const [elegidas, setElegidas] = useState({}); // sku -> { pct, precio }
-  const [stock, setStock] = useState({});       // vid -> stock real (bajo demanda)
-  const [cargandoStock, setCargandoStock] = useState({});
-  const [cat, setCat] = useState("");
-  const [subcat, setSubcat] = useState("");
-  const [imgIndex, setImgIndex] = useState(0);
-  const [importando, setImportando] = useState(false);
-  const imagenes = Array.isArray(ficha.images) ? ficha.images : [];
-  const variantes = Array.isArray(ficha.variants) ? ficha.variants : [];
-  const MARGEN_SUGERIDO = 30;
-
-  const seleccionadas = Object.keys(elegidas);
-
-  // El stock se pide SOLO al marcar la variante: es justo el cambio que quitó
-  // el gasto enorme de cuota de abrir la ficha (antes se pedía el de todas).
-  const alternar = async (v) => {
-    const sku = String(v.sku);
-    if (elegidas[sku]) {
-      setElegidas(prev => { const n = { ...prev }; delete n[sku]; return n; });
-      return;
-    }
-    if (seleccionadas.length >= 12) { flash("Puedes importar hasta 12 variantes por producto"); return; }
-    const costo = Number(v.price) || 0;
-    const precio = Math.round(costo * (1 + MARGEN_SUGERIDO / 100) * 100) / 100;
-    setElegidas(prev => ({ ...prev, [sku]: { pct: String(MARGEN_SUGERIDO), precio: String(precio) } }));
-    if (v.vid && stock[v.vid] === undefined) {
-      setCargandoStock(prev => ({ ...prev, [v.vid]: true }));
-      try {
-        const res = await cjVariantStock([String(v.vid)]);
-        setStock(prev => ({ ...prev, [v.vid]: res[String(v.vid)]?.stock ?? null }));
-      } catch (e) { setStock(prev => ({ ...prev, [v.vid]: null })); }
-      setCargandoStock(prev => { const n = { ...prev }; delete n[v.vid]; return n; });
-    }
-  };
-
-  // Doble control ligado: al escribir el % se recalcula el precio y al revés,
-  // siempre sobre el costo real de ESA variante.
-  const cambiarPct = (sku, costo, valor) => {
-    const pct = valor.replace(/[^\d.]/g, "");
-    const precio = pct === "" ? "" : String(Math.round(costo * (1 + (Number(pct) || 0) / 100) * 100) / 100);
-    setElegidas(prev => ({ ...prev, [sku]: { pct, precio } }));
-  };
-  const cambiarPrecio = (sku, costo, valor) => {
-    const precio = valor.replace(/[^\d.]/g, "");
-    const pct = precio === "" || costo <= 0 ? "" : String(Math.round(((Number(precio) - costo) / costo) * 1000) / 10);
-    setElegidas(prev => ({ ...prev, [sku]: { pct, precio } }));
-  };
-
-  const importar = async () => {
-    if (seleccionadas.length === 0) { flash("Elige al menos una variante"); return; }
-    if (!cat) { flash("Elige la categoría del producto"); return; }
-    const payload = seleccionadas.map(sku => ({ sku, sale_price: Number(elegidas[sku].precio) || 0 }));
-    if (payload.some(v => !(v.sale_price > 0))) { flash("Revisa los precios: todos deben ser mayores que cero"); return; }
-    setImportando(true);
-    try {
-      const res = await cjSellerImport({ pid: ficha.pid, variantes: payload, cat, subcat: subcat || undefined });
-      flash(`✅ "${res.producto.title}" ya está en tu tienda`);
-      onImportado();
-    } catch (e) {
-      flash("⚠️ " + (e.message || "No se pudo importar"));
-      setImportando(false);
-    }
-  };
-
-  const gananciaTotal = seleccionadas.reduce((t, sku) => {
-    const v = variantes.find(x => String(x.sku) === sku);
-    const costo = Number(v?.price) || 0;
-    return t + Math.max(0, (Number(elegidas[sku].precio) || 0) - costo);
-  }, 0);
-
-  return (
-    <div>
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
-        <button onClick={onCerrar} style={{ background:C.s2, border:`1px solid ${C.b}`, color:C.t, borderRadius:8, padding:"7px 12px", fontSize:11.5, fontWeight:700, cursor:"pointer" }}>‹ Volver</button>
-        <span style={{ fontSize:11, color:C.m }}>Producto traído de CJdropshipping</span>
-      </div>
-
-      <div style={{ height:190, borderRadius:12, overflow:"hidden", background:C.s3, marginBottom:8 }}>
-        {imagenes[imgIndex]
-          ? <img src={imagenes[imgIndex]} alt="" referrerPolicy="no-referrer" style={{ width:"100%", height:"100%", objectFit:"cover" }} onError={e => { e.target.style.display = "none"; }}/>
-          : <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", fontSize:40, opacity:.5 }}>📦</div>}
-      </div>
-      {imagenes.length > 1 && (
-        <div style={{ display:"flex", gap:6, overflowX:"auto", marginBottom:14, paddingBottom:2 }}>
-          {imagenes.slice(0, 10).map((src, i) => (
-            <img key={i} src={src} alt="" onClick={() => setImgIndex(i)} referrerPolicy="no-referrer"
-              style={{ width:46, height:46, borderRadius:7, objectFit:"cover", flexShrink:0, cursor:"pointer", border:`2px solid ${i === imgIndex ? ac : "transparent"}` }}
-              onError={e => { e.target.style.display = "none"; }}/>
-          ))}
-        </div>
-      )}
-
-      <div style={{ fontSize:14, fontWeight:800, color:C.t, marginBottom:6, lineHeight:1.35 }}>{ficha.title}</div>
-      <div style={{ fontSize:11, color:C.m, marginBottom:14 }}>
-        {variantes.length} variante(s) disponibles · el nombre y la descripción se traducen al español al importar
-      </div>
-
-      <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:16 }}>
-        <select value={cat} onChange={e => { setCat(e.target.value); setSubcat(""); }}
-          style={{ flex:"1 1 150px", padding:"10px", borderRadius:9, border:`1px solid ${cat ? C.b : C.err}`, background:C.s3, color:C.t, fontSize:12 }}>
-          <option value="">Categoría…</option>
-          {(cats || []).map(c => <option key={c.id || c} value={c.id || c}>{c.label || c.name || c}</option>)}
-        </select>
-        <select value={subcat} onChange={e => setSubcat(e.target.value)} disabled={!cat}
-          style={{ flex:"1 1 150px", padding:"10px", borderRadius:9, border:`1px solid ${C.b}`, background:C.s3, color:C.t, fontSize:12, opacity:cat?1:.5 }}>
-          <option value="">Subcategoría (opcional)</option>
-          {((subcats || {})[cat] || []).map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </div>
-
-      <div style={{ fontSize:12, fontWeight:800, color:C.t, marginBottom:8 }}>
-        Elige las variantes y pon tu precio
-      </div>
-      <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:16 }}>
-        {variantes.map(v => {
-          const sku = String(v.sku);
-          const marcada = Boolean(elegidas[sku]);
-          const costo = Number(v.price) || 0;
-          const st = v.vid ? stock[v.vid] : undefined;
-          const atributos = Object.values(v.attributes || {}).join(" · ") || v.attrs || sku;
-          return (
-            <div key={sku} style={{ background:C.s2, border:`1px solid ${marcada ? ac : C.b}`, borderRadius:11, padding:10 }}>
-              <div onClick={() => alternar(v)} style={{ display:"flex", gap:10, alignItems:"center", cursor:"pointer" }}>
-                <div style={{ width:18, height:18, borderRadius:5, border:`2px solid ${marcada ? ac : C.b}`, background: marcada ? ac : "transparent", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                  {marcada && <Check size={12} color="#000"/>}
-                </div>
-                {v.image
-                  ? <img src={v.image} alt="" referrerPolicy="no-referrer" style={{ width:38, height:38, borderRadius:7, objectFit:"cover", flexShrink:0 }} onError={e => { e.target.style.display = "none"; }}/>
-                  : <div style={{ width:38, height:38, borderRadius:7, background:C.s3, flexShrink:0 }}/>}
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:11.5, fontWeight:700, color:C.t, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{atributos}</div>
-                  <div style={{ fontSize:10.5, color:C.m, marginTop:2 }}>
-                    Tu costo {money(costo, "USD")}
-                    {marcada && (
-                      cargandoStock[v.vid] ? " · consultando stock…"
-                        : st === null ? " · stock sin confirmar"
-                        : st !== undefined ? ` · ${st} disponibles` : ""
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {marcada && (
-                <div style={{ display:"flex", gap:8, marginTop:10, alignItems:"flex-end", flexWrap:"wrap" }}>
-                  <label style={{ flex:"1 1 90px", minWidth:0 }}>
-                    <span style={{ display:"block", fontSize:9.5, color:C.m, fontWeight:700, textTransform:"uppercase", letterSpacing:.4, marginBottom:4 }}>Margen %</span>
-                    <input value={elegidas[sku].pct} onChange={e => cambiarPct(sku, costo, e.target.value)} inputMode="decimal"
-                      style={{ width:"100%", padding:"8px 9px", borderRadius:8, border:`1px solid ${C.b}`, background:C.s3, color:C.t, fontSize:12, boxSizing:"border-box" }}/>
-                  </label>
-                  <label style={{ flex:"1 1 110px", minWidth:0 }}>
-                    <span style={{ display:"block", fontSize:9.5, color:C.m, fontWeight:700, textTransform:"uppercase", letterSpacing:.4, marginBottom:4 }}>Precio de venta</span>
-                    <input value={elegidas[sku].precio} onChange={e => cambiarPrecio(sku, costo, e.target.value)} inputMode="decimal"
-                      style={{ width:"100%", padding:"8px 9px", borderRadius:8, border:`1px solid ${C.b}`, background:C.s3, color:C.t, fontSize:12, fontWeight:700, boxSizing:"border-box" }}/>
-                  </label>
-                  <div style={{ flex:"1 1 90px", fontSize:11, color:C.ok, fontWeight:700, paddingBottom:9 }}>
-                    Ganas {money(Math.max(0, (Number(elegidas[sku].precio) || 0) - costo), "USD")}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      <div style={{ position:"sticky", bottom:0, background:C.s1, borderTop:`1px solid ${C.b}`, padding:"12px 0", display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
-        <div style={{ flex:"1 1 150px", minWidth:0 }}>
-          <div style={{ fontSize:11, color:C.m }}>{seleccionadas.length} variante(s) elegidas</div>
-          {seleccionadas.length > 0 && <div style={{ fontSize:12, fontWeight:800, color:C.ok }}>Ganancia por unidad: {money(gananciaTotal, "USD")}</div>}
-        </div>
-        <button onClick={importar} disabled={importando || seleccionadas.length === 0}
-          style={{ flex:"1 1 160px", padding:"12px", borderRadius:10, border:"none", background:ac, color:"#000", fontSize:13, fontWeight:800, cursor:"pointer", opacity:(importando || seleccionadas.length === 0) ? .5 : 1, display:"flex", alignItems:"center", justifyContent:"center", gap:7 }}>
-          <Sparkles size={14}/>{importando ? "Importando…" : "Publicar en mi tienda"}
-        </button>
-      </div>
-      <div style={{ fontSize:10.5, color:C.m, marginTop:8, lineHeight:1.5 }}>
-        Al publicar, el costo se vuelve a leer del proveedor en ese momento (nunca se toma de esta pantalla) y el producto entra a revisión como cualquier publicación nueva.
-      </div>
-    </div>
-  );
-}
+// Buscador LOCAL del catálogo ya importado — filtra solo por nombre entre lo
+// que ya está visible en esta lista, sin llamar a CJ ni AliExpress (cero
+// costo de cuota). Ignora may/minúsculas y acentos.
+const normalizaTexto = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 function CatalogoProSeller({ C, ac, onOpenCatalogDraft, user }) {
   const [rows, setRows] = useState(undefined); // undefined=cargando · null=error
   const [viewing, setViewing] = useState(null);
+  const [q, setQ] = useState("");
   const { cats, subcats } = useCatalog();
   const load = () => { catalogProSellerCatalog().then(setRows).catch(() => setRows(null)); };
   useEffect(() => { load(); }, []);
 
+  const qNorm = normalizaTexto(q.trim());
+  const filtered = qNorm ? (rows || []).filter(p => normalizaTexto(p.title).includes(qNorm)) : rows;
+
   return (
     <div>
       <SHdr title="Catálogo" sub="Productos ya importados y revisados por RETADOR — listos para vender" ac={ac} C={C}/>
+      {rows && rows.length > 0 && (
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar en el catálogo por nombre…"
+          style={{ width:"100%", padding:"10px 13px", borderRadius:10, border:`1px solid ${C.b}`, background:C.s2, color:C.t, fontSize:13, marginBottom:12, outline:"none" }} />
+      )}
       {rows === undefined && <div style={{ padding:40, textAlign:"center", color:C.m, fontSize:13 }}>Cargando…</div>}
       {rows === null && <div style={{ padding:40, textAlign:"center", color:C.err, fontSize:13 }}>No se pudo cargar el catálogo.</div>}
       {rows && rows.length === 0 && <div style={{ padding:40, textAlign:"center", color:C.m, fontSize:13 }}>Todavía no hay productos publicados en el catálogo.</div>}
-      {rows && rows.length > 0 && (
+      {rows && rows.length > 0 && filtered.length === 0 && <div style={{ padding:40, textAlign:"center", color:C.m, fontSize:13 }}>Ningún producto coincide con "{q}".</div>}
+      {filtered && filtered.length > 0 && (
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-          {rows.map(p => {
+          {filtered.map(p => {
             const cost = Number(p.recommended_price) || 0;
             const suggested = Math.round(cost * (1 + SUGGESTED_MARGIN_PCT / 100) * 100) / 100;
             const profit = Math.round((suggested - cost) * 100) / 100;
@@ -1868,6 +1607,19 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
   const [pricePct, setPricePct] = useState(String(SUGGESTED_MARGIN_PCT));
   const [price, setPrice] = useState(String(Math.round(flatCost * (1 + SUGGESTED_MARGIN_PCT / 100) * 100) / 100));
   const [busy, setBusy] = useState(false);
+  // Cobertura real por país (AliExpress: automática al importar; CJ: solo si
+  // el admin ya usó el botón manual "Verificar cobertura real"). Si el
+  // producto no tiene ninguna fila todavía (ej. CJ viejo sin verificar), este
+  // arreglo queda vacío y el resto de la pantalla se comporta EXACTAMENTE
+  // como antes — no se rompe nada de lo que ya funcionaba.
+  const [coverage, setCoverage] = useState([]);
+  const [showAllCountries, setShowAllCountries] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    catalogProCountryCoverage({ productId: product.id }).then(rows => { if (alive) setCoverage(rows || []); });
+    return () => { alive = false; };
+  }, [product.id]);
 
   useEffect(() => {
     setVariants(undefined); setSelectedAttrs({});
@@ -1915,6 +1667,13 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
   // muestra al vendedor (decisión explícita), junto a "tu costo"/"tu
   // ganancia", nunca destacado ni oculto.
   const cubaShipping = activeVariant?.cost_hub_to_destination != null ? Number(activeVariant.cost_hub_to_destination) : null;
+  // Resumen de cobertura real para el vendedor — ver decisión de diseño
+  // junto al bloque que lo renderiza más abajo (se ADVIERTE, no se bloquea).
+  const hasCoverageData = coverage.length > 0;
+  const cuCoverage = coverage.find(c => c.country_code === "CU") || null;
+  const cuDisponible = cuCoverage?.available === true;
+  const otherCoverage = coverage.filter(c => c.country_code !== "CU");
+  const otherAvailableCount = otherCoverage.filter(c => c.available).length;
   // Proyección simple (no garantía): ganancia por unidad × escalones fijos
   // de ventas, se recalcula en vivo con el precio que el vendedor edite.
   const perUnitProfit = Math.max(0, profit);
@@ -1969,6 +1728,12 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
       variants: variantRows,
       source_catalog_id: product.id,
       source_type: "catalog_pro",
+      // Video real del producto (si lo trae — ver ali-import-product):
+      // viaja con el resto del borrador para que el editor precargado lo
+      // conserve hasta publicar, aunque no sea un campo que el vendedor
+      // edite a mano.
+      video_url: product.video_url || null,
+      video_poster_url: product.video_poster_url || null,
     });
     setBusy(false);
   };
@@ -2076,6 +1841,60 @@ function CatalogDetailSheet({ product, C, ac, cats, subcats, onClose, onOpenDraf
         </div>
         {priceNum > 0 && priceNum < cost && <div style={{ fontSize:11.5, color:C.err, marginBottom:14 }}>Tu precio de venta no puede ser menor a tu costo ({money(cost, "USD")})</div>}
 
+        {/* Cobertura real por país — solo se muestra si el producto YA tiene
+            verificación real guardada (AliExpress automática, o CJ con el
+            botón manual). Un producto sin verificar no muestra este bloque y
+            se comporta igual que siempre (sin romper nada). DECISIÓN: se
+            ADVIERTE de forma prominente cuando falta envío a Cuba, pero NO se
+            bloquea "Añadir a mi tienda" — el producto puede tener cobertura
+            real a otros países (España, etc.) y RETADOR vende a ambos. */}
+        {hasCoverageData && (
+          <div style={{ borderRadius:10, padding:"12px 13px", marginBottom:14, background: cuDisponible ? `${C.ok}14` : `${C.err}14`, border:`1px solid ${cuDisponible ? C.ok : C.err}40` }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ fontSize:16 }}>{cuDisponible ? "✅" : "❌"}</span>
+              <span style={{ fontSize:12.5, fontWeight:800, color: cuDisponible ? C.ok : C.err }}>
+                {cuDisponible ? "Envío a Cuba disponible" : "Sin envío a Cuba"}
+              </span>
+            </div>
+            {!cuDisponible && (
+              <div style={{ fontSize:11, color:C.m, lineHeight:1.5, marginTop:6 }}>
+                {cuCoverage?.reason || "Este producto no tiene cobertura real confirmada hacia Cuba por ahora."} Puedes agregarlo igual para venderlo en los países donde sí hay cobertura confirmada.
+              </div>
+            )}
+            {otherCoverage.length > 0 && (
+              <button type="button" onClick={() => setShowAllCountries(v => !v)} style={{ marginTop:8, background:"none", border:"none", padding:0, fontSize:11, fontWeight:700, color:C.m, cursor:"pointer", textDecoration:"underline" }}>
+                {showAllCountries ? "Ocultar países" : `Ver los ${otherCoverage.length} países verificados`} ({otherAvailableCount} con cobertura real)
+              </button>
+            )}
+            {/* Nombre completo del país y qué significa cada número — antes
+                salían códigos sueltos ("US", "FR") y una cifra sin etiqueta
+                que no dejaba claro si era el envío o el precio del producto
+                (bug real reportado). El significado viene guardado en
+                price_kind: en CJ el número es el ENVÍO, en AliExpress es el
+                precio del producto YA PUESTO en ese país. */}
+            {showAllCountries && (
+              <div style={{ display:"flex", flexDirection:"column", gap:5, marginTop:8 }}>
+                {otherCoverage.map(c => {
+                  const dias = c.days_min != null
+                    ? ` · llega en ${c.days_min === c.days_max ? c.days_min : `${c.days_min} a ${c.days_max}`} días`
+                    : "";
+                  const importe = c.price == null ? "" :
+                    (c.price_kind === "producto_puesto"
+                      ? ` · precio puesto allí ${money(c.price, "USD")}`
+                      : ` · envío ${money(c.price, "USD")}`);
+                  return (
+                    <div key={c.country_code} style={{ fontSize:11, fontWeight:600, padding:"5px 9px", borderRadius:8, background:C.s1, color: c.available ? C.t : C.m }}>
+                      <span style={{ marginRight:5 }}>{c.available ? "✅" : "—"}</span>
+                      <b style={{ color: c.available ? C.ok : C.m }}>{countryNameOf(c.country_code)}</b>
+                      {c.available ? <span style={{ color:C.m }}>{importe}{dias}</span> : <span style={{ color:C.m }}> · sin envío</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={{ display:"flex", gap:9 }}>
           <button onClick={onClose} style={{ flex:1, padding:12, borderRadius:10, border:`1px solid ${C.b}`, background:"transparent", color:C.m, fontSize:13, fontWeight:700, cursor:"pointer" }}>Cancelar</button>
           <button onClick={addToStore} disabled={busy || !priceNum || priceNum < cost} style={{ flex:1, padding:12, borderRadius:10, border:"none", background:ac, color:"#000", fontSize:13, fontWeight:800, cursor:"pointer", opacity:(busy || !priceNum || priceNum < cost) ? .6 : 1 }}>Añadir a mi tienda</button>
@@ -2104,9 +1923,6 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
     { id:"orders", label:"Pedidos", icon:ShoppingCart },
     { id:"products", label:"Productos", icon:Package },
     { id:"catalog", label:"Catálogo", icon:ShoppingBag },
-    // Separado de "Catálogo" a propósito: ahí va lo curado por RETADOR, aquí
-    // lo que el vendedor importa por su cuenta desde un enlace del proveedor.
-    { id:"importador", label:"Importador", icon:Sparkles },
     { id:"analytics", label:"Estadísticas", icon:BarChart2 },
     { id:"customers", label:"Clientes", icon:Users },
     { id:"design", label:"Diseño", icon:Palette },
@@ -2127,7 +1943,6 @@ export function StoreDashboard({ user, cfg, products, orders, plans, myPlan, api
       onArchiveProduct={api.onArchiveProduct} onUnarchiveProduct={api.onUnarchiveProduct}
       onDeleteProduct={api.onDeleteProduct} onToggleFeatured={api.onToggleFeatured} maxProducts={myPlan?.max_products}/>;
     if (sec === "catalog")    return <CatalogoProSeller C={C} ac={ac} onOpenCatalogDraft={api.onOpenCatalogDraft} user={user}/>;
-    if (sec === "importador") return <ImportadorInteligente C={C} ac={ac} user={user} flash={notify}/>;
     if (sec === "analytics")  return <Analytics products={products} orders={orders} C={C} ac={ac}/>;
     if (sec === "customers")  return <Clientes orders={orders} C={C} ac={ac}/>;
     if (sec === "design")     return <Diseno cfg={cfg} products={products} onUpdateConfig={api.onUpdateConfig} C={C} ac={ac} flash={notify} profileRealName={profileRealName}/>;

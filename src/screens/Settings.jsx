@@ -754,7 +754,14 @@ function CFG_PaymentsScreen({ settings, upd, nav, onOpenWallet, walletOn=true, o
   const tk = CFG_useTk();
   const [showInvoices, setShowInvoices] = useState(false);
 
+  // BUG REAL corregido: el domicilio local (shipType==="local") siempre es CUP,
+  // pagado en efectivo al mensajero — nunca la misma moneda que o.amount (el
+  // precio del producto, normalmente USD/EUR). Sumarlos como si fueran la misma
+  // moneda inflaba el TOTAL de la factura (mismo bug que en Seguimiento del
+  // pedido). Con envío internacional o "paquete" sí es la misma moneda.
+  const invoiceTotal = (o) => o.shipType === "local" ? Number(o.amount) || 0 : (Number(o.amount) || 0) + (Number(o.shipPrice) || 0);
   const downloadInvoice = (o) => {
+    const isLocalShip = o.shipType === "local";
     const lines = [
       "RETADOR — Factura",
       "================================",
@@ -765,8 +772,9 @@ function CFG_PaymentsScreen({ settings, upd, nav, onOpenWallet, walletOn=true, o
       `Cantidad: ${o.qty || 1}`,
       "--------------------------------",
       `Producto: ${money(o.amount || 0, o.currency || "CUP")}`,
-      o.shipPrice ? `Envío (${o.shipTo || "envío"}): ${money(o.shipPrice, o.currency || "CUP")}` : "",
-      `TOTAL: ${money((Number(o.amount) || 0) + (Number(o.shipPrice) || 0), o.currency || "CUP")}`,
+      o.shipPrice && !isLocalShip ? `Envío (${o.shipTo || "envío"}): ${money(o.shipPrice, o.currency || "CUP")}` : "",
+      `TOTAL: ${money(invoiceTotal(o), o.currency || "CUP")}`,
+      isLocalShip && o.shipPrice ? `+ ${Math.round(o.shipPrice).toLocaleString()} CUP de domicilio, pagado en efectivo al mensajero (no incluido en el total anterior).` : "",
       "================================",
       "Gracias por usar RETADOR.",
     ].filter(Boolean).join("\n");
@@ -840,7 +848,7 @@ function CFG_PaymentsScreen({ settings, upd, nav, onOpenWallet, walletOn=true, o
               <div key={o.id} style={{ background:tk.ROW }} className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl mb-2">
                 <div className="flex-1 min-w-0">
                   <div style={{ color:tk.T1 }} className="text-[13px] font-semibold truncate">{o.title || "Pedido"}</div>
-                  <div style={{ color:tk.T2 }} className="text-[11px]">{o.id} · {money((Number(o.amount)||0)+(Number(o.shipPrice)||0), o.currency||"CUP")}</div>
+                  <div style={{ color:tk.T2 }} className="text-[11px]">{o.id} · {money(invoiceTotal(o), o.currency||"CUP")}</div>
                 </div>
                 <button onClick={() => downloadInvoice(o)} style={{ background:tk.CARD2, color:tk.T1 }} className="flex items-center gap-1 text-[12px] font-semibold px-3 py-1.5 rounded-full flex-shrink-0">
                   <Download size={13} /> Descargar

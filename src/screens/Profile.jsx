@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, Trash2, Archive, ArchiveRestore } from "lucide-react";
-import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink, getMyFollowing, toggleFollow, requestPlanPromo, getPromoSettings, hazteProLink, getMyCommissionSummary, money } from "../shared/index.js";
+import { G, Ic, Avatar, avatarUrlOf, uploadAvatar, supabase, getUserById, ratingForName, useAt, useR, usePlatformCfg, signOutUser, uploadKyc, submitVerification, getMyVerification, submitPlanRequest, getMyPlanRequest, downgradePlan, getPlans, KycSelfieSample, getSellerAbout, getProfileBasic, saveProfileAll, getSellerReviews, getSellerRatingInfo, getProfileHeaderStats, getMySellerReview, submitSellerReview, deleteSellerReview, shareLink, getMyFollowing, toggleFollow, requestPlanPromo, getPromoSettings, hazteProLink, getMyCommissionSummary, money } from "../shared/index.js";
 
 // Formato de números grandes del encabezado del perfil: "1K", "2,3K"… (coma
 // decimal, como en la captura de referencia). Nunca se abrevia por debajo de 1000.
@@ -961,7 +961,17 @@ function FP_SharePromo({ plan, promoSettings, onSubmitted, flash_, C }) {
     </div>
   );
 }
-function FP_PlansModal({ user, plans = [], current, currentPlanId, onClose, C, flash, onPlanChanged }) {
+function FP_PlansModal({ user, plans: plansProp = [], current, currentPlanId, onClose, C, flash, onPlanChanged }) {
+  // Este modal se monta de nuevo cada vez que se abre (showPlans && ...), así
+  // que pide la fila real de plans aquí mismo — no confía en la copia que
+  // App.jsx cargó una sola vez al arrancar, que queda vieja si el admin
+  // cambia un precio o una promo con la sesión ya abierta.
+  const [plans, setPlans] = useState(plansProp);
+  useEffect(() => {
+    let alive = true;
+    getPlans().then(p => { if (alive) setPlans(p); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const [pending, setPending] = useState(null);   // { plan } de la solicitud pendiente
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -1015,13 +1025,32 @@ function FP_PlansModal({ user, plans = [], current, currentPlanId, onClose, C, f
             const requestable = !isCur && pPrice > curPrice && !!PLAN_KEY(p.id || p.name);
             const downgradable = !isCur && pPrice <= curPrice;
             const isPendingThis = pending && PLAN_KEY(pending.plan) === PLAN_KEY(p.id || p.name);
+            // Precio promocional (editado desde el panel admin › Economía ›
+            // Planes) — si el admin no la activó, esto queda exactamente
+            // como antes, sin ningún cambio visual.
+            const hasPromo = p.promo_active && p.promo_price != null;
             return <div key={p.id} style={{ border:`1.5px solid ${isCur ? C.accent : C.border}`, borderRadius:12, padding:"14px 14px 16px", background: isCur ? `${C.accent}0d` : C.surfaceTop }}>
+              {hasPromo && (
+                <div style={{ display:"inline-flex", alignItems:"center", gap:5, background:"rgba(245,158,11,.14)", border:"1px solid rgba(245,158,11,.4)", borderRadius:20, padding:"3px 10px", fontSize:10, fontWeight:800, color:"#F59E0B", marginBottom:9 }}>
+                  🔥 {p.promo_label || "Promoción"}
+                </div>
+              )}
               <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginBottom:8 }}>
                 <span style={{ fontSize:15, fontWeight:800, color:C.textPrimary }}>{p.name}{isCur && <span style={{ fontSize:10, fontWeight:700, color:C.accent, marginLeft:7 }}>· actual</span>}</span>
-                <span style={{ fontSize:14, fontWeight:800, color:C.textPrimary }}>{pPrice === 0 ? "Gratis" : `$${pPrice}/mes`}</span>
+                {hasPromo ? (
+                  <span style={{ display:"flex", alignItems:"baseline", gap:6 }}>
+                    <span style={{ fontSize:11.5, color:C.textSecondary, textDecoration:"line-through" }}>{pPrice === 0 ? "Gratis" : `$${pPrice}`}</span>
+                    <span style={{ fontSize:14, fontWeight:800, color:"#F59E0B" }}>{Number(p.promo_price) === 0 ? "Gratis" : `$${Number(p.promo_price)}/mes`}</span>
+                  </span>
+                ) : (
+                  <span style={{ fontSize:14, fontWeight:800, color:C.textPrimary }}>{pPrice === 0 ? "Gratis" : `$${pPrice}/mes`}</span>
+                )}
               </div>
               <div style={{ display:"flex", gap:7, alignItems:"flex-start", marginBottom:5 }}><span style={{ color:C.positive, fontSize:12, flexShrink:0 }}>✓</span><span style={{ fontSize:12, color:C.textPrimary }}>Hasta {p.max_products ?? "—"} productos publicados</span></div>
               {p.commission_pct != null && <div style={{ display:"flex", gap:7, alignItems:"flex-start" }}><span style={{ color:C.positive, fontSize:12, flexShrink:0 }}>✓</span><span style={{ fontSize:12, color:C.textPrimary }}>{Number(p.commission_pct)}% de comisión por venta</span></div>}
+              {Array.isArray(p.features) && p.features.length > 0 && p.features.map((f, i) => (
+                <div key={i} style={{ display:"flex", gap:7, alignItems:"flex-start", marginTop:5 }}><span style={{ color:C.positive, fontSize:12, flexShrink:0 }}>✓</span><span style={{ fontSize:12, color:C.textPrimary }}>{f}</span></div>
+              ))}
               {requestable && (
                 isPendingThis
                   ? <button disabled style={{ width:"100%", height:38, marginTop:11, borderRadius:9, background:C.surfaceTop, border:`1px solid ${C.border}`, color:C.textSecondary, fontSize:12.5, fontWeight:700, cursor:"default" }}>🕐 Solicitud enviada</button>

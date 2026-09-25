@@ -1,5 +1,6 @@
-// Registra el service worker respetando la subcarpeta del repo en GitHub Pages.
-// import.meta.env.BASE_URL === "/Retador-Plataform-/" en producción.
+// Registra el service worker respetando la base real de la app (BASE_URL de
+// Vite — hoy "/", desde que RETADOR se sirve en la raíz del dominio propio
+// retadormarketplace.es; antes era "/Retador-Plataform-/" bajo GitHub Pages).
 //
 // AUTO-SANADOR: tras tantas versiones (v45→v80+), un teléfono podía quedar con un
 // service worker VIEJO y roto pegado (p. ej. un manejador push que rompía en

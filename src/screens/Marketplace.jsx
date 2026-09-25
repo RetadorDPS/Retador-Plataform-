@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
 import { Edit2, MapPin, Trash2 } from "lucide-react";
-import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, useUnstickOnPageRestore, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
+import { Avatar, AvatarUser, BC, CJ_COUNTRIES, CUBA_PROVINCES, CURRENCIES, CURRENCY_CODES, CatIcon, DEFAULT_CURRENCY, G, Ic, LiveSlot, BlockView, useFeedAds, feedRows, Logo, MarketBanners, PullIndicator, Spin, createOrder, createOrderMulti, createStripeCheckout, getCatalogProBuyerFreightQuote, catalogProCountryCoverage, countryNameOf, buyerCountryCodeOf, densityCols, estimateDeliveryFee, getAvailableStock, getAvailableVariantStock, bulkDiscountPctFor, getProductById, getProductsBySeller, getProfileHeaderStats, getSellerRatingInfo, getUserById, getSellerDisplay, money, shareLink, pushBackHandler, serviceRating, serviceReviews, systemRating, trackEvent, uploadImage, thumbUrlOf, useAt, useCatalog, useDensity, usePlatformCfg, useR, useScrollDir, usePullToRefresh, useUnstickOnPageRestore, getProductReviews, getMyProductReview, submitProductReview, hasCompletedOrderForProduct, matchCategory, searchProducts, loadProductsPage, loadServicesPage, PAGE_SIZE, getProductVariants, groupVariantAttrs, resolveVariantBy, cartesianVariants, attrLabelText, cartAddItem, getCartItems, cartSetQty, cartRemoveItem, getRelatedProducts } from "../shared/index.js";
 
 export function CatModal({ onClose, onSelect, active }) {
   const { cats, subcats: allSubs } = useCatalog();
@@ -452,7 +452,20 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     else if (product?.id) getAvailableStock(product.id).then(n => { if (alive) setAvailStock(n); }).catch(() => {});
     return () => { alive = false; };
   }, [product?.id, variant?.id]);
-  useEffect(() => { if (availStock != null) setQty(q => Math.max(1, Math.min(q, availStock))); }, [availStock]);
+  // LÍMITE REAL por cliente (problema reportado por Daniel: en la propia
+  // ficha de AliExpress, el Poco F8 Pro dice "Puedes seleccionar uno como
+  // máximo"). Se investigó a fondo el campo real que devuelve ds.product.get
+  // (max_buy_num, purchase_limit, moq y variantes — búsqueda exhaustiva sobre
+  // el JSON crudo, con y sin simplify) y NO existe ningún campo oficial con
+  // ese límite por cliente en la API — confirmado, no es un descuido nuestro.
+  // Mientras esto no se resuelva con más precisión (ej. si AliExpress agrega
+  // el dato más adelante), se topa a 1 unidad máxima por pedido para
+  // CUALQUIER producto de AliExpress: mejor pedir de menos que dejar que se
+  // cree un pedido real, ya cobrado a un comprador cubano, que AliExpress
+  // termine rechazando al procesarlo.
+  const esAliExpress = product.catalogProvider === 'aliexpress';
+  const maxQty = esAliExpress ? 1 : availStock;
+  useEffect(() => { if (maxQty != null) setQty(q => Math.max(1, Math.min(q, maxQty))); }, [availStock, esAliExpress]);
   // Campo de texto para escribir la cantidad directamente (en vez de solo tocar
   // "+" repetido). Estado de texto aparte del número real: así se puede borrar y
   // escribir sin que cada tecla reformatee el campo.
@@ -477,11 +490,11 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     const digits = raw.replace(/[^0-9]/g, "");
     if (digits === "") { setQtyText(""); return; } // permite borrar todo para reescribir
     const n = parseInt(digits, 10);
-    if (availStock != null && n > availStock) {
-      flash(`⚠️ Solo quedan ${availStock} disponibles`);
+    if (maxQty != null && n > maxQty) {
+      flash(esAliExpress ? '⚠️ Este producto de AliExpress permite máximo 1 unidad por pedido' : `⚠️ Solo quedan ${maxQty} disponibles`);
       flashQtyOver();
-      setQty(availStock);
-      setQtyText(String(availStock));
+      setQty(maxQty);
+      setQtyText(String(maxQty));
     } else {
       setQtyText(digits);
       setQty(Math.max(1, n)); // el total se actualiza en vivo con lo que ya es válido
@@ -514,7 +527,9 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
     setPickingVariant(false);
   };
   const removeCartLine = (variantId) => setCartLines(ls => ls.filter(l => l.variantId !== variantId));
-  const setCartLineQty = (variantId, n) => setCartLines(ls => ls.map(l => l.variantId === variantId ? { ...l, qty: Math.max(1, n) } : l));
+  // Mismo tope conservador de 1 unidad por producto AliExpress (ver esAliExpress
+  // más arriba) también para cada línea adicional del carrito de variantes.
+  const setCartLineQty = (variantId, n) => setCartLines(ls => ls.map(l => l.variantId === variantId ? { ...l, qty: Math.max(1, esAliExpress ? Math.min(1, n) : n) } : l));
 
   // Catálogo Pro: el envío internacional es real y se cobra aparte. OJO —
   // bug real ya visto: el flete no escala lineal por unidad (CJ real: 1u=
@@ -523,15 +538,67 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
   // para la cantidad EXACTA de cada línea (debounced, para no golpear la
   // cotización en cada tecla) y se guarda junto con la cantidad para la que
   // vale, así nunca se muestra ni se cobra un número de otra cantidad.
-  const isCatalogPro = product.source_type === 'catalog_pro';
+  // BUG REAL corregido: esto solo era true para 'catalog_pro' — un producto
+  // cj_direct (o aliexpress_direct) tomaba el camino de abajo (shipPrice del
+  // cliente / product.shippingPrice, que el Importador nunca llena) y
+  // cobraba $0 de envío real siempre. Los tres proveedores de importación
+  // directa cotizan real de la misma forma (ver cj-buyer-freight-quote).
+  const isCatalogPro = ['catalog_pro', 'cj_direct', 'aliexpress_direct'].includes(product.source_type);
+  // Cobertura real por país — SOLO existe para productos del Catálogo Pro
+  // curado por el admin (source_type 'catalog_pro', con source_catalog_id
+  // real apuntando a catalog_pro_products). Los productos de "Importador
+  // Inteligente" (cj_direct/aliexpress_direct) no pasan por esta tabla —
+  // coverage queda vacío y todo el bloque de abajo se comporta EXACTAMENTE
+  // igual que antes (lista genérica), sin romper nada de lo que ya funciona.
+  const [coverage, setCoverage] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    if (product.source_type === 'catalog_pro' && product.source_catalog_id) {
+      catalogProCountryCoverage({ productId: product.source_catalog_id }).then(rows => { if (alive) setCoverage(rows || []); });
+    } else {
+      setCoverage([]);
+    }
+    return () => { alive = false; };
+  }, [product.source_type, product.source_catalog_id]);
+  const hasCoverageData = coverage.length > 0;
+  const cuCoverageRow = coverage.find(c => c.country_code === 'CU') || null;
   // El DESTINO ya no es un modo fijo del producto — lo elige el comprador en
   // cada compra. 'CU' activa la ruta vía nuestro hub (tiempo combinado,
-  // igual que siempre); cualquier otro país real de CJ_COUNTRIES es envío
-  // directo de CJ, sin pasar por el hub. Por defecto arranca en Cuba (el
-  // destino más común de esta app) — el comprador siempre puede cambiarlo.
-  const [destCountry, setDestCountry] = useState('CU');
-  const [primaryShipQuote, setPrimaryShipQuote] = useState({ qty: null, country: null, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: false });
-  const [cartShipQuotes, setCartShipQuotes] = useState({}); // { [variantId]: { qty, country, total_price, aging, is_slow, days_min, days_max, loading, failed } }
+  // igual que siempre); cualquier otro país es envío directo, sin hub.
+  // Arranca en la REGIÓN REAL GUARDADA del comprador (profiles.shop_country),
+  // no en Cuba fija: antes, alguien con su tienda en España abría el diálogo
+  // y lo primero que veía era "Cuba" (bug real reportado). Siempre puede
+  // cambiarlo.
+  const [destCountry, setDestCountry] = useState(() => buyerCountryCodeOf(user));
+  // Lista real de países que el comprador puede elegir. Si YA hay cobertura
+  // real verificada guardada, se muestran SOLO los países con cobertura
+  // confirmada — nunca la lista genérica.
+  //
+  // BUG REAL corregido (Daniel lo vio en producción): sin verificación, esto
+  // decidía la lista según product.catalogProvider, que sale de un JOIN a
+  // catalog_pro_products… una tabla que el RLS NO deja leer a un comprador.
+  // Para cualquier comprador real ese dato llegaba SIEMPRE en null, así que
+  // catalogProvider caía a 'cj' y se mostraba la lista genérica de 10 países
+  // incluso en productos de AliExpress — el filtro "solo Cuba" nunca se
+  // aplicó en producción, solo parecía funcionar viéndolo como admin. Ya no
+  // se depende de ese dato: sin verificación se ofrece la lista genérica
+  // (para AMBOS proveedores), y el backend cotiza de verdad el país elegido
+  // y responde con el motivo real si ese destino no se puede servir.
+  const selectableCountries = hasCoverageData
+    ? (() => {
+        const confirmed = coverage.filter(c => c.available).map(c => c.country_code);
+        // Red de seguridad real: un producto verificado sin NINGÚN país
+        // confirmado (caso raro) nunca deja el selector vacío — cae a Cuba.
+        return confirmed.length > 0 ? confirmed : ['CU'];
+      })()
+    : ['CU', ...CJ_COUNTRIES.map(c => c.code)];
+  const countryLabel = (code) => code === 'CU' ? '🇨🇺 Cuba' : countryNameOf(code);
+  useEffect(() => {
+    if (selectableCountries.length && !selectableCountries.includes(destCountry)) setDestCountry(selectableCountries[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectableCountries.join(',')]);
+  const [primaryShipQuote, setPrimaryShipQuote] = useState({ qty: null, country: null, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: false, reason: null });
+  const [cartShipQuotes, setCartShipQuotes] = useState({}); // { [variantId]: { qty, country, total_price, aging, is_slow, days_min, days_max, loading, failed, reason } }
   // BUG REAL ya visto (Daniel, 2-3 veces seguidas): el envío de una variante
   // se mostraba como $0 un instante al agregar/cambiar cantidad. Causa
   // exacta: getCatalogProBuyerFreightQuote() traga cualquier error real de
@@ -553,14 +620,22 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
         if (cancelled) return;
         if (r?.applicable === false) {
           if (attempt < 3) { timer = setTimeout(() => fetchQuote(attempt + 1), 900); return; }
-          setPrimaryShipQuote(q => ({ ...q, loading: false, failed: true }));
+          setPrimaryShipQuote(q => ({ ...q, loading: false, failed: true, reason: null }));
           return;
         }
-        setPrimaryShipQuote({ qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false });
+        // status:'no_disponible' llega con applicable:true y total_price:0 —
+        // NUNCA es una cotización real de $0, es el backend diciendo "no se
+        // puede cobrar esto real" (ver reason). Tratarlo igual que un fallo:
+        // nunca se muestra ni se cobra $0 como si fuera envío gratis.
+        if (r?.status === 'no_disponible') {
+          setPrimaryShipQuote({ qty, country: destCountry, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: true, reason: r?.reason || null });
+          return;
+        }
+        setPrimaryShipQuote({ qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false, reason: null });
       }).catch(() => {
         if (cancelled) return;
         if (attempt < 3) { timer = setTimeout(() => fetchQuote(attempt + 1), 900); return; }
-        setPrimaryShipQuote(q => ({ ...q, loading: false, failed: true }));
+        setPrimaryShipQuote(q => ({ ...q, loading: false, failed: true, reason: null }));
       });
     };
     timer = setTimeout(() => fetchQuote(0), 600);
@@ -585,14 +660,21 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
         if (cancelled) return;
         if (r?.applicable === false) {
           if (attempt < 3) { timers.push(setTimeout(() => fetchLine(l, attempt + 1), 900)); return; }
-          setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { ...(qs[l.variantId] || {}), loading: false, failed: true } }));
+          setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { ...(qs[l.variantId] || {}), loading: false, failed: true, reason: null } }));
           return;
         }
-        setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { qty: l.qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false } }));
+        // Mismo bug real corregido que en la línea principal: status:
+        // 'no_disponible' nunca es un $0 real — se trata como fallo, con el
+        // motivo real del backend, nunca como envío gratis.
+        if (r?.status === 'no_disponible') {
+          setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { qty: l.qty, country: destCountry, total_price: 0, aging: null, is_slow: false, days_min: null, days_max: null, loading: false, failed: true, reason: r?.reason || null } }));
+          return;
+        }
+        setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { qty: l.qty, country: destCountry, total_price: Number(r?.total_price) || 0, aging: r?.aging || null, is_slow: !!r?.is_slow, days_min: r?.days_min ?? null, days_max: r?.days_max ?? null, loading: false, failed: false, reason: null } }));
       }).catch(() => {
         if (cancelled) return;
         if (attempt < 3) { timers.push(setTimeout(() => fetchLine(l, attempt + 1), 900)); return; }
-        setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { ...(qs[l.variantId] || {}), loading: false, failed: true } }));
+        setCartShipQuotes(qs => ({ ...qs, [l.variantId]: { ...(qs[l.variantId] || {}), loading: false, failed: true, reason: null } }));
       });
     };
     const t = setTimeout(() => { cartLines.forEach(l => fetchLine(l, 0)); }, 600);
@@ -870,7 +952,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
 
           <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
             <div style={{ width: 54, height: 54, borderRadius: 14, background: "#1a1a1a", overflow: "hidden", flexShrink: 0 }}>
-              {(variant?.image || product.img || product.image) && <img src={variant?.image || product.img || product.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
+              {(variant?.image || product.img || product.image) && <img src={variant?.image || product.img || product.image} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontSize: 13, fontWeight: 700, color: T1 }}>{product.title}</p>
@@ -892,13 +974,15 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
                 onBlur={commitQtyText}
                 onKeyDown={e => { if (e.key === "Enter") { commitQtyText(); e.currentTarget.blur(); } }}
                 style={{ fontSize: 15, fontWeight: 800, color: qtyOver ? "#ef4444" : T1, width: 34, textAlign: "center", background: "none", border: "none", outline: "none", padding: 0, fontFamily: "inherit", transition: "color .2s" }} />
-              <button className="p" disabled={availStock != null && qty >= availStock}
-                onClick={() => setQty(q => availStock != null ? Math.min(availStock, q + 1) : q + 1)}
-                style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${B}`, background: "none", color: (availStock != null && qty >= availStock) ? T3 : T1, fontSize: 18, fontWeight: 700, lineHeight: 1, cursor: (availStock != null && qty >= availStock) ? "not-allowed" : "pointer" }}>+</button>
+              <button className="p" disabled={maxQty != null && qty >= maxQty}
+                onClick={() => setQty(q => maxQty != null ? Math.min(maxQty, q + 1) : q + 1)}
+                style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${B}`, background: "none", color: (maxQty != null && qty >= maxQty) ? T3 : T1, fontSize: 18, fontWeight: 700, lineHeight: 1, cursor: (maxQty != null && qty >= maxQty) ? "not-allowed" : "pointer" }}>+</button>
             </div>
           </div>
           {qtyOver ? (
-            <p style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginBottom: 12 }}>⚠️ Solo quedan {availStock} disponibles</p>
+            <p style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginBottom: 12 }}>{esAliExpress ? '⚠️ Este producto de AliExpress permite máximo 1 unidad por pedido' : `⚠️ Solo quedan ${maxQty} disponibles`}</p>
+          ) : esAliExpress ? (
+            <p style={{ fontSize: 10, color: T3, fontWeight: 500, marginBottom: 12 }}>Máximo 1 unidad por pedido en este producto</p>
           ) : availStock != null && (
             <p style={{ fontSize: 10, color: availStock <= 5 ? G : T3, fontWeight: availStock <= 5 ? 700 : 500, marginBottom: 12 }}>
               {availStock <= 0 ? "⚠️ Sin stock disponible ahora mismo" : availStock <= 5 ? `¡Últimas ${availStock} disponibles!` : `${availStock} disponibles`}
@@ -917,7 +1001,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
               {cartLinesCalc.map((l, i) => (
                 <div key={l.variantId} style={{ display: "flex", alignItems: "center", gap: 8, background: soft, border: `1px solid ${B}`, borderRadius: 11, padding: "9px 11px", marginBottom: 7 }}>
                   <div style={{ width: 34, height: 34, borderRadius: 8, background: "#1a1a1a", overflow: "hidden", flexShrink: 0 }}>
-                    {l.image && <img src={l.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
+                    {l.image && <img src={l.image} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: T1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 2}. {Object.values(l.attrs || {}).join(" / ") || "Variante"}</div>
@@ -929,7 +1013,7 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
                   </div>
                   <button className="p" onClick={() => setCartLineQty(l.variantId, l.qty - 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>−</button>
                   <span style={{ fontSize: 12.5, fontWeight: 800, color: T1, width: 20, textAlign: "center" }}>{l.qty}</span>
-                  <button className="p" disabled={l.stock != null && l.qty >= l.stock} onClick={() => setCartLineQty(l.variantId, l.qty + 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: (l.stock != null && l.qty >= l.stock) ? T3 : T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>+</button>
+                  <button className="p" disabled={esAliExpress ? l.qty >= 1 : (l.stock != null && l.qty >= l.stock)} onClick={() => setCartLineQty(l.variantId, l.qty + 1)} style={{ width: 24, height: 24, borderRadius: 7, border: `1px solid ${B}`, background: "none", color: (esAliExpress ? l.qty >= 1 : (l.stock != null && l.qty >= l.stock)) ? T3 : T1, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>+</button>
                   <button className="p" onClick={() => removeCartLine(l.variantId)} aria-label="Quitar" style={{ width: 24, height: 24, borderRadius: 7, border: "none", background: "none", color: T3, fontSize: 15, lineHeight: 1 }}>×</button>
                 </div>
               ))}
@@ -954,17 +1038,26 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
             </div>
           )}
 
-          {/* El comprador elige el país de destino AQUÍ, antes de ver el total
-              — Cuba primero (vía nuestro hub, tiempo combinado), debajo el
-              resto de países reales donde CJ envía directo. Precio y tiempo
-              se recotizan en vivo (con debounce) cada vez que cambia. */}
+          {/* El comprador elige el país de destino AQUÍ, antes de ver el total.
+              Si el producto YA tiene cobertura real verificada (tabla
+              catalog_pro_country_coverage), la lista muestra SOLO los países
+              con cobertura confirmada — nunca una lista genérica. Si no hay
+              verificación todavía, se ofrece la lista completa y el backend
+              cotiza de verdad el país elegido (ver selectableCountries
+              arriba) — nada se rompe para productos sin verificar. */}
           {isCatalogPro && (
             <div style={{ marginBottom: 12 }}>
               <label style={lbl}>¿A qué país lo enviamos?</label>
               <select style={{ ...inp, appearance: "none", cursor: "pointer" }} value={destCountry} onChange={e => setDestCountry(e.target.value)}>
-                <option value="CU">🇨🇺 Cuba</option>
-                {CJ_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                {selectableCountries.map(code => <option key={code} value={code}>{countryLabel(code)}</option>)}
               </select>
+              {hasCoverageData && (
+                <p style={{ fontSize: 10, color: T2, marginTop: 4 }}>
+                  {cuCoverageRow?.available === false
+                    ? "Este producto no tiene envío confirmado a Cuba — solo se muestran los países con cobertura real verificada."
+                    : "Cobertura verificada — solo se muestran los países con envío real confirmado."}
+                </p>
+              )}
             </div>
           )}
 
@@ -979,10 +1072,44 @@ export function BuyModal({ product, user, onClose, flash, onSuccess, initialQty 
                   configurable; a cualquier otro país es el tránsito real de
                   CJ tal cual) — nunca se calcula ni se inventa un rango aquí
                   en el frontend. */}
+              {/* Cuando el estimado real es un solo número (AliExpress da un
+                  único día por país, no un rango) se dice "en 7 días", nunca
+                  "en 7 a 7 días". */}
               {catalogProShipDays && (
-                <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>Llega en {catalogProShipDays.days_min} a {catalogProShipDays.days_max} días</p>
+                <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>
+                  Llega en {catalogProShipDays.days_min === catalogProShipDays.days_max
+                    ? catalogProShipDays.days_min
+                    : `${catalogProShipDays.days_min} a ${catalogProShipDays.days_max}`} días
+                </p>
               )}
-              {destCountry === "CU" && <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>🇨🇺 Envío disponible a Cuba</p>}
+              {/* BUG REAL corregido: cuando el backend responde
+                  status:'no_disponible' (ej. AliExpress a un país que no es
+                  Cuba, o un producto real sin cobertura confirmada) sigue
+                  viniendo con applicable:true y total_price:0 — antes eso se
+                  guardaba como si fuera una cotización real de $0 (envío
+                  "gratis" falso). Ahora se muestra el motivo REAL que manda
+                  el backend, nunca un precio inventado. */}
+              {shipQuoteFailed && (primaryShipQuote.reason || Object.values(cartShipQuotes).find(q => q?.reason)?.reason) && (
+                <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>{primaryShipQuote.reason || Object.values(cartShipQuotes).find(q => q?.reason)?.reason}</p>
+              )}
+              {destCountry === "CU" && shipQuoteReady && <p style={{ fontSize: 10, color: T2, marginTop: 3 }}>🇨🇺 Envío disponible a Cuba</p>}
+              {/* Stock REAL de la variante elegida, para el país que el comprador
+                  ya eligió arriba — viene de la cobertura ya guardada al
+                  importar/verificar (catalog_pro_country_coverage.stock_by_variant),
+                  nunca se consulta nada en vivo. Reportado por Daniel: el stock
+                  real de AliExpress y CJ es genuinamente distinto por país (ver
+                  la investigación real en ali-import-product) — se muestra el
+                  del país elegido, no un número genérico del producto. */}
+              {variant?.sku && (() => {
+                const covRow = coverage.find(c => c.country_code === destCountry);
+                const stockReal = covRow?.stock_by_variant?.[variant.sku];
+                if (stockReal == null) return null;
+                return (
+                  <p style={{ fontSize: 10, color: stockReal <= 0 ? "#ef4444" : T2, marginTop: 3, fontWeight: stockReal <= 0 ? 700 : 500 }}>
+                    {stockReal <= 0 ? `⚠️ Sin stock real confirmado para ${countryLabel(destCountry)}` : `📦 ${stockReal} disponibles reales en ${countryLabel(destCountry)}`}
+                  </p>
+                );
+              })()}
             </div>
           )}
 
@@ -2194,7 +2321,7 @@ function PCard({ p, onClick, isFav, onFav, view = "grid" }) {
             se acerca a la pantalla — antes las ~18+ fotos de la Tienda se
             pedían TODAS de una vez al entrar, aunque la mayoría quedara fuera
             de la vista. Nunca cambia qué se ve, solo CUÁNDO se pide. */}
-        <img src={thumbImg} alt={p.title} loading="lazy" decoding="async"
+        <img src={thumbImg} alt={p.title} loading="lazy" decoding="async" referrerPolicy="no-referrer"
           style={{ width: "100%", ...(view === "muro" ? { height: "auto", display: "block" } : { height: "100%", objectFit: "cover" }), transition: "transform .3s" }}
           onError={e => { if (e.target.src !== img) e.target.src = img; else e.target.src = "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400"; }} />
         {flag && <div style={{ position: "absolute", bottom: 7, left: 7, fontSize: 14, filter: "drop-shadow(0 1px 2px rgba(0,0,0,.6))" }}>{flag}</div>}
@@ -2382,7 +2509,7 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
   // vendedor deba escribir — se cotiza real por pedido según el destino
   // que elija el comprador (ver BuyModal), así que ni se pide ni bloquea
   // publicar por faltar ese campo.
-  const isCatalogPro = !!product.source_catalog_id;
+  const isCatalogPro = !!product.source_catalog_id || ['cj_direct', 'aliexpress_direct'].includes(product.source_type);
   // Categoría de servicio: propia (config.serviceCats), texto libre guardado en
   // `subcat` — nunca en `cat` (esa tiene FK a categories, categorías de producto).
   const serviceCats = (Array.isArray(pCfg.serviceCats) && pCfg.serviceCats.length) ? pCfg.serviceCats : DEFAULT_SERVICE_CATS;
@@ -2526,7 +2653,7 @@ export function EditProductModal({ product, onClose, onSave, onCreate, flash, on
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
           {imgs.map((src, i) => (
             <div key={i} style={{ position: "relative", width: 76, height: 76, borderRadius: 10, overflow: "hidden", border: `1px solid ${B}` }}>
-              <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
+              <img src={src} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
               <button onClick={() => setImgs(prev => prev.filter((_, j) => j !== i))} style={{ position: "absolute", top: 2, right: 2, width: 20, height: 20, borderRadius: "50%", border: "none", background: "rgba(0,0,0,.7)", color: "#fff", fontSize: 12, cursor: "pointer", lineHeight: 1 }}>×</button>
               {i === 0 && <span style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,.6)", color: "#fff", fontSize: 8, textAlign: "center", padding: "1px 0" }}>Principal</span>}
             </div>
@@ -2909,7 +3036,7 @@ function ProductImageViewer({ images = [], index = 0, setIndex, onClose, title, 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 9000, background: "#000", overflow: "hidden", touchAction: "none" }}
       onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}>
-      <img src={list[index] || CAROUSEL_FALLBACK} alt="" draggable={false}
+      <img src={list[index] || CAROUSEL_FALLBACK} alt="" draggable={false} referrerPolicy="no-referrer"
         onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }}
         style={{ position: "absolute", inset: 0, margin: "auto", maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
           transform: `translate(${z.tx}px, ${z.ty}px) scale(${z.scale})`, transition: g.current.mode ? "none" : "transform .2s ease", pointerEvents: "none", userSelect: "none" }} />
@@ -3016,7 +3143,9 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
   const scrollDir = useScrollDir(scrollRef);
   const backHidden = scrollDir === "down";
   // Fotos del producto (todas), índice actual y visor a pantalla completa.
-  const imgs = (p.images && p.images.length) ? p.images : (p.image ? [p.image] : (p.img ? [p.img] : []));
+  // baseImgs = las de la galería del producto; `imgs` (más abajo, cuando ya
+  // se conocen las variantes) les suma las fotos propias de cada variante.
+  const baseImgs = (p.images && p.images.length) ? p.images : (p.image ? [p.image] : (p.img ? [p.img] : []));
   const [imgIdx, setImgIdx] = useState(0);
   const [viewerOpen, setViewerOpen] = useState(false);
   useEffect(() => { setImgIdx(0); setViewerOpen(false); }, [p.id]);
@@ -3069,13 +3198,24 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
   const { labels: variantLabels, valuesByLabel: variantValuesByLabel } = useMemo(() => groupVariantAttrs(variants || []), [variants]);
   const activeVariant = useMemo(() => ((variants && variants.length) ? resolveVariantBy(variants, selectedAttrs) : null), [variants, selectedAttrs]);
   const displayPrice = activeVariant && activeVariant.price != null ? activeVariant.price : p.price;
-  // La foto principal salta a la de la variante elegida, si tiene una propia
-  // entre las fotos ya subidas del producto.
+  // BUG REAL corregido (reportado por Daniel): en un producto de AliExpress,
+  // elegir otro color NO cambiaba la foto; en CJ sí. Causa real confirmada
+  // con datos de producción: la foto de cada variante de CJ SIEMPRE está
+  // dentro de la galería del producto (4 de 4 reales), y la de AliExpress
+  // NUNCA lo está (0 de 4) — y el salto de foto se hacía buscando esa imagen
+  // DENTRO de la galería, así que en AliExpress no se encontraba nunca y no
+  // pasaba nada. Ahora la galería incluye también las fotos propias de las
+  // variantes, así que el salto funciona igual para los dos proveedores (y
+  // además esas fotos quedan visibles en las miniaturas y en el visor).
+  const imgs = useMemo(() => {
+    const extra = (variants || []).map(v => v.image).filter(Boolean).filter(src => !baseImgs.includes(src));
+    return [...baseImgs, ...new Set(extra)];
+  }, [baseImgs.join("|"), variants]);
   useEffect(() => {
     if (!activeVariant?.image) return;
     const idx = imgs.indexOf(activeVariant.image);
     if (idx >= 0) setImgIdx(idx);
-  }, [activeVariant?.image]);
+  }, [activeVariant?.image, imgs]);
 
   // Estimado de envío ANTES de comprar (visible en la ficha, no solo dentro
   // del diálogo de pago) — se cotiza hacia la REGIÓN REAL guardada del
@@ -3085,13 +3225,35 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
   // su región es Cuba, o no ha elegido región todavía, se mantiene el
   // estimado hacia Cuba de siempre. El comprador puede elegir cualquier otro
   // país real al momento de comprar, donde se recotiza con su destino exacto.
-  const isCatalogPro = p.source_type === 'catalog_pro';
-  const SHOP_COUNTRY_TO_CJ = { eeuu: 'US', espana: 'ES', cuba: 'CU' };
-  const SHOP_COUNTRY_LABEL = { eeuu: 'Estados Unidos', espana: 'España', cuba: 'Cuba' };
-  const buyerShopCountry = user?.profile?.shop_country || null;
-  const buyerDestCode = SHOP_COUNTRY_TO_CJ[buyerShopCountry] || 'CU';
-  const buyerDestLabel = SHOP_COUNTRY_LABEL[buyerShopCountry] || null;
+  const isCatalogPro = ['catalog_pro', 'cj_direct', 'aliexpress_direct'].includes(p.source_type);
+  // Cobertura real por país — solo existe para productos del Catálogo Pro
+  // curado por el admin (ver mismo criterio en BuyModal). Si el producto no
+  // tiene verificación todavía, coverage queda vacío y no se muestra nada
+  // aquí — la ficha se ve EXACTAMENTE igual que antes.
+  const [coverage, setCoverage] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    if (p.source_type === 'catalog_pro' && p.source_catalog_id) {
+      catalogProCountryCoverage({ productId: p.source_catalog_id }).then(rows => { if (alive) setCoverage(rows || []); });
+    } else {
+      setCoverage([]);
+    }
+    return () => { alive = false; };
+  }, [p.source_type, p.source_catalog_id]);
+  const cuCoverageRow = coverage.find(c => c.country_code === 'CU') || null;
+  const buyerDestCode = buyerCountryCodeOf(user);
+  const buyerDestLabel = countryNameOf(buyerDestCode);
+  // Cobertura real hacia la REGIÓN DEL COMPRADOR — es la que manda en el
+  // resumen principal. Cuba solo se menciona aparte (y nunca contradiciendo
+  // este resumen) cuando la región del comprador no es Cuba.
+  const buyerCoverageRow = coverage.find(c => c.country_code === buyerDestCode) || null;
+  const otherCoverageAvailable = coverage.filter(c => c.country_code !== buyerDestCode && c.available).length;
   const [shipEstimate, setShipEstimate] = useState(null);
+  // Días reales hacia su región: primero la cotización en vivo, y si esa no
+  // trae días, los de la verificación real de cobertura. Nunca se inventa un
+  // número: si ninguna de las dos fuentes lo tiene, no se muestra el tiempo.
+  const buyerDaysMin = shipEstimate?.days_min ?? buyerCoverageRow?.days_min ?? null;
+  const buyerDaysMax = shipEstimate?.days_max ?? buyerCoverageRow?.days_max ?? null;
   useEffect(() => {
     setShipEstimate(null);
     if (!isCatalogPro || !p.id) return;
@@ -3228,9 +3390,19 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
           {imgs.map((src, idx) => (
             <button key={idx} onClick={() => setImgIdx(idx)} aria-label={`Foto ${idx + 1}`}
               style={{ flexShrink: 0, width: 52, height: 52, borderRadius: 10, overflow: "hidden", padding: 0, cursor: "pointer", background: "#161616", border: idx === imgIdx ? `2px solid ${G}` : `1px solid ${B}`, opacity: idx === imgIdx ? 1 : 0.72, transition: "opacity .2s, border-color .2s" }}>
-              <img src={src || CAROUSEL_FALLBACK} alt="" onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              <img src={src || CAROUSEL_FALLBACK} alt="" referrerPolicy="no-referrer" onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Video real del producto (AliExpress, ver ali-import-product) — solo
+          aparece si el producto de verdad trae uno; reproductor simple con
+          la miniatura real del proveedor como portada, nunca inventada. */}
+      {p.video_url && (
+        <div style={{ padding: "12px 16px 0" }}>
+          <video src={p.video_url} poster={p.video_poster_url || undefined} controls playsInline referrerPolicy="no-referrer"
+            style={{ width: "100%", borderRadius: 12, background: "#000", display: "block" }} />
         </div>
       )}
 
@@ -3267,19 +3439,43 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
 
         {isCatalogPro && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", background: `${G}12`, border: `1px solid ${G}30`, borderRadius: 100, padding: "5px 11px", marginBottom: 12, width: "fit-content" }}>
-            {buyerDestCode === "CU" ? (
-              <>
-                <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>✈️ Envío disponible a Cuba y a otros países</span>
-                {shipEstimate?.days_min != null && <span style={{ fontSize: 10.5, color: T2 }}>· a Cuba llega en {shipEstimate.days_min} a {shipEstimate.days_max} días</span>}
-              </>
+            {/* El resumen SIEMPRE habla de la región real guardada del
+                comprador, nunca de Cuba por defecto. Si la verificación real
+                dice que a SU región no llega, se le dice claro en vez de
+                prometerle un envío que no existe. */}
+            {buyerCoverageRow && !buyerCoverageRow.available ? (
+              <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>
+                ⚠️ Sin envío directo a {buyerDestLabel}
+                {otherCoverageAvailable > 0 ? ` — disponible a otros ${otherCoverageAvailable} países` : ""}
+              </span>
             ) : (
               <>
-                <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>✈️ Envío disponible a {buyerDestLabel || "tu país"} y a otros países</span>
-                {shipEstimate?.days_min != null && <span style={{ fontSize: 10.5, color: T2 }}>— a {buyerDestLabel} llega en {shipEstimate.days_min} a {shipEstimate.days_max} días</span>}
+                <span style={{ fontSize: 11, fontWeight: 700, color: T1 }}>✈️ Envío disponible a {buyerDestLabel} y a otros países</span>
+                {buyerDaysMin != null && (
+                  <span style={{ fontSize: 10.5, color: T2 }}>
+                    — a {buyerDestLabel} llega en {buyerDaysMin === buyerDaysMax ? `${buyerDaysMin}` : `${buyerDaysMin} a ${buyerDaysMax}`} días
+                  </span>
+                )}
               </>
             )}
           </div>
         )}
+
+        {/* Stock REAL para la región del comprador (ya guardada, sin
+            consultar nada en vivo) — de la variante que tenga elegida en
+            este momento. Reportado por Daniel: el stock real de AliExpress
+            y CJ es genuinamente distinto por país (ver la investigación
+            real en ali-import-product), así que se muestra el de SU región,
+            nunca un número genérico del producto. */}
+        {isCatalogPro && activeVariant?.sku && buyerCoverageRow?.available && (() => {
+          const stockReal = buyerCoverageRow?.stock_by_variant?.[activeVariant.sku];
+          if (stockReal == null) return null;
+          return (
+            <p style={{ fontSize: 10.5, color: stockReal <= 0 ? "#ef4444" : T2, fontWeight: stockReal <= 0 ? 700 : 500, marginBottom: 10 }}>
+              {stockReal <= 0 ? `⚠️ Sin stock real confirmado para ${buyerDestLabel}` : `📦 ${stockReal} disponibles reales en ${buyerDestLabel}`}
+            </p>
+          );
+        })()}
 
         {/* Selector de variantes (color/talla/etc.), si el producto tiene */}
         {!isService && variantLabels.length > 0 && (
@@ -3384,6 +3580,34 @@ export function ProductDetail({ product: initialProduct, onBack, onDelivery, onC
             producto los recalcula el trigger del backend, nunca el frontend. */}
         <ProductReviews product={p} user={user} flash={flash} requireAuth={requireAuth} />
       </div>
+
+      {/* Cobertura real por país — visible ANTES del botón "Comprar ahora",
+          como mínimo si hay envío a Cuba. Solo aparece si el producto YA
+          tiene verificación real guardada (ver coverage arriba); un producto
+          sin verificar no muestra nada aquí, igual que siempre. */}
+      {isCatalogPro && coverage.length > 0 && (
+        <div style={{ margin: "0 18px 14px", borderRadius: 13, padding: "12px 14px", background: buyerCoverageRow?.available ? "rgba(34,197,94,.12)" : "rgba(239,68,68,.12)", border: `1px solid ${buyerCoverageRow?.available ? "rgba(34,197,94,.35)" : "rgba(239,68,68,.35)"}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>{buyerCoverageRow?.available ? "✅" : "❌"}</span>
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: buyerCoverageRow?.available ? "#22C55E" : "#ef4444" }}>
+              {buyerCoverageRow?.available
+                ? `Envío a ${buyerDestLabel} disponible${buyerDaysMin != null ? ` — llega en ${buyerDaysMin === buyerDaysMax ? buyerDaysMin : `${buyerDaysMin} a ${buyerDaysMax}`} días` : ""}`
+                : `Sin envío a ${buyerDestLabel}`}
+            </span>
+          </div>
+          {/* Nota aparte sobre Cuba (mercado principal de RETADOR) — SOLO si
+              la región del comprador no es Cuba, para que nunca reemplace ni
+              contradiga el resumen de arriba. */}
+          {buyerDestCode !== "CU" && cuCoverageRow && (
+            <p style={{ fontSize: 10.5, color: T2, marginTop: 6 }}>
+              {cuCoverageRow.available ? "🇨🇺 También tiene envío confirmado a Cuba." : "🇨🇺 Este producto no tiene envío a Cuba."}
+            </p>
+          )}
+          {otherCoverageAvailable > 0 && (
+            <p style={{ fontSize: 10, color: T2, marginTop: 6 }}>Envío real confirmado a {otherCoverageAvailable} país{otherCoverageAvailable === 1 ? "" : "es"} más — elige el destino al comprar.</p>
+          )}
+        </div>
+      )}
 
       {/* Acciones — sistema plano (Bloque 1): el CTA principal queda solo en
           su fila, dominante por separación y color; las acciones secundarias
@@ -3617,7 +3841,7 @@ export function CartScreen({ user, onBack, flash, onChange }) {
                 return (
                   <div key={line.id} style={{ display: "flex", gap: 10, background: isDark ? "#0d0d0d" : CARD, border: `1px solid ${B}`, borderRadius: 14, padding: 12, marginBottom: 8 }}>
                     <div style={{ width: 56, height: 56, borderRadius: 11, background: "#1a1a1a", overflow: "hidden", flexShrink: 0 }}>
-                      {img && <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
+                      {img && <img src={img} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: 12.5, fontWeight: 700, color: T1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{line.product.title}</p>
@@ -4071,7 +4295,7 @@ function PublishProductForm({ onClose, onBack, onPublish, user, flash, initialCa
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(cols, 3)},1fr)`, gap: 8, marginBottom: 12 }}>
             {form.images.map((img, i) => (
               <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: isDark?"#141414":CARD }}>
-                <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
+                <img src={img} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
                 <button onClick={() => removeImage(i)} className="p" style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,.85)", border: "none", borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", color: isDark?"#fff":T1, fontSize: 12, fontWeight: 700 }}>×</button>
                 {i === 0 && <div style={{ position: "absolute", bottom: 4, left: 4, background: G, color: "#000", fontSize: 9, fontWeight: 800, padding: "3px 7px", borderRadius: 4 }}>PRINCIPAL</div>}
               </div>
@@ -4429,7 +4653,7 @@ function PublishServiceForm({ onClose, onBack, onPublish, user, flash }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 12 }}>
             {form.images.map((img, i) => (
               <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", background: isDark?"#141414":CARD }}>
-                <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
+                <img src={img} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.target.src = CAROUSEL_FALLBACK; }} />
                 <button onClick={() => removeImage(i)} className="p" style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,.85)", border: "none", borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", color: isDark?"#fff":T1, fontSize: 12, fontWeight: 700 }}>×</button>
                 {i === 0 && <div style={{ position: "absolute", bottom: 4, left: 4, background: G, color: "#000", fontSize: 9, fontWeight: 800, padding: "3px 7px", borderRadius: 4 }}>PRINCIPAL</div>}
               </div>

@@ -76,6 +76,29 @@ Correcciones que salieron de la comprobación: en Acercamiento/Noria la etiqueta
 ### 6. Rendimiento
 Sin cambio visual (prueba píxel a píxel contra la v8.7): grano y fondos fijos se dibujan una vez y se copian; sombras grandes de tarjetas pre-dibujadas; muro de fotos de Vitrina girado una sola vez a resolución de pantalla (antes se giraba y ampliaba ×2 en cada fotograma). Durante la generación: tiempo restante estimado y botón **Cancelar**.
 
+Tiempo de **dibujo** por video (sin codificar: aquí no hay codificador H.264), con la CPU 6× más lenta, a la velocidad Ideal nueva. v8.7 y v8.8 dibujan el mismo video; la v8.8 incluye además los precios nuevos. Hay un ruido de ±7 % entre mediciones.
+
+| Estilo | Dura | Calidad | ms/fotograma v8.7 → v8.8 | 60 fps v8.7 → v8.8 | 30 fps v8.8 | × Directo |
+|---|---|---|---|---|---|---|
+| Acercamiento | 17 s | Alta | 198 → 198 | 197 → 198 s | 99 s | 1,6× |
+| Acercamiento | 17 s | Ligera | 95 → 102 | 95 → 102 s | 51 s | 1,9× |
+| Noria | 15 s | Alta | 195 → 193 | 173 → 171 s | 85 s | 1,6× |
+| Noria | 15 s | Ligera | 90 → 95 | 80 → 84 s | 42 s | 1,8× |
+| Secuencial | 17 s | Alta | 145 → 134 | 148 → 137 s | 69 s | 1,1× |
+| Secuencial | 17 s | Ligera | 64 → 68 | 66 → 70 s | 35 s | 1,3× |
+| Mosaico | 12 s | Alta | 192 → 188 | 139 → 137 s | 68 s | 1,6× |
+| Mosaico | 12 s | Ligera | 92 → 92 | 67 → 67 s | 34 s | 1,8× |
+| Antes/Después | 12 s | Alta | 228 → 228 | 167 → 167 s | 84 s | 1,9× |
+| Antes/Después | 12 s | Ligera | 107 → 114 | 78 → 83 s | 42 s | 2,2× |
+| Directo | 14 s | Alta | 117 → 121 | 99 → 103 s | 51 s | 1,0× |
+| Directo | 14 s | Ligera | 54 → 53 | 46 → 45 s | 22 s | 1,0× |
+| Vitrina | 23 s | Alta | 493 → 266 | 692 → 374 s | 187 s | 2,2× |
+| Vitrina | 23 s | Ligera | 307 → 132 | 432 → 186 s | 93 s | 2,5× |
+| Desfile | 22 s | Alta | 418 → 253 | 540 → 327 s | 164 s | 2,1× |
+| Desfile | 22 s | Ligera | 281 → 126 | 363 → 163 s | 82 s | 2,4× |
+
+La meta "ningún estilo más del doble que Directo" no se alcanza del todo en Vitrina y Desfile (2,1–2,5×) ni en Antes/Después Ligera (2,2×, código sin cambios: es ruido o su costo propio). Lo que queda caro es dibujar fotos y emojis grandes girados y los difuminados, que en este entorno se dibujan por CPU; en un teléfono se dibujan con la GPU y los costos cambian, así que hay que confirmarlo en el Poco F7 Pro y el Redmi Note 11.
+
 ### 7. Peso estimado antes de generar y real después
 "Peso estimado ≈ X MB · dura N s" con la duración real del estilo y la velocidad, la calidad, los fps y si lleva audio (128 kb/s). Después, el peso real en la línea de diagnóstico.
 

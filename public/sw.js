@@ -7,7 +7,7 @@
 //   · Otros orígenes (Supabase, imágenes externas): NO se tocan → van directo a la red.
 // No interfiere con el login de Google, el perfil, los productos ni las tasas.
 // ─────────────────────────────────────────────────────────────────────────────
-const CACHE = "retador-pwa-v237";
+const CACHE = "retador-pwa-v238";
 const START = self.registration.scope; // p.ej. https://retadormarketplace.es/
 
 self.addEventListener("install", (event) => {
@@ -36,16 +36,20 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return; // solo mismo origen
 
   // Navegaciones (abrir/recargar la app): red primero, copia como respaldo.
+  // Solo la PÁGINA DE INICIO se guarda como START: el Generador de Video
+  // (herramientas/video.html) también es una navegación (dentro de un iframe)
+  // y antes sobreescribía la copia de la app, que sin red arrancaba en la herramienta.
   if (req.mode === "navigate") {
+    const esInicio = url.pathname === new URL(START).pathname || url.pathname === new URL(START).pathname + "index.html";
     event.respondWith((async () => {
       try {
         const fresh = await fetch(req);
         const cache = await caches.open(CACHE);
-        cache.put(START, fresh.clone()).catch(() => {});
+        cache.put(esInicio ? START : req, fresh.clone()).catch(() => {});
         return fresh;
       } catch (e) {
         const cache = await caches.open(CACHE);
-        return (await cache.match(START)) || (await cache.match(req)) || Response.error();
+        return (esInicio ? await cache.match(START) : null) || (await cache.match(req)) || Response.error();
       }
     })());
     return;

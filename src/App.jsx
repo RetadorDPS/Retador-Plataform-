@@ -138,6 +138,18 @@ function AuctionScheduleGate({ schedule, dark = true, children }) {
 import { setThemeColor } from "./pwa/themeColor.js";
 import { getPlanPerks } from "./shared/planPerks.js";
 
+// Datos de un producto real que usa el Generador de Video (foto principal,
+// título, precio, moneda, existencias e id), igual que el catálogo del prototipo.
+function aProductoDeVideo(p) {
+  const n = Number(p.price);
+  return {
+    id: p.id, title: p.title || "",
+    price: Number.isFinite(n) ? (Number.isInteger(n) ? String(n) : n.toFixed(2)) : String(p.price || ""),
+    currency: p.currency || "USD", stock: p.stock ?? null,
+    image: p.image || (Array.isArray(p.images) ? p.images[0] : null) || null,
+  };
+}
+
 
 // OMNIPANEL — panel admin integrado (CSS aislado bajo .omni)
 
@@ -514,6 +526,7 @@ function AppShell({ sessionUser, platformStats = null }) {
     setServices(prev => prev.map(p => p.id === id ? mapped : p));
     reloadOwn();
     flash(missing?.length ? `✏️ Actualizado, pero el backend aún no guarda: ${missing.join(", ")}` : "✏️ Publicación actualizada");
+    return mapped;
   };
   const [selChat,   setSelChat]   = useState(null);
   const [selSeller, setSelSeller] = useState(null);
@@ -583,6 +596,16 @@ function AppShell({ sessionUser, platformStats = null }) {
   const [showTools, setShowTools] = useState(false);
   const [toolApp, setToolApp] = useState(false);
   const [promoVideoOpen, setPromoVideoOpen] = useState(false); // Generador de Video Promocional
+  // Producto con el que abrir el generador (estilo Directo) y aviso tras publicar/guardar.
+  const [promoVideoInicial, setPromoVideoInicial] = useState(null);
+  const [videoOffer, setVideoOffer] = useState(null); // { producto, texto }
+  const videoOfferTimer = useRef(null);
+  const ofrecerVideo = (prod, texto) => {
+    if (!prod || prod.kind === "service") return;
+    clearTimeout(videoOfferTimer.current);
+    setVideoOffer({ producto: prod, texto });
+    videoOfferTimer.current = setTimeout(() => setVideoOffer(null), 12000);
+  };
   const [showCourier, setShowCourier] = useState(false);
   const [showFollowing, setShowFollowing] = useState(false); // pantalla "Siguiendo" (☰ → Siguiendo)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false); // panel lateral del Perfil (☰)
@@ -1071,7 +1094,7 @@ function AppShell({ sessionUser, platformStats = null }) {
       catch (error) { flash("⚠️ Se publicó el producto, pero no las variantes: " + (error.message || "")); }
     }
     if (isService) { setServices(prev => [mapProduct(data), ...prev]); flash("✅ Servicio publicado — visible en la sección Servicios"); }
-    else { setProducts(prev => [mapProduct(data), ...prev]); flash(missing?.length ? `✅ Publicado, pero el backend aún no guarda: ${missing.join(", ")}` : "✅ Producto publicado — visible para todos"); }
+    else { setProducts(prev => [mapProduct(data), ...prev]); flash(missing?.length ? `✅ Publicado, pero el backend aún no guarda: ${missing.join(", ")}` : "✅ Producto publicado — visible para todos"); ofrecerVideo(mapProduct(data), "Producto publicado. Genera un video promocional y compártelo"); }
     reloadOwn();
     // ⭐ Marcó "Destacar" al publicar (ya confirmó la tarifa en el formulario).
     if (d.promote && adminCfg.promoActive === true) promoteFlow(data.id, { skipConfirm: true });
@@ -1312,6 +1335,10 @@ function AppShell({ sessionUser, platformStats = null }) {
     return () => { alive = false; };
   }, [isProStore, user?.id]);
   const myStoreProducts = useMemo(() => [...ownListings, ...ownArchived].filter(p => p.kind !== "service"), [ownListings, ownArchived]);
+  // Generador de video: solo productos PUBLICADOS del vendedor (activos, aprobados, sin archivar).
+  const promoVideoProductos = useMemo(() => ownListings
+    .filter(p => p.kind !== "service" && p.status === "active" && p.moderation_status === "approved" && !p.archived_at)
+    .map(aProductoDeVideo), [ownListings]);
   const myStoreOrders = useMemo(() => orders.filter(o => o.sellerId === user?.id), [orders, user?.id]);
   const storeApi = {
     onNewProduct: () => setPubOpen("product"),
@@ -2093,7 +2120,7 @@ function AppShell({ sessionUser, platformStats = null }) {
         ? <EditProductModal product={editProd} mode="create" onClose={() => setEditProd(null)}
             onCreate={async (payload) => { setEditProd(null); await handlePublish({ ...payload, source_catalog_id: editProd.source_catalog_id, source_type: "catalog_pro", video_url: editProd.video_url, video_poster_url: editProd.video_poster_url }); }}
             flash={flash} />
-        : <EditProductModal product={editProd} onClose={() => setEditProd(null)} onSave={(changes) => { updateProduct(editProd.id, changes); setEditProd(null); }} flash={flash} onPromote={() => { setEditProd(null); promoteFlow(editProd.id); }} />
+        : <EditProductModal product={editProd} onClose={() => setEditProd(null)} onSave={(changes) => { updateProduct(editProd.id, changes).then(m => ofrecerVideo(m, "Producto guardado. Genera un video promocional y compártelo")); setEditProd(null); }} flash={flash} onPromote={() => { setEditProd(null); promoteFlow(editProd.id); }} />
       )}
       {confirmCfg && (
         <div onClick={() => setConfirmCfg(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 5300, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -2300,19 +2327,33 @@ function AppShell({ sessionUser, platformStats = null }) {
         // quita la marca de agua; plan desconocido o sin cargar → con marca.
         const perks = getPlanPerks(myRealPlan);
         const dark = effectiveTheme === "dark";
-        return <div style={{ position: "fixed", top: 0, left: 0, zIndex: 4100, width: `calc(100vw / ${densZoom})`, height: `calc(100dvh / ${densZoom})`, overflowY: "auto", WebkitOverflowScrolling: "touch", background: dark ? "#17140F" : "#FAF6EF", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+        const cerrar = () => { setPromoVideoOpen(false); setPromoVideoInicial(null); };
+        return <div style={{ position: "fixed", top: 0, left: 0, zIndex: 4100, width: `calc(100vw / ${densZoom})`, height: `calc(100dvh / ${densZoom})`, overflow: "hidden", background: dark ? "#17140F" : "#FAF6EF", paddingTop: "env(safe-area-inset-top, 0px)", display: "flex", flexDirection: "column" }}>
           <Suspense fallback={<LazyFallback />}>
             <PromoVideoTool
               conMarcaDeAgua={perks.conMarcaDeAgua}
               accentDeMarca={perks.esPago ? (storeCfg?.accent || null) : null}
               nombreTienda={perks.esPago ? (storeCfg?.name || "").trim() : ""}
+              productos={promoVideoProductos}
+              vendedorId={user?.id || null}
+              inicial={promoVideoInicial}
               dark={dark}
-              onClose={() => setPromoVideoOpen(false)}
-              onOpenPlans={() => { setPromoVideoOpen(false); setShowTools(false); setTab("perfil"); setPScr("profile-full"); setAutoOpenPlans(true); }}
+              onClose={cerrar}
+              onOpenPlans={() => { cerrar(); setShowTools(false); setTab("perfil"); setPScr("profile-full"); setAutoOpenPlans(true); }}
             />
           </Suspense>
         </div>;
       })()}
+      {videoOffer && !promoVideoOpen && (
+        <div role="status" style={{ position: "fixed", left: "50%", bottom: "calc(86px + env(safe-area-inset-bottom, 0px))", transform: "translateX(-50%)", zIndex: 4050, width: "min(92vw, 420px)", background: effectiveTheme === "dark" ? "#1c1c22" : "#ffffff", color: effectiveTheme === "dark" ? "#f0f0f2" : "#0f172a", border: `1px solid ${effectiveTheme === "dark" ? "rgba(255,255,255,.1)" : "rgba(0,0,0,.1)"}`, borderRadius: 16, boxShadow: "0 10px 30px rgba(0,0,0,.35)", padding: "12px 12px 12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 22 }}>🎬</span>
+          <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, lineHeight: 1.35 }}>{videoOffer.texto}</span>
+          <button onClick={() => { clearTimeout(videoOfferTimer.current); setPromoVideoInicial({ estilo: "directo", producto: aProductoDeVideo(videoOffer.producto) }); setVideoOffer(null); setPromoVideoOpen(true); }}
+            style={{ background: "#F26B0F", color: "#fff", border: "none", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Crear video</button>
+          <button onClick={() => { clearTimeout(videoOfferTimer.current); setVideoOffer(null); }} aria-label="Cerrar aviso"
+            style={{ background: "transparent", border: "none", color: "inherit", opacity: .6, fontSize: 18, cursor: "pointer", padding: "0 4px" }}>×</button>
+        </div>
+      )}
       {showCourier && (() => {
         const meName = profileData?.name || user?.name || "Usuario";
         // Acceso por ROL real ÚNICAMENTE: role="courier" (lo pone el admin al

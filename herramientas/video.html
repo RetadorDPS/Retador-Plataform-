@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<!--
+  RETADOR · Generador de video promocional · v8.7 (integrado en la plataforma)
+  Se abre dentro de un iframe desde Herramientas y desde Mi Panel → Promociones.
+  El HTML y el CSS son los del prototipo; la lógica vive en src/tools/promoVideo/v8/.
+-->
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Generador de Video Promocional — RETADOR</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script type="module" src="/src/tools/promoVideo/v8/pagina.js"></script>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="mark">RETA<span>DOR</span></div>
+    <div class="sub">Generador de video promocional <span class="ver-tag">v8.7</span></div>
+  </header>
+  <p class="lede">Elige tus productos (fotos o emojis), escribe tu titular y descarga un video vertical listo para Reels, Stories o TikTok.</p>
+
+  <div class="layout">
+    <div class="editor-col">
+
+      <div class="tablist" role="tablist" id="tabList">
+        <button type="button" class="tab-btn" role="tab" data-tab="contenido" id="tabBtn-contenido" aria-controls="tabPanel-contenido">Contenido</button>
+        <button type="button" class="tab-btn" role="tab" data-tab="marca" id="tabBtn-marca" aria-controls="tabPanel-marca">Marca</button>
+        <button type="button" class="tab-btn" role="tab" data-tab="tema" id="tabBtn-tema" aria-controls="tabPanel-tema">Tema</button>
+        <button type="button" class="tab-btn" role="tab" data-tab="musica" id="tabBtn-musica" aria-controls="tabPanel-musica">Música</button>
+        <button type="button" class="tab-btn" role="tab" data-tab="extras" id="tabBtn-extras" aria-controls="tabPanel-extras">Extras</button>
+      </div>
+
+      <div class="card tab-panel" role="tabpanel" id="tabPanel-contenido">
+        <div class="sliders">
+          <div class="slider-row">
+            <label for="sizeRange">Tamaño de productos</label>
+            <div class="slider-wrap">
+              <div class="slider-track"></div>
+              <input type="range" class="nice-range" id="sizeRange" min="100" max="160" step="5" value="100">
+            </div>
+            <output id="sizeOut" for="sizeRange">100%</output>
+          </div>
+          <div class="slider-row">
+            <label for="speedRange">Velocidad de animación</label>
+            <div class="slider-wrap">
+              <div class="slider-track"></div>
+              <span class="slider-default" style="--pos:0.5" aria-hidden="true"></span>
+              <input type="range" class="nice-range" id="speedRange" min="50" max="150" step="5" value="100" aria-describedby="speedHint">
+            </div>
+            <output id="speedOut" for="speedRange">Ideal</output>
+          </div>
+          <p class="hint" id="speedHint" style="margin:6px 0 0;">La rayita marca la velocidad ideal. Más lenta alarga el video; más rápida lo acorta.</p>
+        </div>
+        <div id="fieldsCard"></div>
+      </div>
+
+      <div class="card tab-panel" role="tabpanel" id="tabPanel-marca">
+        <p class="hint">Así cierra tu video: el nombre de tu tienda y una frase que invite a comprar.</p>
+        <label class="field-label" for="storeName">Nombre de la tienda</label>
+        <input type="text" id="storeName" maxlength="18" value="RETADOR" class="field-gap">
+        <label class="field-label" for="ctaText">Frase final (llamado a la acción)</label>
+        <input type="text" id="ctaText" maxlength="28" value="Pide el tuyo hoy" class="field-gap">
+        <label class="field-label" for="accentColor">Color de acento</label>
+        <div class="accent-swatches" id="accentSwatches" role="group" aria-label="Colores rápidos"></div>
+        <div class="swatch-input">
+          <input type="color" id="accentColor" value="#F26B0F">
+          <span id="accentColorHex">#F26B0F</span>
+          <span class="swatch-other">Otro color</span>
+        </div>
+      </div>
+
+      <div class="card tab-panel" role="tabpanel" id="tabPanel-tema">
+        <p class="hint">Fondo y textos del video. El estilo de animación se elige deslizando en la vista previa.</p>
+        <p class="hint" id="themeNote" style="display:none; color:var(--accent-dark); font-weight:700;"></p>
+        <div class="theme-grid" id="themeGrid"></div>
+      </div>
+
+      <div class="card tab-panel" role="tabpanel" id="tabPanel-musica">
+        <p class="hint">Música propia de RETADOR, creada por la app: sin derechos de terceros, así Facebook no silencia tu video. Se ajusta sola a la duración y termina con un final suave.</p>
+        <div class="mood-grid" id="moodGrid" role="group" aria-label="Ambiente musical"></div>
+        <label class="field-label" for="musicVol" style="margin-top:14px;">Volumen de la música</label>
+        <div class="slider-row"><input type="range" id="musicVol" min="10" max="100" step="5" value="70" style="flex:1;"><span id="musicVolVal" style="min-width:40px;text-align:right;font-weight:700;">70%</span></div>
+        <div class="field-label" style="margin-top:16px;">Efectos de sonido</div>
+        <label class="field-label" style="display:flex; align-items:center; gap:7px; cursor:pointer; font-weight:600;">
+          <input type="checkbox" id="sfxSceneToggle" checked> En las transiciones (cambios de escena y cierre)
+        </label>
+        <label class="field-label" style="display:flex; align-items:center; gap:7px; cursor:pointer; font-weight:600;">
+          <input type="checkbox" id="sfxItemToggle"> Cada vez que aparece un producto
+        </label>
+        <p class="hint" style="margin-top:4px;">Los 8 estilos tienen sus efectos, sincronizados con lo que pasa en pantalla. Para oír todo, toca "🔈 Escuchar sonido" debajo de la vista previa.</p>
+      </div>
+
+      <div class="card tab-panel" role="tabpanel" id="tabPanel-extras">
+        <p class="hint">Opcionales — se apagan solos si los dejas vacíos. Aparecen en los 5 estilos con tema (no en Directo, Desfile ni Vitrina, que tienen su propio diseño).</p>
+        <label class="field-label" style="display:flex; align-items:center; gap:7px; cursor:pointer; margin-bottom:12px;">
+          <input type="checkbox" id="progressToggle" checked> Mostrar barra de progreso abajo
+        </label>
+        <label class="field-label" style="display:flex; align-items:center; gap:7px; cursor:pointer;">
+          <input type="checkbox" id="reviewToggle"> Mostrar reseñas de clientes
+        </label>
+        <div id="reviewEditor"></div>
+        <label class="field-label" for="urgencyText" style="margin-top:6px;">Aviso de urgencia (texto fijo, sin cronómetro)</label>
+        <input type="text" id="urgencyText" maxlength="30" placeholder="Ej: ¡Últimas unidades!" value="">
+        <p class="hint" style="margin-top:6px;">No es un reloj corriendo — es un aviso fijo, porque el video queda grabado y un cronómetro real no tendría sentido después.</p>
+      </div>
+
+      <div class="card action-card">
+        <div class="field-label" style="margin-bottom:6px;">Calidad del archivo</div>
+        <div class="fmt-seg" id="qualSeg" role="group" aria-label="Calidad del video" style="grid-template-columns:1fr 1fr;"></div>
+        <p class="fmt-hint" id="qualHint"></p>
+        <div class="field-label" style="margin-bottom:6px;">Formato del video</div>
+        <div class="fmt-seg" id="fmtSeg" role="group" aria-label="Formato del video"></div>
+        <p class="fmt-hint" id="fmtHint"></p>
+        <button class="fb-btn" id="fbPublishBtn" style="margin-bottom:8px;"><span class="fb-glyph">f</span>Publicar en Facebook</button>
+        <button class="primary" id="generateBtn">Generar y descargar video</button>
+        <!-- [integración] plan gratis: aviso con enlace a los planes reales -->
+        <p class="fmt-hint" id="planNotice" style="display:none; text-align:center; margin:8px 0 0;">Tu video incluye la marca 'Hecho con RETADOR'. Quítala con el <button type="button" id="planLink" style="background:none; border:none; padding:0; color:var(--accent-dark); font:inherit; font-weight:700; text-decoration:underline; cursor:pointer;">plan Pro</button>.</p>
+        <div class="progress-wrap" id="progressWrap">
+          <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressTrack"><div class="progress-fill" id="progressFill"></div></div>
+          <div class="progress-label"><span id="progressText" aria-live="polite">Preparando…</span><span id="progressPct">0%</span></div>
+        </div>
+        <div class="status" id="statusMsg" aria-live="polite"></div>
+        <a id="downloadLink" class="download-link" style="display:none;" download="promo-retador.mp4">Descargar video</a>
+        <button type="button" class="primary" id="shareBtn" style="display:none; margin-top:8px; background:#1E8E5A;">📤 Compartir (WhatsApp, Instagram…)</button>
+        <div class="export-detail" id="exportDetail"></div>
+        <details class="tech">
+          <summary>Calidad del video</summary>
+          <div>Vertical 1080×1920, Feed 1080×1350 o Cuadrado 1080×1080, siempre a 60 fotogramas por segundo, en MP4 listo para Instagram, Facebook, TikTok y WhatsApp. En Feed y Cuadrado el video vertical se centra completo y los lados se rellenan con los colores del borde del propio video. La generación puede tardar un poco más en teléfonos antiguos, pero el resultado final siempre sale fluido.</div>
+        </details>
+      </div>
+
+    </div>
+
+    <div class="preview-col">
+      <div class="preview-panel">
+        <div class="phone"><canvas id="previewCanvas" width="1080" height="1920" aria-hidden="true"></canvas></div>
+        <p class="empty-state" id="emptyState" style="display:none;">Añade contenido para ver la vista previa.</p>
+        <div class="carousel-nav">
+          <button type="button" class="carousel-arrow" id="carouselPrev" aria-label="Estilo anterior">‹</button>
+          <div class="carousel-viewport"><div class="style-carousel" id="styleCarousel"></div></div>
+          <button type="button" class="carousel-arrow" id="carouselNext" aria-label="Siguiente estilo">›</button>
+        </div>
+        <div class="carousel-dots" id="carouselDots"></div>
+        <p class="carousel-hint">Desliza o usa las flechas para cambiar de estilo</p>
+      </div>
+      <div class="fps-badge"><span class="dot"></span> Vista previa en vivo — el archivo final se genera fotograma a fotograma</div>
+      <button class="ghost" id="soundBtn" style="display:none;"></button>
+      <button class="ghost" id="replayBtn">Reiniciar vista previa</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="fbScrim"><div class="sheet" id="fbSheet" role="dialog" aria-modal="true"></div></div>
+<div class="scrim" id="pickScrim"><div class="sheet" id="pickSheet" role="dialog" aria-modal="true"></div></div>
+<div class="toast" id="toast"></div>
+</body>
+</html>

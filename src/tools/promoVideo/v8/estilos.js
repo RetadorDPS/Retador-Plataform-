@@ -988,8 +988,9 @@ function dsPriceTag(ctx, item, x, y, fs, alpha, light, accent) {
   ctx.font = font(fp.size);
   const tw = Math.max.apply(null, fp.lines.map(l => ctx.measureText(l).width)), padX = fp.size * 0.55;
   const bw = tw + padX * 2, bh = fp.lines.length * fp.size * 1.05 + fp.size * 0.6;
-  // se desvanece al acercarse a un borde (o a la franja de la marca de agua): nunca se ve cortada
-  const room = Math.min(x - bw / 2 - 12, W - 12 - (x + bw / 2), y - bh / 2 - 12, H - 130 - (y + bh / 2));
+  // se desvanece al acercarse a un borde o a la franja de la marca de agua (en Cuadrado y Feed
+  // esa franja cae más arriba dentro del diseño, hacia y ≈ 1717): nunca se ve cortada ni tapada
+  const room = Math.min(x - bw / 2 - 12, W - 12 - (x + bw / 2), y - bh / 2 - 12, H - 220 - (y + bh / 2));
   alpha *= clamp(room / 40, 0, 1);
   if (alpha <= 0) return;
   ctx.save(); ctx.globalAlpha = alpha;

@@ -56,7 +56,22 @@ Las líneas de tiempo siguen en fotogramas de 60. A 30 fps se exporta uno de cad
 ### 5. Textos de producto que nunca se salen ni se montan
 Una sola función para todos (`fitText`/`fitPrice`/`drawFit` en motor.js). Orden: achicar la letra hasta un mínimo legible (72 % del tamaño) → hasta 2 líneas → "…". Un **precio nunca lleva "…"**: si no cabe, la moneda baja a una segunda línea. Las frases que ya se diseñaron en varias líneas (Secuencial, Antes/Después, título de Directo) conservan su aspecto y solo se ajustan si no caben.
 
-Comprobación automática: `.harness-promo/textos.html` (solo pruebas, no se publica) mide cada caja de texto por fotograma, teniendo en cuenta recortes y giros, y reporta desbordes, textos cortados por el borde y solapes. Casos: 5 nombres reales de Supabase (62–139 caracteres, CJ, AliExpress y productos con emojis), precios "12500 CUP", "1299.99 €", "1299.99 USD", "1299.99 Zelle", "12500 MLC" (5 monedas), con y sin precio tachado y %, con y sin foto, en Vertical, Feed y Cuadrado.
+Comprobación automática: `.harness-promo/textos.html` (solo pruebas, no se publica) mide cada caja de texto por fotograma, teniendo en cuenta recortes y giros, y reporta desbordes, textos cortados por el borde y solapes. Casos: 5 nombres reales de Supabase (62–139 caracteres, CJ, AliExpress y productos con emojis), precios "12500 CUP", "1299.99 €", "1299.99 USD", "1299.99 Zelle", "12500 MLC" (5 monedas), con y sin precio tachado y %, con y sin foto, en Vertical, Feed y Cuadrado (1 de cada 6 fotogramas).
+
+| Estilo | Cajas de texto medidas | Desbordes | Cortados por el borde | Solapes |
+|---|---|---|---|---|
+| Acercamiento | 13.272 | 0 | 0 | 0 |
+| Noria | 10.176 | 0 | 0 | 36 (*) |
+| Secuencial | 13.896 | 0 | 0 | 0 |
+| Mosaico | 13.302 | 0 | 0 | 0 |
+| Antes/Después | 7.590 | 0 | 0 | 0 |
+| Directo | 8.520 | 0 | 0 | 0 |
+| Vitrina | 22.440 | 0 | 0 | 0 |
+| Desfile | 20.526 | 0 | 0 | 0 |
+
+(*) Noria: cuando dos tarjetas se cruzan en la rueda, la etiqueta de la tarjeta de delante tapa un instante (≈0,1–0,2 s) el sello "-%" de la de atrás, igual que la propia tarjeta de delante la tapa. El precio de delante siempre se lee completo. Ya pasaba en la v8.7; cambiarlo exigiría tocar el recorrido de la Noria.
+
+Correcciones que salieron de la comprobación: en Acercamiento/Noria la etiqueta de precio se salía por el borde derecho de la pantalla (ahora entra completa si la tarjeta está en pantalla); en Mosaico la etiqueta podía tapar el sello "-%" de la tarjeta vecina (también en la v8.7; ahora, solo en ese caso, se corre hacia dentro); en Desfile la etiqueta nueva se desvanece antes de llegar a la franja de la marca de agua (en Cuadrado esa franja cae más arriba).
 
 ### 6. Rendimiento
 Sin cambio visual (prueba píxel a píxel contra la v8.7): grano y fondos fijos se dibujan una vez y se copian; sombras grandes de tarjetas pre-dibujadas; muro de fotos de Vitrina girado una sola vez a resolución de pantalla (antes se giraba y ampliaba ×2 en cada fotograma). Durante la generación: tiempo restante estimado y botón **Cancelar**.

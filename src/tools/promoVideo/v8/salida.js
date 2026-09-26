@@ -53,7 +53,8 @@ import {
   parsePrice,
   prepareBlurredBackground,
   roundRectPath,
-  wrapFrame
+  wrapFrame,
+  logTextBox
 } from "./motor.js";
 import {
   MUSIC_DEFS,
@@ -64,6 +65,7 @@ import {
   _noiseCache,
   _softCurve,
   aacSupported,
+  opusSupported,
   audioCtx,
   audioWanted,
   encodeAudioInto,
@@ -170,6 +172,7 @@ function drawWatermark(ctx, OW, OH, opts) {
   ctx.textAlign = "left";
   ctx.fillStyle = "rgba(255,255,255,0.95)";
   ctx.fillText(text, left + padX + logo + gap, bottom - h / 2 + 1 * s);
+  logTextBox(ctx, text, left, bottom - h / 2, h, { tag: "marca-agua", maxW: w, w: w });
   ctx.restore();
 }
 
@@ -246,6 +249,35 @@ function makeBaseRenderer(style, tl, opts, out, F, sc) {
   };
 }
 
+// [v8.8] Fluidez: 60 fps (máxima, por defecto) o 30 fps (más rápido). Las líneas
+// de tiempo siguen en fotogramas de 60: a 30 se exporta uno de cada dos, con
+// marcas de tiempo de 1/30 s y el 60 % del bitrate. El audio no cambia.
+let currentFps = 60;
+function outFps() { return currentFps; }
+function videoBitrate() { return Math.round(Q().bitrate * (currentFps === 30 ? 0.6 : 1)); }
+function recBitrate() { return Math.round(Q().rec * (currentFps === 30 ? 0.6 : 1)); }
+// Modo de prueba: con ?probarOpus=1 se salta AAC para probar la ruta Opus.
+const PROBAR_OPUS = /[?&]probarOpus=1(&|$)/.test(window.location.search);
+const AUDIO_KBPS = 128;
+
+// [v8.8] Cancelar la generación a mitad.
+let _cancel = null;
+function cancelExport() { if (_cancel) _cancel.pedido = true; }
+function cancelError() { const e = new Error("Generación cancelada."); e.cancelado = true; return e; }
+function checkCancel() { if (_cancel && _cancel.pedido) throw cancelError(); }
+// [v8.8] Tiempo que falta, a partir del ritmo real de este teléfono.
+function fmtSecs(sec) { sec = Math.max(1, Math.round(sec)); return sec < 60 ? sec + " s" : Math.floor(sec / 60) + " min " + String(sec % 60).padStart(2, "0") + " s"; }
+function remainingText(t0, done, total) {
+  const el = (performance.now() - t0) / 1000;
+  if (done < 10 || el < 0.6) return " · calculando el tiempo…";
+  return " · quedan ≈ " + fmtSecs((el / done) * (total - done));
+}
+// [v8.8] Tamaño estimado antes de generar (duración real del estilo con su velocidad).
+function estimateBytes(tl, opts, withAudio) {
+  const dur = Math.ceil(tl.total / ((opts && opts.speed) || 1)) / FPS;
+  return ((videoBitrate() + (withAudio ? AUDIO_KBPS * 1000 : 0)) * dur) / 8;
+}
+
 // 1080×1920 necesita un perfil H.264 nivel 4.x; el nivel 3.1 (42001f)
 // solo llega a 1280×720 y fallaría. Se pregunta al navegador cuál soporta.
 async function pickAvcCodec(w, h) {
@@ -254,43 +286,51 @@ async function pickAvcCodec(w, h) {
   const candidates = ["avc1.640028", "avc1.4d0028", "avc1.420028", "avc1.640032"];
   for (const codec of candidates) {
     try {
-      const r = await VideoEncoder.isConfigSupported({ codec: codec, width: w, height: h, bitrate: Q().bitrate, framerate: FPS });
+      const r = await VideoEncoder.isConfigSupported({ codec: codec, width: w, height: h, bitrate: videoBitrate(), framerate: outFps() });
       if (r && r.supported) return codec;
     } catch (e) { /* probar el siguiente */ }
   }
   return null;
 }
 
-async function exportMp4(style, tl, opts, canvas, codec, withAudio) {
+// audioCodec: null (sin audio), "aac" u "opus" [v8.8]
+async function exportMp4(style, tl, opts, canvas, codec, audioCodec) {
   const draw = makeRenderer(style, tl, opts, canvas, null, Q().scale);
-  const OW = canvas.width, OH = canvas.height;
-  // [v8.1] Música: se genera primero el audio completo y se mete como pista AAC.
+  const OW = canvas.width, OH = canvas.height, fps = outFps(), step = FPS / fps;
+  // [v8.1] Música: se genera primero el audio completo y se mete como pista de audio.
   let audioBuf = null;
-  if (withAudio) {
+  if (audioCodec) {
     setProgress(0, "Preparando la música…");
     audioBuf = await renderMusicBuffer(Math.ceil(tl.total / opts.speed) / FPS, style, tl, opts);
     if (!audioBuf) throw new Error("No se pudo generar la música.");
+    checkCancel();
   }
   const muxCfg = { target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: "avc", width: OW, height: OH }, fastStart: "in-memory", firstTimestampBehavior: "offset" };
-  if (audioBuf) muxCfg.audio = { codec: "aac", numberOfChannels: 2, sampleRate: 48000 };
+  if (audioBuf) muxCfg.audio = { codec: audioCodec, numberOfChannels: 2, sampleRate: 48000 };
   const muxer = new Mp4Muxer.Muxer(muxCfg);
-  if (audioBuf) await encodeAudioInto(muxer, audioBuf);
+  if (audioBuf) await encodeAudioInto(muxer, audioBuf, audioCodec);
   let encErr = null;
   const encoder = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { encErr = e; } });
-  encoder.configure({ codec: codec, width: OW, height: OH, bitrate: Q().bitrate, framerate: FPS });
+  encoder.configure({ codec: codec, width: OW, height: OH, bitrate: videoBitrate(), framerate: fps });
   // La velocidad cambia cuántos fotogramas de salida dura el video; cada
   // fotograma sigue calculándose de forma exacta, así que sigue fluido.
-  const outTotal = Math.ceil(tl.total / opts.speed);
-  for (let f = 0; f < outTotal; f++) {
-    if (encErr) throw encErr;
-    draw(Math.min(f * opts.speed, tl.total - 0.001));
-    const vf = new VideoFrame(canvas, { timestamp: Math.round((f * 1e6) / FPS), duration: Math.round(1e6 / FPS) });
-    encoder.encode(vf, { keyFrame: f % 60 === 0 });
-    vf.close();
-    while (encoder.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 0));
-    if (f % 4 === 0) { setProgress((f / outTotal) * 100, "Generando fotograma " + f + " de " + outTotal); await new Promise(r => setTimeout(r, 0)); }
+  const outTotal = Math.ceil(Math.ceil(tl.total / opts.speed) / step), t0 = performance.now();
+  try {
+    for (let f = 0; f < outTotal; f++) {
+      if (encErr) throw encErr;
+      checkCancel();
+      draw(Math.min(f * step * opts.speed, tl.total - 0.001));
+      const vf = new VideoFrame(canvas, { timestamp: Math.round((f * 1e6) / fps), duration: Math.round(1e6 / fps) });
+      encoder.encode(vf, { keyFrame: f % fps === 0 });
+      vf.close();
+      while (encoder.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 0));
+      if (f % 4 === 0) { setProgress((f / outTotal) * 100, "Generando fotograma " + f + " de " + outTotal + remainingText(t0, f, outTotal)); await new Promise(r => setTimeout(r, 0)); }
+    }
+    await encoder.flush();
+  } catch (e) {
+    try { encoder.close(); } catch (e2) { /* ya cerrado */ }
+    throw e;
   }
-  await encoder.flush();
   if (encErr) throw encErr;
   muxer.finalize();
   setProgress(100, "Empaquetando video…");
@@ -303,29 +343,34 @@ function exportWebm(style, tl, opts, canvas, withAudio) {
   return new Promise(function (resolve, reject) {
     const draw = makeRenderer(style, tl, opts, canvas, null, Q().scale);
     let stream;
-    try { stream = canvas.captureStream(60); } catch (e) { reject(new Error("Este navegador no soporta captura de canvas.")); return; }
+    try { stream = canvas.captureStream(outFps()); } catch (e) { reject(new Error("Este navegador no soporta captura de canvas.")); return; }
     const cands = withAudio
       ? ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/webm", "video/mp4"]
       : ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"];
     const mime = cands.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
     if (!mime) { reject(new Error("Este navegador no soporta grabación de video.")); return; }
-    let actx = null, audioDest = null, master = null, mixChain = null;
+    let actx = null, audioDest = null, master = null, mixChain = null, cancelado = false;
     if (withAudio) {
       actx = getAudioCtx();
       if (actx) { audioDest = actx.createMediaStreamDestination(); audioDest.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
     }
-    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: Q().rec });
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: recBitrate() });
     const chunks = [];
     const ext = mime.indexOf("mp4") >= 0 ? "mp4" : "webm";
     rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
-    rec.onstop = () => { try { master && master.disconnect(); mixChain && mixChain.out.disconnect(); } catch (e) {} resolve({ blob: new Blob(chunks, { type: mime.split(";")[0] }), ext: ext, audio: !!audioDest }); };
+    rec.onstop = () => {
+      try { master && master.disconnect(); mixChain && mixChain.out.disconnect(); } catch (e) {}
+      if (cancelado) { reject(cancelError()); return; }
+      resolve({ blob: new Blob(chunks, { type: mime.split(";")[0] }), ext: ext, audio: !!audioDest });
+    };
     rec.onerror = e => reject(e.error || new Error("Error grabando el video."));
     const totalMs = Math.ceil(tl.total / opts.speed) * MS_PER_FRAME, t0 = performance.now();
     rec.start();
     if (audioDest) { mixChain = makeMixChain(actx, audioDest); master = scheduleAudio(actx, mixChain, actx.currentTime + 0.02, totalMs / 1000, style, tl, opts); }
     (function tick() {
       const el = performance.now() - t0;
-      setProgress((el / totalMs) * 100, "Grabando en tiempo real…");
+      if (_cancel && _cancel.pedido) { cancelado = true; rec.stop(); return; }
+      setProgress((el / totalMs) * 100, "Grabando en tiempo real… · quedan ≈ " + fmtSecs((totalMs - el) / 1000));
       if (el >= totalMs) { draw(tl.total - 1); rec.stop(); return; }
       draw(Math.min(Math.floor(el / MS_PER_FRAME) * opts.speed, tl.total - 0.001));
       requestAnimationFrame(tick);
@@ -333,36 +378,57 @@ function exportWebm(style, tl, opts, canvas, withAudio) {
   });
 }
 
-// [v8.1] Punto único de exportación (descarga y Facebook usan esto).
-// Devuelve { blob, ext, audio, note }.
+// [v8.1] Punto único de exportación (descarga, Compartir y Facebook usan esto).
+// Devuelve { blob, ext, audio, note, ruta, fps, w, h }.
+// [v8.8] Orden: MP4 fotograma a fotograma + AAC → MP4 fotograma a fotograma +
+// Opus (si no hay AAC) → grabación en tiempo real → MP4 sin sonido.
 async function exportVideo(style, tl, opts, canvas) {
-  const wantMusic = audioWanted(style);
-  const noMusicNote = "Tu navegador no pudo añadir el sonido; el video salió mudo.";
-  const codec = await pickAvcCodec();
-  if (codec) {
-    if (!wantMusic) return { blob: await exportMp4(style, tl, opts, canvas, codec, false), ext: "mp4", audio: false };
-    if (await aacSupported()) {
-      try { return { blob: await exportMp4(style, tl, opts, canvas, codec, true), ext: "mp4", audio: true }; }
-      catch (e) { /* se reintenta abajo */ }
+  _cancel = { pedido: false };
+  const d = outDims(), info = { fps: outFps(), w: d.w, h: d.h };
+  const fin = (r, ruta) => Object.assign(r, info, { ruta: ruta });
+  const rethrowCancel = e => { if (e && e.cancelado) throw e; };
+  try {
+    const wantMusic = audioWanted(style);
+    const noMusicNote = "Tu navegador no pudo añadir el sonido; el video salió mudo.";
+    const codec = await pickAvcCodec();
+    if (codec) {
+      if (!wantMusic) return fin({ blob: await exportMp4(style, tl, opts, canvas, codec, null), ext: "mp4", audio: false }, "MP4 · sin sonido (elegido)");
+      if (!PROBAR_OPUS && await aacSupported()) {
+        try { return fin({ blob: await exportMp4(style, tl, opts, canvas, codec, "aac"), ext: "mp4", audio: true }, "MP4 · AAC"); }
+        catch (e) { rethrowCancel(e); /* se reintenta abajo */ }
+      }
+      if (await opusSupported()) {
+        try { return fin({ blob: await exportMp4(style, tl, opts, canvas, codec, "opus"), ext: "mp4", audio: true }, "MP4 · Opus"); }
+        catch (e) { rethrowCancel(e); /* se reintenta abajo */ }
+      }
+      const recMime = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/mp4;codecs=avc1.42E01E,mp4a.40.2"]
+        .find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
+      if (recMime && getAudioCtx()) {
+        try { return fin(await exportWebm(style, tl, opts, canvas, true), "Grabación en tiempo real"); } catch (e) { rethrowCancel(e); /* último recurso: sin música */ }
+      }
+      return fin({ blob: await exportMp4(style, tl, opts, canvas, codec, null), ext: "mp4", audio: false, note: noMusicNote }, "MP4 · sin sonido");
     }
-    const recMime = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/mp4;codecs=avc1.42E01E,mp4a.40.2"]
-      .find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
-    if (recMime && getAudioCtx()) {
-      try { return await exportWebm(style, tl, opts, canvas, true); } catch (e) { /* último recurso: sin música */ }
-    }
-    return { blob: await exportMp4(style, tl, opts, canvas, codec, false), ext: "mp4", audio: false, note: noMusicNote };
+    const r = await exportWebm(style, tl, opts, canvas, wantMusic);
+    if (wantMusic && !r.audio) r.note = noMusicNote;
+    return fin(r, "Grabación en tiempo real");
+  } finally {
+    _cancel = null;
   }
-  const r = await exportWebm(style, tl, opts, canvas, wantMusic);
-  if (wantMusic && !r.audio) r.note = noMusicNote;
-  return r;
 }
 // [integración] Formato, calidad y plan los elige la interfaz (otro módulo).
 export function setFormat(id) { currentFormat = id; }
 export function setQuality(id) { currentQuality = id; }
 export function setPlan(p) { currentPlan = p; }
+export function setFps(n) { currentFps = n === 30 ? 30 : 60; }
 
 export {
+  AUDIO_KBPS,
   FORMATS,
+  PROBAR_OPUS,
+  cancelExport,
+  estimateBytes,
+  outFps,
+  videoBitrate,
   PREVIEW_SCALE,
   Q,
   QUALITIES,

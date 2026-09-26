@@ -5,6 +5,9 @@
 // idéntico línea a línea (se verifica con un script, ver README).
 // ═════════════════════════════════════════════════════════════════════════════
 import {
+  shadowSprite,
+  drawShadowSprite,
+  renderScale,
   BG_VEIL,
   CURRENCIES,
   EMOJI_CATS,
@@ -44,6 +47,12 @@ import {
   easeOutCubic,
   extractEmoji,
   fmtPrice,
+  fitText,
+  fitPrice,
+  drawFit,
+  logTextBox,
+  ellipsize,
+  wrapWords,
   getGrain,
   grainPattern,
   hexToRgba,
@@ -254,9 +263,10 @@ const StyleSecuencial = {
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.fillStyle = theme.text;
-      ctx.font = "700 60px Manrope, system-ui, sans-serif";
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      wrapText(ctx, scene.text, W / 2, H * 0.74 + ty, W * 0.82, 72);
+      // [v8.8] Igual que antes (60 px, se parte en líneas); si no cabe en 3 líneas se achica y, al final, "…".
+      const MF = s => "700 " + s + "px Manrope, system-ui, sans-serif";
+      const ft = fitText(ctx, scene.text, { maxW: W * 0.82, size: 60, min: 44, lines: 3, font: MF, wrapFirst: true });
+      drawFit(ctx, ft, { x: W / 2, y: H * 0.74 + ty, lh: 1.2, block: "center", font: MF, maxW: W * 0.82, tag: "escena" });
       ctx.restore();
     }
     drawChrome(ctx, frame, tl, opts);
@@ -332,9 +342,10 @@ function drawBASide(ctx, half, which, theme, accent, sizeScale, scale, stampP) {
   if (half.text) {
     ctx.save();
     ctx.fillStyle = isBefore ? hexToRgba(theme.text, 0.6) : theme.text;
-    ctx.font = "800 64px Manrope, system-ui, sans-serif";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    wrapText(ctx, half.text, W / 2, H * 0.71, W * 0.84, 76);
+    // [v8.8] Igual que antes (64 px, varias líneas); si no cabe en 3 líneas se achica y, al final, "…".
+    const MF = s => "800 " + s + "px Manrope, system-ui, sans-serif";
+    const ft = fitText(ctx, half.text, { maxW: W * 0.84, size: 64, min: 46, lines: 3, font: MF, wrapFirst: true });
+    drawFit(ctx, ft, { x: W / 2, y: H * 0.71, lh: 76 / ft.size, block: "center", font: MF, maxW: W * 0.84, tag: "texto" });
     ctx.restore();
   }
   drawBALabel(ctx, isBefore ? "ANTES" : "DESPUÉS", isBefore ? "rgba(120,120,120,0.9)" : accent, "#FFFFFF");
@@ -464,7 +475,10 @@ const StyleMosaico = {
         const p = clamp(local / MO_POP, 0, 1);
         const scale = easeOutBack(p);
         const alpha = clamp(local / (MO_POP * 0.6), 0, 1);
-        drawProductCard(ctx, item, cx, cy, cell * scale, (1 - p) * 0.3, alpha, 1, theme, accent);
+        // [v8.8] si la tarjeta de la derecha lleva sello "-%", la etiqueta de precio no lo tapa
+        const nb = col < grid.cols - 1 ? tl.items[i + 1] : null;
+        const lim = nb && nb.priceNow && nb.showPct && discountPct(nb) ? { maxRight: cx + cellW - cell * 0.53 - 10 } : null;
+        drawProductCard(ctx, item, cx, cy, cell * scale, (1 - p) * 0.3, alpha, 1, theme, accent, lim);
       });
       drawHeadline(ctx, tl.headline, tl.keyword, theme, accent, frame, frame * MS_PER_FRAME, H * 0.12);
     }
@@ -560,7 +574,12 @@ function diWrapFit(ctx, text, maxW, sizes, maxLines) {
     best = { size: size, lines: lines };
     if (lines.length <= maxLines) return best;
   }
-  return best || { size: sizes[sizes.length - 1], lines: [text] };
+  // [v8.8] No cabe ni con la letra más pequeña: se parte (también las palabras
+  // larguísimas) y la última línea termina en "…". Antes se salía de la pantalla.
+  const size = sizes[sizes.length - 1]; ctx.font = diFont(size);
+  const L = wrapWords(ctx, text, maxW), keep = L.slice(0, maxLines);
+  keep[keep.length - 1] = ellipsize(ctx, L.slice(maxLines - 1).join(" "), maxW);
+  return { size: size, lines: keep, cut: true };
 }
 
 const StyleDirecto = {
@@ -621,6 +640,7 @@ const StyleDirecto = {
           ctx.fillText(w, 0, 0); ctx.restore();
           x += widths[wi] + sp; k++;
         });
+        logTextBox(ctx, line, W / 2, y0 + li * lh, lay.size, { tag: "titulo", maxW: W - 80 * DI_S });
       });
     } else if (t < 5.8) {
       const u = t - 2.6;
@@ -646,14 +666,15 @@ const StyleDirecto = {
         if (p2 > 0) {
           ctx.save(); ctx.translate(W * 0.76, H * 0.585); ctx.scale(p2, p2);
           ctx.fillStyle = P.badge; ctx.beginPath(); ctx.arc(0, 0, 100 * DI_S, 0, Math.PI * 2); ctx.fill();
-          let fs = 64 * DI_S; ctx.font = diFont(fs);
-          while (ctx.measureText(price).width > 150 * DI_S && fs > 22 * DI_S) { fs -= 2 * DI_S; ctx.font = diFont(fs); }
-          ctx.fillStyle = P.badgeText; ctx.fillText(price, 0, 3 * DI_S); ctx.restore();
+          // [v8.8] Precio largo: se achica y, si aún no cabe, la moneda baja a otra línea (nunca "…").
+          const fp = fitPrice(ctx, price, { maxW: 150 * DI_S, size: 64 * DI_S, min: 22 * DI_S, paso: 2 * DI_S, font: s => diFont(s) });
+          ctx.fillStyle = P.badgeText; drawFit(ctx, fp, { x: 0, y: 3 * DI_S, lh: 1.0, block: "center", font: s => diFont(s), maxW: 150 * DI_S, tag: "precio" }); ctx.restore();
         }
       }
       const tw = diWrapFit(ctx, tl.title.toUpperCase(), W - 90 * DI_S, [44, 38, 32, 28].map(s => s * DI_S), 2);
       ctx.globalAlpha = clamp((u - 1) / 0.5, 0, 1); ctx.fillStyle = P.dark; ctx.font = diFont(tw.size);
       tw.lines.slice(0, 2).forEach((l, i) => ctx.fillText(l, W / 2, H * 0.79 + i * tw.size * 1.1 + (1 - clamp((u - 1) / 0.5, 0, 1)) * 20 * DI_S));
+      tw.lines.slice(0, 2).forEach((l, i) => logTextBox(ctx, l, W / 2, H * 0.79 + i * tw.size * 1.1, tw.size, { tag: "nombre", maxW: W - 90 * DI_S }));
       // [v8.4] Donde el título pasa sobre el círculo oscuro, se redibuja en color
       // claro (efecto "recorte"): se lee entero, como un diseño de dos tonos.
       ctx.save();
@@ -810,7 +831,26 @@ function dsBrandBg(ctx, accent) {
 // [v8.4] Colores de texto según fondo (oscuro = el original; claro = nuevo)
 const DS_INK = { oscuro: { text: "#FFFFFF", sub: "#FFFFFF", mark: "#FFFFFF", markInk: "#1b1c20", div: "rgba(255,255,255,0.7)" },
   claro: { text: "#17171B", sub: "#2A2B30", mark: "#17171B", markInk: "#FFFFFF", div: "rgba(23,23,27,0.45)" } };
+// [v8.8] Rendimiento: este fondo no cambia en toda la escena → se dibuja UNA
+// vez (degradado + grano) y cada fotograma solo lo copia. Mismo resultado.
+const _dsBgCache = new Map();
 function dsSceneBg(ctx, light) {
+  const m = ctx.getTransform(), cv = ctx.canvas;
+  if (m.b === 0 && m.c === 0 && cv) {
+    const key = [cv.width, cv.height, m.a, m.d, m.e, m.f, light ? 1 : 0].join(",");
+    let bg = _dsBgCache.get(key);
+    if (!bg) {
+      bg = document.createElement("canvas"); bg.width = cv.width; bg.height = cv.height;
+      const bx = bg.getContext("2d"); bx.setTransform(m); dsSceneBgDraw(bx, light);
+      if (_dsBgCache.size >= 6) _dsBgCache.delete(_dsBgCache.keys().next().value);
+      _dsBgCache.set(key, bg);
+    }
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.drawImage(bg, 0, 0); ctx.restore();
+    return;
+  }
+  dsSceneBgDraw(ctx, light);
+}
+function dsSceneBgDraw(ctx, light) {
   const g = ctx.createLinearGradient(0, 0, 0, H);
   if (light) {
     g.addColorStop(0, "#F7F5F0"); g.addColorStop(0.45, "#EFEDE7"); g.addColorStop(0.78, "#DDE1E9"); g.addColorStop(1, "#C3CCDB");
@@ -887,6 +927,7 @@ function dsHeadline(ctx, text, keyword, accent, alpha, glowP, scale, ink, light)
       }
       x += ww + sp;
     });
+    logTextBox(ctx, ln.ws.join(" "), W / 2 - ln.w / 2, y, fs, { tag: "titular", w: ln.w });
   });
   ctx.restore();
 }
@@ -900,7 +941,7 @@ function dsSubtitle(ctx, text, alpha, rise, ink) {
     if (ctx.measureText(t).width > W * 0.78 && cur) { lines.push(cur); cur = w; } else cur = t; }); if (cur) lines.push(cur); };
   lay(); while (lines.length > 2 && fs > 44) { fs -= 4; ctx.font = "500 " + fs + "px " + DS_FONT; lay(); }
   const lh = fs * 1.2, y0 = H * 0.36 + rise;
-  lines.slice(0, 3).forEach((l, i) => ctx.fillText(l, W / 2, y0 + i * lh));
+  lines.slice(0, 3).forEach((l, i) => { ctx.fillText(l, W / 2, y0 + i * lh); logTextBox(ctx, l, W / 2, y0 + i * lh, fs, { tag: "titular" }); });
   ctx.restore();
 }
 function dsProduct(ctx, item, cx, cy, size, rot, alpha) {
@@ -936,6 +977,25 @@ function dsBadge(ctx, cx, cy, s, accent, iconKind, alpha) {
   ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.lineWidth = Math.max(1, s * 0.02);
   roundRectPath(ctx, cx - s / 2, cy - s / 2, s, s, s * 0.24); ctx.stroke();
   dsIcon(ctx, iconKind, cx, cy, s * 0.52);
+  ctx.restore();
+}
+
+// [v8.8] Etiqueta pequeña de precio bajo la insignia (solo si el producto tiene precio).
+function dsPriceTag(ctx, item, x, y, fs, alpha, light, accent) {
+  if (!item || !item.priceNow || fs <= 4 || alpha <= 0) return;
+  const font = s => "700 " + s + "px " + DS_FONT, maxW = W * 0.34;
+  const fp = fitPrice(ctx, fmtPrice(item.priceNow), { maxW: maxW, size: Math.round(fs), font: font });
+  ctx.font = font(fp.size);
+  const tw = Math.max.apply(null, fp.lines.map(l => ctx.measureText(l).width)), padX = fp.size * 0.55;
+  const bw = tw + padX * 2, bh = fp.lines.length * fp.size * 1.05 + fp.size * 0.6;
+  // se desvanece al acercarse a un borde (o a la franja de la marca de agua): nunca se ve cortada
+  const room = Math.min(x - bw / 2 - 12, W - 12 - (x + bw / 2), y - bh / 2 - 12, H - 130 - (y + bh / 2));
+  alpha *= clamp(room / 40, 0, 1);
+  if (alpha <= 0) return;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.fillStyle = light ? "#17171B" : "#FFFFFF"; roundRectPath(ctx, x - bw / 2, y - bh / 2, bw, bh, Math.min(bh / 2, fp.size * 0.8)); ctx.fill();
+  ctx.fillStyle = light ? "#FFFFFF" : "#17171B";
+  drawFit(ctx, fp, { x: x, y: y + 1, lh: 1.05, block: "center", font: font, maxW: maxW, tag: "precio" });
   ctx.restore();
 }
 
@@ -992,7 +1052,9 @@ const StyleDesfile = {
         dsProduct(ctx, o.s.item, x, y, size, rot, a);
         const bp = easeOutBack(clamp((p - 0.04) / 0.10, 0, 1));
         const bob = Math.sin((t + o.s.k) * 2.4) * size * 0.02;
-        dsBadge(ctx, x + size * 0.36 * (mir ? -1 : 1), y - size * 0.30 + bob, W * 0.16 * (1 - 0.5 * p) * bp, accent, o.s.icon, a);
+        const bs = W * 0.16 * (1 - 0.5 * p) * bp, bx = x + size * 0.36 * (mir ? -1 : 1), byy = y - size * 0.30 + bob;
+        dsBadge(ctx, bx, byy, bs, accent, o.s.icon, a);
+        if (bp > 0) dsPriceTag(ctx, o.s.item, bx, byy + bs * 0.5 + W * 0.16 * (1 - 0.5 * p) * 0.24, W * 0.16 * (1 - 0.5 * p) * 0.27 * Math.min(1, bp), a * clamp(bp, 0, 1), light, accent); // [v8.8]
       });
       // cabecera y textos
       const txtOut = 1 - clamp((t - (DS.washIn - 0.1)) / 0.6, 0, 1);
@@ -1135,11 +1197,97 @@ function vtItemBox(ctx, it, x, y, w, h, r, bg) {
   }
   ctx.restore();
 }
-function vtText(ctx, text, x, y, size, weight, color, align, maxW) {
+function vtText(ctx, text, x, y, size, weight, color, align, maxW, tag) {
   ctx.save(); ctx.fillStyle = color; ctx.textAlign = align || "center"; ctx.textBaseline = "middle";
   let fs = size; ctx.font = weight + " " + fs + "px " + DS_FONT;
   if (maxW) while (ctx.measureText(text).width > maxW && fs > 18) { fs -= 2; ctx.font = weight + " " + fs + "px " + DS_FONT; }
-  ctx.fillText(text, x, y); ctx.restore();
+  if (maxW && ctx.measureText(text).width > maxW) text = ellipsize(ctx, text, maxW); // [v8.8] nunca se sale
+  ctx.fillText(text, x, y); logTextBox(ctx, text, x, y, fs, { tag: tag || "vt", maxW: maxW || Infinity }); ctx.restore();
+}
+// [v8.8] Nombre de producto: achica hasta un mínimo legible → hasta N líneas → "…".
+// y = centro de la 1.ª línea. Devuelve el alto usado por las líneas de más.
+function vtFitName(ctx, text, x, y, size, weight, color, align, maxW, lines) {
+  const font = s => weight + " " + s + "px " + DS_FONT;
+  const ft = fitText(ctx, text, { maxW: maxW, size: size, lines: lines || 1, font: font });
+  ctx.save(); ctx.fillStyle = color;
+  drawFit(ctx, ft, { x: x, y: y, align: align, lh: 1.1, font: font, maxW: maxW, tag: "nombre" });
+  ctx.restore();
+  return (ft.lines.length - 1) * ft.size * 1.1;
+}
+// [v8.8] Precio: se achica y, si no cabe, la moneda baja a otra línea (nunca "…").
+function vtPriceText(ctx, price, x, y, size, weight, color, align, maxW) {
+  const font = s => weight + " " + s + "px " + DS_FONT;
+  const fp = fitPrice(ctx, price, { maxW: maxW, size: size, font: font });
+  ctx.save(); ctx.fillStyle = color;
+  drawFit(ctx, fp, { x: x, y: y, align: align, lh: 1.0, block: "center", font: font, maxW: maxW, tag: "precio" });
+  ctx.restore();
+}
+// Color de texto legible sobre un fondo (blanco sobre oscuro, casi negro sobre claro).
+function vtInkOn(hex) {
+  const n = parseInt(toHex(hex).slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 170 ? "#161510" : "#FFFFFF";
+}
+// [v8.8] Círculo de precio del anillo: precio normal tachado (si hay) + precio de
+// oferta; sello "-N%" si el vendedor marcó "mostrar %".
+function vtPriceCircle(ctx, it, x, y, r, accent, sc, alpha) {
+  const now = vtPrice(it); if (!now || sc <= 0 || alpha <= 0) return;
+  const before = it.priceBefore ? fmtPrice(it.priceBefore) : "", pct = it.showPct ? discountPct(it) : null, ink = vtInkOn(accent);
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(x, y); ctx.scale(sc, sc);
+  ctx.shadowColor = "rgba(0,0,0,0.28)"; ctx.shadowBlur = 24; ctx.shadowOffsetY = 8;
+  ctx.fillStyle = toHex(accent); ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowColor = "transparent";
+  const FN = w => s => w + " " + s + "px " + DS_FONT, maxW = r * 1.5;
+  const fn = fitPrice(ctx, now, { maxW: maxW, size: Math.round(r * 0.46), font: FN(700) });
+  const fb = before ? fitPrice(ctx, before, { maxW: r * 1.3, size: Math.round(r * 0.26), font: FN(500) }) : null;
+  const hN = fn.lines.length * fn.size, hB = fb ? fb.lines.length * fb.size * 1.05 : 0, top = -(hN + hB + (fb ? r * 0.06 : 0)) / 2;
+  ctx.fillStyle = ink;
+  if (fb) {
+    ctx.globalAlpha = alpha * 0.8;
+    const yb = top + fb.size * 0.52;
+    drawFit(ctx, fb, { x: 0, y: yb, lh: 1.05, font: FN(500), maxW: r * 1.3, tag: "precio-antes" });
+    ctx.strokeStyle = ink; ctx.lineWidth = Math.max(2, r * 0.02); ctx.font = FN(500)(fb.size);
+    fb.lines.forEach(function (l, i) { const bw = ctx.measureText(l).width, ly = yb + i * fb.size * 1.05;
+      ctx.beginPath(); ctx.moveTo(-bw / 2 - 3, ly); ctx.lineTo(bw / 2 + 3, ly); ctx.stroke(); });
+    ctx.globalAlpha = alpha;
+  }
+  drawFit(ctx, fn, { x: 0, y: top + hB + (fb ? r * 0.06 : 0) + fn.size * 0.5, lh: 1.0, font: FN(700), maxW: maxW, tag: "precio" });
+  if (pct) {
+    const pr = r * 0.4;
+    ctx.translate(-r * 0.74, -r * 0.74); ctx.rotate(-0.18);
+    ctx.fillStyle = "#D7263D"; ctx.beginPath(); ctx.arc(0, 0, pr, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#FFFFFF"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const fs = fitPrice(ctx, "-" + pct + "%", { maxW: pr * 1.6, size: Math.round(pr * 0.62), font: FN(700) });
+    drawFit(ctx, fs, { x: 0, y: pr * 0.04, lh: 1.0, font: FN(700), maxW: pr * 1.6, tag: "pct" });
+  }
+  ctx.restore();
+}
+// [v8.8] Etiqueta de precio en píldora (banner, foto a pantalla completa).
+function vtPriceTag(ctx, it, x, y, size, accent, alpha, maxW, alignLeft) {
+  const now = vtPrice(it); if (!now || alpha <= 0) return null;
+  const before = it.priceBefore ? fmtPrice(it.priceBefore) : "", ink = vtInkOn(accent);
+  const FN = w => s => w + " " + s + "px " + DS_FONT, padX = size * 0.55, h = size * 1.7;
+  const fn = fitPrice(ctx, now, { maxW: maxW - padX * 2, size: size, font: FN(700) });
+  ctx.font = FN(700)(fn.size); const wN = Math.max.apply(null, fn.lines.map(l => ctx.measureText(l).width));
+  let fb = null, wB = 0;
+  if (before) { fb = fitText(ctx, before, { maxW: Math.max(0, maxW - padX * 2.6 - wN), size: Math.round(fn.size * 0.62), min: Math.round(fn.size * 0.5), font: FN(500) });
+    if (fb.cut) fb = null; else { ctx.font = FN(500)(fb.size); wB = ctx.measureText(fb.lines[0]).width + size * 0.4; } }
+  const bh = Math.max(h, fn.lines.length * fn.size * 1.05 + size * 0.6), bw = Math.min(maxW, wN + wB + padX * 2);
+  if (alignLeft) x += bw / 2;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.shadowColor = "rgba(0,0,0,0.25)"; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
+  ctx.fillStyle = toHex(accent); roundRectPath(ctx, x - bw / 2, y - bh / 2, bw, bh, bh / 2); ctx.fill();
+  ctx.shadowColor = "transparent"; ctx.fillStyle = ink;
+  let tx = x - bw / 2 + padX;
+  if (fb) {
+    ctx.globalAlpha = alpha * 0.8;
+    drawFit(ctx, fb, { x: tx, y: y + 1, align: "left", font: FN(500), maxW: maxW, tag: "precio-antes" });
+    ctx.strokeStyle = ink; ctx.lineWidth = Math.max(2, size * 0.06);
+    ctx.beginPath(); ctx.moveTo(tx - 2, y + 1); ctx.lineTo(tx + wB - size * 0.4 + 2, y + 1); ctx.stroke();
+    ctx.globalAlpha = alpha; tx += wB;
+  }
+  drawFit(ctx, fn, { x: tx, y: y + 1, align: "left", lh: 1.05, block: "center", font: FN(700), maxW: maxW - padX * 2, tag: "precio" });
+  ctx.restore();
+  return { w: bw, h: bh };
 }
 function vtWrapLines(ctx, text, maxW, size, weight, maxLines) {
   let fs = size, lines;
@@ -1153,10 +1301,29 @@ function vtCardAnim(t, a, b) {
   const p = clamp((t - a) / 0.45, 0, 1), q = clamp((t - (b - 0.3)) / 0.3, 0, 1);
   return { on: t >= a && t < b, alpha: easeOutCubic(p) * (1 - q), scale: 0.9 + 0.1 * easeOutBack(p) + 0.05 * q, dy: (1 - easeOutCubic(p)) * 70 };
 }
+// [v8.8] Rendimiento: capas de pantalla completa que no cambian (degradados de
+// fondo, velo) se dibujan UNA vez por tamaño de lienzo y cada fotograma solo las
+// copia 1:1 (un degradado a pantalla completa costaba ~5 veces más que copiarlo).
+const _fullLayers = new Map();
+function fullLayer(ctx, key, draw) {
+  const m = ctx.getTransform(), cv = ctx.canvas;
+  if (!cv || m.b !== 0 || m.c !== 0) { draw(ctx); return; }
+  const k = key + "|" + [cv.width, cv.height, m.a, m.d, m.e, m.f].join(",");
+  let layer = _fullLayers.get(k);
+  if (!layer) {
+    layer = document.createElement("canvas"); layer.width = cv.width; layer.height = cv.height;
+    const lx = layer.getContext("2d"); lx.setTransform(m); draw(lx);
+    if (_fullLayers.size >= 16) _fullLayers.delete(_fullLayers.keys().next().value);
+    _fullLayers.set(k, layer);
+  }
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(layer, 0, 0); ctx.restore();
+}
 function vtIntroBg(ctx, t, cols) {
-  const g = ctx.createLinearGradient(0, 0, W, H);
-  g.addColorStop(0, mixHex(cols[0], "#FFFFFF", 0.55)); g.addColorStop(0.5, mixHex(cols[0], "#1b2030", 0.6)); g.addColorStop(1, "#0a0d14");
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  fullLayer(ctx, "vtIntro:" + cols[0], function (c) {
+    const g = c.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, mixHex(cols[0], "#FFFFFF", 0.55)); g.addColorStop(0.5, mixHex(cols[0], "#1b2030", 0.6)); g.addColorStop(1, "#0a0d14");
+    c.fillStyle = g; c.fillRect(0, 0, W, H);
+  });
   ctx.save(); ctx.fillStyle = "#FFFFFF";
   VT_STARS.forEach(function (s) {
     const x = s[0] * W, y = s[1] * H, dark = clamp(x / W + y / H - 0.95, 0, 1);
@@ -1168,20 +1335,27 @@ function vtIntroBg(ctx, t, cols) {
   drawGrain(ctx, 0, 0, W, H, 0.025);
 }
 function vtStudioBg(ctx, t, cols, accent) {
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, mixHex(cols[0], "#F1F2EE", 0.8)); g.addColorStop(0.55, mixHex(cols[0], "#A7B1AA", 0.72)); g.addColorStop(1, mixHex(cols[0], "#4F5A54", 0.7));
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  fullLayer(ctx, "vtStudio:" + cols[0], function (c) {
+    const g = c.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, mixHex(cols[0], "#F1F2EE", 0.8)); g.addColorStop(0.55, mixHex(cols[0], "#A7B1AA", 0.72)); g.addColorStop(1, mixHex(cols[0], "#4F5A54", 0.7));
+    c.fillStyle = g; c.fillRect(0, 0, W, H);
+  });
   ctx.save();
   ctx.globalAlpha = 0.35; ctx.drawImage(softSprite(cols[0]), W * (0.1 + 0.05 * Math.sin(t * 0.4)) - W * 0.6, H * 0.15 - W * 0.6, W * 1.2, W * 1.2);
   ctx.globalAlpha = 0.25; ctx.drawImage(softSprite(toHex(accent)), W * (0.85 + 0.05 * Math.cos(t * 0.35)) - W * 0.55, H * 0.8 - W * 0.55, W * 1.1, W * 1.1);
   ctx.restore();
   drawGrain(ctx, 0, 0, W, H, 0.025);
 }
+// [v8.8] Sombra grande de tarjeta pre-dibujada (misma forma, color, desenfoque y desplazamiento).
+function vtCardShadow(ctx, key, x, y, w, h, r, fill, color, blur, offY) {
+  const q = renderScale(ctx);
+  const sp = shadowSprite("vt:" + key, w, h, blur * q, color, q, c => { c.fillStyle = fill; roundRectPath(c, 0, 0, w, h, r); c.fill(); });
+  drawShadowSprite(ctx, sp, x, y + offY, 1);
+}
 function vtGlass(ctx, x, y, w, h, r) {
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.18)"; ctx.shadowBlur = 50; ctx.shadowOffsetY = 18;
+  vtCardShadow(ctx, "glass", x, y, w, h, r, "rgba(255,255,255,0.30)", "rgba(0,0,0,0.18)", 50, 18);
   ctx.fillStyle = "rgba(255,255,255,0.30)"; roundRectPath(ctx, x, y, w, h, r); ctx.fill();
-  ctx.shadowColor = "transparent";
   const g = ctx.createLinearGradient(0, y, 0, y + h); g.addColorStop(0, "rgba(255,255,255,0.28)"); g.addColorStop(1, "rgba(255,255,255,0.06)");
   ctx.fillStyle = g; roundRectPath(ctx, x, y, w, h, r); ctx.fill();
   ctx.strokeStyle = "rgba(255,255,255,0.65)"; ctx.lineWidth = 2.5; roundRectPath(ctx, x, y, w, h, r); ctx.stroke();
@@ -1244,18 +1418,44 @@ function vtCollageCache(tl, items) {
   }
   tl._collage = c; return c;
 }
+// [v8.8] Rendimiento: el muro girado y ampliado ×2 costaba ~27 ms por fotograma.
+// Ahora se gira y amplía UNA vez a resolución de pantalla (con margen para todo
+// su recorrido) y cada fotograma solo lo desplaza (con precisión de subpíxel).
+// El giro es fijo, así que desplazar en el marco girado = desplazar en pantalla.
+const VT_ROT = -0.21, VT_VX = 20, VT_VY = -46;
+function vtCollageScreen(ctx, tl, items) {
+  const m = ctx.getTransform(), cv = ctx.canvas, q = m.a;
+  const key = [cv.width, cv.height, m.a, m.d, m.e, m.f].join(",");
+  if (tl._collageScr && tl._collageScr.key === key) return tl._collageScr;
+  const cache = vtCollageCache(tl, items);
+  // recorrido máximo del muro en pantalla (marco girado → pantalla), a cada lado
+  const dtMax = VT.exp - VT.c1, cs = Math.cos(VT_ROT), sn = Math.sin(VT_ROT);
+  const mx = Math.ceil(Math.abs((VT_VX * cs - VT_VY * sn) * dtMax)) + 4, my = Math.ceil(Math.abs((VT_VX * sn + VT_VY * cs) * dtMax)) + 4;
+  const c = document.createElement("canvas");
+  c.width = Math.ceil((W + 2 * mx) * q); c.height = Math.ceil((H + 2 * my) * q);
+  const x = c.getContext("2d");
+  // el mismo dibujo que antes en su posición inicial (dt = 0); el píxel (0,0) es el punto (-mx, -my) de la pantalla
+  x.setTransform(q, 0, 0, q, mx * q, my * q);
+  x.translate(W / 2, H / 2); x.rotate(VT_ROT); x.translate(-W / 2, -H / 2);
+  x.imageSmoothingEnabled = true;
+  x.drawImage(cache, -VT_PAD, -VT_PAD, W + 2 * VT_PAD, H + 2 * VT_PAD);
+  tl._collageScr = { key: key, canvas: c, q: q, mx: mx, my: my, cs: cs, sn: sn };
+  return tl._collageScr;
+}
 function vtCollage(ctx, t, tl, items, cols, alpha) {
   if (alpha <= 0) return;
-  const cache = vtCollageCache(tl, items), dt = Math.max(0, t - VT.c1);
+  const sc = vtCollageScreen(ctx, tl, items), dt = clamp(t - VT.c1, 0, VT.exp - VT.c1);
+  const dx = (VT_VX * sc.cs - VT_VY * sc.sn) * dt, dy = (VT_VX * sc.sn + VT_VY * sc.cs) * dt;
   ctx.save(); ctx.globalAlpha = alpha;
-  ctx.translate(W / 2, H / 2); ctx.rotate(-0.21); ctx.translate(-W / 2, -H / 2);
   ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(cache, -VT_PAD + dt * 20, -VT_PAD - dt * 46, W + 2 * VT_PAD, H + 2 * VT_PAD);
+  ctx.drawImage(sc.canvas, -sc.mx + dx, -sc.my + dy, sc.canvas.width / sc.q, sc.canvas.height / sc.q);
   ctx.restore();
   ctx.save(); ctx.globalAlpha = alpha;
-  const v = ctx.createLinearGradient(0, 0, 0, H);
-  v.addColorStop(0, hexToRgba(toHex(mixHex(cols[0], "#FFFFFF", 0.8)), 0.55)); v.addColorStop(0.5, "rgba(255,255,255,0.35)"); v.addColorStop(1, hexToRgba(toHex(mixHex(cols[0], "#2b312d", 0.6)), 0.55));
-  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  fullLayer(ctx, "vtVelo:" + cols[0], function (c) {
+    const v = c.createLinearGradient(0, 0, 0, H);
+    v.addColorStop(0, hexToRgba(toHex(mixHex(cols[0], "#FFFFFF", 0.8)), 0.55)); v.addColorStop(0.5, "rgba(255,255,255,0.35)"); v.addColorStop(1, hexToRgba(toHex(mixHex(cols[0], "#2b312d", 0.6)), 0.55));
+    c.fillStyle = v; c.fillRect(0, 0, W, H);
+  });
   ctx.restore();
 }
 
@@ -1304,6 +1504,9 @@ const StyleVitrina = {
       const hp = clamp((t - 2.9) / 0.8, 0, 1);
       if (hp > 0) { dsProduct.light = false; dsProduct(ctx, hero, cx, cy, W * 0.52 * (0.85 + 0.15 * easeOutCubic(hp)), 0, easeOutCubic(hp) * (1 - clamp((t - (VT.c1 - 0.25)) / 0.25, 0, 1))); }
       vtRing(ctx, d.ring, cx, ringCy, t, ringA, true);
+      // [v8.8] círculo de precio con rebote (~3,6 s), se va junto con el producto
+      const pcP = clamp((t - 3.6) / 0.45, 0, 1);
+      if (pcP > 0) vtPriceCircle(ctx, hero, cx + W * 0.27, cy - W * 0.25, 120, accent, easeOutBack(pcP), clamp(pcP * 3, 0, 1) * (1 - clamp((t - (VT.c1 - 0.25)) / 0.25, 0, 1)));
       // frases
       const a1 = clamp(t / 0.3, 0, 1) * (1 - clamp((t - 1.1) / 0.25, 0, 1));
       const a2 = clamp((t - VT.phrase) / 0.3, 0, 1) * (1 - clamp((t - 2.9) / 0.3, 0, 1));
@@ -1329,8 +1532,8 @@ const StyleVitrina = {
         const gw = W * 0.72, gh = W * 0.98, gx = cx - gw / 2, gy = cy - gh / 2;
         vtGlass(ctx, gx, gy, gw, gh, 44);
         vtItemBox(ctx, it, gx + 36, gy + 36, gw - 72, gw - 72, 30, "#FFFFFF");
-        vtText(ctx, vtName(it).toUpperCase(), gx + 44, gy + gw + 20, 44, 500, "#FFFFFF", "left", gw - 88);
-        const pr = vtPrice(it); if (pr) vtText(ctx, pr, gx + 44, gy + gw + 84, 56, 700, "#FFFFFF", "left", gw - 88);
+        const extra = vtFitName(ctx, vtName(it).toUpperCase(), gx + 44, gy + gw + 20, 44, 500, "#FFFFFF", "left", gw - 88, 2); // [v8.8] hasta 2 líneas
+        const pr = vtPrice(it); if (pr) vtPriceText(ctx, pr, gx + 44, gy + gw + 84 + extra, 56, 700, "#FFFFFF", "left", gw - 88);
         ctx.restore();
       }
       A = vtCardAnim(t, VT.c2, VT.c3);
@@ -1338,7 +1541,7 @@ const StyleVitrina = {
         const it = pick(2);
         ctx.save(); ctx.globalAlpha = A.alpha; ctx.translate(cx, cy + A.dy); ctx.scale(A.scale, A.scale); ctx.translate(-cx, -cy);
         const bw = W * 0.74, bh = W * 1.06, bx = cx - bw / 2, by = cy - bh / 2;
-        ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.25)"; ctx.shadowBlur = 50; ctx.shadowOffsetY = 18;
+        ctx.save(); vtCardShadow(ctx, "banner", bx, by, bw, bh, 34, "#000", "rgba(0,0,0,0.25)", 50, 18); // [v8.8]
         const bg = ctx.createLinearGradient(0, by, 0, by + bh); bg.addColorStop(0, mixHex(accent, "#1d2b4a", 0.35)); bg.addColorStop(1, mixHex(accent, "#0e1526", 0.55));
         ctx.fillStyle = bg; roundRectPath(ctx, bx, by, bw, bh, 34); ctx.fill(); ctx.restore();
         ctx.save(); roundRectPath(ctx, bx, by, bw, bh, 34); ctx.clip();
@@ -1346,11 +1549,21 @@ const StyleVitrina = {
         vtText(ctx, (name || "RETADOR").toUpperCase(), bx + 30, by + 36, 30, 700, "#161510", "left", bw * 0.45);
         vtText(ctx, "Descubre lo nuevo", bx + bw - 30, by + 36, 28, 500, "#6b6b6b", "right", bw * 0.45);
         const zoom = 1 + 0.06 * clamp((t - VT.c2) / (VT.c3 - VT.c2), 0, 1);
-        dsProduct.light = false; dsProduct(ctx, it, cx, by + bh * 0.56, bw * 0.62 * zoom, 0, 1);
+        const pSize = bw * 0.62 * zoom, pCy = by + bh * 0.56;
+        dsProduct.light = false; dsProduct(ctx, it, cx, pCy, pSize, 0, 1);
         const words = (d.banner || "").trim().split(/\s+/), half = Math.ceil(words.length / 2);
         const top = words.slice(0, half).join(" "), bot = words.slice(half).join(" ");
-        if (top) { const L = vtWrapLines(ctx, top, bw * 0.84, 84, 700, 2); L.lines.forEach((l, i) => vtText(ctx, l, cx, by + 150 + i * L.fs * 1.02, L.fs, 700, "#FFF4C2", "center", bw * 0.86)); }
-        if (bot) { const L = vtWrapLines(ctx, bot, bw * 0.84, 84, 700, 2); L.lines.forEach((l, i) => vtText(ctx, l, cx, by + bh - 190 - (L.lines.length - 1 - i) * L.fs * 1.02, L.fs, 700, "#FFF4C2", "center", bw * 0.86)); }
+        let topEnd = by + 90, botStart = by + bh - 120;
+        if (top) { const L = vtWrapLines(ctx, top, bw * 0.84, 84, 700, 2); L.lines.forEach((l, i) => vtText(ctx, l, cx, by + 150 + i * L.fs * 1.02, L.fs, 700, "#FFF4C2", "center", bw * 0.86, "banner")); topEnd = by + 150 + (L.lines.length - 1) * L.fs * 1.02 + L.fs * 0.55; }
+        if (bot) { const L = vtWrapLines(ctx, bot, bw * 0.84, 84, 700, 2); L.lines.forEach((l, i) => vtText(ctx, l, cx, by + bh - 190 - (L.lines.length - 1 - i) * L.fs * 1.02, L.fs, 700, "#FFF4C2", "center", bw * 0.86, "banner")); botStart = by + bh - 190 - (L.lines.length - 1) * L.fs * 1.02 - L.fs * 0.55; }
+        // [v8.8] etiqueta de precio montada en el borde inferior de la foto; si ahí
+        // chocaría con el texto del banner, en el borde superior.
+        if (vtPrice(it)) {
+          const tagH = 44 * 1.7, edge = pSize * 0.45;
+          let ty = pCy + edge;
+          if (ty + tagH / 2 > botStart - 6) ty = Math.max(pCy - edge, topEnd + 6 + tagH / 2);
+          vtPriceTag(ctx, it, cx, ty, 44, accent, 1, bw * 0.8);
+        }
         if (cta) { ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.lineWidth = 2.5; roundRectPath(ctx, cx - 190, by + bh - 100, 380, 64, 8); ctx.stroke();
           vtText(ctx, cta.toUpperCase(), cx, by + bh - 67, 28, 700, "#FFFFFF", "center", 350); }
         ctx.restore(); ctx.restore();
@@ -1360,7 +1573,7 @@ const StyleVitrina = {
         const slide = (1 - easeOutCubic(clamp((t - VT.c3) / 0.5, 0, 1))) * H * 0.35;
         ctx.save(); ctx.globalAlpha = A.alpha; ctx.translate(0, slide);
         const pw = W * 0.58, ph = pw * 2.05, px = cx - pw / 2, py = cy - ph / 2;
-        ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.3)"; ctx.shadowBlur = 60; ctx.shadowOffsetY = 24;
+        ctx.save(); vtCardShadow(ctx, "movil", px, py, pw, ph, 76, "#111214", "rgba(0,0,0,0.3)", 60, 24); // [v8.8]
         ctx.fillStyle = "#111214"; roundRectPath(ctx, px, py, pw, ph, 76); ctx.fill(); ctx.restore();
         const sx = px + 14, sy = py + 14, sw = pw - 28, sh = ph - 28;
         ctx.save(); roundRectPath(ctx, sx, sy, sw, sh, 64); ctx.clip();
@@ -1374,8 +1587,8 @@ const StyleVitrina = {
           const tx = sx + 24 + col * (tileW + 24), ty = gridTop + row * (tileH + 20) - scroll;
           if (ty > sy + sh || ty + tileH < gridTop - 10) continue;
           vtItemBox(ctx, it, tx, ty, tileW, tileW, 18, "#F3F3F1");
-          vtText(ctx, vtName(it), tx + 4, ty + tileW + 30, 22, 700, "#161510", "left", tileW - 8);
-          const pr = vtPrice(it); if (pr) vtText(ctx, pr, tx + 4, ty + tileW + 64, 24, 700, accent, "left", tileW - 8);
+          vtFitName(ctx, vtName(it), tx + 4, ty + tileW + 30, 22, 700, "#161510", "left", tileW - 8, 1);
+          const pr = vtPrice(it); if (pr) vtPriceText(ctx, pr, tx + 4, ty + tileW + 64, 24, 700, accent, "left", tileW - 8);
         }
         ctx.restore();
         // cabecera fija
@@ -1396,7 +1609,7 @@ const StyleVitrina = {
         const cw = W * 0.86, tileW = (cw - 80 - 28 * (cols2 - 1)) / cols2, tileH = tileW * (cols2 === 1 ? 0.9 : 1) + 110;
         const ch = 120 + rows * tileH + (rows - 1) * 24 + 40, x0 = cx - cw / 2, y0 = cy - ch / 2;
         ctx.save(); ctx.globalAlpha = A.alpha; ctx.translate(cx, cy + A.dy); ctx.scale(A.scale, A.scale); ctx.translate(-cx, -cy);
-        ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.18)"; ctx.shadowBlur = 50; ctx.shadowOffsetY = 18;
+        ctx.save(); vtCardShadow(ctx, "destacados", x0, y0, cw, ch, 40, "rgba(255,255,255,0.9)", "rgba(0,0,0,0.18)", 50, 18); // [v8.8]
         ctx.fillStyle = "rgba(255,255,255,0.9)"; roundRectPath(ctx, x0, y0, cw, ch, 40); ctx.fill(); ctx.restore();
         vtText(ctx, d.featured || "Productos destacados", x0 + 40, y0 + 64, 42, 700, "#161510", "left", cw - 80);
         list.forEach(function (it, k) {
@@ -1408,8 +1621,8 @@ const StyleVitrina = {
           ctx.translate(tx + tileW / 2, ty + tileH / 2); ctx.scale(0.8 + 0.2 * pk, 0.8 + 0.2 * pk); ctx.translate(-(tx + tileW / 2), -(ty + tileH / 2));
           ctx.fillStyle = "#F4F4F2"; roundRectPath(ctx, tx, ty, tileW, tileH, 24); ctx.fill();
           vtItemBox(ctx, it, tx + (tileW - box) / 2, ty, box, box, 24, "#FFFFFF");
-          vtText(ctx, vtName(it).toUpperCase(), tx + 18, ty + box + 36, 24, 700, "#161510", "left", tileW - 36);
-          const pr = vtPrice(it); if (pr) vtText(ctx, pr, tx + 18, ty + box + 76, 28, 700, "#161510", "left", tileW * 0.5);
+          vtFitName(ctx, vtName(it).toUpperCase(), tx + 18, ty + box + 36, 24, 700, "#161510", "left", tileW - 36, 1);
+          const pr = vtPrice(it); if (pr) vtPriceText(ctx, pr, tx + 18, ty + box + 76, 28, 700, "#161510", "left", tileW * 0.5);
           vtStars(ctx, tx + tileW - 118, ty + box + 76, 16, "#F5B301");
           ctx.restore();
         });
@@ -1439,6 +1652,20 @@ const StyleVitrina = {
         dsProduct.light = true; dsProduct(ctx, hero, cx, cy, Math.min(w, h) * 0.78, 0, 1);
       }
       ctx.restore();
+      // [v8.8] nombre y precio en una esquina, desde que termina la expansión hasta el logo
+      const np = clamp((t - VT.full) / 0.35, 0, 1) * (1 - clamp((t - (VT.logo - 0.45)) / 0.3, 0, 1));
+      if (np > 0) {
+        const pw = W * 0.62, px = 56, pad = 34, NF = s => "700 " + s + "px " + DS_FONT, hasP = !!vtPrice(hero);
+        const ft = fitText(ctx, vtName(hero), { maxW: pw - pad * 2, size: 46, lines: 2, font: NF });
+        const nameH = ft.lines.length * ft.size * 1.1, ph = pad * 2 + nameH + (hasP ? 16 + 44 * 1.7 : 0);
+        const py = H - 190 - ph + (1 - easeOutCubic(np)) * 40;
+        ctx.save(); ctx.globalAlpha = np;
+        ctx.fillStyle = "rgba(12,12,14,0.55)"; roundRectPath(ctx, px, py, pw, ph, 28); ctx.fill();
+        ctx.fillStyle = "#FFFFFF";
+        drawFit(ctx, ft, { x: px + pad, y: py + pad + ft.size * 0.55, align: "left", lh: 1.1, font: NF, maxW: pw - pad * 2, tag: "nombre" });
+        if (hasP) vtPriceTag(ctx, hero, px + pad, py + pad + nameH + 16 + 44 * 0.85, 44, accent, np, pw - pad * 2, true);
+        ctx.restore();
+      }
       if (t > VT.logo - 0.3) {
         const lp = clamp((t - (VT.logo - 0.3)) / 0.5, 0, 1);
         ctx.save(); ctx.globalAlpha = lp * 0.5;

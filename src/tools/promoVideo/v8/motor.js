@@ -108,12 +108,30 @@ function getGrain(ctx) {
   grainPattern = ctx.createPattern(g, "repeat");
   return grainPattern;
 }
+// [v8.8] Rendimiento: el grano se pre-dibuja UNA vez (por tamaño de lienzo,
+// transformación y opacidad) en una capa, y cada fotograma solo la copia.
+// Antes se rellenaba la pantalla entera con el patrón en cada fotograma.
+const _grainLayers = new Map();
 function drawGrain(ctx, x, y, w, h, alpha) {
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = getGrain(ctx);
-  ctx.fillRect(x, y, w, h);
-  ctx.restore();
+  const m = ctx.getTransform ? ctx.getTransform() : null, cv = ctx.canvas;
+  if (!m || m.b !== 0 || m.c !== 0 || !cv) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = getGrain(ctx);
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
+    return;
+  }
+  const key = [cv.width, cv.height, m.a, m.d, m.e, m.f, x, y, w, h, alpha].join(",");
+  let layer = _grainLayers.get(key);
+  if (!layer) {
+    layer = document.createElement("canvas"); layer.width = cv.width; layer.height = cv.height;
+    const lx = layer.getContext("2d");
+    lx.setTransform(m); lx.globalAlpha = alpha; lx.fillStyle = getGrain(lx); lx.fillRect(x, y, w, h);
+    if (_grainLayers.size >= 12) _grainLayers.delete(_grainLayers.keys().next().value);
+    _grainLayers.set(key, layer);
+  }
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.drawImage(layer, 0, 0); ctx.restore();
 }
 
 // ============================================================
@@ -214,48 +232,146 @@ function discountPct(item) {
   return Math.round(((b - n) / b) * 100);
 }
 
-function drawPriceBadge(ctx, item, cx, cy, size, alpha, accent) {
+// ---------- [v8.8] Ajuste de textos de producto ----------
+// Nombre, precio y etiquetas NUNCA se salen de su caja ni se montan. Orden fijo:
+// 1) achicar la letra hasta un mínimo legible; 2) partir en hasta N líneas;
+// 3) cortar con "…" al final. Un precio nunca se corta con "…": si no cabe en
+// una línea, la moneda baja a una segunda línea.
+function _sizes(size, min, paso) {
+  const out = [], step = paso || Math.max(1, Math.round(size / 40));
+  for (let s = size; s > min; s -= step) out.push(s);
+  out.push(min);
+  return out;
+}
+function _splitWord(ctx, w, maxW) {
+  const out = []; let cur = "";
+  Array.from(w).forEach(function (ch) { if (cur && ctx.measureText(cur + ch).width > maxW) { out.push(cur); cur = ch; } else cur += ch; });
+  if (cur) out.push(cur);
+  return out;
+}
+function wrapWords(ctx, text, maxW) {
+  const out = []; let cur = "";
+  text.split(" ").forEach(function (w) {
+    if (!w) return;
+    if (ctx.measureText(w).width > maxW) { // palabra más ancha que la caja: se parte por letras
+      if (cur) { out.push(cur); cur = ""; }
+      const parts = _splitWord(ctx, w, maxW); cur = parts.pop(); parts.forEach(q => out.push(q)); return;
+    }
+    const t = cur ? cur + " " + w : w;
+    if (cur && ctx.measureText(t).width > maxW) { out.push(cur); cur = w; } else cur = t;
+  });
+  if (cur) out.push(cur);
+  return out;
+}
+function ellipsize(ctx, s, maxW) {
+  if (ctx.measureText(s).width <= maxW) return s;
+  const a = Array.from(s), clean = x => x.replace(/[\s.,;:·\-–(]+$/, "");
+  while (a.length > 1 && ctx.measureText(clean(a.join("")) + "…").width > maxW) a.pop();
+  return clean(a.join("")) + "…";
+}
+// o = { maxW, size, min (por defecto 72 % de size), lines (máx. líneas, 1), font: s => "700 " + s + "px ...", wrapFirst }
+// Devuelve { size, lines, cut } y deja ctx.font con el tamaño elegido.
+function fitText(ctx, text, o) {
+  const t = String(text == null ? "" : text).replace(/\s+/g, " ").trim();
+  const maxLines = Math.max(1, o.lines || 1), min = Math.min(o.size, o.min || Math.round(o.size * 0.72)), sizes = _sizes(o.size, min, o.paso);
+  if (!t) { ctx.font = o.font(o.size); return { size: o.size, lines: [], cut: false }; }
+  // wrapFirst: frases (no de producto) que ya se diseñaron en varias líneas: se parte antes de achicar, como siempre.
+  if (!o.wrapFirst) for (const s of sizes) { ctx.font = o.font(s); if (ctx.measureText(t).width <= o.maxW) return { size: s, lines: [t], cut: false }; }
+  if (maxLines > 1) for (const s of sizes) { ctx.font = o.font(s); const L = wrapWords(ctx, t, o.maxW); if (L.length <= maxLines) return { size: s, lines: L, cut: false }; }
+  ctx.font = o.font(min);
+  const L = wrapWords(ctx, t, o.maxW), keep = L.slice(0, maxLines);
+  keep[keep.length - 1] = ellipsize(ctx, L.slice(maxLines - 1).join(" "), o.maxW);
+  return { size: min, lines: keep, cut: true };
+}
+// Precio: una línea achicando; si no cabe, número arriba y moneda abajo; nunca "…".
+function fitPrice(ctx, price, o) {
+  const t = String(price || "").trim(), min = o.min || Math.round(o.size * 0.6);
+  for (const s of _sizes(o.size, min, o.paso)) { ctx.font = o.font(s); if (ctx.measureText(t).width <= o.maxW) return { size: s, lines: [t], cut: false }; }
+  const i = t.lastIndexOf(" "), L = i > 0 ? [t.slice(0, i), t.slice(i + 1)] : [t];
+  for (const s of _sizes(o.size, Math.max(8, Math.round(o.size * 0.35)))) {
+    ctx.font = o.font(s);
+    if (L.every(l => ctx.measureText(l).width <= o.maxW)) return { size: s, lines: L, cut: false };
+  }
+  return { size: Math.max(8, Math.round(o.size * 0.35)), lines: L, cut: false };
+}
+// Dibuja un ajuste. y = centro de la 1.ª línea (o del bloque con o.block = "center").
+// o = { x, y, align, lh (alto de línea en veces el tamaño, 1.12), block, font, maxW, tag }
+function drawFit(ctx, fit, o) {
+  if (!fit || !fit.lines.length) return 0;
+  const lh = fit.size * (o.lh || 1.12), n = fit.lines.length;
+  const y0 = o.block === "center" ? o.y - ((n - 1) * lh) / 2 : o.y;
+  ctx.font = o.font(fit.size); ctx.textAlign = o.align || "center"; ctx.textBaseline = "middle";
+  fit.lines.forEach(function (l, i) { ctx.fillText(l, o.x, y0 + i * lh); logTextBox(ctx, l, o.x, y0 + i * lh, fit.size, o); });
+  return n * lh;
+}
+// Solo pruebas: si existe window.__cajasTexto se anotan las cajas de texto en píxeles del lienzo.
+function logTextBox(ctx, text, x, y, size, o) {
+  const log = typeof window !== "undefined" && window.__cajasTexto;
+  if (!log) return;
+  const w = o.w != null ? o.w : ctx.measureText(text).width, al = ctx.textAlign;
+  const x0 = al === "left" ? x : al === "right" ? x - w : x - w / 2;
+  const m = ctx.getTransform(), pts = [[x0, y - size * 0.5], [x0 + w, y - size * 0.5], [x0, y + size * 0.5], [x0 + w, y + size * 0.5]].map(p => [m.a * p[0] + m.c * p[1] + m.e, m.b * p[0] + m.d * p[1] + m.f]);
+  log.push({ tag: o.tag || "", text: text, alpha: ctx.globalAlpha, canvas: ctx.canvas, clip: ctx.__clip, girado: m.b !== 0 || m.c !== 0, movil: !!o.movil, w: w, maxW: o.maxW || Infinity,
+    box: [Math.min(...pts.map(p => p[0])), Math.min(...pts.map(p => p[1])), Math.max(...pts.map(p => p[0])), Math.max(...pts.map(p => p[1]))] });
+}
+
+function drawPriceBadge(ctx, item, cx, cy, size, alpha, accent, lim) {
   if (!item.priceNow) return;
   item = Object.assign({}, item, { priceBefore: fmtPrice(item.priceBefore), priceNow: fmtPrice(item.priceNow), _pct: item.showPct ? discountPct(item) : null });
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.translate(cx + size * 0.36, cy - size * 0.42);
-  const nowFont = Math.round(size * 0.15), beforeFont = Math.round(size * 0.095);
-  ctx.font = "800 " + nowFont + "px Manrope, system-ui, sans-serif";
-  const nowW = ctx.measureText(item.priceNow).width;
-  ctx.font = "700 " + beforeFont + "px Manrope, system-ui, sans-serif";
-  const beforeW = item.priceBefore ? ctx.measureText(item.priceBefore).width : 0;
-  const padX = size * 0.055, padY = size * 0.045;
+  // [v8.8] Los precios largos ("12.500 CUP", "1.299,99 €") se achican para que la
+  // etiqueta no pase del 80 % de la tarjeta; si la tarjeta está en pantalla, la
+  // etiqueta tampoco se sale por los bordes.
+  const PF = w => s => w + " " + s + "px Manrope, system-ui, sans-serif";
+  const padX = size * 0.055, padY = size * 0.045, maxT = size * 0.76 - padX * 2;
+  const now = fitPrice(ctx, item.priceNow, { maxW: maxT, size: Math.round(size * 0.15), font: PF(800) });
+  const before = item.priceBefore ? fitPrice(ctx, item.priceBefore, { maxW: maxT, size: Math.round(size * 0.095), font: PF(700) }) : null;
+  const widest = (f, font) => { ctx.font = font(f.size); return Math.max.apply(null, f.lines.map(l => ctx.measureText(l).width)); };
+  const nowW = widest(now, PF(800)), beforeW = before ? widest(before, PF(700)) : 0;
+  const nowH = now.size * (1 + (now.lines.length - 1) * 1.05), beforeH = before ? before.size * (0.9 + (before.lines.length - 1) * 1.05) : 0;
   const boxW = Math.max(nowW, beforeW) + padX * 2;
-  const boxH = (item.priceBefore ? nowFont + beforeFont * 0.9 : nowFont) + padY * 2.4;
+  const boxH = nowH + beforeH + padY * 2.4;
+  // Misma posición de siempre (centro en la esquina de la tarjeta). Solo se corre
+  // si tocaría el sello "-%" de la tarjeta vecina (lim.maxRight, Mosaico) o si se
+  // saldría de la pantalla.
+  let bx = cx + size * 0.36;
+  if (lim && lim.maxRight != null) bx = Math.min(bx, lim.maxRight - boxW / 2);
+  const movil = !(cx >= 0 && cx <= W); // tarjeta a medio entrar/salir: la etiqueta va con ella
+  if (!movil) bx = clamp(bx, boxW / 2 + 12, W - boxW / 2 - 12);
+  const sealR = size * 0.13;
+  let sealX = cx - size * 0.38;
+  if (item._pct) { // el sello "-%" nunca queda debajo de la etiqueta
+    sealX = Math.min(sealX, bx - boxW / 2 - 10 - sealR * 1.1);
+    if (!movil) sealX = Math.max(sealX, sealR + 12);
+    bx = Math.max(bx, sealX + sealR * 1.1 + 10 + boxW / 2);
+  }
+  ctx.translate(bx, cy - size * 0.42);
   ctx.shadowColor = "rgba(0,0,0,0.28)"; ctx.shadowBlur = size * 0.04; ctx.shadowOffsetY = size * 0.012;
   roundRectPath(ctx, -boxW / 2, -boxH / 2, boxW, boxH, boxH * 0.24);
   ctx.fillStyle = accent; ctx.fill();
   ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
   ctx.textAlign = "center";
-  if (item.priceBefore) {
-    ctx.font = "700 " + beforeFont + "px Manrope, system-ui, sans-serif";
+  if (before) {
     ctx.fillStyle = "rgba(255,255,255,0.78)";
-    const by = -boxH / 2 + padY + beforeFont * 0.62;
-    ctx.textBaseline = "middle";
-    ctx.fillText(item.priceBefore, 0, by);
-    const bw = ctx.measureText(item.priceBefore).width;
+    const by = -boxH / 2 + padY + before.size * 0.62;
+    drawFit(ctx, before, { x: 0, y: by, lh: 1.05, font: PF(700), maxW: maxT, tag: "precio-antes", movil: movil });
     ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = Math.max(1.5, size * 0.006);
-    ctx.beginPath(); ctx.moveTo(-bw / 2 - 2, by); ctx.lineTo(bw / 2 + 2, by); ctx.stroke();
-    ctx.font = "800 " + nowFont + "px Manrope, system-ui, sans-serif";
+    ctx.font = PF(700)(before.size);
+    before.lines.forEach(function (l, i) { const bw = ctx.measureText(l).width, ly = by + i * before.size * 1.05;
+      ctx.beginPath(); ctx.moveTo(-bw / 2 - 2, ly); ctx.lineTo(bw / 2 + 2, ly); ctx.stroke(); });
     ctx.fillStyle = "#FFFFFF";
-    ctx.fillText(item.priceNow, 0, by + beforeFont * 0.6 + nowFont * 0.62);
+    drawFit(ctx, now, { x: 0, y: by + (before.lines.length - 1) * before.size * 1.05 + before.size * 0.6 + now.size * 0.62, lh: 1.05, font: PF(800), maxW: maxT, tag: "precio", movil: movil });
   } else {
-    ctx.font = "800 " + nowFont + "px Manrope, system-ui, sans-serif";
-    ctx.fillStyle = "#FFFFFF"; ctx.textBaseline = "middle";
-    ctx.fillText(item.priceNow, 0, 0);
+    ctx.fillStyle = "#FFFFFF";
+    drawFit(ctx, now, { x: 0, y: 0, lh: 1.05, block: "center", font: PF(800), maxW: maxT, tag: "precio", movil: movil });
   }
   ctx.restore();
-  if (item._pct) drawPctSeal(ctx, item._pct, cx - size * 0.38, cy - size * 0.40, size, alpha);
+  if (item._pct) drawPctSeal(ctx, item._pct, sealX, cy - size * 0.40, size, alpha, movil);
 }
 
 // Sello redondo "-75%" en la esquina opuesta a la etiqueta de precio.
-function drawPctSeal(ctx, pct, x, y, size, alpha) {
+function drawPctSeal(ctx, pct, x, y, size, alpha, movil) {
   const r = size * 0.13;
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -268,13 +384,14 @@ function drawPctSeal(ctx, pct, x, y, size, alpha) {
   ctx.fillStyle = "#FFFFFF"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.font = "800 " + Math.round(r * 0.72) + "px Manrope, system-ui, sans-serif";
   ctx.fillText("-" + pct + "%", 0, r * 0.04);
+  logTextBox(ctx, "-" + pct + "%", 0, r * 0.04, Math.round(r * 0.72), { tag: "pct", maxW: r * 2, movil: movil });
   ctx.restore();
 }
 
 // Tarjeta de producto nítida: sin desenfoque, profundidad solo por
 // tamaño y sombra. size es en píxeles reales (sin ctx.scale), porque
 // shadowBlur no se escala con la transformación del canvas.
-function drawProductCard(ctx, item, cx, cy, size, angle, alpha, depth, theme, accent) {
+function drawProductCard(ctx, item, cx, cy, size, angle, alpha, depth, theme, accent, lim) {
   const h = size / 2, r = size * 0.14;
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -299,7 +416,7 @@ function drawProductCard(ctx, item, cx, cy, size, angle, alpha, depth, theme, ac
     drawEmoji(ctx, item.icon || "🛍️", 0, 0, size * 0.58);
   }
   ctx.restore();
-  if (item.priceNow) drawPriceBadge(ctx, item, cx, cy, size, alpha, accent || "#F26B0F");
+  if (item.priceNow) drawPriceBadge(ctx, item, cx, cy, size, alpha, accent || "#F26B0F", lim);
 }
 
 function hexToRgba(hex, a) {
@@ -371,6 +488,7 @@ function drawHeadline(ctx, text, keyword, theme, accent, frame, localMs, y) {
       ctx.fillText(w, x, top + li * lh);
       x += ctx.measureText(w).width + space;
     });
+    logTextBox(ctx, ln.words.join(" "), W / 2 - ln.w / 2, top + li * lh, 70, { tag: "titular", w: ln.w });
   });
   ctx.restore();
 }
@@ -531,11 +649,42 @@ function drawChrome(ctx, frame, tl, opts) {
   }
 }
 
+// [v8.8] Rendimiento: sombras pre-dibujadas. shadowBlur en cada fotograma era lo
+// más caro de Desfile y Vitrina. La sombra (sin la figura) se dibuja UNA vez como
+// imagen y luego se copia escalada. blurDev y el desplazamiento son en píxeles de
+// pantalla, igual que shadowBlur/shadowOffset del lienzo.
+const _shadowCache = new Map();
+function shadowSprite(key, w, h, blurDev, color, q, drawShape) {
+  const k = key + "|" + w + "|" + h + "|" + blurDev + "|" + color + "|" + q;
+  let s = _shadowCache.get(k);
+  if (s) return s;
+  const pad = Math.ceil(blurDev * 1.6 + 2);
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.ceil(w * q + 2 * pad)); c.height = Math.max(1, Math.ceil(h * q + 2 * pad));
+  const x = c.getContext("2d"), off = c.width + 64;
+  x.shadowColor = color; x.shadowBlur = blurDev; x.shadowOffsetX = off;
+  x.translate(pad - off, pad); x.scale(q, q); drawShape(x);
+  s = { canvas: c, padU: pad / q, q: q };
+  if (_shadowCache.size >= 80) _shadowCache.delete(_shadowCache.keys().next().value);
+  _shadowCache.set(k, s);
+  return s;
+}
+// Dibuja la sombra con la figura escalada por `scale` y su origen en (x, y).
+function drawShadowSprite(ctx, s, x, y, scale) {
+  const k = scale || 1;
+  ctx.drawImage(s.canvas, x - s.padU * k, y - s.padU * k, (s.canvas.width / s.q) * k, (s.canvas.height / s.q) * k);
+}
+// Píxeles de pantalla por unidad de diseño del fotograma (1 = Alta, 2/3 = Ligera, 0,5 = vista previa).
+function renderScale(ctx) { return ctx.canvas ? ctx.canvas.width / W : 1; }
+
 // [integración] La interfaz vive en otro módulo: estas dos variables se asignan por aquí.
 export function setBgPhoto(img, blurred) { bgPhoto = img; bgPhotoBlurred = blurred; }
 export function setCurrency(c) { currency = c; }
 
 export {
+  shadowSprite,
+  drawShadowSprite,
+  renderScale,
   BG_VEIL,
   CURRENCIES,
   EMOJI_CATS,
@@ -555,6 +704,12 @@ export {
   clamp,
   currency,
   discountPct,
+  drawFit,
+  ellipsize,
+  fitPrice,
+  fitText,
+  logTextBox,
+  wrapWords,
   drawArrivalRing,
   drawBackground,
   drawChrome,

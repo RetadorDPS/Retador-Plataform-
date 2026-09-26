@@ -1,10 +1,10 @@
 # Generador de Video Promocional — RETADOR
 
-**Versión actual: v8.7** (archivo `retador-video-generador-v8.7.html`).
-**Versión que hoy está en la plataforma: v8.7** (integrada en la v238 de RETADOR;
-reemplazó a la v7.3). Ver "Integración en RETADOR (v8.7)" justo abajo.
-Lo nuevo desde v7.3 está en las secciones "v8.7" a "v8.0" justo debajo, y en el
-código cada bloque nuevo va marcado con su versión (`[v8.3]` … `[v8.0]`).
+**Versión actual: v8.8** (integrada en la v239 de RETADOR; el código de la
+plataforma es la fuente de verdad: `herramientas/video.html` + `src/tools/promoVideo/v8/`).
+Ver "v8.8" justo abajo y "Integración en RETADOR (v8.7)" después.
+Lo nuevo desde v7.3 está en las secciones "v8.8" a "v8.0" justo debajo, y en el
+código cada bloque nuevo va marcado con su versión (`[v8.8]` … `[v8.0]`).
 
 **Estilos disponibles (8, ninguno se elimina sin que Daniel lo pida explícitamente):**
 Acercamiento, Noria horizontal, Escenas secuenciales, Antes/Después, Mosaico de
@@ -16,6 +16,68 @@ El estilo Directo tiene sus propias paletas y no usa los temas.
 aquí, en una sección nueva arriba de las anteriores, antes de pasarlo a Claude Code.
 
 ---
+
+## v8.8 — Precios en todas las escenas, textos que nunca se salen, 30/60 fps, Opus y sin conexión — plataforma v239
+
+Pedido de Daniel tras probar la v8.7 en un Xiaomi Poco F7 Pro y un Redmi Note 11 (MP4 + AAC, Alta con Vitrina, fotos de CJ/AliExpress y Compartir funcionan). El código de la plataforma es la fuente de verdad.
+
+### 1. Orden del audio
+1. MP4 fotograma a fotograma + **AAC** (la ruta que ya funciona).
+2. **Nuevo:** MP4 fotograma a fotograma + **Opus**, solo si el navegador no codifica AAC.
+3. Grabación en tiempo real.
+4. Último recurso: MP4 sin sonido (con aviso).
+
+Modo de prueba: abrir la app con `?probarOpus=1` (la app lo pasa al iframe) salta AAC y fuerza la ruta Opus. En la línea de diagnóstico se ve "modo prueba Opus". Si Daniel ve fallos con Opus en WhatsApp, galería de iPhone, Facebook o Instagram, se apaga quitando el paso 2 de `exportVideo` (salida.js).
+
+### 2. Fluidez: 60 fps (Máxima, por defecto) / 30 fps (Más rápido)
+Las líneas de tiempo siguen en fotogramas de 60. A 30 fps se exporta uno de cada dos, con marcas de tiempo de 1/30 s, `framerate` 30 en el codificador y el **60 % del bitrate**. El audio y la vista previa no cambian. Vale para descarga, Compartir y Facebook (todo pasa por `exportVideo`).
+
+### 3. Velocidad
+"Ideal" = 0,65 de la velocidad anterior. Rango 0,40–1,50 (de la escala anterior). La etiqueta dice "Ideal" en la rayita y, fuera de ella, el multiplicador respecto a Ideal (p. ej. "1.54×"). La velocidad propia de Directo se sigue multiplicando encima.
+
+### 4. Precios donde aparece un producto
+| Estilo | Escena | Antes (v8.7) | Ahora (v8.8) |
+|---|---|---|---|
+| Acercamiento | tarjetas | etiqueta de precio (si hay) | igual; con precios largos la etiqueta crece hacia dentro de la tarjeta y nunca tapa el sello "-%" ni se sale de pantalla |
+| Noria | tarjetas | etiqueta de precio | igual (mismas reglas) |
+| Secuencial | escena con foto o emoji | etiqueta de precio | igual (mismas reglas) |
+| Mosaico | cuadrícula | etiqueta de precio (con precios largos invadía la tarjeta vecina) | etiqueta dentro de su tarjeta |
+| Antes/Después | antes y después | sin precio | sin precio (la esquina la ocupa el sello ✓/✕; son situaciones, no fichas de producto) |
+| Directo | foto | círculo de precio | igual; precio largo → la moneda baja a otra línea |
+| Vitrina | producto y anillo (0–4,9 s) | sin precio | **círculo de precio** con rebote a ~3,6 s, color de acento, precio normal tachado y sello "-%" si se marcó |
+| Vitrina | cristal | nombre + precio | igual; nombre hasta 2 líneas |
+| Vitrina | banner | sin precio | **etiqueta de precio** pegada al borde de la foto (abajo; arriba si abajo taparía el texto del banner) |
+| Vitrina | móvil con catálogo | nombre + precio | igual (ajustados) |
+| Vitrina | destacados | nombre + precio + estrellas | igual (ajustados) |
+| Vitrina | foto a pantalla completa | sin texto | **nombre + precio** en la esquina inferior izquierda, desde el final de la expansión hasta el logo |
+| Vitrina | muro de fotos | sin precio | sin precio (como se pidió) |
+| Desfile | productos desfilando | sin precio (y sin campos de precio) | **campos de precio** en el formulario y **etiqueta pequeña** bajo la insignia; se desvanece cerca de los bordes para no verse nunca cortada |
+
+### 5. Textos de producto que nunca se salen ni se montan
+Una sola función para todos (`fitText`/`fitPrice`/`drawFit` en motor.js). Orden: achicar la letra hasta un mínimo legible (72 % del tamaño) → hasta 2 líneas → "…". Un **precio nunca lleva "…"**: si no cabe, la moneda baja a una segunda línea. Las frases que ya se diseñaron en varias líneas (Secuencial, Antes/Después, título de Directo) conservan su aspecto y solo se ajustan si no caben.
+
+Comprobación automática: `.harness-promo/textos.html` (solo pruebas, no se publica) mide cada caja de texto por fotograma, teniendo en cuenta recortes y giros, y reporta desbordes, textos cortados por el borde y solapes. Casos: 5 nombres reales de Supabase (62–139 caracteres, CJ, AliExpress y productos con emojis), precios "12500 CUP", "1299.99 €", "1299.99 USD", "1299.99 Zelle", "12500 MLC" (5 monedas), con y sin precio tachado y %, con y sin foto, en Vertical, Feed y Cuadrado.
+
+### 6. Rendimiento
+Sin cambio visual (prueba píxel a píxel contra la v8.7): grano y fondos fijos se dibujan una vez y se copian; sombras grandes de tarjetas pre-dibujadas; muro de fotos de Vitrina girado una sola vez a resolución de pantalla (antes se giraba y ampliaba ×2 en cada fotograma). Durante la generación: tiempo restante estimado y botón **Cancelar**.
+
+### 7. Peso estimado antes de generar y real después
+"Peso estimado ≈ X MB · dura N s" con la duración real del estilo y la velocidad, la calidad, los fps y si lleva audio (128 kb/s). Después, el peso real en la línea de diagnóstico.
+
+### 8. Nota plegable junto a Compartir
+WhatsApp: Ajustes → Almacenamiento y datos → Calidad de subida → HD, y tocar "HD" al enviar (los estados siempre comprimen más). Instagram: Ajustes → Uso de datos y calidad multimedia → "Subir con la máxima calidad".
+
+### 9. Pantalla más compacta
+Calidad, Fluidez y Formato en filas de chips (etiqueta a la izquierda), explicaciones de una línea, toque mínimo 44 px (el enlace "plan Pro" amplía su zona táctil sin cambiar su aspecto) y letra mínima 12 px. La vista previa no se movió y no hay barra fija (decisión de Daniel).
+
+### 10. Fotos externas
+Sin cambios: si una foto externa no se puede usar, se sigue avisando para subirla (no se copian fotos).
+
+### 11. Línea de diagnóstico
+Ruta ("MP4 · AAC", "MP4 · Opus", "Grabación en tiempo real", "MP4 · sin sonido"), fps, medidas, peso real y tiempo de generación.
+
+### 12. Sin conexión
+El build genera `precache.json` (plugin en vite.config.js, con los nombres con hash reales) y `public/sw.js` lo precarga al instalarse: la app arranca sin red desde la pantalla de inicio y la herramienta tiene su página, código, estilos, fuentes (solo latín: Manrope, Bricolage Grotesque, DM Sans) y logo sin red.
 
 ## Integración en RETADOR (v8.7) — plataforma v238
 

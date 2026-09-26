@@ -1,5 +1,5 @@
 // ═════════════════════════════════════════════════════════════════════════════
-// Generador de Video Promocional v8.7 — contenedor en la app.
+// Generador de Video Promocional v8.8 — contenedor en la app.
 // La herramienta es la página herramientas/video.html (mismo dominio) dentro de
 // un iframe: así su HTML y su CSS quedan idénticos al prototipo aprobado y a
 // salvo de los estilos globales de la app. Los datos reales viajan por
@@ -15,7 +15,8 @@
 // ═════════════════════════════════════════════════════════════════════════════
 import { useEffect, useRef } from "react";
 
-const SRC = import.meta.env.BASE_URL + "herramientas/video.html";
+// [v8.8] Modo de prueba: abrir la app con ?probarOpus=1 fuerza la ruta de audio Opus.
+const SRC = import.meta.env.BASE_URL + "herramientas/video.html" + (/[?&]probarOpus=1(&|$)/.test(window.location.search) ? "?probarOpus=1" : "");
 
 export default function PromoVideoTool({ conMarcaDeAgua = true, accentDeMarca = null, nombreTienda = "", productos = [], vendedorId = null, inicial = null, dark = false, onClose, onOpenPlans }) {
   const frameRef = useRef(null);

@@ -187,6 +187,26 @@
   button.ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .action-card { margin-top: 10px; }
+  /* [v8.8] Panel compacto: filas de chips (toque mínimo 44 px, letra mínima 12 px) */
+  .opt-row { display: grid; grid-template-columns: 58px 1fr; align-items: center; gap: 8px; margin: 0 0 2px; }
+  .opt-label { font-size: 12px; font-weight: 700; color: var(--text-muted); }
+  .opt-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; padding: 3px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); }
+  .opt-seg button { min-height: 44px; border: 1.5px solid transparent; border-radius: 9px; background: transparent; color: var(--text); font-family: inherit; font-size: 13px; font-weight: 700; line-height: 1.15; padding: 3px 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+  .opt-seg button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-tint); }
+  .opt-seg button span.t { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .opt-seg small { font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+  .opt-seg .shape { display: inline-block; border: 2px solid currentColor; border-radius: 3px; opacity: .8; }
+  .action-card .fmt-hint { font-size: 12px; margin: 3px 0 8px; line-height: 1.35; }
+  .size-est { font-size: 12px; color: var(--text); text-align: center; margin: 2px 0 8px; font-weight: 600; }
+  .action-card .export-detail { font-size: 12px; }
+  .diag-line { font-size: 12px; color: var(--text-muted); text-align: center; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .cancel-btn { display: block; width: 100%; min-height: 44px; margin-top: 8px; border-radius: 10px; border: 1.5px solid var(--border); background: var(--surface-2); color: var(--text); font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .tap-ext { position: relative; }
+  .tap-ext::after { content: ""; position: absolute; inset: -14px -6px; }
+  details.share-note { margin-top: 8px; font-size: 12px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 10px; padding: 0 12px; }
+  details.share-note summary, details.tech summary { padding: 13px 0; line-height: 18px; }
+  details.share-note summary { cursor: pointer; font-weight: 700; color: var(--text); }
+  details.share-note p { margin: 0 0 8px; line-height: 1.45; }
   button.primary { width: 100%; background: var(--accent); color: #fff; border: none; border-radius: 12px; padding: 13px 16px; font-size: 15px; font-weight: 700; font-family: inherit; cursor: pointer; }
   button.primary:hover { background: var(--accent-dark); }
   button.primary:disabled { background: var(--border); color: var(--text-muted); cursor: default; }
@@ -205,6 +225,7 @@
   details.tech { margin-top: 12px; font-size: 12px; color: var(--text-muted); }
   details.tech summary { cursor: pointer; font-weight: 600; }
   details.tech div { margin-top: 6px; line-height: 1.55; }
+  .action-card details.tech { margin-top: 4px; } /* [v8.8] */
 
   /* ---------- [v8.0] Botón de Facebook (compartido por el panel automático y la barra de exportar) ---------- */
   button.fb-btn { width: 100%; background: #1877F2; color: #fff; border: none; border-radius: 12px; padding: 13px 16px; font-size: 15px; font-weight: 700; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 9px; }

@@ -7,7 +7,7 @@
 //   · Otros orígenes (Supabase, imágenes externas): NO se tocan → van directo a la red.
 // No interfiere con el login de Google, el perfil, los productos ni las tasas.
 // ─────────────────────────────────────────────────────────────────────────────
-const CACHE = "retador-pwa-v238";
+const CACHE = "retador-pwa-v239";
 const START = self.registration.scope; // p.ej. https://retadormarketplace.es/
 
 self.addEventListener("install", (event) => {
@@ -15,6 +15,16 @@ self.addEventListener("install", (event) => {
     try {
       const cache = await caches.open(CACHE);
       await cache.add(new Request(START, { cache: "reload" }));
+      // [v8.8] Precarga: los archivos de la app y del Generador de Video (código,
+      // estilos, fuentes y logo) que lista el build en precache.json, para que
+      // la app arranque sin conexión y la herramienta tenga fuentes y logo sin red.
+      // Si alguno falla, los demás se guardan igual.
+      const res = await fetch(new Request(START + "precache.json", { cache: "reload" }));
+      if (res.ok) {
+        const lista = await res.json();
+        const rutas = [...new Set([].concat(lista.app || [], lista.herramienta || []))].filter((r) => r !== "index.html");
+        await Promise.allSettled(rutas.map((r) => cache.add(new Request(START + r, { cache: "reload" }))));
+      }
     } catch (e) { /* sin red en la instalación: no pasa nada */ }
     await self.skipWaiting();
   })());

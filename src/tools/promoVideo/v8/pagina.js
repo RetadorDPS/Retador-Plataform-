@@ -1,5 +1,5 @@
 // ═════════════════════════════════════════════════════════════════════════════
-// Generador de Video Promocional v8.7 — ENTRADA de la página del iframe
+// Generador de Video Promocional v8.8 — ENTRADA de la página del iframe
 // (herramientas/video.html). La app (PromoVideoTool.jsx) le manda los datos
 // reales por postMessage (mismo dominio): plan, color y nombre de tienda,
 // productos publicados y, si viene de "Producto publicado", el producto inicial.

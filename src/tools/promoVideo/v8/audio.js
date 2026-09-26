@@ -215,10 +215,17 @@ async function aacSupported() {
   try { const r = await AudioEncoder.isConfigSupported({ codec: "mp4a.40.2", sampleRate: 48000, numberOfChannels: 2, bitrate: 128000 }); return !!(r && r.supported); }
   catch (e) { return false; }
 }
-async function encodeAudioInto(muxer, buf) {
+// [v8.8] Opus dentro del MP4: segunda opción cuando el navegador no codifica AAC.
+async function opusSupported() {
+  if (typeof window.AudioEncoder === "undefined" || typeof window.AudioData === "undefined") return false;
+  try { const r = await AudioEncoder.isConfigSupported({ codec: "opus", sampleRate: 48000, numberOfChannels: 2, bitrate: 128000 }); return !!(r && r.supported); }
+  catch (e) { return false; }
+}
+// codec: "aac" (por defecto) u "opus"
+async function encodeAudioInto(muxer, buf, codec) {
   let err = null;
   const enc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: e => { err = e; } });
-  enc.configure({ codec: "mp4a.40.2", sampleRate: 48000, numberOfChannels: 2, bitrate: 128000 });
+  enc.configure({ codec: codec === "opus" ? "opus" : "mp4a.40.2", sampleRate: 48000, numberOfChannels: 2, bitrate: 128000 });
   const L = buf.getChannelData(0), R = buf.getChannelData(1), N = buf.length, CH = 1024;
   for (let i = 0; i < N; i += CH) {
     if (err) throw err;
@@ -302,6 +309,7 @@ export {
   _noiseCache,
   _softCurve,
   aacSupported,
+  opusSupported,
   audioCtx,
   audioWanted,
   encodeAudioInto,

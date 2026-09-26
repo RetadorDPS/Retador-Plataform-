@@ -217,7 +217,7 @@ import {
 // interfaz arranca cuando la app le pasa los datos reales (P).
 // [integración] asignadores de estado que vive en otros módulos + Facebook (apagado)
 import { setBgPhoto, setCurrency } from "./motor.js";
-import { setFormat, setQuality, setPlan, setProgressHandler } from "./salida.js";
+import { setFormat, setQuality, setPlan, setProgressHandler, setFps, cancelExport, estimateBytes, outFps, PROBAR_OPUS } from "./salida.js";
 import { FACEBOOK_PUBLICAR, fbConectar, fbListarPaginas, fbSubirVideo, fbPublicar, fbEsperarProcesado } from "./facebook.js";
 
 export function iniciarEditor(P) {
@@ -230,7 +230,9 @@ export function iniciarEditor(P) {
   let sizeScale = 1;
   let openPickerKey = null;
   let pickerCat = "tienda";
-  let speed = 1;
+  // [v8.8] "Ideal" = 0,65 de la velocidad de antes; rango 0,40–1,50.
+  const SPEED_IDEAL = 0.65;
+  let speed = SPEED_IDEAL;
   const reviews = [{ quote: "¡Llegó rapidísimo y como en las fotos!", stars: 5 }];
   let reviewPos = "bl";
 
@@ -851,7 +853,7 @@ export function iniciarEditor(P) {
         rm.addEventListener("click", function () { st.items.splice(i, 1); openPickerKey = null; refreshFields(); });
         head.appendChild(rm);
       }
-      div.append(head, makeVisualEditor(item, "ds:" + i, true));
+      div.append(head, makeVisualEditor(item, "ds:" + i)); // [v8.8] con precio
       box.appendChild(div);
     });
     const add = document.createElement("button");
@@ -994,7 +996,8 @@ export function iniciarEditor(P) {
   els.speedRange.addEventListener("input", function () {
     const v = Number(els.speedRange.value);
     speed = v / 100;
-    els.speedOut.textContent = v === 100 ? "Ideal" : speed.toFixed(2).replace(/0$/, "") + "×";
+    // [v8.8] se muestra respecto a la velocidad ideal (la rayita)
+    els.speedOut.textContent = v === Math.round(SPEED_IDEAL * 100) ? "Ideal" : (speed / SPEED_IDEAL).toFixed(2).replace(/0$/, "") + "×";
     rebuildPreview();
   });
 
@@ -1073,13 +1076,36 @@ export function iniciarEditor(P) {
     Object.keys(QUALITIES).forEach(function (k) {
       const q = QUALITIES[k], b = document.createElement("button");
       b.type = "button"; b.setAttribute("aria-pressed", currentQuality === k ? "true" : "false");
-      b.innerHTML = q.label + "<small>" + q.sub + "</small>";
-      b.addEventListener("click", function () { setQuality(k); renderQualityUI(); }); // [integración]
+      b.innerHTML = '<span class="t">' + q.label + "</span><small>" + q.sub.split(" · ")[0] + "</small>"; // [v8.8] el peso sale en "Tamaño estimado"
+      b.addEventListener("click", function () { setQuality(k); renderQualityUI(); renderSizeEstimate(); }); // [integración]
       seg.appendChild(b);
     });
-    $("qualHint").textContent = currentQuality === "ligera"
-      ? "Pesa unas 3 veces menos: ideal para subir o mandar con datos móviles. Se ve bien en el teléfono."
-      : "Máxima nitidez. Si vas a subirlo con datos móviles, prueba \"Ligera\".";
+    $("qualHint").textContent = currentQuality === "ligera" // [v8.8] explicaciones de una línea
+      ? "Pesa unas 3 veces menos: ideal con datos móviles."
+      : "Máxima nitidez. Con datos móviles, prueba \"Ligera\".";
+  }
+  // [v8.8] Fluidez: 60 fps (máxima) o 30 fps (se genera casi el doble de rápido y pesa menos)
+  function renderFpsUI() {
+    const seg = $("fpsSeg"); seg.innerHTML = "";
+    [[60, "60 fps", "Máxima"], [30, "30 fps", "Más rápido"]].forEach(function (o) {
+      const b = document.createElement("button");
+      b.type = "button"; b.setAttribute("aria-pressed", outFps() === o[0] ? "true" : "false");
+      b.innerHTML = '<span class="t">' + o[1] + "</span><small>" + o[2] + "</small>";
+      b.addEventListener("click", function () { setFps(o[0]); renderFpsUI(); renderSizeEstimate(); });
+      seg.appendChild(b);
+    });
+    $("fpsHint").textContent = outFps() === 30
+      ? "Se genera casi el doble de rápido y pesa menos."
+      : "Lo más suave. Si tu teléfono tarda, prueba \"30 fps\".";
+  }
+  // [v8.8] Tamaño estimado antes de generar (duración real del estilo y la velocidad)
+  function renderSizeEstimate() {
+    const el = $("sizeEst");
+    if (!el) return;
+    if (!hasEnoughData()) { el.textContent = ""; return; }
+    const style = STYLES[currentStyle], tl = style.buildTimeline(currentData()), opts = currentOpts();
+    const mb = estimateBytes(tl, opts, audioWanted(style)) / 1048576, secs = Math.ceil(tl.total / opts.speed) / FPS;
+    el.textContent = "Peso estimado ≈ " + mb.toFixed(1).replace(".", ",") + " MB · dura " + Math.round(secs) + " s";
   }
 
   // [integración] Se quitó el selector "Plan del vendedor (solo para probar)".
@@ -1128,11 +1154,12 @@ export function iniciarEditor(P) {
       const b = document.createElement("button");
       b.type = "button"; b.setAttribute("aria-pressed", F.id === currentFormat ? "true" : "false");
       const sw = 14, sh = Math.round(14 * F.h / F.w);
-      b.innerHTML = '<span class="shape" style="width:' + (F.id === "vertical" ? 11 : sw) + 'px;height:' + (F.id === "vertical" ? 20 : Math.min(sh, 18)) + 'px;"></span>' + F.label + '<small>' + F.sub + '</small>';
+      // [v8.8] fila compacta: el dibujo de la forma va junto al nombre
+      b.innerHTML = '<span class="t"><span class="shape" style="width:' + (F.id === "vertical" ? 7 : Math.round(sw * 0.7)) + 'px;height:' + (F.id === "vertical" ? 13 : Math.round(Math.min(sh, 18) * 0.7)) + 'px;"></span>' + F.label + '</span><small>' + F.sub.replace("Reel · ", "") + '</small>';
       b.addEventListener("click", function () { setFormat(F.id); renderFormatUI(); rebuildPreview(); }); // [integración]
       seg.appendChild(b);
     });
-    $("fmtHint").textContent = fmt().hint;
+    $("fmtHint").textContent = fmt().hint.split(". ")[0].replace(/\.$/, "") + "."; // [v8.8] una línea (Facebook sigue apagado)
     document.querySelector(".phone").className = "phone" + (fmt().cls ? " " + fmt().cls : "");
   }
 
@@ -1170,12 +1197,14 @@ export function iniciarEditor(P) {
     const pw = Math.round(F.w * PREVIEW_SCALE), ph = Math.round(F.h * PREVIEW_SCALE);
     if (els.previewCanvas.width !== pw || els.previewCanvas.height !== ph) { els.previewCanvas.width = pw; els.previewCanvas.height = ph; }
     if (!hasEnoughData()) {
+      renderSizeEstimate();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = THEMES[currentThemeId].bg; ctx.fillRect(0, 0, pw, ph);
       els.emptyState.style.display = "block";
       return;
     }
     els.emptyState.style.display = "none";
+    renderSizeEstimate();
     const style = STYLES[currentStyle], tl = style.buildTimeline(currentData()), opts = currentOpts();
     const draw = makeRenderer(style, tl, opts, els.previewCanvas, F, PREVIEW_SCALE);
     let clock;
@@ -1252,29 +1281,37 @@ export function iniciarEditor(P) {
     clearStatus();
     els.downloadLink.style.display = "none";
     $("shareBtn").style.display = "none";
-    els.exportDetail.textContent = "";
+    $("shareNote").style.display = "none";
+    els.exportDetail.textContent = ""; $("diagLine").textContent = "";
     els.generateBtn.disabled = true; els.generateBtn.textContent = "Generando…";
+    const cancelBtn = $("cancelBtn"); cancelBtn.disabled = false; cancelBtn.textContent = "Cancelar";
     stopPreview();
     setProgress(0, "Preparando…");
     const style = STYLES[currentStyle], tl = style.buildTimeline(currentData()), opts = currentOpts();
+    const t0 = performance.now();
     try {
       const r = await exportVideo(style, tl, opts, els.previewCanvas);
-      const blob = r.blob, codec = r.ext === "mp4";
+      const blob = r.blob, codec = r.ext === "mp4", secs = (performance.now() - t0) / 1000;
       const name = opts.storeName.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "retador";
       els.downloadLink.href = URL.createObjectURL(blob);
       els.downloadLink.download = name + "-promo-" + fmt().id + "." + r.ext;
       els.downloadLink.style.display = "block";
       prepareShare(blob, els.downloadLink.download);
-      els.exportDetail.textContent = "Video " + fmt().label.toLowerCase() + " " + outDims().w + "×" + outDims().h + " a 60fps (." + r.ext + ") · " + (blob.size / 1048576).toFixed(1) + " MB" +
-        " · " + audioLabel(r.audio) + "." + (r.note ? " " + r.note : "") + (codec ? "" : " (Modo de compatibilidad.)");
+      $("shareNote").style.display = "";
+      els.exportDetail.textContent = "Video " + fmt().label.toLowerCase() + " (." + r.ext + ") · " + audioLabel(r.audio) + "." + (r.note ? " " + r.note : "") + (codec ? "" : " (Modo de compatibilidad.)");
+      // [v8.8] línea de diagnóstico: ruta, fps, medidas, peso real y tiempo de generación
+      $("diagLine").textContent = r.ruta + " · " + r.fps + " fps · " + r.w + "×" + r.h + " · " + (blob.size / 1048576).toFixed(1).replace(".", ",") + " MB · generado en " + (secs < 60 ? Math.round(secs) + " s" : Math.floor(secs / 60) + " min " + Math.round(secs % 60) + " s") + (PROBAR_OPUS ? " · modo prueba Opus" : "");
       setStatus(shareFile ? "Video listo. Descárgalo o compártelo directo." : "Video listo. Ya puedes descargarlo.", "success");
     } catch (err) {
-      setStatus((err && err.message) || "No se pudo generar el video.", "error");
+      if (err && err.cancelado) setStatus("Generación cancelada. Puedes cambiar lo que quieras y volver a generar.", "");
+      else setStatus((err && err.message) || "No se pudo generar el video.", "error");
     } finally {
       els.generateBtn.disabled = false; els.generateBtn.textContent = "Generar y descargar video";
       hideProgress(); rebuildPreview();
     }
   });
+  // [v8.8] Cancelar a mitad de la generación
+  $("cancelBtn").addEventListener("click", function () { cancelExport(); this.disabled = true; this.textContent = "Cancelando…"; });
 
   // ============================================================
   // [v8.0] Catálogo de la tienda (simulado — fotos de ejemplo, no son productos
@@ -1659,6 +1696,7 @@ export function iniciarEditor(P) {
   renderReviewEditor();
   renderFormatUI();
   renderQualityUI();
+  renderFpsUI(); // [v8.8]
   renderPlanNotice(); // [integración]
   renderAccentSwatches();
   renderMusicUI();

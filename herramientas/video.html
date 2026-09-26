@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  RETADOR · Generador de video promocional · v8.7 (integrado en la plataforma)
+  RETADOR · Generador de video promocional · v8.8 (integrado en la plataforma)
   Se abre dentro de un iframe desde Herramientas y desde Mi Panel → Promociones.
   El HTML y el CSS son los del prototipo; la lógica vive en src/tools/promoVideo/v8/.
 -->
@@ -16,7 +16,7 @@
 
   <header class="top">
     <div class="mark">RETA<span>DOR</span></div>
-    <div class="sub">Generador de video promocional <span class="ver-tag">v8.7</span></div>
+    <div class="sub">Generador de video promocional <span class="ver-tag">v8.8</span></div>
   </header>
   <p class="lede">Elige tus productos (fotos o emojis), escribe tu titular y descarga un video vertical listo para Reels, Stories o TikTok.</p>
 
@@ -45,8 +45,8 @@
             <label for="speedRange">Velocidad de animación</label>
             <div class="slider-wrap">
               <div class="slider-track"></div>
-              <span class="slider-default" style="--pos:0.5" aria-hidden="true"></span>
-              <input type="range" class="nice-range" id="speedRange" min="50" max="150" step="5" value="100" aria-describedby="speedHint">
+              <span class="slider-default" style="--pos:0.2273" aria-hidden="true"></span>
+              <input type="range" class="nice-range" id="speedRange" min="40" max="150" step="5" value="65" aria-describedby="speedHint">
             </div>
             <output id="speedOut" for="speedRange">Ideal</output>
           </div>
@@ -106,27 +106,39 @@
       </div>
 
       <div class="card action-card">
-        <div class="field-label" style="margin-bottom:6px;">Calidad del archivo</div>
-        <div class="fmt-seg" id="qualSeg" role="group" aria-label="Calidad del video" style="grid-template-columns:1fr 1fr;"></div>
+        <!-- [v8.8] Calidad, Fluidez y Formato en filas compactas -->
+        <div class="opt-row"><span class="opt-label" id="qualLbl">Calidad</span><div class="opt-seg" id="qualSeg" role="group" aria-labelledby="qualLbl"></div></div>
         <p class="fmt-hint" id="qualHint"></p>
-        <div class="field-label" style="margin-bottom:6px;">Formato del video</div>
-        <div class="fmt-seg" id="fmtSeg" role="group" aria-label="Formato del video"></div>
+        <div class="opt-row"><span class="opt-label" id="fpsLbl">Fluidez</span><div class="opt-seg" id="fpsSeg" role="group" aria-labelledby="fpsLbl"></div></div>
+        <p class="fmt-hint" id="fpsHint"></p>
+        <div class="opt-row"><span class="opt-label" id="fmtLbl">Formato</span><div class="opt-seg" id="fmtSeg" role="group" aria-labelledby="fmtLbl"></div></div>
         <p class="fmt-hint" id="fmtHint"></p>
+        <p class="size-est" id="sizeEst" aria-live="polite"></p>
         <button class="fb-btn" id="fbPublishBtn" style="margin-bottom:8px;"><span class="fb-glyph">f</span>Publicar en Facebook</button>
         <button class="primary" id="generateBtn">Generar y descargar video</button>
         <!-- [integración] plan gratis: aviso con enlace a los planes reales -->
-        <p class="fmt-hint" id="planNotice" style="display:none; text-align:center; margin:8px 0 0;">Tu video incluye la marca 'Hecho con RETADOR'. Quítala con el <button type="button" id="planLink" style="background:none; border:none; padding:0; color:var(--accent-dark); font:inherit; font-weight:700; text-decoration:underline; cursor:pointer;">plan Pro</button>.</p>
+        <p class="fmt-hint" id="planNotice" style="display:none; text-align:center; margin:8px 0 0;">Tu video incluye la marca 'Hecho con RETADOR'. Quítala con el <button type="button" id="planLink" class="tap-ext" style="background:none; border:none; padding:0; color:var(--accent-dark); font:inherit; font-weight:700; text-decoration:underline; cursor:pointer;">plan Pro</button>.</p>
         <div class="progress-wrap" id="progressWrap">
           <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressTrack"><div class="progress-fill" id="progressFill"></div></div>
           <div class="progress-label"><span id="progressText" aria-live="polite">Preparando…</span><span id="progressPct">0%</span></div>
+          <button type="button" class="cancel-btn" id="cancelBtn">Cancelar</button>
         </div>
         <div class="status" id="statusMsg" aria-live="polite"></div>
         <a id="downloadLink" class="download-link" style="display:none;" download="promo-retador.mp4">Descargar video</a>
         <button type="button" class="primary" id="shareBtn" style="display:none; margin-top:8px; background:#1E8E5A;">📤 Compartir (WhatsApp, Instagram…)</button>
+        <!-- [v8.8] Consejos para que no pierda calidad al compartir -->
+        <details class="share-note" id="shareNote" style="display:none;">
+          <summary>Para que se vea nítido en WhatsApp e Instagram</summary>
+          <div>
+            <p><b>WhatsApp:</b> Ajustes → Almacenamiento y datos → Calidad de subida de contenido multimedia → <b>HD</b>. Al enviar el video, toca <b>«HD»</b> arriba antes de mandarlo. Los estados siempre se comprimen más que un chat.</p>
+            <p><b>Instagram:</b> Ajustes → Uso de datos y calidad multimedia → activa <b>«Subir con la máxima calidad»</b>.</p>
+          </div>
+        </details>
         <div class="export-detail" id="exportDetail"></div>
+        <div class="diag-line" id="diagLine"></div>
         <details class="tech">
           <summary>Calidad del video</summary>
-          <div>Vertical 1080×1920, Feed 1080×1350 o Cuadrado 1080×1080, siempre a 60 fotogramas por segundo, en MP4 listo para Instagram, Facebook, TikTok y WhatsApp. En Feed y Cuadrado el video vertical se centra completo y los lados se rellenan con los colores del borde del propio video. La generación puede tardar un poco más en teléfonos antiguos, pero el resultado final siempre sale fluido.</div>
+          <div>Vertical 1080×1920, Feed 1080×1350 o Cuadrado 1080×1080, a 60 fotogramas por segundo (o 30 si eliges «Más rápido» en Fluidez), en MP4 listo para Instagram, Facebook, TikTok y WhatsApp. En Feed y Cuadrado el video vertical se centra completo y los lados se rellenan con los colores del borde del propio video. La generación puede tardar un poco más en teléfonos antiguos, pero el resultado final siempre sale fluido.</div>
         </details>
       </div>
 

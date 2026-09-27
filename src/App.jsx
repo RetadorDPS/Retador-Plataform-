@@ -62,6 +62,7 @@ const SubastasScreen = lazy(() => import("./screens/Auctions.jsx").then(m => ({ 
 // caché). Nunca pantalla en blanco/negra sin explicación.
 const LazyFallback = () => <div style={{ position: "fixed", inset: 0, zIndex: 4000, background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center" }}><Spin size={32} /></div>;
 import { SettingsScreen } from "./screens/Settings.jsx";
+import { PantallaEliminacionPendiente } from "./screens/EliminacionPendiente.jsx";
 import { FreeProfileScreen, ProfileMenuDrawer, FollowingListScreen } from "./screens/Profile.jsx";
 import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
 import { OrderDetailScreen, OrdersScreen } from "./screens/Orders.jsx";
@@ -289,7 +290,12 @@ export default function App() {
           <DensityProvider defaultMode="pequena">
             <CatalogProvider>
               {sessionUser
-                ? (entered
+                ? (sessionUser.pendingDeletion
+                    // Pidió eliminar su cuenta y volvió antes de la fecha: se le
+                    // ofrece cancelar (restaura todo, incluido el plan) o salir.
+                    ? <PantallaEliminacionPendiente fecha={sessionUser.pendingDeletion.date} dark={welcomeDark}
+                        onCancelled={() => loadSessionUser().then(u => setSessionUser(u))} />
+                    : entered
                     ? (needsOnboarding
                         ? <OnboardingScreen user={sessionUser} onDone={() => {
                             // BUG REAL encontrado y corregido: antes esto ponía

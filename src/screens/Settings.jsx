@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Globe, HelpCircle, Info, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Plus, Shield, ShoppingBag, Smartphone, Star, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
-import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser, useAppVersion, CUBA_PROVINCES, ONBOARDING_PAISES, saveOnboarding, getMyVerification } from "../shared/index.js";
+import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Globe, HelpCircle, Info, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Plus, Shield, ShoppingBag, Smartphone, Star, Trash2, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
+import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser, useAppVersion, CUBA_PROVINCES, ONBOARDING_PAISES, saveOnboarding, getMyVerification, signOutEverywhere, accountDeletionPrecheck, requestAccountDeletion } from "../shared/index.js";
+import { fechaBorradoTexto } from "./EliminacionPendiente.jsx";
 import { isPushSupported, hasActiveSubscription, enablePush, disablePush } from "../pwa/push.js";
 
 const CFG_DARK = {
@@ -267,6 +268,8 @@ function CFG_AccountScreen({ profile, nav, onSignOut, isVerified=false, onReques
   const tk = CFG_useTk();
   const [verif, setVerif] = useState(null);
   const [verifLoading, setVerifLoading] = useState(true);
+  const [confirmAll, setConfirmAll] = useState(false);
+  const [closingAll, setClosingAll] = useState(false);
   useEffect(() => {
     let alive = true;
     if (!user?.id) { setVerifLoading(false); return; }
@@ -346,8 +349,201 @@ function CFG_AccountScreen({ profile, nav, onSignOut, isVerified=false, onReques
         )}
       </CFG_Crd>
       <CFG_Lbl>Sesión</CFG_Lbl>
-      <CFG_Crd><CFG_Row icon={LogOut} bg="bg-red-700" label="Cerrar sesión" danger onClick={onSignOut || (() => signOutUser())} /></CFG_Crd>
+      <CFG_Crd>
+        <CFG_Row icon={LogOut} bg="bg-red-700" label="Cerrar sesión" sub="Solo en este dispositivo" danger onClick={onSignOut || (() => signOutUser())} />
+        <CFG_Hr />
+        <CFG_Row icon={Smartphone} bg="bg-orange-600" label="Cerrar sesión en todos los dispositivos" sub="Móvil, ordenador y cualquier otro" danger onClick={() => setConfirmAll(true)} />
+      </CFG_Crd>
+      <CFG_Lbl>Eliminar cuenta</CFG_Lbl>
+      <CFG_Crd>
+        <CFG_Row icon={Trash2} bg="bg-red-900" label="Eliminar cuenta" sub="Tienes 30 días para arrepentirte" danger onClick={() => nav("deleteAccount")} />
+      </CFG_Crd>
       <div className="h-8" />
+      {confirmAll && (
+        <CFG_Confirm
+          title="¿Cerrar sesión en todos los dispositivos?"
+          text="Se cerrará tu sesión en este teléfono y en todos los demás sitios donde hayas entrado (otro móvil, ordenador, tablet). Para volver a usar RETADOR tendrás que entrar otra vez con Google en cada uno."
+          okLabel={closingAll ? "Cerrando…" : "Cerrar en todos"}
+          busy={closingAll}
+          onCancel={() => setConfirmAll(false)}
+          onOk={async () => {
+            setClosingAll(true);
+            try { await signOutEverywhere(); }
+            catch (e) { setClosingAll(false); setConfirmAll(false); flash && flash("⚠️ No se pudieron cerrar las otras sesiones — intenta de nuevo"); }
+          }} />
+      )}
+    </div>
+  );
+}
+
+/* Ventana de confirmación (se usa para acciones que no se pueden deshacer). */
+function CFG_Confirm({ title, text, okLabel, onOk, onCancel, busy }) {
+  const tk = CFG_useTk();
+  return (
+    <div role="dialog" aria-modal="true" onClick={busy ? undefined : onCancel}
+      style={{ position:"fixed", inset:0, zIndex:400, background:"rgba(0,0,0,.55)" }}
+      className="flex items-center justify-center px-5">
+      <div onClick={e => e.stopPropagation()} style={{ background:tk.ROW, borderColor:tk.CARD_BD }}
+        className="w-full max-w-[340px] rounded-2xl border p-5">
+        <div style={{ color:tk.T1 }} className="text-[16px] font-bold leading-snug">{title}</div>
+        <div style={{ color:tk.T2 }} className="text-[13px] leading-relaxed mt-2">{text}</div>
+        <div className="flex gap-2 mt-5">
+          <button onClick={onCancel} disabled={busy} style={{ background:tk.CARD2, color:tk.T1 }}
+            className="flex-1 min-h-[44px] rounded-xl text-[14px] font-semibold">Cancelar</button>
+          <button onClick={onOk} disabled={busy} style={{ background:"#DC2626", color:"#fff", opacity: busy ? .7 : 1 }}
+            className="flex-1 min-h-[44px] rounded-xl text-[14px] font-bold">{okLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── ELIMINAR CUENTA ──────────────────────────────────────────────
+   Todo lo decide el servidor (account_deletion_precheck / request_account_deletion):
+   el navegador solo explica, pide escribir ELIMINAR y muestra el resultado.
+   No se envía ningún correo: la fecha exacta del borrado se muestra aquí. */
+function CFG_DeleteAccountScreen({ nav, flash }) {
+  const tk = CFG_useTk();
+  const [chk, setChk] = useState(null);        // resultado de la comprobación previa
+  const [err, setErr] = useState(false);
+  const [txt, setTxt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(null);      // { fecha } cuando ya quedó pedida
+  const cargar = useCallback(() => {
+    setErr(false); setChk(null);
+    accountDeletionPrecheck().then(setChk).catch(() => setErr(true));
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const enCurso = chk ? (Number(chk.pedidos_en_curso) || 0) + (Number(chk.subastas_en_curso) || 0) : 0;
+  const saldo = (chk?.saldo || []).filter(x => Number(x.saldo) !== 0);
+  const puede = chk && !chk.es_admin && !chk.pendiente && enCurso === 0;
+  const listo = txt.trim() === "ELIMINAR";
+
+  async function eliminar() {
+    if (!listo || busy) return;
+    setBusy(true);
+    try {
+      const r = await requestAccountDeletion(txt.trim());
+      if (r?.ok) { setDone({ fecha: r.fecha_borrado }); }
+      else if (r?.motivo === "pedidos_en_curso") { setChk(c => ({ ...c, pedidos_en_curso: r.pedidos_en_curso, subastas_en_curso: r.subastas_en_curso })); }
+      else { flash && flash("⚠️ " + (r?.motivo || "No se pudo eliminar la cuenta")); }
+    } catch (e) { flash && flash("⚠️ No se pudo eliminar la cuenta — revisa tu conexión e intenta de nuevo"); }
+    setBusy(false);
+  }
+
+  const Aviso = ({ tone="err", children }) => (
+    <div style={{ background: tone === "ok" ? tk.OK_BG : tone === "wrn" ? tk.WRN_BG : tk.ERR_BG, color: tone === "ok" ? tk.OK_T : tone === "wrn" ? tk.WRN_T : tk.ERR_T }}
+      className="mx-4 mt-3 rounded-xl px-3.5 py-3 text-[13px] leading-relaxed">{children}</div>
+  );
+  const Lista = ({ items }) => (
+    <div style={{ background:tk.ROW }} className="px-3.5 py-3">
+      <ul style={{ color:tk.T1 }} className="text-[13px] leading-relaxed list-disc pl-4 space-y-1">
+        {items.map(t => <li key={t}>{t}</li>)}
+      </ul>
+    </div>
+  );
+
+  // Ya pedida: fecha exacta y cómo cancelar. Luego se cierra la sesión.
+  if (done) {
+    return (
+      <div style={{ background:tk.BG }} className="min-h-full">
+        <CFG_Hdr title="Eliminar cuenta" />
+        <div className="px-5 pt-8 text-center">
+          <div className="text-[44px]">🗓️</div>
+          <div style={{ color:tk.T1 }} className="text-[18px] font-bold mt-3">Tu cuenta se eliminará definitivamente el</div>
+          <div style={{ color:tk.ERR_T }} className="text-[20px] font-black mt-2">{fechaBorradoTexto(done.fecha)}</div>
+          <div style={{ color:tk.T2 }} className="text-[13px] leading-relaxed mt-4">
+            Tu tienda, tus productos y tu perfil ya no los ve nadie, y tu plan pasó a Gratis.
+            Hemos cerrado tu sesión en todos tus dispositivos.
+          </div>
+        </div>
+        <Aviso tone="ok">
+          <b>¿Te arrepientes?</b> Entra otra vez en RETADOR con Google <b>antes de esa fecha</b> y pulsa
+          “Cancelar la eliminación”. Recuperarás todo como estaba, incluido tu plan.
+        </Aviso>
+        <div style={{ color:tk.T2 }} className="text-[12px] text-center px-6 mt-3">No te enviaremos ningún correo: apunta la fecha.</div>
+        <div className="px-4 mt-5">
+          <button onClick={() => signOutUser()} style={{ background:tk.P, color:"#000" }}
+            className="w-full min-h-[48px] rounded-xl text-[15px] font-bold">Entendido, salir</button>
+        </div>
+        <div className="h-8" />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background:tk.BG }} className="min-h-full">
+      <CFG_Hdr title="Eliminar cuenta" onBack={() => nav("account")} />
+      {!chk && !err && <div style={{ color:tk.T2 }} className="px-4 py-6 text-[13px]">Comprobando tu cuenta…</div>}
+      {err && (
+        <>
+          <Aviso>No se pudo comprobar tu cuenta. Revisa tu conexión.</Aviso>
+          <div className="px-4 mt-3"><button onClick={cargar} style={{ background:tk.CARD2, color:tk.T1 }} className="w-full min-h-[44px] rounded-xl text-[14px] font-semibold">Reintentar</button></div>
+        </>
+      )}
+      {chk && (
+        <>
+          <div style={{ color:tk.T1 }} className="px-4 pt-4 text-[14px] leading-relaxed">
+            Si eliminas tu cuenta tienes <b>30 días</b> para arrepentirte. Pasado ese plazo se borra para siempre y no se puede recuperar.
+          </div>
+          <CFG_Lbl>Al confirmar, en el momento</CFG_Lbl>
+          <CFG_Crd><Lista items={[
+            "Tu tienda, tus productos y tu perfil dejan de verse.",
+            "Tu plan pasa a Gratis (si vuelves antes del plazo, recuperas el que tenías).",
+            "Se cierra tu sesión en todos tus dispositivos.",
+          ]} /></CFG_Crd>
+          <CFG_Lbl>A los 30 días se borra</CFG_Lbl>
+          <CFG_Crd><Lista items={[
+            "Tu cuenta de acceso y tu perfil (nombre, foto, correo, ciudad, descripción).",
+            "Tu tienda, tus productos y subastas, y las fotos y archivos que subiste.",
+            "Favoritos, carrito, seguidores, reseñas, notificaciones, verificación y datos de cobro.",
+            "El texto de tus mensajes (la otra persona verá “Mensaje eliminado”).",
+          ]} /></CFG_Crd>
+          <CFG_Lbl>Se conserva, sin tus datos personales</CFG_Lbl>
+          <CFG_Crd><Lista items={[
+            "Los pedidos ya terminados: la otra persona y las cuentas de la plataforma los necesitan. Aparecerás como “Usuario eliminado”, sin dirección ni teléfono.",
+          ]} /></CFG_Crd>
+
+          {chk.es_admin && <Aviso>Las cuentas de administrador no se pueden eliminar desde aquí.</Aviso>}
+          {!chk.es_admin && chk.pendiente && (
+            <Aviso tone="wrn">Tu cuenta ya tiene la eliminación pedida. Se borrará el <b>{fechaBorradoTexto(chk.fecha_borrado)}</b>.</Aviso>
+          )}
+          {!chk.es_admin && !chk.pendiente && enCurso > 0 && (
+            <Aviso>
+              <b>Todavía no puedes eliminar tu cuenta.</b>{" "}
+              {Number(chk.pedidos_en_curso) > 0 && <>Tienes {chk.pedidos_en_curso} {Number(chk.pedidos_en_curso) === 1 ? "pedido" : "pedidos"} en curso (como comprador o como vendedor). </>}
+              {Number(chk.subastas_en_curso) > 0 && <>Tienes {chk.subastas_en_curso} {Number(chk.subastas_en_curso) === 1 ? "subasta" : "subastas"} en curso. </>}
+              Espera a que terminen (entregados o cancelados) y vuelve a intentarlo.
+            </Aviso>
+          )}
+          {puede && saldo.length > 0 && (
+            <Aviso tone="wrn">
+              Tienes saldo en tu billetera: <b>{saldo.map(x => `${Number(x.saldo).toLocaleString("es-ES")} ${x.moneda}`).join(" · ")}</b>.
+              Cuando la cuenta se borre ya no podrás usarlo. Úsalo o retíralo antes.
+            </Aviso>
+          )}
+          {puede && (
+            <>
+              <CFG_Lbl>Confirmar</CFG_Lbl>
+              <div className="px-4">
+                <label style={{ color:tk.T2 }} className="text-[13px] block mb-1.5" htmlFor="cfg-eliminar">
+                  Escribe <b style={{ color:tk.T1 }}>ELIMINAR</b> para confirmar
+                </label>
+                <input id="cfg-eliminar" value={txt} onChange={e => setTxt(e.target.value)} autoComplete="off" autoCapitalize="characters" spellCheck={false}
+                  placeholder="ELIMINAR" style={{ background:tk.CARD2, color:tk.T1, borderColor: listo ? "#DC2626" : tk.CARD_BD }}
+                  className="w-full min-h-[44px] rounded-xl border px-3.5 text-[15px] font-semibold tracking-wide outline-none" />
+                <button onClick={eliminar} disabled={!listo || busy}
+                  style={{ background: listo ? "#DC2626" : tk.CARD2, color: listo ? "#fff" : tk.T3 }}
+                  className="w-full min-h-[48px] rounded-xl text-[15px] font-bold mt-3">
+                  {busy ? "Eliminando…" : "Eliminar mi cuenta"}
+                </button>
+              </div>
+            </>
+          )}
+        </>
+      )}
+      <div className="h-10" />
     </div>
   );
 }
@@ -1075,6 +1271,7 @@ export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTh
   const map = {
     home:          <CFG_HomeScreen          {...p} />,
     account:       <CFG_AccountScreen       {...p} />,
+    deleteAccount: <CFG_DeleteAccountScreen {...p} />,
     region:        <CFG_RegionScreen        {...p} />,
     appearance:    <CFG_AppearanceScreen    {...p} />,
     notifications: <CFG_NotificationsScreen {...p} />,

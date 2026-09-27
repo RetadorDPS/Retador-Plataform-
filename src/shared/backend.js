@@ -2852,3 +2852,27 @@ export const catalogProDeleteDefinitive = async (catalogId) => {
   if (error) { console.error("catalogProDeleteDefinitive:", error.message); throw error; }
   return data;
 };
+
+// ── CUENTA: ELIMINAR (30 días de gracia) ─────────────────────────────────────
+// Todo se decide en el servidor (funciones SECURITY DEFINER). El navegador
+// solo pregunta y muestra: nunca borra nada por su cuenta.
+// Comprobación previa: si es admin, pedidos/subastas en curso, saldo y si ya
+// hay una eliminación pendiente (con su fecha).
+export const accountDeletionPrecheck = async () => {
+  const { data, error } = await supabase.rpc("account_deletion_precheck");
+  if (error) { console.error("accountDeletionPrecheck:", error.message); throw error; }
+  return data;
+};
+// Pide la eliminación. `confirm` debe ser exactamente "ELIMINAR".
+// Devuelve { ok, fecha_borrado } o { ok:false, motivo }.
+export const requestAccountDeletion = async (confirm) => {
+  const { data, error } = await supabase.rpc("request_account_deletion", { p_confirm: confirm });
+  if (error) { console.error("requestAccountDeletion:", error.message); throw error; }
+  return data;
+};
+// Cancela una eliminación pendiente y lo restaura todo (plan y productos).
+export const cancelAccountDeletion = async () => {
+  const { data, error } = await supabase.rpc("cancel_account_deletion");
+  if (error) { console.error("cancelAccountDeletion:", error.message); throw error; }
+  return data;
+};

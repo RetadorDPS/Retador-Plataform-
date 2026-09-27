@@ -417,7 +417,8 @@ function CFG_DeleteAccountScreen({ nav, flash }) {
 
   const enCurso = chk ? (Number(chk.pedidos_en_curso) || 0) + (Number(chk.subastas_en_curso) || 0) : 0;
   const saldo = (chk?.saldo || []).filter(x => Number(x.saldo) !== 0);
-  const puede = chk && !chk.es_admin && !chk.pendiente && enCurso === 0;
+  // v241: con saldo en la billetera no se puede eliminar (primero hay que retirarlo)
+  const puede = chk && !chk.es_admin && !chk.pendiente && enCurso === 0 && saldo.length === 0;
   const listo = txt.trim() === "ELIMINAR";
 
   async function eliminar() {
@@ -427,6 +428,7 @@ function CFG_DeleteAccountScreen({ nav, flash }) {
       const r = await requestAccountDeletion(txt.trim());
       if (r?.ok) { setDone({ fecha: r.fecha_borrado }); }
       else if (r?.motivo === "pedidos_en_curso") { setChk(c => ({ ...c, pedidos_en_curso: r.pedidos_en_curso, subastas_en_curso: r.subastas_en_curso })); }
+      else if (r?.motivo === "saldo") { setChk(c => ({ ...c, saldo: r.saldo || [] })); }
       else { flash && flash("⚠️ " + (r?.motivo || "No se pudo eliminar la cuenta")); }
     } catch (e) { flash && flash("⚠️ No se pudo eliminar la cuenta — revisa tu conexión e intenta de nuevo"); }
     setBusy(false);
@@ -498,7 +500,7 @@ function CFG_DeleteAccountScreen({ nav, flash }) {
             "Tu cuenta de acceso y tu perfil (nombre, foto, correo, ciudad, descripción).",
             "Tu tienda, tus productos y subastas, y las fotos y archivos que subiste.",
             "Favoritos, carrito, seguidores, reseñas, notificaciones, verificación y datos de cobro.",
-            "El texto de tus mensajes (la otra persona verá “Mensaje eliminado”).",
+            "El texto de tus mensajes (la otra persona verá “Mensaje eliminado”) y tu nombre en los avisos de otras personas.",
           ]} /></CFG_Crd>
           <CFG_Lbl>Se conserva, sin tus datos personales</CFG_Lbl>
           <CFG_Crd><Lista items={[
@@ -517,10 +519,12 @@ function CFG_DeleteAccountScreen({ nav, flash }) {
               Espera a que terminen (entregados o cancelados) y vuelve a intentarlo.
             </Aviso>
           )}
-          {puede && saldo.length > 0 && (
-            <Aviso tone="wrn">
+          {!chk.es_admin && !chk.pendiente && saldo.length > 0 && (
+            <Aviso>
+              <b>Todavía no puedes eliminar tu cuenta.</b>{" "}
               Tienes saldo en tu billetera: <b>{saldo.map(x => `${Number(x.saldo).toLocaleString("es-ES")} ${x.moneda}`).join(" · ")}</b>.
-              Cuando la cuenta se borre ya no podrás usarlo. Úsalo o retíralo antes.
+              Primero retíralo; cuando tu saldo esté en cero, vuelve a intentarlo. Si no puedes retirarlo, escríbenos a{" "}
+              <a href="mailto:retadormarketplace@gmail.com" style={{ textDecoration:"underline" }}>retadormarketplace@gmail.com</a>.
             </Aviso>
           )}
           {puede && (

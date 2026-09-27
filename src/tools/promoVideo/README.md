@@ -1,10 +1,10 @@
 # Generador de Video Promocional — RETADOR
 
-**Versión actual: v8.9** (integrada en la v240 de RETADOR; el código de la
+**Versión actual: v8.10** (integrada en la v242 de RETADOR; el código de la
 plataforma es la fuente de verdad: `herramientas/video.html` + `src/tools/promoVideo/v8/`).
-Ver "v8.9" justo abajo y "Integración en RETADOR (v8.7)" después.
-Lo nuevo desde v7.3 está en las secciones "v8.9" a "v8.0" justo debajo, y en el
-código cada bloque nuevo va marcado con su versión (`[v8.9]` … `[v8.0]`).
+Ver "v8.10" justo abajo y "Integración en RETADOR (v8.7)" después.
+Lo nuevo desde v7.3 está en las secciones "v8.10" a "v8.0" justo debajo, y en el
+código cada bloque nuevo va marcado con su versión (`[v8.10]` … `[v8.0]`).
 
 **Estilos disponibles (8, ninguno se elimina sin que Daniel lo pida explícitamente):**
 Acercamiento, Noria horizontal, Escenas secuenciales, Antes/Después, Mosaico de
@@ -14,6 +14,43 @@ El estilo Directo tiene sus propias paletas y no usa los temas.
 
 **Regla de versiones:** cada cambio sube la versión (v8.1, v8.2…) y se documenta
 aquí, en una sección nueva arriba de las anteriores, antes de pasarlo a Claude Code.
+
+---
+
+## v8.10 — El video nunca sale corrido: lienzo propio, todo bloqueado mientras se genera y comprobación de cada fotograma — plataforma v242
+
+Pedido de Daniel tras probar la v8.9: en el Redmi Note 11, formato Cuadrado y calidad Alta, un video salió **corrido** (solo se veía la esquina de arriba a la izquierda).
+
+### Causa (reproducida antes de arreglar)
+- El video final se dibujaba en el **mismo lienzo que la vista previa** (`previewCanvas`). Si algo llamaba a `rebuildPreview` durante la generación (el botón de sonido, una foto de producto que llega tarde, el plan que la app manda tarde, las fuentes, un toque en el formulario), el lienzo volvía al tamaño de la vista previa (540×540 en Cuadrado) y la vista previa volvía a animarse entre fotograma y fotograma. El video seguía dibujando a 1080 en un lienzo de 540: solo cabía la esquina de arriba a la izquierda.
+- Prueba con la v8.9 (Chromium con la CPU 6× más lenta, foto que llega a los ~11 s y botón de sonido durante la generación, con un codificador "espía" que acepta H.264 como un teléfono y anota el tamaño de cada fotograma):
+  - Cuadrado Alta: codificador a 1080×1080, pero **841 de 850** fotogramas llegaron a 540×540.
+  - Feed Alta: **841 de 850** a 540×675.
+  - Vertical Alta: **805 de 850** a 540×960.
+  - Grabación en tiempo real (ruta de respaldo): el archivo también sale con la esquina ampliada.
+- La detección de fotos vaciadas por falta de memoria (v8.9) **no** llama a `rebuildPreview`: se redibuja por dentro, sin tocar el lienzo.
+
+### Arreglo
+1. **Lienzo propio** (`crearLienzos` en salida.js): cada generación dibuja en un lienzo suyo, y también tiene su propio lienzo intermedio para Feed y Cuadrado. Se liberan al terminar. La vista previa nunca se toca. En la grabación en tiempo real el lienzo propio se mete en la página invisible (1 px, sin toques): con el teléfono muy cargado, Chrome deja de capturar un lienzo que no está en la página y el archivo salía vacío (visto en pruebas con CPU 6×; así queda igual que la v8.9: 0,5 MB).
+2. **Una sola función de exportación** para la descarga, Compartir y Facebook: `exportarVideo` (ui.js) → `exportVideo` (salida.js). El lienzo propio, el bloqueo y la comprobación valen para todos.
+3. **Nada se redibuja mientras se genera**: `rebuildPreview` solo anota que está pendiente. Lo que llegue mientras tanto (foto de producto, datos de la app) se **aplaza** y se aplica al terminar o al cancelar. Formato, calidad, fluidez y plan quedan **fijos** desde que se pulsa Generar.
+4. **Controles desactivados**: pestañas, formulario, estilos, sonido, formato, calidad, fluidez y Facebook se atenúan y no responden (`inert`). Arriba aparece el aviso **"⏳ Generando… Mientras se crea el video no se puede cambiar nada. Si quieres parar, pulsa «Cancelar»."** El botón Cancelar sigue activo.
+5. **Sin doble toque**: mientras hay una generación, Generar queda bloqueado. Una segunda llamada (Generar o Facebook) se rechaza.
+6. **Comprobación de cada fotograma**: el lienzo y el fotograma (`VideoFrame`: `displayWidth/Height` y `visibleRect`) deben medir exactamente lo que espera el codificador. Si no, la generación **se para** con el mensaje: "La generación se detuvo porque la imagen cambió de tamaño a mitad del video (se esperaba 1080×1080 y llegó 540×540). No se guardó ningún archivo. Vuelve a intentarlo." Ese error no se reintenta por otra ruta. En la grabación en tiempo real se comprueba el lienzo en cada fotograma.
+
+### Pruebas (misma prueba que reprodujo el fallo)
+| Prueba (CPU 6×, foto tarde + aviso de sonido) | v8.9 | v8.10 |
+|---|---|---|
+| Cuadrado Alta (1080×1080) | 841/850 fotogramas mal | **850/850 bien** |
+| Feed Alta (1080×1350) | 841/850 mal | **850/850 bien** |
+| Vertical Alta (1080×1920) | 805/850 mal | **850/850 bien** |
+| Cuadrado Ligera (720×720) | — | **850/850 bien** |
+| Grabación en tiempo real, Cuadrado Alta | esquina ampliada | **completo**, 1080×1080, 14 s |
+- El texto del video no cambia a mitad: la foto que llega tarde y su titular se aplican **después**, en la vista previa, que vuelve a animarse sola.
+- Bloqueo: aviso visible, controles con opacidad 0,45 e `inert`, y Generar desactivado. Los toques de prueba en Generar (doble toque), Formato, pestañas y sonido no pasan. Cancelar sigue activo y funciona (los controles vuelven y la vista previa se anima).
+- Fotograma de otra medida provocado a propósito en el fotograma 100: se para en el 100, muestra el mensaje y no hay descarga.
+- Velocidad: exportación limpia de Cuadrado Alta con CPU 6×: v8.9 3 min 48 s y v8.10 3 min 45 s (sin cambio).
+- Lo que no se pudo verificar aquí: un teléfono real (el Chromium de pruebas no tiene H.264; la ruta MP4 se probó con el codificador espía, que por dentro usa VP9) y Facebook (está apagado; usa la misma función por código).
 
 ---
 

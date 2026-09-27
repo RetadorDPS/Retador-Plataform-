@@ -115,7 +115,11 @@ const FORMATS = [
     hint: "Se ve bien en cualquier lugar, también en grupos y Marketplace. En Facebook se publica como video normal." }
 ];
 let currentFormat = "vertical";
-function fmt() { return FORMATS.find(f => f.id === currentFormat) || FORMATS[0]; }
+// [v8.10] Mientras se exporta, formato, calidad, fluidez y plan quedan FIJOS en
+// los valores del momento en que se pulsó Generar (aunque algo intente
+// cambiarlos a mitad): así todo el video sale con las mismas medidas.
+let _fijo = null;
+function fmt() { const id = _fijo ? _fijo.format : currentFormat; return FORMATS.find(f => f.id === id) || FORMATS[0]; }
 
 const stageCanvas = document.createElement("canvas"); stageCanvas.width = W; stageCanvas.height = H;
 const stageCtx = stageCanvas.getContext("2d");
@@ -134,9 +138,9 @@ const QUALITIES = {
   ligera: { label: "Ligera", sub: "720p · ≈3–4 MB", scale: 2 / 3, bitrate: 3200000, rec: 3500000 }
 };
 let currentQuality = "alta";
-function Q() { return QUALITIES[currentQuality] || QUALITIES.alta; }
+function Q() { return QUALITIES[_fijo ? _fijo.quality : currentQuality] || QUALITIES.alta; }
 function outDims() { return { w: Math.round(fmt().w * Q().scale), h: Math.round(fmt().h * Q().scale) }; }
-function hasWatermark() { return currentPlan !== "pro"; }
+function hasWatermark() { return (_fijo ? _fijo.plan : currentPlan) !== "pro"; }
 
 // [v8.0] Marca de agua "Hecho con RETADOR": se dibuja DENTRO de cada fotograma
 // sobre el lienzo final, así queda en la descarga, en Feed/Cuadrado y en lo que
@@ -190,13 +194,15 @@ function getStage(sc) {
   }
   return _stages[k];
 }
-function makeRenderer(style, tl, opts, outCanvas, format, scale) {
+// [v8.10] stage (opcional): lienzo intermedio propio. La exportación pasa el
+// suyo para no compartir nada con la vista previa ni con otras pantallas.
+function makeRenderer(style, tl, opts, outCanvas, format, scale, stage) {
   const F = format || fmt(), sc = scale || 1;
   const ow = Math.round(F.w * sc), oh = Math.round(F.h * sc);
   if (outCanvas.width !== ow || outCanvas.height !== oh) { outCanvas.width = ow; outCanvas.height = oh; }
   const out = outCanvas.getContext("2d");
   const wm = hasWatermark();
-  const base = makeBaseRenderer(style, tl, opts, out, F, sc);
+  const base = makeBaseRenderer(style, tl, opts, out, F, sc, stage);
   return function (f) {
     out.setTransform(sc, 0, 0, sc, 0, 0);
     try { base(f); }
@@ -222,9 +228,9 @@ function drawFailedFrame(out, F, sc, opts, style, f, e) {
     out.fillStyle = g; out.fillRect(0, 0, F.w, F.h);
   } catch (e2) { /* nada más que hacer */ }
 }
-function makeBaseRenderer(style, tl, opts, out, F, sc) {
+function makeBaseRenderer(style, tl, opts, out, F, sc, ownStage) {
   if (F.id === "vertical") return function (f) { style.renderFrame(out, f, tl, opts); };
-  const stage = getStage(sc), stageC = stage.canvas, stageX = stage.ctx;
+  const stage = ownStage || getStage(sc), stageC = stage.canvas, stageX = stage.ctx;
   const fit = Math.min(F.w / W, F.h / H), fw = Math.round(W * fit), fh = Math.round(H * fit);
   const fx = Math.round((F.w - fw) / 2), fy = Math.round((F.h - fh) / 2);
   let prev = null; // suavizado entre fotogramas para que el color no salte
@@ -273,9 +279,9 @@ function makeBaseRenderer(style, tl, opts, out, F, sc) {
 // de tiempo siguen en fotogramas de 60: a 30 se exporta uno de cada dos, con
 // marcas de tiempo de 1/30 s y el 60 % del bitrate. El audio no cambia.
 let currentFps = 60;
-function outFps() { return currentFps; }
-function videoBitrate() { return Math.round(Q().bitrate * (currentFps === 30 ? 0.6 : 1)); }
-function recBitrate() { return Math.round(Q().rec * (currentFps === 30 ? 0.6 : 1)); }
+function outFps() { return _fijo ? _fijo.fps : currentFps; }
+function videoBitrate() { return Math.round(Q().bitrate * (outFps() === 30 ? 0.6 : 1)); }
+function recBitrate() { return Math.round(Q().rec * (outFps() === 30 ? 0.6 : 1)); }
 // Modo de prueba: con ?probarOpus=1 se salta AAC para probar la ruta Opus.
 const PROBAR_OPUS = /[?&]probarOpus=1(&|$)/.test(window.location.search);
 const AUDIO_KBPS = 128;
@@ -314,8 +320,9 @@ async function pickAvcCodec(w, h) {
 }
 
 // audioCodec: null (sin audio), "aac" u "opus" [v8.8]
-async function exportMp4(style, tl, opts, canvas, codec, audioCodec) {
-  const draw = makeRenderer(style, tl, opts, canvas, null, Q().scale);
+async function exportMp4(style, tl, opts, lienzos, codec, audioCodec) {
+  const canvas = lienzos.canvas;
+  const draw = makeRenderer(style, tl, opts, canvas, null, Q().scale, lienzos.stage(Q().scale));
   const OW = canvas.width, OH = canvas.height, fps = outFps(), step = FPS / fps;
   // [v8.1] Música: se genera primero el audio completo y se mete como pista de audio.
   let audioBuf = null;
@@ -340,7 +347,13 @@ async function exportMp4(style, tl, opts, canvas, codec, audioCodec) {
       if (encErr) throw encErr;
       checkCancel();
       draw(Math.min(f * step * opts.speed, tl.total - 0.001));
+      // [v8.10] Cada fotograma se comprueba: lienzo y fotograma deben medir
+      // exactamente lo que espera el codificador. Si no, se para (nunca se
+      // guarda un video corrido o recortado).
+      checkMedidas(canvas.width, canvas.height, OW, OH);
       const vf = new VideoFrame(canvas, { timestamp: Math.round((f * 1e6) / fps), duration: Math.round(1e6 / fps) });
+      try { checkMedidas(vf.displayWidth, vf.displayHeight, OW, OH); checkMedidas(vf.visibleRect ? vf.visibleRect.width : OW, vf.visibleRect ? vf.visibleRect.height : OH, OW, OH); }
+      catch (e) { vf.close(); throw e; }
       encoder.encode(vf, { keyFrame: f % fps === 0 });
       vf.close();
       while (encoder.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 0));
@@ -359,9 +372,12 @@ async function exportMp4(style, tl, opts, canvas, codec, audioCodec) {
 
 // Respaldo: grabación en tiempo real. [v8.1] Puede llevar la música (pista
 // de audio en vivo) y acepta MP4 si el navegador solo graba MP4 (Safari).
-function exportWebm(style, tl, opts, canvas, withAudio) {
+function exportWebm(style, tl, opts, lienzos, withAudio) {
   return new Promise(function (resolve, reject) {
-    const draw = makeRenderer(style, tl, opts, canvas, null, Q().scale);
+    const canvas = lienzos.canvas;
+    const draw = makeRenderer(style, tl, opts, canvas, null, Q().scale, lienzos.stage(Q().scale));
+    const OW = canvas.width, OH = canvas.height;
+    let fallo = null;
     let stream;
     try { stream = canvas.captureStream(outFps()); } catch (e) { reject(new Error("Este navegador no soporta captura de canvas.")); return; }
     const cands = withAudio
@@ -380,6 +396,7 @@ function exportWebm(style, tl, opts, canvas, withAudio) {
     rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
     rec.onstop = () => {
       try { master && master.disconnect(); mixChain && mixChain.out.disconnect(); } catch (e) {}
+      if (fallo) { reject(fallo); return; }
       if (cancelado) { reject(cancelError()); return; }
       resolve({ blob: new Blob(chunks, { type: mime.split(";")[0] }), ext: ext, audio: !!audioDest });
     };
@@ -390,6 +407,7 @@ function exportWebm(style, tl, opts, canvas, withAudio) {
     (function tick() {
       const el = performance.now() - t0;
       if (_cancel && _cancel.pedido) { cancelado = true; rec.stop(); return; }
+      try { checkMedidas(canvas.width, canvas.height, OW, OH); } catch (e) { fallo = e; rec.stop(); return; } // [v8.10]
       setProgress((el / totalMs) * 100, "Grabando en tiempo real… · quedan ≈ " + fmtSecs((totalMs - el) / 1000));
       if (el >= totalMs) { draw(tl.total - 1); rec.stop(); return; }
       draw(Math.min(Math.floor(el / MS_PER_FRAME) * opts.speed, tl.total - 0.001));
@@ -402,37 +420,79 @@ function exportWebm(style, tl, opts, canvas, withAudio) {
 // Devuelve { blob, ext, audio, note, ruta, fps, w, h }.
 // [v8.8] Orden: MP4 fotograma a fotograma + AAC → MP4 fotograma a fotograma +
 // Opus (si no hay AAC) → grabación en tiempo real → MP4 sin sonido.
-async function exportVideo(style, tl, opts, canvas) {
+// [v8.10] Descarga, Compartir y Facebook usan SOLO esta función:
+//  · lienzo propio (fuera de la pantalla), nunca el de la vista previa;
+//  · formato, calidad, fluidez y plan fijos hasta terminar;
+//  · no se puede lanzar dos veces a la vez;
+//  · cada fotograma se comprueba (medidas iguales a las del codificador).
+let _exportando = false;
+function exportando() { return _exportando; }
+function checkMedidas(w, h, OW, OH) {
+  if (w === OW && h === OH) return;
+  const e = new Error("La generación se detuvo porque la imagen cambió de tamaño a mitad del video (se esperaba " + OW + "×" + OH + " y llegó " + w + "×" + h + "). No se guardó ningún archivo. Vuelve a intentarlo.");
+  e.medidas = true;
+  throw e;
+}
+// enPagina: para la grabación en tiempo real el lienzo tiene que estar en la
+// página (con el teléfono muy cargado, Chrome deja de capturar un lienzo que no
+// está en la página y el archivo sale vacío). Se pone invisible y sin toques;
+// sigue siendo un lienzo propio, nunca el de la vista previa.
+function crearLienzos(enPagina) {
+  const canvas = document.createElement("canvas");
+  if (enPagina) {
+    canvas.setAttribute("aria-hidden", "true");
+    canvas.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0.01;pointer-events:none;z-index:-1;";
+    document.body.appendChild(canvas);
+  }
+  const stages = [];
+  return {
+    canvas: canvas,
+    stage: function (sc) {
+      const c = document.createElement("canvas"); c.width = Math.round(W * sc); c.height = Math.round(H * sc);
+      stages.push(c); return { canvas: c, ctx: c.getContext("2d") };
+    },
+    liberar: function () { stages.concat([canvas]).forEach(function (c) { c.width = 0; c.height = 0; }); if (canvas.parentNode) canvas.parentNode.removeChild(canvas); }
+  };
+}
+async function exportVideo(style, tl, opts) {
+  if (_exportando) throw new Error("Ya se está generando un video. Espera a que termine.");
+  _exportando = true;
+  _fijo = { format: currentFormat, quality: currentQuality, fps: currentFps, plan: currentPlan };
   _cancel = { pedido: false };
   const d = outDims(), info = { fps: outFps(), w: d.w, h: d.h };
   const fin = (r, ruta) => Object.assign(r, info, { ruta: ruta });
-  const rethrowCancel = e => { if (e && e.cancelado) throw e; };
+  // cancelar o un fallo de medidas no se reintenta por otra ruta: se avisa
+  const rethrowCancel = e => { if (e && (e.cancelado || e.medidas)) throw e; };
+  // Cada intento usa lienzos nuevos (y se liberan al terminar)
+  let lz = null;
+  const canvas = (enPagina) => { if (lz) lz.liberar(); lz = crearLienzos(enPagina); return lz; };
   try {
     const wantMusic = audioWanted(style);
     const noMusicNote = "Tu navegador no pudo añadir el sonido; el video salió mudo.";
     const codec = await pickAvcCodec();
     if (codec) {
-      if (!wantMusic) return fin({ blob: await exportMp4(style, tl, opts, canvas, codec, null), ext: "mp4", audio: false }, "MP4 · sin sonido (elegido)");
+      if (!wantMusic) return fin({ blob: await exportMp4(style, tl, opts, canvas(), codec, null), ext: "mp4", audio: false }, "MP4 · sin sonido (elegido)");
       if (!PROBAR_OPUS && await aacSupported()) {
-        try { return fin({ blob: await exportMp4(style, tl, opts, canvas, codec, "aac"), ext: "mp4", audio: true }, "MP4 · AAC"); }
+        try { return fin({ blob: await exportMp4(style, tl, opts, canvas(), codec, "aac"), ext: "mp4", audio: true }, "MP4 · AAC"); }
         catch (e) { rethrowCancel(e); /* se reintenta abajo */ }
       }
       if (await opusSupported()) {
-        try { return fin({ blob: await exportMp4(style, tl, opts, canvas, codec, "opus"), ext: "mp4", audio: true }, "MP4 · Opus"); }
+        try { return fin({ blob: await exportMp4(style, tl, opts, canvas(), codec, "opus"), ext: "mp4", audio: true }, "MP4 · Opus"); }
         catch (e) { rethrowCancel(e); /* se reintenta abajo */ }
       }
       const recMime = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/mp4;codecs=avc1.42E01E,mp4a.40.2"]
         .find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
       if (recMime && getAudioCtx()) {
-        try { return fin(await exportWebm(style, tl, opts, canvas, true), "Grabación en tiempo real"); } catch (e) { rethrowCancel(e); /* último recurso: sin música */ }
+        try { return fin(await exportWebm(style, tl, opts, canvas(true), true), "Grabación en tiempo real"); } catch (e) { rethrowCancel(e); /* último recurso: sin música */ }
       }
-      return fin({ blob: await exportMp4(style, tl, opts, canvas, codec, null), ext: "mp4", audio: false, note: noMusicNote }, "MP4 · sin sonido");
+      return fin({ blob: await exportMp4(style, tl, opts, canvas(), codec, null), ext: "mp4", audio: false, note: noMusicNote }, "MP4 · sin sonido");
     }
-    const r = await exportWebm(style, tl, opts, canvas, wantMusic);
+    const r = await exportWebm(style, tl, opts, canvas(true), wantMusic);
     if (wantMusic && !r.audio) r.note = noMusicNote;
     return fin(r, "Grabación en tiempo real");
   } finally {
-    _cancel = null;
+    if (lz) lz.liberar();
+    _cancel = null; _fijo = null; _exportando = false;
   }
 }
 // [integración] Formato, calidad y plan los elige la interfaz (otro módulo).
@@ -461,6 +521,7 @@ export {
   edgeCtx,
   exportMp4,
   exportVideo,
+  exportando,
   exportWebm,
   fmt,
   getStage,

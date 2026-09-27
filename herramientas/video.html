@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  RETADOR · Generador de video promocional · v8.9 (integrado en la plataforma)
+  RETADOR · Generador de video promocional · v8.10 (integrado en la plataforma)
   Se abre dentro de un iframe desde Herramientas y desde Mi Panel → Promociones.
   El HTML y el CSS son los del prototipo; la lógica vive en src/tools/promoVideo/v8/.
 -->
@@ -16,12 +16,14 @@
 
   <header class="top">
     <div class="mark">RETA<span>DOR</span></div>
-    <div class="sub">Generador de video promocional <span class="ver-tag">v8.9</span></div>
+    <div class="sub">Generador de video promocional <span class="ver-tag">v8.10</span></div>
   </header>
   <p class="lede">Elige tus productos (fotos o emojis), escribe tu titular y descarga un video vertical listo para Reels, Stories o TikTok.</p>
 
   <div class="layout">
     <div class="editor-col">
+      <!-- [v8.10] Mientras se genera, los controles se atenúan y no responden -->
+      <p class="aviso-generando" id="avisoGenerando" role="status">⏳ <b>Generando…</b> Mientras se crea el video no se puede cambiar nada. Si quieres parar, pulsa «Cancelar».</p>
 
       <div class="tablist" role="tablist" id="tabList">
         <button type="button" class="tab-btn" role="tab" data-tab="contenido" id="tabBtn-contenido" aria-controls="tabPanel-contenido">Contenido</button>

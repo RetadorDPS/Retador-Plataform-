@@ -202,6 +202,7 @@ import {
   exportMp4,
   exportVideo,
   exportWebm,
+  exportando,
   fmt,
   getStage,
   hasWatermark,
@@ -1195,7 +1196,38 @@ export function iniciarEditor(P) {
     b.style.display = "";
     b.textContent = previewSound ? (previewSoundBusy ? "⏳ Preparando sonido…" : "🔊 Sonando · Silenciar") : "🔈 Escuchar sonido";
   }
+  // [v8.10] Mientras se genera el video, NADA redibuja ni cambia de tamaño la
+  // vista previa: se anota y se hace una sola vez al terminar. Lo que llegue
+  // entretanto (una foto que tarda, datos de la app…) también se aplaza.
+  let exportBusy = false, previewPendiente = false;
+  const aplazados = [];
+  function aplazar(fn) { if (exportBusy) aplazados.push(fn); else fn(); }
+  function bloquearEditor(on) {
+    exportBusy = on;
+    document.body.classList.toggle("exportando", on);
+    document.querySelectorAll("#tabList, .tab-panel, .preview-panel, #soundBtn, #replayBtn, .action-card .opt-row, #fbPublishBtn, #planNotice").forEach(function (el) {
+      el.classList.toggle("bloqueado", on);
+      if (on) el.setAttribute("inert", ""); else el.removeAttribute("inert");
+    });
+    els.generateBtn.disabled = on;
+    if (on) els.generateBtn.textContent = "Generando…";
+  }
+  // Punto único de exportación de la pantalla: la descarga y Facebook pasan
+  // por aquí (y esto llama a exportVideo, que usa su propio lienzo).
+  async function exportarVideo(style, tl, opts) {
+    if (exportBusy || exportando()) throw new Error("Ya se está generando un video. Espera a que termine.");
+    bloquearEditor(true);
+    stopPreview();
+    try { return await exportVideo(style, tl, opts); }
+    finally {
+      bloquearEditor(false);
+      aplazados.splice(0).forEach(function (fn) { try { fn(); } catch (e) { console.error("[video] tarea aplazada falló:", e); } });
+      previewPendiente = false;
+      rebuildPreview();
+    }
+  }
   function rebuildPreview() {
+    if (exportBusy) { previewPendiente = true; return; }
     stopPreview();
     const ctx = els.previewCanvas.getContext("2d");
     const F = fmt();
@@ -1292,6 +1324,7 @@ export function iniciarEditor(P) {
   });
 
   els.generateBtn.addEventListener("click", async function () {
+    if (exportBusy || exportando()) return; // [v8.10] sin doble toque
     if (audioWanted(STYLES[currentStyle])) unlockAudio();
     if (!hasEnoughData()) {
       const msg = currentStyle === "secuencial" ? "Escribe al menos una frase."
@@ -1306,14 +1339,12 @@ export function iniciarEditor(P) {
     $("shareBtn").style.display = "none";
     $("shareNote").style.display = "none";
     els.exportDetail.textContent = ""; $("diagLine").textContent = "";
-    els.generateBtn.disabled = true; els.generateBtn.textContent = "Generando…";
     const cancelBtn = $("cancelBtn"); cancelBtn.disabled = false; cancelBtn.textContent = "Cancelar";
-    stopPreview();
     setProgress(0, "Preparando…");
     const style = STYLES[currentStyle], tl = style.buildTimeline(currentData()), opts = currentOpts();
     const t0 = performance.now();
     try {
-      const r = await exportVideo(style, tl, opts, els.previewCanvas);
+      const r = await exportarVideo(style, tl, opts);
       const blob = r.blob, codec = r.ext === "mp4", secs = (performance.now() - t0) / 1000;
       const name = opts.storeName.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "retador";
       els.downloadLink.href = URL.createObjectURL(blob);
@@ -1330,7 +1361,7 @@ export function iniciarEditor(P) {
       else setStatus((err && err.message) || "No se pudo generar el video.", "error");
     } finally {
       els.generateBtn.disabled = false; els.generateBtn.textContent = "Generar y descargar video";
-      hideProgress(); rebuildPreview();
+      hideProgress();
     }
   });
   // [v8.8] Cancelar a mitad de la generación
@@ -1363,9 +1394,11 @@ export function iniciarEditor(P) {
   }
   function pickRealProduct(item, onPick) {
     loadProductPhoto(item.image).then(function (img) {
-      if (!img && item.image) toast(NO_CORS_PHOTO);
-      if (PRODUCT_CURRENCY[item.currency]) setCurrency(PRODUCT_CURRENCY[item.currency]);
-      onPick(item, img);
+      aplazar(function () { // [v8.10] si llega a mitad de una generación, se aplica al terminar
+        if (!img && item.image) toast(NO_CORS_PHOTO);
+        if (PRODUCT_CURRENCY[item.currency]) setCurrency(PRODUCT_CURRENCY[item.currency]);
+        onPick(item, img);
+      });
     });
   }
 
@@ -1643,6 +1676,7 @@ export function iniciarEditor(P) {
 
   let lastCaption = "";
   async function runFbPublish(captionText) {
+    if (exportBusy || exportando()) { toast("Ya se está generando un video. Espera a que termine."); return; } // [v8.10]
     if (typeof captionText === "string") lastCaption = captionText;
     fbBusy = true;
     openFbSheet(
@@ -1655,17 +1689,15 @@ export function iniciarEditor(P) {
       '<li data-s="4"><span class="ic"></span><span><b>Facebook está procesando el video</b><small></small></span></li>' +
       '</ol><div id="fbEnd"></div>'
     );
-    stopPreview();
     const style = STYLES[currentStyle], data = currentData(), tl = style.buildTimeline(data), opts = currentOpts();
     const originalSetProgress = setProgress;
     setProgress = function (pct, label) { setFbBar(pct, label); };
     let blob = null, err = null, isMp4 = false, expInfo = null;
     try {
-      expInfo = await exportVideo(style, tl, opts, els.previewCanvas);
+      expInfo = await exportarVideo(style, tl, opts);
       blob = expInfo.blob; isMp4 = expInfo.ext === "mp4";
     } catch (e) { err = e; }
     setProgress = originalSetProgress;
-    rebuildPreview();
     if (err || !blob) {
       setFbStep(1, "error", (err && err.message) || "No se pudo generar el video.");
       fbBusy = false;
@@ -1741,11 +1773,13 @@ export function iniciarEditor(P) {
   }
 
   // [integración] La app puede mandar datos nuevos (plan cargado tarde, productos).
-  return {
+  const api = {
     actualizar: function (N) {
       if (!N) return;
+      if (exportBusy) { aplazar(function () { api.actualizar(N); }); return; } // [v8.10]
       if ("conMarcaDeAgua" in N) { setPlan(N.conMarcaDeAgua === false ? "pro" : "gratis"); renderPlanNotice(); rebuildPreview(); }
       if (N.productos) CATALOG = N.productos.slice();
     }
   };
+  return api;
 }

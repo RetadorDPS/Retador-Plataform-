@@ -1,6 +1,12 @@
 # Retador-Plataform-
 Plataforma Retador 
 
+**Versión de la app: v242** (fuente de verdad: `public/sw.js` → `CACHE` y `APP_VERSION_FALLBACK` en `src/shared/theme.jsx`).
+
+## Generador de video promocional
+- Versión **v8.10**. Todo lo del generador está en `src/tools/promoVideo/README.md`.
+- v8.10: el video se genera en un lienzo propio (nunca el de la vista previa), nada se redibuja mientras se genera (los controles se atenúan con el aviso "Generando…" y Cancelar sigue activo), Generar no se puede lanzar dos veces y cada fotograma se comprueba. Arregla el video Cuadrado "corrido" visto en el Redmi Note 11.
+
 ## Cuenta y seguridad
 
 ### Reglas obligatorias para trabajar en la plataforma (decisión de Daniel, v240)
@@ -25,11 +31,12 @@ Plataforma Retador
   - Tarea diaria `borrado-cuentas-diario` (pg_cron, 03:17 UTC) → función `account-delete-purge` → primero `account_purge_files(uid)` (archivos de Storage) y después `purge_account_data(uid)`. Si en ese momento apareciera saldo en la billetera, **no se borra nada** (ni archivos ni datos) y la cuenta sigue pendiente.
   - La cuenta de acceso queda **anulada (modo A, confirmado por Daniel)**: sin correo ni datos, sin identidad de Google, sin sesiones y bloqueada para siempre (si esa persona vuelve con Google, se crea una cuenta nueva vacía).
 
-#### Qué pasa con cada tabla a los 30 días (v241)
+#### Qué pasa con cada tabla a los 30 días (v241, reseñas v242)
 **Se borra:**
 - `products` (y sus `product_variants` con sus fotos). Excepción: un producto que aparece en un pedido de proveedor (`catalog_pro_fulfillment`) se queda como `deleted`, sin fotos, descripción, vídeo, dirección ni teléfono de recogida.
 - `seller_direct_pricing`, `seller_direct_products`, `auctions` (como vendedor), `store_config`.
-- `reviews`, `seller_reviews` (las que escribió y las que recibió), `favorites`, `cart_items`, `followers`, `blocked_users`.
+- Reseñas que **recibió** (v242): las de sus productos en `reviews` (también las de productos que se quedan como `deleted`) y las de su tienda en `seller_reviews`.
+- `favorites`, `cart_items`, `followers`, `blocked_users`.
 - Sus `notifications`, `push_subscriptions`, `push_client_log`, `push_debug_log`.
 - `referral_codes`, `referrals`, `verifications`, `courier_applications`, `couriers`, `seller_payment_accounts`, `team_members`, `staff_permissions`, `wallet_balances` (en cero), `message_reactions`.
 - Acceso: `auth.refresh_tokens`, `auth.sessions`, `auth.identities`, `auth.mfa_factors`, `auth.one_time_tokens`, `auth.flow_state`, `auth.audit_log_entries`.
@@ -44,12 +51,14 @@ Plataforma Retador
 - `reports`: el nombre del denunciado pasa a "Usuario eliminado". `wallet_topup_requests.reference` y `plan_requests.evidence_urls` vacíos.
 
 **Se conserva (sin datos personales, por contabilidad):**
+- Reseñas que **escribió** sobre otros vendedores o productos (v242, decisión de Daniel): `reviews` y `seller_reviews` se quedan con su puntuación y su texto, firmadas como "Usuario eliminado", sin foto ni enlace a su perfil (salen del perfil anonimizado). Así las medias de los demás vendedores no cambian (probado con cuentas temporales: vendedor 2,5 / 2 valoraciones antes y después).
 - `orders` y `order_items`, `payment_transactions` (solo enlace y caducidad del pago), `payouts`, `seller_commission_ledger`, `platform_cost_recovery`, `wallet_ledger`, `bids`, `audit_log`.
 - `conversations` (la otra persona las sigue viendo, con "Mensaje eliminado"), las denuncias que hizo esa persona y la fila de `account_deletions` (estado `borrada` con el resumen del borrado).
 - Por qué la cuenta de acceso se anula y no se borra (modo A): 16 tablas apuntan a `auth.users` y, al borrarla, Supabase borraría en cascada pagos, liquidaciones y comisiones de la plataforma, o fallaría con compradores que tienen pedidos. Cambiar esas 16 referencias (modo B) es posible, pero **lo decide Daniel**.
 
 ### Pendiente para una próxima tarea
 - Error de lint en `src/screens/Marketplace.jsx` (línea 546): usa la regla `react-hooks/exhaustive-deps`, que no está en la configuración de ESLint. No afecta a la app; no se ha tocado.
+- **Nota media de los productos que no se actualiza** (encontrado en v242, fallo anterior, no se ha tocado): el cálculo automático `recalc_product_rating` (al escribir o borrar una reseña de producto) intenta guardar `products.rating` / `reviews_count`, pero la protección `protect_product_metrics` lo devuelve al valor anterior porque no activa `app.bypass_product_guard`. Resultado: los productos muestran 0 aunque tengan reseñas (hoy 1 producto real con una reseña de 5 estrellas muestra 0). Las valoraciones de **vendedor** (`seller_rating`) sí se calculan bien. Arreglo propuesto (lo decide Daniel): activar esa marca dentro de `recalc_product_rating` y recalcular una vez todos los productos.
 
 ### Pendiente antes de publicar en tiendas (Google Play / App Store)
 - Correos con Resend (aviso de eliminación pedida, recordatorio antes del borrado y confirmación).

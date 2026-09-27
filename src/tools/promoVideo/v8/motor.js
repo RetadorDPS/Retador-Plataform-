@@ -81,8 +81,7 @@ function prepareBlurredBackground(img) {
     boxBlurRGBA(id.data, sw, sh, 14);
     sctx.putImageData(id, 0, 0);
   } catch (e) { /* si el navegador no deja leer píxeles, queda la foto sin desenfocar bajo el velo */ }
-  const big = document.createElement("canvas");
-  big.width = W; big.height = H;
+  const big = newCacheCanvas(W, H);
   const bctx = big.getContext("2d");
   bctx.imageSmoothingEnabled = true;
   bctx.imageSmoothingQuality = "high";
@@ -93,10 +92,28 @@ function prepareBlurredBackground(img) {
 // [v8.0] Grano fino y FIJO (no cambia entre fotogramas) que se pinta sobre los
 // fondos degradados: rompe las "bandas"/escalones que se ven en los fondos
 // oscuros con brillo de color, sobre todo después de comprimir el video.
-let grainPattern = null;
+// [v8.9] Lienzos de caché que se pueden perder: en móviles con poca memoria o
+// al pasar la app a segundo plano, Chrome puede vaciar los lienzos guardados
+// (quedan transparentes). Cada caché comprueba esto antes de usarse y, si se
+// perdió, se vuelve a dibujar — así nunca queda la escena en blanco.
+function newCacheCanvas(w, h) {
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h));
+  c.addEventListener("contextlost", function () { c._lost = true; });
+  return c;
+}
+function cacheOk(c) {
+  if (!c || c._lost || !c.width || !c.height) return false;
+  try { const x = c.getContext("2d"); if (!x || (x.isContextLost && x.isContextLost())) { c._lost = true; return false; } }
+  catch (e) { return false; }
+  return true;
+}
+// Libera enseguida la memoria de un lienzo que ya no se usa.
+function freeCanvas(c) { if (c && c.width) { c.width = 0; c.height = 0; } }
+let grainPattern = null, grainCanvas = null;
 function getGrain(ctx) {
-  if (grainPattern) return grainPattern;
-  const g = document.createElement("canvas"); g.width = 256; g.height = 256;
+  if (grainPattern && cacheOk(grainCanvas)) return grainPattern;
+  const g = newCacheCanvas(256, 256); grainCanvas = g;
   const gx = g.getContext("2d"), id = gx.createImageData(256, 256);
   let seed = 1337;
   const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
@@ -124,11 +141,13 @@ function drawGrain(ctx, x, y, w, h, alpha) {
   }
   const key = [cv.width, cv.height, m.a, m.d, m.e, m.f, x, y, w, h, alpha].join(",");
   let layer = _grainLayers.get(key);
-  if (!layer) {
-    layer = document.createElement("canvas"); layer.width = cv.width; layer.height = cv.height;
+  if (!cacheOk(layer)) { // [v8.9] también si el navegador la vació
+    layer = newCacheCanvas(cv.width, cv.height);
     const lx = layer.getContext("2d");
     lx.setTransform(m); lx.globalAlpha = alpha; lx.fillStyle = getGrain(lx); lx.fillRect(x, y, w, h);
-    if (_grainLayers.size >= 12) _grainLayers.delete(_grainLayers.keys().next().value);
+    // [v8.9] solo se guardan capas del tamaño de lienzo actual (menos memoria en móviles)
+    for (const [k2, c2] of _grainLayers) if (!k2.startsWith(cv.width + "," + cv.height + ",")) { freeCanvas(c2); _grainLayers.delete(k2); }
+    if (_grainLayers.size >= 6) { const k0 = _grainLayers.keys().next().value; freeCanvas(_grainLayers.get(k0)); _grainLayers.delete(k0); }
     _grainLayers.set(key, layer);
   }
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.drawImage(layer, 0, 0); ctx.restore();
@@ -181,6 +200,81 @@ function drawEmoji(ctx, emoji, x, y, size) {
   ctx.font = Math.round(size) + "px " + EMOJI_FONT;
   ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#000";
   ctx.fillText(emoji, x, y + size * 0.05);
+  ctx.restore();
+}
+
+// [v8.9] ¿La foto ya se puede dibujar? (cargada y con medidas reales). Una foto
+// externa lenta (CJ/AliExpress) puede llegar tarde: mientras tanto se trata como
+// si no hubiera foto y NUNCA se guarda nada calculado con ella a medio cargar.
+function photoReady(img) {
+  if (!img) return false;
+  if (typeof HTMLImageElement !== "undefined" && img instanceof HTMLImageElement) return img.complete && img.naturalWidth > 0 && img.naturalHeight > 0;
+  return (img.width || 0) > 0 && (img.height || 0) > 0;
+}
+function photoW(img) { return img.naturalWidth || img.width || 1; }
+function photoH(img) { return img.naturalHeight || img.height || 1; }
+// [v8.9] (movido desde estilos.js para usarlo en todas las tarjetas)
+const _cutoutCache = new WeakMap();
+// ¿La foto ya viene sin fondo (PNG con transparencia)? Se mira una vez.
+function isCutout(img) {
+  if (!img || !photoReady(img)) return false; // [v8.9] a medio cargar daba "sin fondo" para siempre
+  if (_cutoutCache.has(img)) return _cutoutCache.get(img);
+  let r = false;
+  try {
+    const c = document.createElement("canvas"); c.width = 24; c.height = 24;
+    const x = c.getContext("2d"); x.drawImage(img, 0, 0, 24, 24);
+    const d = x.getImageData(0, 0, 24, 24).data, px = [0, 23, 24 * 23, 24 * 24 - 1];
+    r = px.every(i => d[i * 4 + 3] < 200);
+  } catch (e) { r = false; }
+  _cutoutCache.set(img, r); return r;
+}
+// [v8.9] Cuánto se recortaría la foto si llenara la caja (0 = nada, 0,25 = una cuarta parte).
+function photoCropFrac(img, w, h) {
+  const ir = photoW(img) / photoH(img), br = w / h;
+  return 1 - Math.min(ir, br) / Math.max(ir, br);
+}
+// Si llenar la caja recortaría más de esto, la foto se muestra ENTERA (sin cortar el producto).
+const FIT_MAX_CROP = 0.2;
+// [v8.9] Fondo desenfocado de la MISMA foto (para los lados cuando se muestra
+// entera). Se calcula UNA vez por foto: la foto completa reducida (256 px en su
+// lado largo) y desenfocada de verdad; luego solo se amplía para cubrir la caja.
+const _backdropCache = new WeakMap();
+function photoBackdrop(img) {
+  if (_backdropCache.has(img) && cacheOk(_backdropCache.get(img))) return _backdropCache.get(img);
+  const ir = photoW(img) / photoH(img), bw = ir >= 1 ? 256 : Math.max(8, Math.round(256 * ir)), bh = ir >= 1 ? Math.max(8, Math.round(256 / ir)) : 256;
+  const c = newCacheCanvas(bw, bh), x = c.getContext("2d");
+  x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high";
+  x.drawImage(img, 0, 0, bw, bh);
+  try { const id = x.getImageData(0, 0, bw, bh); boxBlurRGBA(id.data, bw, bh, 10); x.putImageData(id, 0, 0); }
+  catch (e) { // sin permiso para leer píxeles: desenfoque por reducción
+    const s = document.createElement("canvas"); s.width = Math.max(2, Math.round(bw / 24)); s.height = Math.max(2, Math.round(bh / 24));
+    s.getContext("2d").drawImage(c, 0, 0, s.width, s.height); x.clearRect(0, 0, bw, bh); x.drawImage(s, 0, 0, bw, bh);
+  }
+  _backdropCache.set(img, c);
+  return c;
+}
+// Dibuja el fondo desenfocado cubriendo la caja (x, y, w, h).
+function drawBackdropCover(ctx, img, x, y, w, h) {
+  const bd = photoBackdrop(img), ir = bd.width / bd.height, br = w / h;
+  const dw = ir > br ? h * ir : w, dh = ir > br ? h : w / ir;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(bd, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+}
+// [v8.9] Dibuja la foto en la caja sin cortar el producto:
+//  · forma parecida a la caja (recorte ≤ 20 %) → la llena (como antes);
+//  · forma muy distinta → entera y centrada, con el fondo desenfocado de la misma foto;
+//  · PNG sin fondo (opts.clear) → entera y centrada, sin fondo.
+// opts.cover = true fuerza llenar (muro de fotos y fondo "Foto propia").
+function drawPhotoFit(ctx, img, x, y, w, h, r, opts) {
+  if (!photoReady(img)) return;
+  const o = opts || {};
+  if (o.cover || (!o.clear && photoCropFrac(img, w, h) <= FIT_MAX_CROP)) { drawPhotoCover(ctx, img, x, y, w, h, r); return; }
+  ctx.save();
+  roundRectPath(ctx, x, y, w, h, r); ctx.clip();
+  if (!o.clear) drawBackdropCover(ctx, img, x, y, w, h);
+  const ir = photoW(img) / photoH(img), br = w / h, k = o.inset || 1;
+  const dw = (ir > br ? w : h * ir) * k, dh = (ir > br ? w / ir : h) * k;
+  ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
   ctx.restore();
 }
 
@@ -409,9 +503,9 @@ function drawProductCard(ctx, item, cx, cy, size, angle, alpha, depth, theme, ac
   ctx.lineWidth = Math.max(2, size * 0.006);
   ctx.strokeStyle = theme.cardBorder;
   ctx.stroke();
-  if (item.photo) {
+  if (item.photo && photoReady(item.photo)) { // [v8.9] mientras carga, el emoji
     const p = size * 0.035;
-    drawPhotoCover(ctx, item.photo, -h + p, -h + p, size - 2 * p, size - 2 * p, r * 0.8);
+    drawPhotoFit(ctx, item.photo, -h + p, -h + p, size - 2 * p, size - 2 * p, r * 0.8, { clear: isCutout(item.photo) }); // [v8.9] nunca corta el producto
   } else {
     drawEmoji(ctx, item.icon || "🛍️", 0, 0, size * 0.58);
   }
@@ -430,6 +524,7 @@ function drawBackground(ctx, theme, accent, glowY) {
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, W, H);
+  if (theme.usesPhoto && bgPhotoBlurred && !cacheOk(bgPhotoBlurred) && photoReady(bgPhoto)) bgPhotoBlurred = prepareBlurredBackground(bgPhoto); // [v8.9] se rehace si se perdió
   if (theme.usesPhoto && bgPhotoBlurred) {
     ctx.drawImage(bgPhotoBlurred, 0, 0, W, H);
     ctx.fillStyle = "rgba(10,9,7," + BG_VEIL + ")";
@@ -657,23 +752,72 @@ const _shadowCache = new Map();
 function shadowSprite(key, w, h, blurDev, color, q, drawShape) {
   const k = key + "|" + w + "|" + h + "|" + blurDev + "|" + color + "|" + q;
   let s = _shadowCache.get(k);
-  if (s) return s;
+  if (s && cacheOk(s.canvas)) return s;
   const pad = Math.ceil(blurDev * 1.6 + 2);
-  const c = document.createElement("canvas");
-  c.width = Math.max(1, Math.ceil(w * q + 2 * pad)); c.height = Math.max(1, Math.ceil(h * q + 2 * pad));
+  const c = newCacheCanvas(w * q + 2 * pad, h * q + 2 * pad);
   const x = c.getContext("2d"), off = c.width + 64;
   x.shadowColor = color; x.shadowBlur = blurDev; x.shadowOffsetX = off;
   x.translate(pad - off, pad); x.scale(q, q); drawShape(x);
   s = { canvas: c, padU: pad / q, q: q };
-  if (_shadowCache.size >= 80) _shadowCache.delete(_shadowCache.keys().next().value);
+  if (_shadowCache.size >= 80) { const k0 = _shadowCache.keys().next().value; freeCanvas(_shadowCache.get(k0).canvas); _shadowCache.delete(k0); }
   _shadowCache.set(k, s);
   return s;
 }
 // Dibuja la sombra con la figura escalada por `scale` y su origen en (x, y).
 function drawShadowSprite(ctx, s, x, y, scale) {
   const k = scale || 1;
-  ctx.drawImage(s.canvas, x - s.padU * k, y - s.padU * k, (s.canvas.width / s.q) * k, (s.canvas.height / s.q) * k);
+  blitStamp(ctx, s.canvas, x - s.padU * k, y - s.padU * k, (s.canvas.width / s.q) * k, (s.canvas.height / s.q) * k, true); // [v8.9]
 }
+// [v8.9] Copia un dibujo ya hecho. Si en ese momento no hay giro ni escala extra
+// (el caso normal cuando una tarjeta está quieta), se copia en un píxel entero:
+// es muchísimo más barato que una copia "filtrada" con posición decimal, y medio
+// píxel de diferencia en algo quieto no se ve.
+// borroso = true (sombras y brillos): si hay que escalar, sin filtrar (la mitad de
+// coste); en algo tan desenfocado la diferencia es de 1 nivel de color.
+function blitStamp(ctx, c, x, y, w, h, borroso) {
+  const m = ctx.getTransform();
+  if (m.b === 0 && m.c === 0 && Math.abs(m.a * w - c.width) < 1.01 && Math.abs(m.d * h - c.height) < 1.01) {
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(c, Math.round(m.a * x + m.e), Math.round(m.d * y + m.f));
+    ctx.restore(); return;
+  }
+  if (borroso) { const sm = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = false; ctx.drawImage(c, x, y, w, h); ctx.imageSmoothingEnabled = sm; return; }
+  ctx.drawImage(c, x, y, w, h);
+}
+// [v8.9] Escala para un sello: la de pantalla exacta si no hay escala extra
+// (así se puede copiar en píxel entero); si la hay (algo creciendo), un escalón.
+function stampScale(ctx) {
+  const d = devScale(ctx), r = renderScale(ctx);
+  return Math.abs(d - r) < 1e-6 ? r : scaleStep(d);
+}
+// [v8.9] "Sellos": lo que se repite igual en muchos fotogramas (cada producto,
+// su sombra, las insignias, las manchas de color) se dibuja UNA vez a la
+// resolución de pantalla y luego solo se copia. Copiar un dibujo ya hecho es
+// mucho más barato que volver a dibujar una foto grande, un emoji enorme o una
+// sombra desenfocada en cada fotograma. Presupuesto de memoria fijo.
+const _stamps = new Map(); let _stampBytes = 0; const STAMP_BUDGET = 32e6;
+function stamp(key, w, h, draw) {
+  let st = _stamps.get(key);
+  if (st && cacheOk(st.c)) { _stamps.delete(key); _stamps.set(key, st); return st.c; }
+  if (st) { _stamps.delete(key); _stampBytes -= st.bytes; }
+  const c = newCacheCanvas(w, h);
+  draw(c.getContext("2d"), c.width, c.height);
+  st = { c: c, bytes: c.width * c.height * 4 };
+  _stamps.set(key, st); _stampBytes += st.bytes;
+  while (_stampBytes > STAMP_BUDGET && _stamps.size > 1) {
+    const e = _stamps.entries().next().value; _stamps.delete(e[0]); _stampBytes -= e[1].bytes; freeCanvas(e[1].c);
+  }
+  return c;
+}
+// Identificador estable de una foto (para las claves de los sellos).
+const _objIds = new WeakMap(); let _objN = 0;
+function objId(o) { if (!o || typeof o !== "object") return String(o); if (!_objIds.has(o)) _objIds.set(o, ++_objN); return "#" + _objIds.get(o); }
+// Escala real del lienzo en este momento y un escalón por encima (pasos de 12 %),
+// para que un producto que crece o encoge reuse pocos sellos y siempre se copie
+// reduciendo (nítido), nunca ampliando.
+function devScale(ctx) { const m = ctx.getTransform(); return Math.hypot(m.a, m.b) || 1; }
+function scaleStep(v) { return Math.pow(1.12, Math.ceil(Math.log(Math.max(v, 1e-3)) / Math.log(1.12) - 1e-9)); }
+
 // Píxeles de pantalla por unidad de diseño del fotograma (1 = Alta, 2/3 = Ligera, 0,5 = vista previa).
 function renderScale(ctx) { return ctx.canvas ? ctx.canvas.width / W : 1; }
 
@@ -682,6 +826,15 @@ export function setBgPhoto(img, blurred) { bgPhoto = img; bgPhotoBlurred = blurr
 export function setCurrency(c) { currency = c; }
 
 export {
+  blitStamp,
+  stampScale,
+  stamp,
+  objId,
+  devScale,
+  scaleStep,
+  newCacheCanvas,
+  cacheOk,
+  freeCanvas,
   shadowSprite,
   drawShadowSprite,
   renderScale,
@@ -719,6 +872,14 @@ export {
   drawLogo,
   drawPctSeal,
   drawPhotoCover,
+  drawPhotoFit,
+  isCutout,
+  _cutoutCache,
+  photoReady,
+  photoCropFrac,
+  photoBackdrop,
+  drawBackdropCover,
+  FIT_MAX_CROP,
   drawPriceBadge,
   drawProductCard,
   drawProgressBar,

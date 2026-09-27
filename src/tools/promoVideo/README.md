@@ -1,10 +1,10 @@
 # Generador de Video Promocional — RETADOR
 
-**Versión actual: v8.8** (integrada en la v239 de RETADOR; el código de la
+**Versión actual: v8.9** (integrada en la v240 de RETADOR; el código de la
 plataforma es la fuente de verdad: `herramientas/video.html` + `src/tools/promoVideo/v8/`).
-Ver "v8.8" justo abajo y "Integración en RETADOR (v8.7)" después.
-Lo nuevo desde v7.3 está en las secciones "v8.8" a "v8.0" justo debajo, y en el
-código cada bloque nuevo va marcado con su versión (`[v8.8]` … `[v8.0]`).
+Ver "v8.9" justo abajo y "Integración en RETADOR (v8.7)" después.
+Lo nuevo desde v7.3 está en las secciones "v8.9" a "v8.0" justo debajo, y en el
+código cada bloque nuevo va marcado con su versión (`[v8.9]` … `[v8.0]`).
 
 **Estilos disponibles (8, ninguno se elimina sin que Daniel lo pida explícitamente):**
 Acercamiento, Noria horizontal, Escenas secuenciales, Antes/Después, Mosaico de
@@ -14,6 +14,49 @@ El estilo Directo tiene sus propias paletas y no usa los temas.
 
 **Regla de versiones:** cada cambio sube la versión (v8.1, v8.2…) y se documenta
 aquí, en una sección nueva arriba de las anteriores, antes de pasarlo a Claude Code.
+
+---
+
+## v8.9 — Sonido de la vista previa, Vitrina nunca en blanco, fotos enteras y Vitrina/Desfile por debajo de 2× — plataforma v240
+
+Pedido de Daniel tras probar la v8.8 en un Redmi Note 11 (Vitrina + "Moderno": sonido distorsionado, cortado y tarde; Vitrina a veces en blanco; fotos cortadas).
+
+### 1. Vista previa con sonido (A1)
+- Antes: la vista previa sintetizaba la música **en vivo**, vuelta a vuelta (cientos de osciladores). En teléfonos lentos se distorsionaba, se cortaba o llegaba tarde.
+- Ahora: al tocar "Escuchar sonido" se genera **una sola vez** el sonido de una vuelta completa con la **misma función, mezcla y normalización que el video descargado** (`renderMusicBuffer`, OfflineAudioContext) y suena en bucle desde **un único reproductor** (`AudioBufferSourceNode` con `loop`). La animación toma su reloj de ese sonido: imagen y sonido van siempre juntos.
+- Mientras se prepara, el botón dice **"⏳ Preparando sonido…"** (con una espera de 350 ms por si el vendedor sigue tocando opciones). Si nada que afecte al sonido cambió, se reutiliza el ya generado (se guardan los 2 últimos).
+- Prueba (CPU 6× más lenta): tiempo de preparar una vuelta de Vitrina (15,2 s) con efectos: Sin música 0,6 s · Alegre 2,1 s · Elegante 1,6 s · Energía 2,1 s · Relajado 1,5 s · Moderno 2,6 s; Desfile + Moderno 2,2 s; Directo + Moderno 1,1 s. Pico ≤ 0,89 (no satura) y la música empieza a los ~30 ms (no llega tarde). En la herramienta real (Vitrina + Moderno + efectos, velocidad Ideal = 23,4 s, CPU 6×): "Preparando sonido…" ~6 s → "Sonando", **1** reproductor en bucle, **0** osciladores creados durante la reproducción (antes, miles), la animación sigue corriendo, y al cambiar de música el reproductor se sustituye.
+- Lo que no se pudo verificar aquí: **escucharlo** (el entorno no tiene altavoz) ni el tiempo exacto en el Redmi.
+
+### 2. Vitrina nunca en blanco (A2)
+- **Reproducido con la v8.8**: si una foto (externa, lenta) llega cuando la escena ya empezó, la v8.8 guardaba para siempre los colores de acento (naranja) y el **muro de fotos en blanco**; además marcaba la foto como "PNG sin fondo". Con la v8.9, mientras la foto carga se ve el **emoji** del producto y, en cuanto llega, se recalculan colores, muro y tarjetas solos (hoja de prueba "A2-foto-tarde").
+- Colores del producto, muro, detección de PNG y tarjetas **no se guardan** hasta que la foto está cargada (`complete` y `naturalWidth > 0`).
+- **Cada fotograma está protegido**: si algo falla, se anota el error en la consola (una vez por tipo) y se pinta un fondo con los colores de la marca; la animación **nunca se para** (la vista previa pide el siguiente fotograma antes de dibujar).
+- **Cachés que el navegador puede vaciar**: en móviles con poca memoria o al pasar la app a segundo plano, Chrome puede vaciar los lienzos guardados (quedan transparentes). Todas las cachés de dibujo (fondos, muro, sombras, grano, fondo "Foto propia", sellos) comprueban esto y se rehacen. También se limitó la memoria: capas de pantalla completa solo del tamaño actual (máx. 6) y sellos con un presupuesto fijo de 32 MB. Esta es la causa más probable de lo visto en el Redmi, pero **no se pudo provocar aquí** una pérdida real de memoria: se verificó el camino de recuperación.
+
+### 3. Fotos enteras en los 8 estilos (A4) y foto final de Vitrina (A3)
+Regla única (`drawPhotoFit` en motor.js): si llenar la caja recortaría **más del 20 %** de la foto, la foto se muestra **entera y centrada** sobre la **misma foto desenfocada** (calculada una vez); si no, llena la caja como antes. PNG sin fondo: sin cambios (enteros, sin fondo). El muro de Vitrina y el fondo "Foto propia" siguen llenando.
+
+| Estilo | Escena | Antes (v8.8) | Ahora (v8.9) |
+|---|---|---|---|
+| Acercamiento, Noria, Secuencial, Mosaico, Antes/Después | tarjeta cuadrada | foto recortada a cuadrado (3:4, 4:3, 16:9 y 9:16 perdían bordes; un PNG alto se cortaba) | cuadradas y casi cuadradas (hasta 4:5) igual; el resto entera con fondo desenfocado; PNG alto entero |
+| Directo | foto en tarjeta | recortada a cuadrado | igual regla |
+| Desfile | productos desfilando | recortada a cuadrado | igual regla |
+| Vitrina | producto y anillo, banner | recortada | igual regla |
+| Vitrina | cristal, móvil, destacados | recortada | igual regla |
+| Vitrina | muro de fotos | llena | llena (sin cambio) |
+| Vitrina | expansión y foto final | llenaba la pantalla (una foto cuadrada perdía ~44 % de los lados) con zoom de 8 % | solo las fotos **verticales** (≈9:16) llenan la pantalla; el resto se ve **entera** con 8 % de margen sobre su foto desenfocada; **zoom máximo 3 %** (nunca corta el producto); la expansión arranca exactamente como se veía el cuadro anterior |
+| Vitrina | textos finales | velo general | además, **franja oscura suave** detrás del logo, nombre de la tienda y botón, y panel de nombre/precio más opaco (0,62): se leen aunque la foto sea blanca |
+
+Probado con: cuadrada, 3:4 real (mallas), cuadrada real (POCO), 4:5 sobre blanco, 9:16, 4:3, 16:9, PNG recortado cuadrado y alto; en Vertical (14 escenas) y en Feed y Cuadrado (4 escenas). Cada foto de prueba lleva 4 marcas rosas en las esquinas: si se ven las 4, la foto no se cortó. **No se pudieron usar fotos reales de CJ/AliExpress**: la red de este entorno bloquea `cf.cjdropshipping.com` y `ae01.alicdn.com` (se leyeron sus URLs reales en Supabase, pero no se pueden descargar aquí); se usaron las 3 fotos reales de productos que hay en el repositorio.
+
+### 4. Vitrina y Desfile por debajo de 2× Directo (A5)
+- **Sellos**: cada producto (foto o emoji), su marco, su sombra, las insignias con su brillo, las cajas de Vitrina, el cristal, cada letra del anillo y el titular con brillo de Desfile se dibujan **una vez** (por tamaño, en escalones de 12 %) y cada fotograma solo se **copian**. Nada de sombras desenfocadas calculadas en cada fotograma.
+- **Copias en píxel entero**: lo que está quieto (tarjetas, fondos, muro, manchas de color, partículas) se copia en un píxel entero, sin filtrar (~10 veces más barato que una copia con posición decimal). Las sombras y brillos (muy borrosos) se copian sin filtrar cuando van girados.
+- El grano va dentro de las capas fijas de fondo; con la foto final a pantalla completa ya no se dibuja el fondo que queda tapado.
+- **Verificación de píxeles** (contra la v8.8, fotos cuadradas para aislar este cambio del de encaje): a simple vista idénticos (capturas lado a lado). Diferencias medidas: Desfile 1,3 % de píxeles con más de 8 niveles (de 255) y 0,1 % con más de 32; Vitrina 0,5 % / 0,07 % en la entrada y 6 % / 1,1 % en la parte media. Vienen de: el muro y las manchas redondeados a medio píxel, el remuestreo del grano fino de las fotos, y el grano quedando debajo de estrellas y manchas (1–2 niveles). El final de Vitrina cambia a propósito (punto 3).
+
+TABLA_TIEMPOS
 
 ---
 

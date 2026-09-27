@@ -36,6 +36,23 @@ import {
   drawLogo,
   drawPctSeal,
   drawPhotoCover,
+  drawPhotoFit,
+  isCutout,
+  _cutoutCache,
+  stamp,
+  blitStamp,
+  stampScale,
+  objId,
+  devScale,
+  scaleStep,
+  cacheOk,
+  newCacheCanvas,
+  freeCanvas,
+  photoReady,
+  photoCropFrac,
+  photoBackdrop,
+  drawBackdropCover,
+  FIT_MAX_CROP,
   drawPriceBadge,
   drawProductCard,
   drawProgressBar,
@@ -541,7 +558,7 @@ function diBag(ctx, cx, cy, s, p, color) {
 }
 // Ilustración de ejemplo (cuando aún no hay foto real) o la foto real del producto.
 function diPhoto(ctx, photo, x, y, w, h) {
-  if (photo) { drawPhotoCover(ctx, photo, x, y, w, h, 0); return; }
+  if (photo && photoReady(photo)) { drawPhotoFit(ctx, photo, x, y, w, h, 0, { clear: isCutout(photo) }); return; } // [v8.9] nunca corta el producto
   ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
   const g = ctx.createLinearGradient(x, y, x + w, y + h);
   g.addColorStop(0, "#9FE6DE"); g.addColorStop(1, "#FFE9A8");
@@ -729,20 +746,6 @@ const DS = { total: 14.0, introEnd: 1.0, washIn: 10.3, washFull: 11.1, draw0: 11
   spawn0: 1.15, spawnGap: 1.35, spawnLast: 9.4, travel: 4.2 };
 const easeInOutCubic = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 const DS_FONT = '"DM Sans", Manrope, system-ui, sans-serif';
-const _cutoutCache = new WeakMap();
-// ¿La foto ya viene sin fondo (PNG con transparencia)? Se mira una vez.
-function isCutout(img) {
-  if (!img) return false;
-  if (_cutoutCache.has(img)) return _cutoutCache.get(img);
-  let r = false;
-  try {
-    const c = document.createElement("canvas"); c.width = 24; c.height = 24;
-    const x = c.getContext("2d"); x.drawImage(img, 0, 0, 24, 24);
-    const d = x.getImageData(0, 0, 24, 24).data, px = [0, 23, 24 * 23, 24 * 24 - 1];
-    r = px.every(i => d[i * 4 + 3] < 200);
-  } catch (e) { r = false; }
-  _cutoutCache.set(img, r); return r;
-}
 function mixHex(hex, other, t) {
   const a = parseInt(hex.slice(1), 16), b = parseInt(other.slice(1), 16);
   const ch = (v, s) => (v >> s) & 255;
@@ -839,10 +842,10 @@ function dsSceneBg(ctx, light) {
   if (m.b === 0 && m.c === 0 && cv) {
     const key = [cv.width, cv.height, m.a, m.d, m.e, m.f, light ? 1 : 0].join(",");
     let bg = _dsBgCache.get(key);
-    if (!bg) {
-      bg = document.createElement("canvas"); bg.width = cv.width; bg.height = cv.height;
+    if (!cacheOk(bg)) { // [v8.9] también si el navegador lo vació
+      bg = newCacheCanvas(cv.width, cv.height);
       const bx = bg.getContext("2d"); bx.setTransform(m); dsSceneBgDraw(bx, light);
-      if (_dsBgCache.size >= 6) _dsBgCache.delete(_dsBgCache.keys().next().value);
+      if (_dsBgCache.size >= 4) { const k0 = _dsBgCache.keys().next().value; freeCanvas(_dsBgCache.get(k0)); _dsBgCache.delete(k0); }
       _dsBgCache.set(key, bg);
     }
     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.drawImage(bg, 0, 0); ctx.restore();
@@ -883,9 +886,22 @@ function dsHeader(ctx, name, label, alpha, ink) {
   }
   ctx.restore();
 }
-function dsHeadline(ctx, text, keyword, accent, alpha, glowP, scale, ink, light) {
+function dsHeadline(ctx, text, keyword, accent, alpha, glowP, scale, ink, light, direct) {
   ink = ink || DS_INK.oscuro;
   if (!text || alpha <= 0) return;
+  // [v8.9] Rendimiento: con el brillo ya completo y sin zoom, el titular está
+  // quieto: se dibuja UNA vez (con su brillo) y cada fotograma solo se copia.
+  if (!direct && glowP >= 1 && scale === 1 && !(typeof window !== "undefined" && window.__cajasTexto)) {
+    const m = ctx.getTransform(), q = renderScale(ctx);
+    if (m.b === 0 && m.c === 0 && Math.abs(m.a - q) < 1e-6 && Math.abs(m.d - q) < 1e-6) {
+      const cw = Math.round(W * q), ch = Math.round(H * 0.5 * q);
+      const c = stamp("dsH|" + [text, keyword, accent, light ? 1 : 0, ink.text, cw].join("|"), cw, ch, function (x) {
+        x.scale(q, q); dsHeadline(x, text, keyword, accent, 1, 1, 1, ink, light, true);
+      });
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha; ctx.drawImage(c, Math.round(m.e), Math.round(m.f)); ctx.restore();
+      return;
+    }
+  }
   const norm = s => s.toLowerCase().replace(/[.,!?¡¿:;"'()]/g, "");
   const kw = (keyword || "").trim().split(/\s+/).map(norm).filter(Boolean);
   const words = text.trim().split(/\s+/);
@@ -944,39 +960,140 @@ function dsSubtitle(ctx, text, alpha, rise, ink) {
   lines.slice(0, 3).forEach((l, i) => { ctx.fillText(l, W / 2, y0 + i * lh); logTextBox(ctx, l, W / 2, y0 + i * lh, fs, { tag: "titular" }); });
   ctx.restore();
 }
-function dsProduct(ctx, item, cx, cy, size, rot, alpha) {
-  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(cx, cy); ctx.rotate(rot);
-  ctx.shadowColor = dsProduct.light ? "rgba(20,24,40,0.22)" : "rgba(0,0,0,0.45)"; ctx.shadowBlur = size * 0.10; ctx.shadowOffsetY = size * 0.05;
-  if (item.photo) {
-    const img = item.photo;
+// Dibuja una parte del producto centrado en (0,0) a tamaño `size`:
+// "marco" (tarjeta blanca de las fotos con fondo), "foto" (foto o emoji) o
+// "silueta" (la forma que proyecta la sombra).
+// [v8.9] Foto: entera si su forma es muy distinta (ver drawPhotoFit); mientras
+// una foto externa carga se ve su emoji, nunca una tarjeta vacía.
+function dsProductShape(ctx, item, size, part) {
+  const img = item.photo && photoReady(item.photo) ? item.photo : null;
+  if (img) {
     if (isCutout(img)) {
+      if (part === "marco") return;
       const ir = img.naturalWidth / img.naturalHeight;
       const w = ir >= 1 ? size : size * ir, h = ir >= 1 ? size / ir : size;
+      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
       ctx.drawImage(img, -w / 2, -h / 2, w, h);
     } else {
       const s = size * 0.86;
-      ctx.fillStyle = "#fff"; roundRectPath(ctx, -s / 2 - 8, -s / 2 - 8, s + 16, s + 16, s * 0.1); ctx.fill();
-      ctx.shadowColor = "transparent";
-      drawPhotoCover(ctx, img, -s / 2, -s / 2, s, s, s * 0.08);
+      if (part !== "foto") { ctx.fillStyle = "#fff"; roundRectPath(ctx, -s / 2 - 8, -s / 2 - 8, s + 16, s + 16, s * 0.1); ctx.fill(); }
+      if (part === "foto" || part === "todo") { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; drawPhotoFit(ctx, img, -s / 2, -s / 2, s, s, s * 0.08); }
     }
   } else {
+    if (part === "marco") return;
     ctx.font = Math.round(size * 0.82) + "px " + EMOJI_FONT;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#000";
     ctx.fillText(item.icon || "🛍️", 0, size * 0.04);
+  }
+}
+const _dsLast = new Map();
+// Caja (en unidades del producto, centro en 0,0) que ocupa cada parte.
+const _glyphBox = new Map();
+function dsPartBox(item, size, part) {
+  const img = item.photo && photoReady(item.photo) ? item.photo : null;
+  if (img && isCutout(img)) {
+    const ir = img.naturalWidth / img.naturalHeight, w = ir >= 1 ? size : size * ir, h = ir >= 1 ? size / ir : size;
+    return part === "marco" ? null : [-w / 2, -h / 2, w, h];
+  }
+  if (img) { const s = size * 0.86; return part === "foto" ? [-s / 2, -s / 2, s, s] : [-s / 2 - 8, -s / 2 - 8, s + 16, s + 16]; } // marco, silueta y todo
+  if (part === "marco") return null;
+  // emoji: caja real del dibujo, medida una vez por emoji (en proporción al tamaño)
+  const icon = item.icon || "🛍️";
+  let g = _glyphBox.get(icon);
+  if (!g) {
+    const x = document.createElement("canvas").getContext("2d");
+    x.font = "400px " + EMOJI_FONT; x.textAlign = "center"; x.textBaseline = "middle";
+    const mt = x.measureText(icon), f = 0.82 / 400;
+    g = [-(mt.actualBoundingBoxLeft || 200) * f, -(mt.actualBoundingBoxAscent || 200) * f, (mt.actualBoundingBoxRight || 200) * f, (mt.actualBoundingBoxDescent || 200) * f];
+    _glyphBox.set(icon, g);
+  }
+  const mg = 0.06 * size; // margen de seguridad
+  return [g[0] * size - mg, g[1] * size + size * 0.04 - mg, (g[2] - g[0]) * size + 2 * mg, (g[3] - g[1]) * size + 2 * mg];
+}
+// [v8.9] Rendimiento: el producto y su sombra se dibujan UNA vez por tamaño
+// (escalones de 12 %) como sellos recortados a su contenido, y luego solo se
+// copian girados y escalados. La sombra conserva su desenfoque (10 % del tamaño)
+// y su caída hacia abajo en pantalla (5 % del tamaño), como el shadowBlur que se
+// calculaba en cada fotograma. Sombra, marco y foto van en capas separadas para
+// que, al aparecer o desvanecerse, se mezclen igual que antes.
+function dsProduct(ctx, item, cx, cy, size, rot, alpha) {
+  if (alpha <= 0 || size <= 0) return;
+  const light = !!dsProduct.light;
+  const ready = item.photo && photoReady(item.photo), cut = ready && isCutout(item.photo);
+  const id = ready ? objId(item.photo) + (cut ? "c" : "p") : "e" + (item.icon || "🛍️");
+  const m = ctx.getTransform(), q = devScale(ctx), dev = size * q, qk = q.toFixed(4);
+  // [v8.9] si el producto está quieto (mismo tamaño que en el fotograma anterior,
+  // sin giro), su sello se hace a su tamaño exacto y se copia en píxel entero
+  const lk = id + "|" + qk + "|" + light, quieto = rot === 0 && m.b === 0 && m.c === 0 && _dsLast.get(lk) === size;
+  _dsLast.set(lk, size);
+  const B = quieto ? dev : scaleStep(dev), u = B / q, k = dev / B;
+  // cada parte: sello de su tamaño exacto (+2 px) y su posición respecto al centro, en píxeles del sello
+  const part = function (name) {
+    const bx = dsPartBox(item, u, name); if (!bx) return null;
+    const X = Math.floor(bx[0] * q) - 2, Y = Math.floor(bx[1] * q) - 2, Wd = Math.ceil(bx[2] * q) + 4, Hd = Math.ceil(bx[3] * q) + 4;
+    const c = stamp("dsP|" + name + "|" + id + "|" + B + "|" + qk, Wd, Hd, function (x) {
+      x.translate(-X, -Y); x.scale(q, q); dsProductShape(x, item, u, name);
+    });
+    return { c: c, X: X, Y: Y };
+  };
+  const sb = dsPartBox(item, u, "silueta"), blur = u * 0.10, pad = Math.ceil(blur * 1.6 + 2);
+  const SX = Math.floor(sb[0] * q) - pad, SY = Math.floor(sb[1] * q) - pad, SW = Math.ceil(sb[2] * q) + 2 * pad, SH = Math.ceil(sb[3] * q) + 2 * pad;
+  const sh = stamp("dsS|" + id + "|" + B + "|" + qk + "|" + light, SW, SH, function (x, cw) {
+    const off = cw + 64;
+    x.shadowColor = light ? "rgba(20,24,40,0.22)" : "rgba(0,0,0,0.45)"; x.shadowBlur = blur; x.shadowOffsetX = off;
+    x.translate(-SX - off, -SY); x.scale(q, q); dsProductShape(x, item, u, "silueta");
+  });
+  let px = m.a * cx + m.c * cy + m.e, py = m.b * cx + m.d * cy + m.f, sy = py + size * 0.05;
+  const ang = Math.atan2(m.b, m.a) + rot;
+  if (quieto) { px = Math.round(px); py = Math.round(py); sy = Math.round(sy); }
+  ctx.save(); ctx.globalAlpha = alpha; // igual que antes: fija la opacidad (no la multiplica)
+  ctx.imageSmoothingEnabled = true;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.translate(px, sy); ctx.rotate(ang); ctx.scale(k, k);
+  ctx.imageSmoothingEnabled = quieto; // sombra muy borrosa: girada/escalada sin filtrar (mitad de coste, sin diferencia visible)
+  ctx.drawImage(sh, SX, SY);
+  ctx.imageSmoothingEnabled = true;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.translate(px, py); ctx.rotate(ang); ctx.scale(k, k);
+  // opaco: marco y foto en un solo sello (una copia menos); transparente (al
+  // aparecer o irse): por separado, para mezclarse exactamente como antes
+  if (alpha >= 1 && ready && !cut) { const tc = part("todo"); ctx.drawImage(tc.c, tc.X, tc.Y); }
+  else {
+    const mc = part("marco"), fc = part("foto");
+    if (mc) ctx.drawImage(mc.c, mc.X, mc.Y);
+    if (fc) ctx.drawImage(fc.c, fc.X, fc.Y);
   }
   ctx.restore();
 }
+// [v8.9] La insignia y su brillo se dibujan UNA vez por tamaño (escalones de
+// 12 %) y color, y se copian: el brillo (muy borroso) sin filtrar, la insignia
+// nítida. El brillo conserva su tamaño (55 % de la insignia).
 function dsBadge(ctx, cx, cy, s, accent, iconKind, alpha) {
   if (s <= 1 || alpha <= 0) return;
-  ctx.save(); ctx.globalAlpha = alpha;
-  ctx.shadowColor = accent; ctx.shadowBlur = s * 0.55;
-  const g = ctx.createLinearGradient(0, cy - s / 2, 0, cy + s / 2);
-  g.addColorStop(0, mixHex(accent, "#FFFFFF", 0.18)); g.addColorStop(1, accent);
-  ctx.fillStyle = g; roundRectPath(ctx, cx - s / 2, cy - s / 2, s, s, s * 0.24); ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.lineWidth = Math.max(1, s * 0.02);
-  roundRectPath(ctx, cx - s / 2, cy - s / 2, s, s, s * 0.24); ctx.stroke();
-  dsIcon(ctx, iconKind, cx, cy, s * 0.52);
+  const q = devScale(ctx), dev = s * q, B = scaleStep(dev), u = B / q, k = dev / B, qk = q.toFixed(4);
+  const blur = u * 0.55, pad = Math.ceil(blur * 1.6 + 4), side = Math.ceil(u * q) + 2 * pad + 2;
+  const glow = stamp("dsBg|" + accent + "|" + B + "|" + qk, side, side, function (x, cw, ch) {
+    // el brillo (shadowBlur) se mide en píxeles de pantalla: u·0,55 aquí, ×k al copiar
+    const off = cw + 64;
+    x.shadowColor = accent; x.shadowBlur = blur; x.shadowOffsetX = off;
+    x.translate(cw / 2 - off, ch / 2); x.scale(q, q);
+    x.fillStyle = accent; roundRectPath(x, -u / 2, -u / 2, u, u, u * 0.24); x.fill();
+  });
+  const bs = Math.ceil(u * q) + 6;
+  const body = stamp("dsBb|" + accent + "|" + iconKind + "|" + B + "|" + qk, bs, bs, function (x, cw, ch) {
+    x.translate(cw / 2, ch / 2); x.scale(q, q);
+    const g = x.createLinearGradient(0, -u / 2, 0, u / 2);
+    g.addColorStop(0, mixHex(accent, "#FFFFFF", 0.18)); g.addColorStop(1, accent);
+    x.fillStyle = g; roundRectPath(x, -u / 2, -u / 2, u, u, u * 0.24); x.fill();
+    x.strokeStyle = "rgba(255,255,255,0.22)"; x.lineWidth = Math.max(1, u * 0.02);
+    roundRectPath(x, -u / 2, -u / 2, u, u, u * 0.24); x.stroke();
+    dsIcon(x, iconKind, 0, 0, u * 0.52);
+  });
+  const m = ctx.getTransform(), px = m.a * cx + m.c * cy + m.e, py = m.b * cx + m.d * cy + m.f;
+  ctx.save(); ctx.globalAlpha = alpha; // igual que antes: fija la opacidad (no la multiplica)
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.translate(px, py); ctx.rotate(Math.atan2(m.b, m.a)); ctx.scale(k, k);
+  ctx.imageSmoothingEnabled = false; ctx.drawImage(glow, -side / 2, -side / 2);
+  ctx.imageSmoothingEnabled = true; ctx.drawImage(body, -bs / 2, -bs / 2);
   ctx.restore();
 }
 
@@ -1126,7 +1243,11 @@ function toHex(c) {
   return m ? "#" + [m[1], m[2], m[3]].map(n => (+n).toString(16).padStart(2, "0")).join("") : "#F26B0F";
 }
 // Colores dominantes del producto (foto o emoji) para la nube de partículas.
+// [v8.9] Si la foto todavía no terminó de cargar, se usan los colores del emoji
+// SIN guardarlos: en cuanto la foto llega, el siguiente fotograma calcula y
+// guarda los colores reales (antes se guardaba para siempre el color de acento).
 function productColors(item, accent) {
+  if (item && item.photo && !photoReady(item.photo)) return productColors({ icon: item.icon }, accent);
   const key = item && item.photo ? item.photo : null, ek = item && !item.photo ? (item.icon || "") : null;
   if (key && _colCache.has(key)) return _colCache.get(key);
   if (ek != null && _colCacheE[ek]) return _colCacheE[ek];
@@ -1150,7 +1271,7 @@ function productColors(item, accent) {
     }
     out = bins.filter(Boolean).sort((p, q) => q.w - p.w).slice(0, 2).map(v =>
       "#" + [v.r, v.g, v.b].map(n => Math.round(n / v.w).toString(16).padStart(2, "0")).join(""));
-  } catch (e) { out = []; }
+  } catch (e) { out = []; console.warn("[video] colores del producto no disponibles:", e && e.message); }
   if (!out.length) out = [accent];
   if (out.length < 2) out.push(toHex(mixHex(out[0], "#FFFFFF", 0.4)));
   if (key) _colCache.set(key, out); else _colCacheE[ek] = out;
@@ -1158,14 +1279,38 @@ function productColors(item, accent) {
 }
 const _sprites = {};
 function softSprite(color) {
-  if (_sprites[color]) return _sprites[color];
-  const c = document.createElement("canvas"); c.width = c.height = 128;
+  if (_sprites[color] && cacheOk(_sprites[color])) return _sprites[color];
+  const c = newCacheCanvas(128, 128);
   const x = c.getContext("2d");
   // desvanecido real hacia transparente del mismo color
   const g2 = x.createRadialGradient(64, 64, 0, 64, 64, 64);
   g2.addColorStop(0, hexToRgba(color, 0.95)); g2.addColorStop(0.5, hexToRgba(color, 0.55)); g2.addColorStop(1, hexToRgba(color, 0));
   x.fillStyle = g2; x.fillRect(0, 0, 128, 128);
   _sprites[color] = c; return c;
+}
+// [v8.9] Rendimiento: una mancha suave ampliada en cada fotograma es un dibujo
+// "filtrado" carísimo (~7 ms a pantalla completa). Ahora cada mancha se amplía
+// UNA vez a su tamaño en pantalla (escalones de 3 %) y cada fotograma solo se
+// copia en un píxel entero (casi gratis). En manchas tan suaves, redondear
+// medio píxel o un 1,5 % de tamaño no se nota.
+// Mancha ya en coordenadas de pantalla (sin transformación activa): la más barata.
+function blobAt(ctx, color, dx, dy, dev, alpha) {
+  const n = Math.round(Math.log(Math.max(dev, 1)) / LOG_103), S = Math.max(1, Math.round(Math.pow(1.03, n)));
+  const c = stamp("blob|" + color + "|" + S, S, S, function (x2) {
+    x2.imageSmoothingEnabled = true; x2.imageSmoothingQuality = "high"; x2.drawImage(softSprite(color), 0, 0, S, S);
+  });
+  ctx.globalAlpha = alpha; ctx.drawImage(c, Math.round(dx - S / 2), Math.round(dy - S / 2));
+}
+const LOG_103 = Math.log(1.03);
+function softBlob(ctx, color, x, y, s, alpha) {
+  const m = ctx.getTransform();
+  if (m.b !== 0 || m.c !== 0) { ctx.globalAlpha = alpha; ctx.drawImage(softSprite(color), x - s / 2, y - s / 2, s, s); return; }
+  const dev = s * m.a, n = Math.round(Math.log(Math.max(dev, 1)) / Math.log(1.03)), S = Math.max(1, Math.round(Math.pow(1.03, n)));
+  const c = stamp("blob|" + color + "|" + S, S, S, function (x2) {
+    x2.imageSmoothingEnabled = true; x2.imageSmoothingQuality = "high"; x2.drawImage(softSprite(color), 0, 0, S, S);
+  });
+  const px = Math.round(m.a * x + m.e - S / 2), py = Math.round(m.d * y + m.f - S / 2);
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha; ctx.drawImage(c, px, py); ctx.restore();
 }
 function vtSeeded(n, seed) { const r = seededRand(seed), a = []; for (let i = 0; i < n; i++) a.push([r(), r(), r(), r(), r(), r()]); return a; }
 const VT_PARTS = vtSeeded(230, 99), VT_STARS = vtSeeded(70, 7);
@@ -1181,22 +1326,45 @@ function vtStars(ctx, x, y, s, color) {
   ctx.restore();
 }
 // Caja con la imagen del producto (foto sin fondo = contenida; con fondo = cubre; emoji = centrado)
-function vtItemBox(ctx, it, x, y, w, h, r, bg) {
+// [v8.9] Con fondo: la llena solo si su forma se parece a la caja; si no, entera
+// sobre su propio fondo desenfocado (el muro de fotos sí la llena siempre).
+// Mientras una foto externa carga se ve el emoji del producto.
+function vtItemBoxDraw(ctx, it, x, y, w, h, r, bg, cover) {
   ctx.save();
   roundRectPath(ctx, x, y, w, h, r); ctx.fillStyle = bg || "#FFFFFF"; ctx.fill();
   roundRectPath(ctx, x, y, w, h, r); ctx.clip();
-  if (it && it.photo) {
-    const img = it.photo;
+  const img = it && it.photo && photoReady(it.photo) ? it.photo : null;
+  if (img) {
     if (isCutout(img)) {
       const ir = img.naturalWidth / img.naturalHeight, bw = w * 0.84, bh = h * 0.84;
       const dw = ir > bw / bh ? bw : bh * ir, dh = ir > bw / bh ? bw / ir : bh;
       ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
-    } else drawPhotoCover(ctx, img, x, y, w, h, 0);
+    } else drawPhotoFit(ctx, img, x, y, w, h, 0, { cover: !!cover });
   } else {
     ctx.font = Math.round(Math.min(w, h) * 0.6) + "px " + EMOJI_FONT; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText((it && it.icon) || "🛍️", x + w / 2, y + h / 2 + Math.min(w, h) * 0.03);
   }
   ctx.restore();
+}
+// [v8.9] Rendimiento: cada caja de producto se dibuja UNA vez (por tamaño y
+// escala de pantalla) como sello y luego solo se copia. Fondo y contenido van
+// en capas separadas para mezclarse igual que antes al aparecer o desvanecerse.
+function vtItemBox(ctx, it, x, y, w, h, r, bg, opts) {
+  const o = opts || {};
+  if (o.direct) { vtItemBoxDraw(ctx, it, x, y, w, h, r, bg, o.cover); return; }
+  const q = stampScale(ctx);
+  const ready = it && it.photo && photoReady(it.photo);
+  const id = ready ? objId(it.photo) : "e" + ((it && it.icon) || "🛍️");
+  const base = [w, h, r, q.toFixed(4)].join("|"), color = bg || "#FFFFFF";
+  const fondo = stamp("vtF|" + color + "|" + base, w * q, h * q, function (x2, cw, ch) {
+    x2.scale(cw / w, ch / h); roundRectPath(x2, 0, 0, w, h, r); x2.fillStyle = color; x2.fill();
+  });
+  const cont = stamp("vtC|" + id + "|" + base + "|" + (o.cover ? 1 : 0), w * q, h * q, function (x2, cw, ch) {
+    x2.scale(cw / w, ch / h); x2.imageSmoothingEnabled = true; x2.imageSmoothingQuality = "high";
+    vtItemBoxDraw(x2, it, 0, 0, w, h, r, "rgba(0,0,0,0)", o.cover);
+  });
+  blitStamp(ctx, fondo, x, y, w, h);
+  blitStamp(ctx, cont, x, y, w, h);
 }
 function vtText(ctx, text, x, y, size, weight, color, align, maxW, tag) {
   ctx.save(); ctx.fillStyle = color; ctx.textAlign = align || "center"; ctx.textBaseline = "middle";
@@ -1311,19 +1479,27 @@ function fullLayer(ctx, key, draw) {
   if (!cv || m.b !== 0 || m.c !== 0) { draw(ctx); return; }
   const k = key + "|" + [cv.width, cv.height, m.a, m.d, m.e, m.f].join(",");
   let layer = _fullLayers.get(k);
-  if (!layer) {
-    layer = document.createElement("canvas"); layer.width = cv.width; layer.height = cv.height;
+  if (!cacheOk(layer)) { // [v8.9] también si el navegador la vació
+    layer = newCacheCanvas(cv.width, cv.height);
     const lx = layer.getContext("2d"); lx.setTransform(m); draw(lx);
-    if (_fullLayers.size >= 16) _fullLayers.delete(_fullLayers.keys().next().value);
+    // [v8.9] menos memoria en móviles: solo capas del tamaño de lienzo actual, máximo 6
+    const sz = "|" + cv.width + "," + cv.height + ",";
+    for (const [k2, c2] of _fullLayers) if (k2.indexOf(sz) < 0) { freeCanvas(c2); _fullLayers.delete(k2); }
+    if (_fullLayers.size >= 6) { const k0 = _fullLayers.keys().next().value; freeCanvas(_fullLayers.get(k0)); _fullLayers.delete(k0); }
     _fullLayers.set(k, layer);
   }
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(layer, 0, 0); ctx.restore();
 }
+// [v8.9] Rendimiento: el grano va DENTRO de la capa fija del fondo (antes se
+// mezclaba aparte en cada fotograma, a pantalla completa). Las estrellas y
+// manchas quedan encima del grano en vez de debajo: diferencia de 1–2 niveles
+// de color en esos puntos, invisible.
 function vtIntroBg(ctx, t, cols) {
-  fullLayer(ctx, "vtIntro:" + cols[0], function (c) {
+  fullLayer(ctx, "vtIntroG:" + cols[0], function (c) {
     const g = c.createLinearGradient(0, 0, W, H);
     g.addColorStop(0, mixHex(cols[0], "#FFFFFF", 0.55)); g.addColorStop(0.5, mixHex(cols[0], "#1b2030", 0.6)); g.addColorStop(1, "#0a0d14");
     c.fillStyle = g; c.fillRect(0, 0, W, H);
+    drawGrain(c, 0, 0, W, H, 0.025);
   });
   ctx.save(); ctx.fillStyle = "#FFFFFF";
   VT_STARS.forEach(function (s) {
@@ -1333,19 +1509,18 @@ function vtIntroBg(ctx, t, cols) {
     ctx.beginPath(); ctx.arc(x, y, 1.5 + s[4] * 2.5, 0, 7); ctx.fill();
   });
   ctx.restore();
-  drawGrain(ctx, 0, 0, W, H, 0.025);
 }
 function vtStudioBg(ctx, t, cols, accent) {
-  fullLayer(ctx, "vtStudio:" + cols[0], function (c) {
+  fullLayer(ctx, "vtStudioG:" + cols[0], function (c) {
     const g = c.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, mixHex(cols[0], "#F1F2EE", 0.8)); g.addColorStop(0.55, mixHex(cols[0], "#A7B1AA", 0.72)); g.addColorStop(1, mixHex(cols[0], "#4F5A54", 0.7));
     c.fillStyle = g; c.fillRect(0, 0, W, H);
+    drawGrain(c, 0, 0, W, H, 0.025);
   });
   ctx.save();
-  ctx.globalAlpha = 0.35; ctx.drawImage(softSprite(cols[0]), W * (0.1 + 0.05 * Math.sin(t * 0.4)) - W * 0.6, H * 0.15 - W * 0.6, W * 1.2, W * 1.2);
-  ctx.globalAlpha = 0.25; ctx.drawImage(softSprite(toHex(accent)), W * (0.85 + 0.05 * Math.cos(t * 0.35)) - W * 0.55, H * 0.8 - W * 0.55, W * 1.1, W * 1.1);
+  softBlob(ctx, cols[0], W * (0.1 + 0.05 * Math.sin(t * 0.4)), H * 0.15, W * 1.2, 0.35); // [v8.9]
+  softBlob(ctx, toHex(accent), W * (0.85 + 0.05 * Math.cos(t * 0.35)), H * 0.8, W * 1.1, 0.25);
   ctx.restore();
-  drawGrain(ctx, 0, 0, W, H, 0.025);
 }
 // [v8.8] Sombra grande de tarjeta pre-dibujada (misma forma, color, desenfoque y desplazamiento).
 function vtCardShadow(ctx, key, x, y, w, h, r, fill, color, blur, offY) {
@@ -1356,10 +1531,16 @@ function vtCardShadow(ctx, key, x, y, w, h, r, fill, color, blur, offY) {
 function vtGlass(ctx, x, y, w, h, r) {
   ctx.save();
   vtCardShadow(ctx, "glass", x, y, w, h, r, "rgba(255,255,255,0.30)", "rgba(0,0,0,0.18)", 50, 18);
-  ctx.fillStyle = "rgba(255,255,255,0.30)"; roundRectPath(ctx, x, y, w, h, r); ctx.fill();
-  const g = ctx.createLinearGradient(0, y, 0, y + h); g.addColorStop(0, "rgba(255,255,255,0.28)"); g.addColorStop(1, "rgba(255,255,255,0.06)");
-  ctx.fillStyle = g; roundRectPath(ctx, x, y, w, h, r); ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.65)"; ctx.lineWidth = 2.5; roundRectPath(ctx, x, y, w, h, r); ctx.stroke();
+  // [v8.9] el cristal (dos rellenos y el borde) se dibuja UNA vez y se copia
+  const q = stampScale(ctx), P = 3;
+  const c = stamp("vtGlass|" + [w, h, r, q.toFixed(4)].join("|"), (w + 2 * P) * q, (h + 2 * P) * q, function (x2, cw, ch) {
+    x2.scale(cw / (w + 2 * P), ch / (h + 2 * P)); x2.translate(P, P);
+    x2.fillStyle = "rgba(255,255,255,0.30)"; roundRectPath(x2, 0, 0, w, h, r); x2.fill();
+    const g = x2.createLinearGradient(0, 0, 0, h); g.addColorStop(0, "rgba(255,255,255,0.28)"); g.addColorStop(1, "rgba(255,255,255,0.06)");
+    x2.fillStyle = g; roundRectPath(x2, 0, 0, w, h, r); x2.fill();
+    x2.strokeStyle = "rgba(255,255,255,0.65)"; x2.lineWidth = 2.5; roundRectPath(x2, 0, 0, w, h, r); x2.stroke();
+  });
+  blitStamp(ctx, c, x - P, y - P, w + 2 * P, h + 2 * P);
   ctx.restore();
 }
 function vtMark(ctx, cx, cy, size, name, fg, ink) {
@@ -1375,11 +1556,27 @@ function vtBrandLine(ctx, cx, cy, name, markSize, fs, color, markInk) {
   vtText(ctx, store, cx - tot / 2 + markSize + gap, cy + 2, fs, 700, color, "left", W * 0.66);
   ctx.restore();
 }
+let _ringMeasure = null;
+const _ringW = new Map();
+function vtRingGlyph(ch, q) {
+  const pad = 24, fs = 76 * q, mk = ch + "|" + fs;
+  let tw = _ringW.get(mk);
+  if (tw == null) {
+    if (!_ringMeasure) _ringMeasure = document.createElement("canvas").getContext("2d");
+    _ringMeasure.font = "500 " + fs + "px " + DS_FONT; tw = _ringMeasure.measureText(ch).width; _ringW.set(mk, tw);
+  }
+  const w = Math.ceil(tw) + 2 * pad, h = Math.ceil(fs * 1.4) + 2 * pad;
+  return stamp("anillo|" + ch + "|" + q.toFixed(4), w, h, function (x) {
+    x.font = "500 " + fs + "px " + DS_FONT; x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillStyle = "#FFFFFF"; x.shadowColor = "rgba(0,0,0,0.25)"; x.shadowBlur = 12;
+    x.fillText(ch, w / 2, h / 2);
+  });
+}
 function vtRing(ctx, text, cx, cy, t, alpha, front) {
   if (!text || alpha <= 0) return;
   const rx = W * 0.47, ry = W * 0.075, rep = text.toUpperCase() === text ? text + "  •  " : text + "  •  ";
   ctx.save(); ctx.font = "500 76px " + DS_FONT; ctx.textBaseline = "middle"; ctx.textAlign = "center";
-  const repW = ctx.measureText(rep).width, circ = 2 * Math.PI * rx * 0.92, n = Math.max(1, Math.round(circ / repW));
+  const repW = ctx.measureText(rep).width, circ = 2 * Math.PI * rx * 0.92, n = Math.max(1, Math.round(circ / repW)), q = renderScale(ctx);
   const full = rep.repeat(n), chars = full.split(""), widths = chars.map(ch => ctx.measureText(ch).width), totW = widths.reduce((a, b) => a + b, 0);
   let acc = 0;
   chars.forEach(function (ch, i) {
@@ -1390,8 +1587,10 @@ function vtRing(ctx, text, cx, cy, t, alpha, front) {
     const x = cx + rx * Math.sin(th), y = cy + ry * z;
     ctx.save(); ctx.translate(x, y); ctx.scale(Math.max(0.08, Math.abs(z)) * (z < 0 ? -1 : 1), 0.86 + 0.14 * z);
     ctx.globalAlpha = alpha * (z >= 0 ? 1 : 0.38);
-    ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = "rgba(0,0,0,0.25)"; ctx.shadowBlur = 12;
-    ctx.fillText(ch, 0, 0); ctx.restore();
+    // [v8.9] cada letra con su sombra se dibuja UNA vez y se copia (antes, una sombra por letra y fotograma)
+    const g = vtRingGlyph(ch, q), gw = g.width / q, gh = g.height / q;
+    ctx.drawImage(g, -gw / 2, -gh / 2, gw, gh);
+    ctx.restore();
   });
   ctx.restore();
 }
@@ -1402,10 +1601,15 @@ function vtRing(ctx, text, cx, cy, t, alpha, front) {
 // Rendimiento: el muro se dibuja UNA vez (a media resolución) por línea de
 // tiempo y luego solo se desplaza; así no se redibujan ~60 fotos por fotograma.
 const VT_PAD = 700;
+// [v8.9] Firma de qué fotos del muro ya están listas: si una foto externa llega
+// tarde, el muro se vuelve a dibujar con ella (antes quedaba en blanco para siempre).
+function vtReadySig(items) { return items.map(it => (it && it.photo ? (photoReady(it.photo) ? "1" : "0") : "-")).join(""); }
 function vtCollageCache(tl, items) {
-  if (tl._collage) return tl._collage;
-  const k = 0.5, c = document.createElement("canvas");
-  c.width = Math.ceil((W + 2 * VT_PAD) * k); c.height = Math.ceil((H + 2 * VT_PAD) * k);
+  const sig = vtReadySig(items);
+  if (tl._collage && tl._collageSig === sig && cacheOk(tl._collage)) return tl._collage;
+  freeCanvas(tl._collage); if (tl._collageScr) freeCanvas(tl._collageScr.canvas);
+  tl._collageSig = sig; tl._collageScr = null;
+  const k = 0.5, c = newCacheCanvas((W + 2 * VT_PAD) * k, (H + 2 * VT_PAD) * k);
   const x = c.getContext("2d");
   x.setTransform(k, 0, 0, k, VT_PAD * k, VT_PAD * k);
   const tile = W * 0.34, gap = 26, step = tile + gap, n = items.length;
@@ -1414,7 +1618,7 @@ function vtCollageCache(tl, items) {
       const tx = col * step + (r % 2 ? step * 0.5 : 0), ty = r * step;
       const it = items[(((r * 3 + col) % n) + n) % n];
       x.fillStyle = "rgba(0,0,0,0.07)"; roundRectPath(x, tx + 4, ty + 8, tile, tile, 26); x.fill();
-      vtItemBox(x, it, tx, ty, tile, tile, 26, "#FFFFFF");
+      vtItemBox(x, it, tx, ty, tile, tile, 26, "#FFFFFF", { direct: true, cover: true });
     }
   }
   tl._collage = c; return c;
@@ -1427,13 +1631,13 @@ const VT_ROT = -0.21, VT_VX = 20, VT_VY = -46;
 function vtCollageScreen(ctx, tl, items) {
   const m = ctx.getTransform(), cv = ctx.canvas, q = m.a;
   const key = [cv.width, cv.height, m.a, m.d, m.e, m.f].join(",");
-  if (tl._collageScr && tl._collageScr.key === key) return tl._collageScr;
-  const cache = vtCollageCache(tl, items);
+  const cache = vtCollageCache(tl, items); // [v8.9] antes de mirar la copia en pantalla (puede haberse rehecho)
+  if (tl._collageScr && tl._collageScr.key === key && cacheOk(tl._collageScr.canvas)) return tl._collageScr;
+  if (tl._collageScr) freeCanvas(tl._collageScr.canvas);
   // recorrido máximo del muro en pantalla (marco girado → pantalla), a cada lado
   const dtMax = VT.exp - VT.c1, cs = Math.cos(VT_ROT), sn = Math.sin(VT_ROT);
   const mx = Math.ceil(Math.abs((VT_VX * cs - VT_VY * sn) * dtMax)) + 4, my = Math.ceil(Math.abs((VT_VX * sn + VT_VY * cs) * dtMax)) + 4;
-  const c = document.createElement("canvas");
-  c.width = Math.ceil((W + 2 * mx) * q); c.height = Math.ceil((H + 2 * my) * q);
+  const c = newCacheCanvas((W + 2 * mx) * q, (H + 2 * my) * q);
   const x = c.getContext("2d");
   // el mismo dibujo que antes en su posición inicial (dt = 0); el píxel (0,0) es el punto (-mx, -my) de la pantalla
   x.setTransform(q, 0, 0, q, mx * q, my * q);
@@ -1447,9 +1651,18 @@ function vtCollage(ctx, t, tl, items, cols, alpha) {
   if (alpha <= 0) return;
   const sc = vtCollageScreen(ctx, tl, items), dt = clamp(t - VT.c1, 0, VT.exp - VT.c1);
   const dx = (VT_VX * sc.cs - VT_VY * sc.sn) * dt, dy = (VT_VX * sc.sn + VT_VY * sc.cs) * dt;
+  // [v8.9] Rendimiento: se copia en un píxel entero de pantalla (sin filtrar):
+  // ~0,7 ms en vez de ~6,7 ms. El muro avanza menos de 1 píxel por fotograma,
+  // así que el redondeo (medio píxel como mucho) no se ve.
+  const m = ctx.getTransform();
   ctx.save(); ctx.globalAlpha = alpha;
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(sc.canvas, -sc.mx + dx, -sc.my + dy, sc.canvas.width / sc.q, sc.canvas.height / sc.q);
+  if (m.b === 0 && m.c === 0 && Math.abs(m.a - sc.q) < 1e-6 && Math.abs(m.d - sc.q) < 1e-6) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(sc.canvas, Math.round((-sc.mx + dx) * sc.q + m.e), Math.round((-sc.my + dy) * sc.q + m.f));
+  } else {
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(sc.canvas, -sc.mx + dx, -sc.my + dy, sc.canvas.width / sc.q, sc.canvas.height / sc.q);
+  }
   ctx.restore();
   ctx.save(); ctx.globalAlpha = alpha;
   fullLayer(ctx, "vtVelo:" + cols[0], function (c) {
@@ -1460,6 +1673,15 @@ function vtCollage(ctx, t, tl, items, cols, alpha) {
   ctx.restore();
 }
 
+// [v8.9] Fondo desenfocado de la foto final. A pantalla completa se prepara UNA
+// vez a la resolución de pantalla y luego solo se copia (casi gratis).
+function vtBackdrop(ctx, img, x, y, w, h, full) {
+  const m = ctx.getTransform();
+  if (!full || m.b !== 0 || m.c !== 0) { drawBackdropCover(ctx, img, x, y, w, h); return; }
+  const cw = Math.round(W * m.a), ch = Math.round(H * m.d);
+  const c = stamp("vtFondo|" + objId(img) + "|" + cw + "x" + ch, cw, ch, function (x2) { x2.scale(cw / W, ch / H); drawBackdropCover(x2, img, 0, 0, W, H); });
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(c, Math.round(m.e), Math.round(m.f)); ctx.restore();
+}
 const StyleVitrina = {
   id: "vitrina", icon: "🛍️", label: "Vitrina",
   description: "Tu producto aparece desde una nube de color con un anillo de texto girando, luego tarjetas, móvil con la ficha y foto a pantalla completa. Cierre con logo y botón.",
@@ -1488,14 +1710,17 @@ const StyleVitrina = {
       const burst = 1.25 - 0.25 * easeOutCubic(clamp(t / 0.7, 0, 1));
       if (fadeP > 0) {
         ctx.save();
+        const pm = ctx.getTransform(), fastP = pm.b === 0 && pm.c === 0; // [v8.9]
+        if (fastP) ctx.setTransform(1, 0, 0, 1, 0, 0);
         VT_PARTS.forEach(function (p) {
           const r = (0.06 + Math.pow(p[0], 0.7) * 0.40) * W * burst * (1 - 0.86 * conv);
           const ang = p[1] * Math.PI * 2 + (p[2] - 0.5) * 1.1 * t;
           const x = cx + Math.cos(ang) * r + Math.sin(t * 1.3 + p[3] * 6) * 16;
           const y = cy + Math.sin(ang) * r * 0.82 + Math.cos(t * 1.1 + p[4] * 6) * 16;
           const s = (50 + p[5] * 130) * (1 - 0.5 * conv);
-          ctx.globalAlpha = (0.22 + p[3] * 0.32) * fadeP;
-          ctx.drawImage(softSprite(pal[Math.floor(p[4] * 4) % 4]), x - s / 2, y - s / 2, s, s);
+          const col = pal[Math.floor(p[4] * 4) % 4], al = (0.22 + p[3] * 0.32) * fadeP;
+          if (fastP) blobAt(ctx, col, pm.a * x + pm.e, pm.d * y + pm.f, s * pm.a, al); // [v8.9]
+          else softBlob(ctx, col, x, y, s, al);
         });
         ctx.restore();
       }
@@ -1632,19 +1857,33 @@ const StyleVitrina = {
       // foto redondeada que empieza a entrar al final de destacados
       if (t > VT.exp - 0.25) {
         const e = clamp((t - (VT.exp - 0.25)) / 0.25, 0, 1), s = W * 0.66 * (0.9 + 0.1 * e);
-        ctx.save(); ctx.globalAlpha = e; vtItemBox(ctx, hero, cx - s / 2, cy - s / 2, s, s, 70, mixHex(cols[0], "#FFFFFF", 0.7)); ctx.restore();
+        ctx.save(); ctx.globalAlpha = e; vtItemBox(ctx, hero, cx - s / 2, cy - s / 2, s, s, 70, mixHex(cols[0], "#FFFFFF", 0.7), { direct: true }); ctx.restore(); // directo: su tamaño cambia en cada fotograma
       }
     } else {
       // ----- expansión, pantalla completa y cierre -----
       const e = easeInOutCubic(clamp((t - VT.exp) / (VT.full - VT.exp), 0, 1));
-      vtStudioBg(ctx, t, cols, accent);
+      if (e < 1) vtStudioBg(ctx, t, cols, accent); // [v8.9] con la foto a pantalla completa no se ve: no se dibuja
       const w = W * 0.66 + (W - W * 0.66) * e, h = W * 0.66 + (H - W * 0.66) * e, r = 70 * (1 - e);
-      const kb = 1 + 0.08 * clamp((t - VT.full) / (VT.total - VT.full), 0, 1);
+      // [v8.9] zoom suave de 3 % como mucho (antes 8 %: se comía bordes del producto)
+      const kb = 1 + 0.03 * clamp((t - VT.full) / (VT.total - VT.full), 0, 1);
+      const img = hero.photo && photoReady(hero.photo) && !isCutout(hero.photo) ? hero.photo : null;
       ctx.save();
       roundRectPath(ctx, cx - w / 2, cy - h / 2, w, h, r); ctx.clip();
-      if (hero.photo && !isCutout(hero.photo)) {
-        ctx.translate(cx, cy); ctx.scale(kb, kb); ctx.translate(-cx, -cy);
-        drawPhotoCover(ctx, hero.photo, cx - w / 2, cy - h / 2, w, h, 0);
+      if (img) {
+        // [v8.9] Foto vertical (parecida a la pantalla): termina llenándola, como antes.
+        // Cuadrada o apaisada: se ve ENTERA y centrada sobre la misma foto
+        // desenfocada, con un 8 % de margen para que el zoom de 3 % nunca la corte.
+        // Empieza exactamente como se veía en el cuadro anterior (entera), así la
+        // expansión es continua.
+        const full = photoCropFrac(img, W, H) <= FIT_MAX_CROP, ir = img.naturalWidth / img.naturalHeight, s0 = W * 0.66;
+        const fit = (bw, bh, cover) => ((ir > bw / bh) !== !!cover ? [bw, bw / ir] : [bh * ir, bh]);
+        const d0 = fit(s0, s0, photoCropFrac(img, s0, s0) <= FIT_MAX_CROP); // como en el cuadro anterior
+        const d1 = full ? fit(W, H, true) : fit(W * 0.92, H * 0.92, false);
+        const dw = d0[0] + (d1[0] - d0[0]) * e, dh = d0[1] + (d1[1] - d0[1]) * e;
+        if (!(full && e >= 1)) vtBackdrop(ctx, img, cx - w / 2, cy - h / 2, w, h, e >= 1);
+        ctx.translate(cx, cy); ctx.scale(kb, kb);
+        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
       } else {
         const g = ctx.createLinearGradient(0, cy - h / 2, 0, cy + h / 2);
         g.addColorStop(0, mixHex(cols[0], "#FFFFFF", 0.72)); g.addColorStop(1, mixHex(cols[0], "#8f9a93", 0.55));
@@ -1661,7 +1900,7 @@ const StyleVitrina = {
         const nameH = ft.lines.length * ft.size * 1.1, ph = pad * 2 + nameH + (hasP ? 16 + 44 * 1.7 : 0);
         const py = H - 190 - ph + (1 - easeOutCubic(np)) * 40;
         ctx.save(); ctx.globalAlpha = np;
-        ctx.fillStyle = "rgba(12,12,14,0.55)"; roundRectPath(ctx, px, py, pw, ph, 28); ctx.fill();
+        ctx.fillStyle = "rgba(12,12,14,0.62)"; roundRectPath(ctx, px, py, pw, ph, 28); ctx.fill(); // [v8.9] se lee también sobre fotos blancas
         ctx.fillStyle = "#FFFFFF";
         drawFit(ctx, ft, { x: px + pad, y: py + pad + ft.size * 0.55, align: "left", lh: 1.1, font: NF, maxW: pw - pad * 2, tag: "nombre" });
         if (hasP) vtPriceTag(ctx, hero, px + pad, py + pad + nameH + 16 + 44 * 0.85, 44, accent, np, pw - pad * 2, true);
@@ -1670,8 +1909,20 @@ const StyleVitrina = {
       if (t > VT.logo - 0.3) {
         const lp = clamp((t - (VT.logo - 0.3)) / 0.5, 0, 1);
         ctx.save(); ctx.globalAlpha = lp * 0.5;
-        const gd = ctx.createLinearGradient(0, 0, 0, H); gd.addColorStop(0, "rgba(0,0,0,0.05)"); gd.addColorStop(0.5, "rgba(0,0,0,0.55)"); gd.addColorStop(1, "rgba(0,0,0,0.25)");
-        ctx.fillStyle = gd; ctx.fillRect(0, 0, W, H); ctx.restore();
+        fullLayer(ctx, "vtCierre", function (c) { // [v8.9] capa fija: se dibuja una vez
+          const gd = c.createLinearGradient(0, 0, 0, H); gd.addColorStop(0, "rgba(0,0,0,0.05)"); gd.addColorStop(0.5, "rgba(0,0,0,0.55)"); gd.addColorStop(1, "rgba(0,0,0,0.25)");
+          c.fillStyle = gd; c.fillRect(0, 0, W, H);
+        });
+        ctx.restore();
+        // [v8.9] franja oscura suave detrás del logo, el nombre de la tienda y el
+        // botón: el texto blanco se lee aunque la foto sea blanca
+        ctx.save(); ctx.globalAlpha = lp;
+        fullLayer(ctx, "vtFranja", function (c) {
+          const fr = c.createLinearGradient(0, H * 0.34, 0, H * 0.62);
+          fr.addColorStop(0, "rgba(0,0,0,0)"); fr.addColorStop(0.3, "rgba(0,0,0,0.5)"); fr.addColorStop(0.7, "rgba(0,0,0,0.5)"); fr.addColorStop(1, "rgba(0,0,0,0)");
+          c.fillStyle = fr; c.fillRect(0, H * 0.34, W, H * 0.28);
+        });
+        ctx.restore();
         const la = clamp((t - VT.logo) / 0.45, 0, 1);
         if (la > 0) {
           ctx.save(); ctx.globalAlpha = la; ctx.translate(cx, H * 0.45); const sc = 0.92 + 0.08 * easeOutBack(la); ctx.scale(sc, sc); ctx.translate(-cx, -H * 0.45);
@@ -1743,7 +1994,6 @@ export {
   VT_STARS,
   _colCache,
   _colCacheE,
-  _cutoutCache,
   _sprites,
   diBag,
   diFitFont,
@@ -1768,7 +2018,6 @@ export {
   dsSceneBg,
   dsSubtitle,
   easeInOutCubic,
-  isCutout,
   mixHex,
   mosaicGrid,
   productColors,

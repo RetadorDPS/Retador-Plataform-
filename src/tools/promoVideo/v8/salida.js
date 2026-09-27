@@ -199,9 +199,28 @@ function makeRenderer(style, tl, opts, outCanvas, format, scale) {
   const base = makeBaseRenderer(style, tl, opts, out, F, sc);
   return function (f) {
     out.setTransform(sc, 0, 0, sc, 0, 0);
-    base(f);
+    try { base(f); }
+    catch (e) { drawFailedFrame(out, F, sc, opts, style, f, e); }
     if (wm) drawWatermark(out, F.w, F.h, opts);
   };
+}
+// [v8.9] Si un fotograma falla (foto rota, dato raro…), NUNCA se queda la
+// pantalla en blanco ni se para la animación: se anota el error (una vez por
+// tipo) y se pinta un fondo con los colores de la marca; el siguiente fotograma
+// lo vuelve a intentar normal.
+const _frameErrors = new Set();
+function drawFailedFrame(out, F, sc, opts, style, f, e) {
+  const msg = (e && e.message) || String(e);
+  if (!_frameErrors.has(style.id + msg)) { _frameErrors.add(style.id + msg); console.error("[video] fotograma " + f + " de " + style.id + " falló:", e); }
+  try {
+    for (let i = 0; i < 64; i++) out.restore(); // deshace los save() que quedaron abiertos
+    out.setTransform(sc, 0, 0, sc, 0, 0); out.globalAlpha = 1; out.globalCompositeOperation = "source-over";
+    out.shadowColor = "transparent"; out.shadowBlur = 0; out.filter = "none";
+    const accent = /^#[0-9a-f]{6}$/i.test(opts.accentColor || "") ? opts.accentColor : "#F26B0F";
+    const g = out.createLinearGradient(0, 0, 0, F.h);
+    g.addColorStop(0, (opts.theme && opts.theme.bg) || "#161510"); g.addColorStop(1, accent);
+    out.fillStyle = g; out.fillRect(0, 0, F.w, F.h);
+  } catch (e2) { /* nada más que hacer */ }
 }
 function makeBaseRenderer(style, tl, opts, out, F, sc) {
   if (F.id === "vertical") return function (f) { style.renderFrame(out, f, tl, opts); };
@@ -216,7 +235,8 @@ function makeBaseRenderer(style, tl, opts, out, F, sc) {
   }
   return function (f) {
     stageX.setTransform(sc, 0, 0, sc, 0, 0);
-    style.renderFrame(stageX, f, tl, opts);
+    try { style.renderFrame(stageX, f, tl, opts); }
+    catch (e) { for (let i = 0; i < 64; i++) stageX.restore(); throw e; } // [v8.9] deja el lienzo interno limpio
     // Promedia una franja de 24 px de cada borde en 12 tramos de altura
     edgeCtx.imageSmoothingEnabled = true; edgeCtx.imageSmoothingQuality = "high";
     edgeCtx.drawImage(stageC, 0, 0, 24 * sc, stageC.height, 0, 0, 1, 12);

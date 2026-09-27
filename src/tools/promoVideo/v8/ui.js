@@ -52,7 +52,9 @@ import {
   parsePrice,
   prepareBlurredBackground,
   roundRectPath,
-  wrapFrame
+  wrapFrame,
+  isCutout,
+  _cutoutCache
 } from "./motor.js";
 import {
   AP_BASE,
@@ -101,7 +103,6 @@ import {
   VT_STARS,
   _colCache,
   _colCacheE,
-  _cutoutCache,
   _sprites,
   diBag,
   diFitFont,
@@ -126,7 +127,6 @@ import {
   dsSceneBg,
   dsSubtitle,
   easeInOutCubic,
-  isCutout,
   mixHex,
   mosaicGrid,
   productColors,
@@ -1167,28 +1167,33 @@ export function iniciarEditor(P) {
   // Vista previa en vivo
   // ============================================================
   let previewRaf = null;
-  // [v8.1] Música de la vista previa: se programa por vueltas del video y el
-  // reloj de audio manda sobre la animación, así imagen y sonido van juntos.
-  let previewSound = false, previewMusic = null;
+  // [v8.9] Sonido de la vista previa: se genera UNA vez con la MISMA función,
+  // mezcla y normalización que el video descargado (renderMusicBuffer) y suena en
+  // bucle desde un solo reproductor. Antes se sintetizaba en vivo, vuelta a
+  // vuelta: en teléfonos lentos (Redmi Note 11) se distorsionaba, se cortaba o
+  // llegaba tarde. La animación toma su reloj de este sonido.
+  let previewSound = false, previewMusic = null, previewSoundBusy = false, previewSoundGen = 0, previewSoundTimer = null;
+  const previewBufCache = new Map(); // firma → sonido ya generado (máx. 2)
   function stopPreviewMusic() {
+    clearTimeout(previewSoundTimer); previewSoundGen++;
+    if (previewSoundBusy) { previewSoundBusy = false; renderSoundBtn(); }
     if (!previewMusic) return;
-    clearInterval(previewMusic.timer);
-    const c = audioCtx;
-    const ch = previewMusic.chain;
-    try { ch.out.gain.cancelScheduledValues(0); ch.out.gain.setValueAtTime(ch.out.gain.value, c.currentTime); ch.out.gain.linearRampToValueAtTime(0, c.currentTime + 0.03); } catch (e) {}
-    const groups = previewMusic.masters;
-    setTimeout(function () {
-      groups.forEach(m => { try { m && m.disconnect(); } catch (e) {} });
-      try { ch.out.disconnect(); } catch (e) {}
-    }, 80);
-    previewMusic = null;
+    const pm = previewMusic, c = audioCtx; previewMusic = null;
+    try { pm.gain.gain.cancelScheduledValues(0); pm.gain.gain.setValueAtTime(pm.gain.gain.value, c.currentTime); pm.gain.gain.linearRampToValueAtTime(0, c.currentTime + 0.03); } catch (e) {}
+    setTimeout(function () { try { pm.src.stop(); } catch (e) {} try { pm.src.disconnect(); pm.gain.disconnect(); } catch (e) {} }, 80);
+  }
+  // Firma de todo lo que cambia el sonido: si no cambia, se reutiliza el ya generado.
+  function previewSoundKey(style, tl, opts) {
+    let ev = [];
+    try { ev = (style.sfxEvents ? style.sfxEvents(tl, opts) : []).map(e => e.type + "@" + e.t.toFixed(3) + (e.cat || "")); } catch (e) { ev = []; }
+    return JSON.stringify([style.id, Math.ceil(tl.total / opts.speed), opts.speed, music.mood, music.volume, music.sfxScene, music.sfxItem, ev]);
   }
   function stopPreview() { if (previewRaf) { cancelAnimationFrame(previewRaf); previewRaf = null; } stopPreviewMusic(); }
   function renderSoundBtn() {
     const b = $("soundBtn");
     if (!audioWanted(STYLES[currentStyle])) { b.style.display = "none"; return; }
     b.style.display = "";
-    b.textContent = previewSound ? "🔊 Sonando · Silenciar" : "🔈 Escuchar sonido";
+    b.textContent = previewSound ? (previewSoundBusy ? "⏳ Preparando sonido…" : "🔊 Sonando · Silenciar") : "🔈 Escuchar sonido";
   }
   function rebuildPreview() {
     stopPreview();
@@ -1207,28 +1212,46 @@ export function iniciarEditor(P) {
     renderSizeEstimate();
     const style = STYLES[currentStyle], tl = style.buildTimeline(currentData()), opts = currentOpts();
     const draw = makeRenderer(style, tl, opts, els.previewCanvas, F, PREVIEW_SCALE);
-    let clock;
+    const startedAt = performance.now();
+    let clock = () => performance.now() - startedAt;
     const c = audioCtx;
     if (previewSound && audioWanted(style) && c && c.state === "running") {
-      const period = (tl.total / opts.speed) / FPS, start = c.currentTime + 0.08;
-      const pm = { masters: [], next: 0, timer: null, chain: makeMixChain(c, c.destination) };
-      const queue = function () {
-        while (c.currentTime > start + pm.next * period - 1.5) {
-          pm.masters.push(scheduleAudio(c, pm.chain, start + pm.next * period, period, style, tl, opts));
-          pm.next++;
-          if (pm.masters.length > 3) { const old = pm.masters.shift(); setTimeout(() => { try { old && old.disconnect(); } catch (e) {} }, (period + 1) * 1000); }
-        }
+      const durSec = Math.ceil(tl.total / opts.speed) / FPS, key = previewSoundKey(style, tl, opts), gen = ++previewSoundGen;
+      const play = function (buf) {
+        if (gen !== previewSoundGen || !buf) return;
+        const src = c.createBufferSource(), gain = c.createGain();
+        src.buffer = buf; src.loop = true; src.loopStart = 0; src.loopEnd = Math.min(durSec, buf.duration);
+        src.connect(gain); gain.connect(c.destination);
+        const at = c.currentTime + 0.06; src.start(at);
+        previewMusic = { src: src, gain: gain };
+        // reloj = posición dentro del sonido en bucle: imagen y sonido siempre juntos
+        clock = () => { const t = c.currentTime - at; return t <= 0 ? 0 : (t % src.loopEnd) * 1000; };
       };
-      queue(); pm.timer = setInterval(queue, 250);
-      previewMusic = pm;
-      clock = () => Math.max(0, (c.currentTime - start) * 1000);
-    } else {
-      const startedAt = performance.now();
-      clock = () => performance.now() - startedAt;
+      const cached = previewBufCache.get(key);
+      if (cached) play(cached);
+      else {
+        previewSoundBusy = true; renderSoundBtn();
+        // se espera un momento por si el vendedor sigue escribiendo o tocando opciones
+        previewSoundTimer = setTimeout(function () {
+          renderMusicBuffer(durSec, style, tl, opts).then(function (buf) {
+            if (gen !== previewSoundGen) return;
+            previewSoundBusy = false; renderSoundBtn();
+            if (!buf) return;
+            previewBufCache.set(key, buf);
+            if (previewBufCache.size > 2) previewBufCache.delete(previewBufCache.keys().next().value);
+            play(buf);
+          }).catch(function (e) {
+            if (gen !== previewSoundGen) return;
+            previewSoundBusy = false; renderSoundBtn();
+            console.error("[video] no se pudo preparar el sonido de la vista previa:", e);
+            toast("No se pudo preparar el sonido de la vista previa.");
+          });
+        }, 350);
+      }
     }
     (function tick() {
+      previewRaf = requestAnimationFrame(tick); // [v8.9] primero: un error nunca para la vista previa
       draw(Math.floor(clock() / MS_PER_FRAME) * opts.speed);
-      previewRaf = requestAnimationFrame(tick);
     })();
   }
 

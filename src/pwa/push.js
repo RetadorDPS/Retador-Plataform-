@@ -84,7 +84,7 @@ export async function enablePush(userId) {
   if (!userId || !isPushSupported()) return { ok: false, reason: "unsupported" };
   const perm = await Notification.requestPermission();
   if (perm !== "granted") return { ok: false, reason: perm };
-  logPushEvent("push_permission", "permiso concedido (enablePush)", userId);
+  logPushEvent("push_permission", `permission=${perm} (enablePush)`, userId);
   try {
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
@@ -126,7 +126,7 @@ export async function disablePush() {
 export async function ensurePushSubscription(userId) {
   if (!userId || !isPushSupported()) return;                 // navegador sin push
   if (Notification.permission !== "granted") return;          // permiso no concedido: silencioso
-  logPushEvent("push_permission", "permiso concedido (ensurePushSubscription)", userId);
+  logPushEvent("push_permission", `permission=${Notification.permission} (ensurePushSubscription)`, userId);
   try {
     const reg = await navigator.serviceWorker.ready;
     logPushEvent("sw_ready", "service worker listo", userId);

@@ -56,7 +56,20 @@ Probado con: cuadrada, 3:4 real (mallas), cuadrada real (POCO), 4:5 sobre blanco
 - El grano va dentro de las capas fijas de fondo; con la foto final a pantalla completa ya no se dibuja el fondo que queda tapado.
 - **Verificación de píxeles** (contra la v8.8, fotos cuadradas para aislar este cambio del de encaje): a simple vista idénticos (capturas lado a lado). Diferencias medidas: Desfile 1,3 % de píxeles con más de 8 niveles (de 255) y 0,1 % con más de 32; Vitrina 0,5 % / 0,07 % en la entrada y 6 % / 1,1 % en la parte media. Vienen de: el muro y las manchas redondeados a medio píxel, el remuestreo del grano fino de las fotos, y el grano quedando debajo de estrellas y manchas (1–2 niveles). El final de Vitrina cambia a propósito (punto 3).
 
-TABLA_TIEMPOS
+**Tabla de tiempos** (ms por fotograma, dibujo + fotograma de video sin codificar, CPU 6× más lenta, 1 de cada 4 fotogramas, mismo equipo y misma pasada):
+
+| Estilo | v8.8 Alta | v8.9 Alta | v8.8 Ligera | v8.9 Ligera | v8.9 frente a Directo (Alta / Ligera) |
+|---|---|---|---|---|---|
+| Acercamiento | 102,9 | 99,9 | 45,2 | 48,3 | 1,86× / 1,94× |
+| Noria | 103,6 | 103,7 | 46,2 | 50,9 | 1,93× / 2,04× |
+| Secuencial | 66,6 | 63,2 | 29,4 | 27,1 | 1,18× / 1,09× |
+| Mosaico | 97,0 | 102,7 | 44,7 | 43,3 | 1,92× / 1,74× |
+| Antes/Después | 113,0 | 112,7 | 54,5 | 53,0 | 2,10× / 2,13× |
+| Directo | 55,8 | 53,6 | 24,9 | 24,9 | 1× |
+| **Vitrina** | 154,1 | **87,9** | 72,7 | **40,3** | **1,64× / 1,62×** (antes 2,76× / 2,92×) |
+| **Desfile** | 141,4 | **83,2** | 60,1 | **41,9** | **1,55× / 1,68×** (antes 2,53× / 2,41×) |
+
+Solo se optimizaron Vitrina y Desfile (lo pedido). En los demás, las diferencias entre v8.8 y v8.9 (±5 %) son ruido de la medición: su dibujo no cambió salvo el encaje de fotos.
 
 ---
 

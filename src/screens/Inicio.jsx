@@ -119,6 +119,9 @@ export function RetadorInicio({ onGoogle, onEnter = null, subtitle = "", enterLa
                   <GoogleG size={19} /> Entrar con Google
                 </button>
                 <p style={{ marginTop: 10, textAlign: "center", fontSize: 11.5, color: p.t30 }}>Con tu cuenta de Google. Rápido y seguro.</p>
+                <p style={{ marginTop: 6, textAlign: "center", fontSize: 11, color: p.t30, lineHeight: 1.5 }}>
+                  Al entrar aceptas los <a href="/terms" style={{ color: "inherit", textDecoration: "underline" }}>Términos</a> y la <a href="/privacy" style={{ color: "inherit", textDecoration: "underline" }}>Política de privacidad</a>.
+                </p>
               </>
             )}
           </div>

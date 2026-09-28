@@ -493,6 +493,7 @@ function CFG_DeleteAccountScreen({ nav, flash }) {
         <>
           <div style={{ color:tk.T1 }} className="px-4 pt-4 text-[14px] leading-relaxed">
             Si eliminas tu cuenta tienes <b>30 días</b> para arrepentirte. Pasado ese plazo se borra para siempre y no se puede recuperar.
+            {" "}<a href="/data-deletion" style={{ color:tk.T2, textDecoration:"underline" }}>Qué se borra y qué se conserva</a>.
           </div>
           <CFG_Lbl>Al confirmar, en el momento</CFG_Lbl>
           <CFG_Crd><Lista items={[
@@ -1144,6 +1145,14 @@ function CFG_LanguageScreen({ nav, user, onUpdate, flash }) {
   );
 }
 
+/* Páginas legales públicas (estáticas, se abren sin iniciar sesión). */
+const CFG_LEGAL = [
+  ["/privacy", "Política de privacidad"],
+  ["/terms", "Términos de servicio"],
+  ["/cookies", "Cookies y almacenamiento"],
+  ["/data-deletion", "Eliminación de datos"],
+];
+
 /* ── INTEGRACIÓN CON REDES SOCIALES ───────────────────────────── */
 // Conectar Facebook, ver las Páginas donde se puede publicar, elegir la
 // predeterminada y desconectar. Todo pasa por el backend (fb-pages y
@@ -1253,6 +1262,7 @@ function CFG_SocialScreen({ nav, flash }) {
 
       <p style={{ color:tk.T3 }} className="text-[11px] leading-relaxed mx-4 mt-4">
         RETADOR solo publica cuando tú lo pides, como máximo 5 veces por hora en cada Página. Nunca vemos tu contraseña de Facebook y puedes desconectarlo cuando quieras.
+        {" "}Más información en la <a href="/privacy#facebook" style={{ color:tk.T2, textDecoration:"underline" }}>Política de privacidad</a> y en <a href="/data-deletion#facebook" style={{ color:tk.T2, textDecoration:"underline" }}>Eliminación de datos</a>.
       </p>
       <div className="h-8" />
     </div>
@@ -1345,9 +1355,15 @@ function CFG_AboutScreen({ nav }) {
       </div>
       <CFG_Lbl>Legal</CFG_Lbl>
       <CFG_Crd>
-        <div style={{ background:tk.ROW }} className="px-3.5 py-3 text-center">
-          <p style={{ color:tk.T2 }} className="text-[12px]">Política de privacidad, términos y licencias estarán disponibles próximamente.</p>
-        </div>
+        {CFG_LEGAL.map(([href, label], i) => (
+          <div key={href}>
+            {i > 0 && <CFG_Hr />}
+            <a href={href} style={{ background:tk.ROW }} className="w-full flex items-center gap-2.5 px-3.5 py-2.5 active:opacity-60">
+              <span style={{ color:tk.T1 }} className="flex-1 text-[14px] font-medium">{label}</span>
+              <ChevronRight size={13} style={{ color:tk.T3 }} />
+            </a>
+          </div>
+        ))}
       </CFG_Crd>
       <CFG_Lbl>Información</CFG_Lbl>
       <CFG_Crd>

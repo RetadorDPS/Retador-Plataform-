@@ -34,7 +34,7 @@ export const admin: SupabaseClient = createClient(
 // ── Respuestas ───────────────────────────────────────────────────────────────
 export const CORS = {
   'Access-Control-Allow-Origin': ORIGEN_APP,
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Vary': 'Origin',
 }
@@ -178,13 +178,68 @@ export async function tokenDesdeCodigo(codigo: string): Promise<string> {
 }
 
 // Revoca la autorización de la app para ese usuario de Facebook (token de app).
-export async function revocarEnMeta(externalUserId: string): Promise<boolean> {
+export async function revocarEnMetaDetalle(externalUserId: string): Promise<{ ok: boolean; codigo: string }> {
+  if (secretsFaltantes().length) return { ok: false, codigo: 'no_configurado' }
   try {
     await grafo('revocar', `${externalUserId}/permissions`, { metodo: 'DELETE', token: `${APP_ID}|${APP_SECRET}` })
-    return true
-  } catch (_e) {
-    return false
+    return { ok: true, codigo: '' }
+  } catch (e) {
+    return { ok: false, codigo: e instanceof ErrorMeta ? e.codigo : 'interno' }
   }
+}
+export async function revocarEnMeta(externalUserId: string): Promise<boolean> {
+  return (await revocarEnMetaDetalle(externalUserId)).ok
+}
+
+// ── signed_request de Meta (desautorización y eliminación de datos) ─────────
+// Formato oficial: "<firma>.<datos>", ambos en base64url; la firma es
+// HMAC-SHA256 de <datos> con el App Secret. Devuelve el id de Facebook o null.
+const desdeB64Url = (s: string) => desdeB64(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4))
+export async function verificarSignedRequest(signed: string): Promise<string | null> {
+  if (!APP_SECRET || typeof signed !== 'string' || signed.length > 4096) return null
+  const partes = signed.split('.')
+  if (partes.length !== 2 || !partes[0] || !partes[1]) return null
+  try {
+    const firma = desdeB64Url(partes[0])
+    const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(APP_SECRET),
+      { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'])
+    // verify() compara en tiempo constante.
+    const valida = await crypto.subtle.verify('HMAC', k, firma, new TextEncoder().encode(partes[1]))
+    if (!valida) return null
+    const datos = JSON.parse(new TextDecoder().decode(desdeB64Url(partes[1])))
+    if (String(datos?.algorithm ?? '').toUpperCase() !== 'HMAC-SHA256') return null
+    const id = String(datos?.user_id ?? '')
+    return /^[0-9]{1,32}$/.test(id) ? id : null
+  } catch (_e) {
+    return null
+  }
+}
+
+// ── Publicaciones ────────────────────────────────────────────────────────────
+export const BUCKET_VIDEOS = 'social-videos'
+export const TAM_MAX_VIDEO = 50 * 1024 * 1024 // igual que el límite del bucket
+
+// MISMO formato que shareLink() de src/shared/backend.js (páginas estáticas de
+// vista previa en el dominio oficial). No es un sistema paralelo de enlaces.
+export const enlaceProducto = (productId: string) =>
+  `${ORIGEN_APP}/share/producto/${encodeURIComponent(productId)}.html`
+
+// Token de una Página: lo entrega la base CIFRADO (solo si plan, dueño, Página
+// y conexión lo permiten) y se descifra aquí, en memoria, y nunca sale.
+export async function tokenDePagina(userId: string, socialPageId: string): Promise<{ token: string; pageId: string } | null> {
+  const { data, error } = await admin.rpc('social_obtener_token', { p_user: userId, p_social_page_id: socialPageId })
+  const fila = Array.isArray(data) ? data[0] : null
+  if (error || !fila) return null
+  const token = await descifrarToken(fila, userId, String(fila.page_id))
+  return { token, pageId: String(fila.page_id) }
+}
+
+// Si Meta dice que el token ya no vale (código 190), la conexión pasa a
+// 'expired' para que la pantalla pida reconectar.
+export async function marcarConexionCaducada(userId: string, codigo: string) {
+  if (codigo !== '190') return
+  await admin.from('social_connections').update({ status: 'expired', last_error_code: '190' })
+    .eq('user_id', userId).eq('provider', PROVEEDOR).eq('status', 'active')
 }
 
 // ── Sesión, plan y auditoría ─────────────────────────────────────────────────

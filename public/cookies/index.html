@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cookies y almacenamiento · RETADOR</title>
+<meta name="description" content="Qué guarda RETADOR en tu navegador: sesión, preferencias, caché de la app y notificaciones. RETADOR no crea cookies propias ni usa rastreadores publicitarios.">
+<link rel="canonical" href="https://retadormarketplace.es/cookies">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="stylesheet" href="/legal/legal.css">
+</head>
+<body>
+<header class="barra"><div>
+  <a class="marca" href="/">RETADOR</a>
+  <a class="volver" href="/">← Volver a RETADOR</a>
+</div></header>
+
+<main>
+<h1>Política de cookies y almacenamiento</h1>
+<p class="fecha">Última actualización: 28 de septiembre de 2026</p>
+
+<div class="resumen">
+  <p><strong>En pocas palabras:</strong> RETADOR <strong>no crea cookies propias</strong> y no usa herramientas de analítica ni de publicidad.</p>
+  <p>Para funcionar, la app guarda algunos datos en tu navegador con otros mecanismos: almacenamiento local, almacenamiento de sesión, Service Worker con su caché y, si las activas, la suscripción a notificaciones. Aquí te explicamos cada uno con su nombre correcto.</p>
+</div>
+
+<h2>1. Cookies</h2>
+<p>El dominio <strong>retadormarketplace.es</strong> no crea cookies propias.</p>
+<p>Cuando usas servicios de terceros, se abren sus propias páginas y esas páginas pueden usar sus cookies en su propio dominio, según sus políticas:</p>
+<ul>
+  <li><strong>Google</strong>, al iniciar sesión con tu cuenta de Google.</li>
+  <li><strong>Stripe</strong>, al pagar con tarjeta en su página segura.</li>
+  <li><strong>Facebook</strong>, solo si en el futuro conectas tus Páginas (función todavía no abierta a los vendedores).</li>
+</ul>
+<p>RETADOR no controla ni lee esas cookies.</p>
+
+<h2>2. Almacenamiento local del navegador (<code>localStorage</code>)</h2>
+<p>Son datos que la app guarda en tu dispositivo y que no se envían solos a ningún servidor.</p>
+<table>
+  <thead><tr><th>Uso</th><th>Qué guarda</th><th>Tipo</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Sesión (autenticación)</td>
+      <td>La sesión de tu cuenta, para que no tengas que entrar cada vez (clave <code>sb-…-auth-token</code>). Se borra al cerrar sesión.</td>
+      <td>Estrictamente necesario</td>
+    </tr>
+    <tr>
+      <td>Preferencias</td>
+      <td>Tema claro u oscuro, tamaño de letra, densidad, vista de productos, última provincia elegida, últimos métodos de pago o cobro usados y ajustes de la app (claves que empiezan por <code>retador_</code>).</td>
+      <td>Preferencias</td>
+    </tr>
+    <tr>
+      <td>Funcionamiento de la app</td>
+      <td>Avisos ya vistos (bienvenida, recordatorios, notificaciones y pedidos ya revisados), si la app ya está instalada y copias locales que la app usa para mostrar datos más rápido.</td>
+      <td>Funcionamiento</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>3. Almacenamiento de sesión (<code>sessionStorage</code>)</h2>
+<p>Se borra al cerrar la pestaña. RETADOR lo usa para:</p>
+<ul>
+  <li>Recordar el pedido que estabas pagando al volver de la página de pago de Stripe.</li>
+  <li>Evitar recargas repetidas si una parte de la app no se descargó bien.</li>
+</ul>
+<p>Es estrictamente necesario.</p>
+
+<h2>4. Service Worker y su caché (<code>Cache Storage</code>)</h2>
+<p>RETADOR es una aplicación web instalable. Su Service Worker guarda en la caché del navegador los archivos de la app (código, estilos, fuentes e iconos) y copias de las páginas visitadas, para que:</p>
+<ul>
+  <li>la app abra rápido;</li>
+  <li>la app pueda abrirse aunque la conexión falle;</li>
+  <li>recibas las notificaciones push.</li>
+</ul>
+<p>Las páginas de autorización (la vuelta de Facebook y AliExpress) <strong>nunca</strong> se guardan en esa caché.</p>
+<p>Es estrictamente necesario para la app instalada.</p>
+
+<h2>5. Notificaciones push</h2>
+<p>Solo si las aceptas, tu navegador genera una suscripción de notificaciones. Guardamos esa suscripción en nuestra base de datos para poder enviarte avisos de tus pedidos y mensajes, y las entrega el servicio de notificaciones de tu navegador (por ejemplo, Google, Apple o Mozilla). Puedes desactivarlas en Ajustes → Notificaciones o en tu navegador.</p>
+
+<h2>6. Lo que RETADOR no usa</h2>
+<ul>
+  <li>No usa cookies propias.</li>
+  <li>No usa <code>IndexedDB</code>.</li>
+  <li>No usa analítica de terceros ni píxeles o rastreadores de publicidad.</li>
+</ul>
+
+<h2>7. Cómo borrar estos datos</h2>
+<ul>
+  <li>Cerrar sesión borra la sesión guardada.</li>
+  <li>Puedes borrar todo lo demás desde la configuración de tu navegador (datos del sitio de retadormarketplace.es) o desinstalando la app.</li>
+  <li>Si lo borras, tendrás que volver a iniciar sesión y se perderán tus preferencias locales. Tus datos de la cuenta siguen en tu cuenta.</li>
+</ul>
+
+<h2>8. Contacto</h2>
+<p>Dudas: <a href="mailto:retadormarketplace@gmail.com">retadormarketplace@gmail.com</a>. Más información en la <a href="/privacy">Política de privacidad</a>.</p>
+</main>
+
+<footer><div>
+  <nav aria-label="Información legal">
+    <a href="/privacy">Privacidad</a>
+    <a href="/terms">Términos</a>
+    <a href="/cookies" aria-current="page">Cookies y almacenamiento</a>
+    <a href="/data-deletion">Eliminación de datos</a>
+    <a href="/">Volver a RETADOR</a>
+  </nav>
+  <p>RETADOR · <a href="mailto:retadormarketplace@gmail.com">retadormarketplace@gmail.com</a></p>
+</div></footer>
+</body>
+</html>

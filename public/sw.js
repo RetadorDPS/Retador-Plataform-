@@ -45,6 +45,12 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // solo mismo origen
 
+  // Callbacks de autorización (Facebook y AliExpress): llegan con ?code=&state=
+  // de un solo uso. Nunca pasan por la caché (ni se guardan ni se sirven desde
+  // ella): el navegador va siempre directo a la red.
+  const base = new URL(START).pathname;
+  if (url.pathname.startsWith(base + "redes-sociales/") || url.pathname.startsWith(base + "aliexpress/callback")) return;
+
   // Navegaciones (abrir/recargar la app): red primero, copia como respaldo.
   // Solo la PÁGINA DE INICIO se guarda como START: el Generador de Video
   // (herramientas/video.html) también es una navegación (dentro de un iframe)

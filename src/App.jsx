@@ -476,6 +476,8 @@ function AppShell({ sessionUser, platformStats = null }) {
   // Sub-pantallas
   const [mScr,      setMScr]      = useState("home");
   const [pScr,      setPScr]      = useState("main");
+  // Sección de Ajustes a abrir directamente (p. ej. "social" al volver de Facebook).
+  const [settingsInicial, setSettingsInicial] = useState(null);
   const [eScr,      setEScr]      = useState("menu");
 
   // Selección activa
@@ -1214,15 +1216,18 @@ function AppShell({ sessionUser, platformStats = null }) {
   // deep link tiene que ser un query param leído aquí, igual que openConv/openOrder.
   useEffect(() => {
     if (!user?.id) return;
-    let convId = null, orderId = null, productId = null, profileId = null;
+    let convId = null, orderId = null, productId = null, profileId = null, redesSociales = null;
     try {
       const q = new URLSearchParams(window.location.search);
       convId = q.get("openConv"); orderId = q.get("openOrder");
       productId = q.get("openProduct"); profileId = q.get("openProfile");
+      // Vuelta del callback de Facebook (/redes-sociales/facebook/callback/).
+      redesSociales = q.get("redesSociales");
     } catch (e) {}
-    if (!convId && !orderId && !productId && !profileId) return;
+    if (!convId && !orderId && !productId && !profileId && !redesSociales) return;
     try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
-    if (convId) openConversationById(convId, true);
+    if (redesSociales) { setSettingsInicial("social"); setTab("perfil"); setPScr("settings"); }
+    else if (convId) openConversationById(convId, true);
     else if (orderId) openOrderById(orderId);
     else if (productId) openProductFromChat(productId);
     else if (profileId) openPublicProfile(profileId);
@@ -2693,7 +2698,7 @@ function AppShell({ sessionUser, platformStats = null }) {
                 autoOpenPlans={autoOpenPlans} onAutoOpenPlansDone={() => setAutoOpenPlans(false)} />;
             })()}
             {pScr === "messages" && <MessagesScreen user={user} chatOpen={chatOpen} onBack={() => setPScr("main")} onChat={c => { setSelChat(c); setChatOpen(true); }} />}
-            {pScr === "settings" && <SettingsScreen user={user} onBack={() => setPScr("main")} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}
+            {pScr === "settings" && <SettingsScreen user={user} pantallaInicial={settingsInicial} onBack={() => { setSettingsInicial(null); setPScr("main"); }} onSignOut={handleSignOut} onUpdate={u => setUser(prev => ({ ...prev, ...u }))} flash={flash} appTheme={appTheme} onThemeChange={changeTheme} appTextScale={appTextScale} onTextScaleChange={changeTextScale}
               productView={productView} onProductViewChange={setProductView}
               profileData={profileData} onProfileUpdate={setProfileData}
               isVerified={!!user?.verified}

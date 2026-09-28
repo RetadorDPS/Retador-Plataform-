@@ -1,29 +1,9 @@
--- ═══════════════════════════════════════════════════════════════════════════
--- INTEGRACIÓN CON REDES SOCIALES — FASE 1 (base de datos y seguridad)
---
--- Conexión de Páginas de Facebook para publicar desde RETADOR. El login de
--- RETADOR sigue siendo Google; Facebook es solo una conexión externa.
---
--- Reglas de seguridad de esta migración:
---  · Los tokens de Página viven SOLO en private.social_tokens, cifrados con
---    AES-256-GCM en la Edge Function (la llave SOCIAL_TOKEN_KEY nunca entra a
---    la base). El esquema "private" no está expuesto por la API.
---  · Los estados OAuth se guardan como hash SHA-256, nunca en texto plano.
---  · El navegador solo LEE (RLS del dueño) conexiones, Páginas y publicaciones
---    propias. Nunca escribe: todo lo escribe una Edge Function.
---  · En este proyecto todo lo nuevo en "public" nace con permisos para anon y
---    authenticated (default privileges), y toda función nace ejecutable por
---    PUBLIC: por eso cada objeto revoca explícitamente lo que no corresponde.
---  · Las funciones auxiliares son SECURITY INVOKER y solo las ejecuta
---    service_role (que ya tiene BYPASSRLS). No hace falta SECURITY DEFINER.
--- ═══════════════════════════════════════════════════════════════════════════
+-- INTEGRACIÓN CON REDES SOCIALES — FASE 1 (base de datos y seguridad). Copia versionada: supabase/migrations/20260927_redes_sociales_fase1.sql
 
--- ── Esquema privado ─────────────────────────────────────────────────────────
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;
 grant usage on schema private to service_role;
 
--- updated_at automático (solo para las tablas de esta integración).
 create or replace function private.social_touch_updated_at()
 returns trigger language plpgsql set search_path = '' as $$
 begin
@@ -32,10 +12,6 @@ begin
 end $$;
 revoke all on function private.social_touch_updated_at() from public, anon, authenticated;
 
--- ── Acceso por plan (ÚNICO lugar que decide qué plan puede usar cada red) ───
--- Sin fila = sin acceso. Para habilitar Premium basta cambiar enabled; para
--- un plan de empresas, primero debe existir en public.plans y luego se añade
--- aquí su fila. No cambia la lógica general de planes.
 create table private.social_plan_access (
   plan_id    text not null references public.plans(id) on update cascade on delete cascade,
   provider   text not null check (provider in ('facebook')),
@@ -50,9 +26,8 @@ grant select, insert, update, delete on private.social_plan_access to service_ro
 insert into private.social_plan_access (plan_id, provider, enabled) values
   ('gratis',  'facebook', false),
   ('pro',     'facebook', true),
-  ('premium', 'facebook', false);  -- preparado, todavía sin habilitar
+  ('premium', 'facebook', false);
 
--- ── Conexiones (una por usuario y red) ──────────────────────────────────────
 create table public.social_connections (
   id                     uuid primary key default gen_random_uuid(),
   user_id                uuid not null references auth.users(id) on delete cascade,
@@ -70,13 +45,11 @@ create table public.social_connections (
   unique (user_id, provider),
   unique (id, user_id)
 );
--- Una misma cuenta de Facebook solo puede estar ACTIVA en una cuenta de RETADOR.
 create unique index social_connections_externo_activo
   on public.social_connections (provider, external_user_id) where status = 'active';
 create trigger social_connections_updated_at before update on public.social_connections
   for each row execute function private.social_touch_updated_at();
 
--- ── Páginas de cada conexión ────────────────────────────────────────────────
 create table public.social_pages (
   id            uuid primary key default gen_random_uuid(),
   connection_id uuid not null,
@@ -89,7 +62,6 @@ create table public.social_pages (
   status        text not null default 'active' check (status in ('active', 'no_access', 'revoked')),
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
-  -- La Página nunca puede quedar con un dueño distinto al de su conexión.
   foreign key (connection_id, user_id)
     references public.social_connections (id, user_id) on delete cascade,
   unique (connection_id, page_id),
@@ -102,10 +74,6 @@ create index social_pages_user_id on public.social_pages (user_id);
 create trigger social_pages_updated_at before update on public.social_pages
   for each row execute function private.social_touch_updated_at();
 
--- ── Tokens de Página (SOLO backend, cifrados) ───────────────────────────────
--- token_ciphertext = salida de AES-256-GCM (incluye la etiqueta de 16 bytes).
--- token_iv = nonce aleatorio de 12 bytes, distinto en cada cifrado.
--- key_version permite rotar SOCIAL_TOKEN_KEY sin perder los tokens existentes.
 create table private.social_tokens (
   id               uuid primary key default gen_random_uuid(),
   social_page_id   uuid not null unique references public.social_pages(id) on delete cascade,
@@ -121,9 +89,6 @@ grant select, insert, update, delete on private.social_tokens to service_role;
 create trigger social_tokens_updated_at before update on private.social_tokens
   for each row execute function private.social_touch_updated_at();
 
--- ── Estados OAuth de un solo uso ────────────────────────────────────────────
--- return_to es una CLAVE de destino permitido, nunca una URL (sin redirecciones
--- abiertas). La pantalla traduce la clave a su sección.
 create table private.social_oauth_states (
   id         uuid primary key default gen_random_uuid(),
   user_id    uuid not null references auth.users(id) on delete cascade,
@@ -143,12 +108,11 @@ create index social_oauth_states_pendientes
   on private.social_oauth_states (user_id, provider) where used_at is null;
 create index social_oauth_states_expira on private.social_oauth_states (expires_at);
 
--- ── Publicaciones ───────────────────────────────────────────────────────────
 create table public.social_publications (
   id                uuid primary key default gen_random_uuid(),
   user_id           uuid not null references auth.users(id) on delete cascade,
   social_page_id    uuid references public.social_pages(id) on delete set null,
-  page_id           text not null check (page_id ~ '^[0-9]{1,32}$'),  -- copia para historial y límite
+  page_id           text not null check (page_id ~ '^[0-9]{1,32}$'),
   product_id        uuid references public.products(id) on delete set null,
   publication_type  text not null check (publication_type in ('link', 'photo', 'video', 'reel')),
   idempotency_key   uuid not null,
@@ -164,21 +128,17 @@ create table public.social_publications (
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
   published_at      timestamptz,
-  -- Un reintento del cliente con la misma clave nunca crea otra publicación.
   unique (user_id, idempotency_key),
   check (storage_path is null or split_part(storage_path, '/', 1) = user_id::text)
 );
--- Límite por hora (usuario + Página de Facebook, sobrevive a reconexiones).
 create index social_publications_limite
   on public.social_publications (user_id, page_id, created_at desc);
--- El mismo producto no puede tener dos publicaciones EN CURSO del mismo tipo en la misma Página.
 create unique index social_publications_en_curso
   on public.social_publications (page_id, product_id, publication_type)
   where status in ('pending', 'processing') and product_id is not null;
 create trigger social_publications_updated_at before update on public.social_publications
   for each row execute function private.social_touch_updated_at();
 
--- ── RLS y permisos de las tablas visibles para el dueño ─────────────────────
 alter table public.social_connections  enable row level security;
 alter table public.social_pages        enable row level security;
 alter table public.social_publications enable row level security;
@@ -197,12 +157,6 @@ create policy "dueño ve sus páginas sociales" on public.social_pages
 create policy "dueño ve sus publicaciones sociales" on public.social_publications
   for select to authenticated using (user_id = (select auth.uid()));
 
--- ═══════════════════════════════════════════════════════════════════════════
--- FUNCIONES AUXILIARES — SECURITY INVOKER, solo service_role (Edge Functions)
--- ═══════════════════════════════════════════════════════════════════════════
-
--- Comprobación CENTRAL de plan y estado de la cuenta. Todas las Edge Functions
--- de redes sociales pasan por aquí; nunca se confía en lo que diga el navegador.
 create or replace function public.social_plan_permite(p_user uuid, p_provider text)
 returns jsonb language sql stable set search_path = '' as $$
   select case
@@ -221,9 +175,6 @@ returns jsonb language sql stable set search_path = '' as $$
   left join private.social_plan_access a on a.plan_id = pr.plan and a.provider = p_provider;
 $$;
 
--- Crea un state (solo su hash). Máximo 5 pendientes por usuario y red; la
--- comprobación es atómica (candado por usuario) para que varias pestañas o
--- dispositivos a la vez no se salten el tope.
 create or replace function public.social_crear_state(
   p_user uuid, p_provider text, p_state_hash text, p_return_to text)
 returns timestamptz language plpgsql set search_path = '' as $$
@@ -247,9 +198,6 @@ begin
   return v_expira;
 end $$;
 
--- Consume el state de forma ATÓMICA (una sola sentencia UPDATE). Si ya se usó,
--- caducó o no existe, no devuelve filas. Dos llamadas simultáneas con el mismo
--- state: la segunda espera el candado de la fila y ya no la encuentra libre.
 create or replace function public.social_consumir_state(p_state_hash text, p_provider text)
 returns table (user_id uuid, return_to text) language sql set search_path = '' as $$
   update private.social_oauth_states s
@@ -259,10 +207,6 @@ returns table (user_id uuid, return_to text) language sql set search_path = '' a
   returning s.user_id, s.return_to;
 $$;
 
--- Guarda la conexión y sus Páginas (con token cifrado) en UNA transacción.
--- p_paginas: [{page_id, page_name, picture_url, tasks[], token_ciphertext (base64),
---              token_iv (base64), key_version}]
--- Solo se guardan Páginas con la tarea CREATE_CONTENT. Devuelve SOLO datos públicos.
 create or replace function public.social_guardar_conexion(
   p_user uuid, p_provider text, p_external_user_id text, p_external_name text,
   p_scopes_granted text[], p_scopes_rejected text[], p_data_access_expires_at timestamptz,
@@ -279,8 +223,6 @@ begin
   end if;
   perform pg_advisory_xact_lock(hashtextextended('social_conn:' || p_provider || ':' || p_external_user_id, 0));
 
-  -- Si esta cuenta de Facebook estaba activa en OTRA cuenta de RETADOR, esa
-  -- conexión queda reemplazada y sus tokens se borran.
   delete from private.social_tokens t
    using public.social_pages p, public.social_connections c
    where t.social_page_id = p.id and p.connection_id = c.id
@@ -328,13 +270,11 @@ begin
     v_ids := v_ids || (v_pag->>'page_id');
   end loop;
 
-  -- Páginas que ya no llegaron (o sin CREATE_CONTENT): sin acceso y sin token.
   delete from private.social_tokens t using public.social_pages p
    where t.social_page_id = p.id and p.connection_id = v_conn and not (p.page_id = any (v_ids));
   update public.social_pages set status = 'no_access', is_default = false
    where connection_id = v_conn and not (page_id = any (v_ids)) and status <> 'no_access';
 
-  -- Siempre una predeterminada si hay alguna activa.
   if not exists (select 1 from public.social_pages where connection_id = v_conn and is_default) then
     update public.social_pages set is_default = true
      where id = (select id from public.social_pages
@@ -349,7 +289,6 @@ begin
       from public.social_pages where connection_id = v_conn and status = 'active'), '[]'::jsonb);
 end $$;
 
--- Elige la Página predeterminada (atómico: quita la anterior y pone la nueva).
 create or replace function public.social_elegir_predeterminada(p_user uuid, p_social_page_id uuid)
 returns boolean language plpgsql set search_path = '' as $$
 declare v_conn uuid;
@@ -362,8 +301,6 @@ begin
   return true;
 end $$;
 
--- Desconecta: borra tokens, marca Páginas y conexión como revocadas. Devuelve
--- el id externo para que la Edge Function revoque también en Meta.
 create or replace function public.social_desconectar(p_user uuid, p_provider text)
 returns text language plpgsql set search_path = '' as $$
 declare v_conn uuid; v_ext text;
@@ -378,9 +315,6 @@ begin
   return v_ext;
 end $$;
 
--- Entrega el token CIFRADO (nunca en claro: la base no tiene la llave) solo si
--- el plan lo permite, la Página es del usuario, está activa, la conexión está
--- activa y tiene CREATE_CONTENT.
 create or replace function public.social_obtener_token(p_user uuid, p_social_page_id uuid)
 returns table (page_id text, token_ciphertext text, token_iv text, key_version smallint)
 language plpgsql stable set search_path = '' as $$
@@ -400,10 +334,6 @@ begin
        and 'CREATE_CONTENT' = any (p.tasks);
 end $$;
 
--- Reserva una publicación aplicando, en UNA transacción con candado por
--- usuario+Página: idempotencia, plan, propiedad, producto propio y el límite
--- de 5 publicaciones por hora (ventana móvil con el reloj de la BASE, no del
--- navegador). Devuelve la fila (sin secretos) o el motivo del rechazo.
 create or replace function public.social_reservar_publicacion(
   p_user uuid, p_social_page_id uuid, p_product_id uuid, p_type text,
   p_idempotency_key uuid, p_message text, p_storage_path text)
@@ -428,7 +358,6 @@ begin
 
   perform pg_advisory_xact_lock(hashtextextended('social_pub:' || p_user::text || ':' || v_page_id, 0));
 
-  -- Reintento con la misma clave: se devuelve la publicación existente.
   select * into v_fila from public.social_publications
    where user_id = p_user and idempotency_key = p_idempotency_key;
   if found then
@@ -469,7 +398,6 @@ begin
                                       'publication_type', v_fila.publication_type));
 end $$;
 
--- Permisos de las funciones: NADIE salvo service_role.
 revoke all on function public.social_plan_permite(uuid, text) from public, anon, authenticated;
 revoke all on function public.social_crear_state(uuid, text, text, text) from public, anon, authenticated;
 revoke all on function public.social_consumir_state(text, text) from public, anon, authenticated;
@@ -488,10 +416,6 @@ grant execute on function public.social_desconectar(uuid, text) to service_role;
 grant execute on function public.social_obtener_token(uuid, uuid) to service_role;
 grant execute on function public.social_reservar_publicacion(uuid, uuid, uuid, text, uuid, text, text) to service_role;
 
--- ── Bucket privado para videos que se publicarán ────────────────────────────
--- Estructura {user_id}/{uuid}.mp4. Solo sube quien tiene una conexión activa,
--- a su propia carpeta, sin sobrescribir (no hay política de UPDATE). Meta lo
--- descarga con una URL firmada de duración limitada que crea el backend.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('social-videos', 'social-videos', false, 52428800, array['video/mp4'])
 on conflict (id) do nothing;
@@ -510,6 +434,5 @@ create policy "social-videos borrar mis archivos" on storage.objects
   for delete to authenticated using (
     bucket_id = 'social-videos' and (storage.foldername(name))[1] = (select auth.uid())::text);
 
--- ── Limpieza diaria de estados OAuth viejos ─────────────────────────────────
 select cron.schedule('limpieza-estados-oauth-sociales', '41 4 * * *',
   $$delete from private.social_oauth_states where expires_at < now() - interval '1 day'$$);

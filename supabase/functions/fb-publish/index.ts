@@ -2,12 +2,17 @@
 // fb-publish — publica en una Página de Facebook (verify_jwt = true).
 //
 // POST { social_page_id, tipo: 'link'|'photo'|'video'|'reel', idempotency_key,
-//        product_id?, mensaje?, storage_path? }
+//        product_id?, mensaje?, storage_path?, foto_indice?, foto_esperada? }
+//
+// 'photo': foto_indice es la posición dentro de products.images (0 si no llega).
+// La URL SIEMPRE sale del registro del producto; foto_esperada (opcional) solo
+// se compara con ella para detectar que el orden de fotos cambió.
 //
 // Orden de comprobaciones (todas en el servidor):
 //  1) sesión; 2) plan central (Gratis y Empresas no, Pro y Premium sí; ni
-//  suspendidos ni con borrado pendiente); 3) datos: producto propio y activo,
-//  enlace público de RETADOR respondiendo 200, o video propio en el bucket
+//  suspendidos ni con borrado pendiente); 3) datos: producto propio, activo,
+//  sin archivar y aprobado por moderación, y su enlace público de RETADOR
+//  respondiendo 200 (link) o su foto elegida (photo), o video propio en el bucket
 //  privado (ruta, extensión, tipo, tamaño y existencia); 4) reserva atómica
 //  en la base: dueño de la Página, Página activa con CREATE_CONTENT,
 //  idempotencia y límite de 5 por hora; 5) token descifrado SOLO aquí;
@@ -25,6 +30,8 @@ import {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const TIPOS = ['link', 'photo', 'video', 'reel']
 const DURACION_URL_FIRMADA = 2 * 60 * 60 // 2 h: Meta descarga el video de forma asíncrona
+const FOTO_INDICE_MAX = 199
+const URL_FOTO_MAX = 2000
 
 const MOTIVOS: Record<string, [number, string]> = {
   limite_por_hora: [429, 'Llegaste al límite de 5 publicaciones por hora en esta Página. Inténtalo más tarde.'],
@@ -67,6 +74,16 @@ Deno.serve(async (req) => {
     return responder({ ok: false, motivo: 'datos_invalidos', error: 'Datos de publicación no válidos.' }, 400)
   }
 
+  // Foto elegida (solo 'photo'; en los demás tipos se ignora). Sin foto_indice
+  // se usa la primera, como hasta ahora. Solo enteros reales: "2" no vale.
+  const fotoIndiceDado = tipo === 'photo' && c.foto_indice !== undefined && c.foto_indice !== null
+  const fotoIndice = fotoIndiceDado ? c.foto_indice : 0
+  const fotoEsperada = tipo === 'photo' && c.foto_esperada !== undefined && c.foto_esperada !== null ? c.foto_esperada : null
+  if (!Number.isInteger(fotoIndice) || (fotoIndice as number) < 0 || (fotoIndice as number) > FOTO_INDICE_MAX ||
+      (fotoEsperada !== null && (typeof fotoEsperada !== 'string' || fotoEsperada.length > URL_FOTO_MAX))) {
+    return responder({ ok: false, motivo: 'datos_invalidos', error: 'Datos de publicación no válidos.' }, 400)
+  }
+
   const permiso = await permisoDePlan(usuario.id)
   if (!permiso.permitido) return rechazo(permiso.motivo ?? 'plan_no_permitido')
 
@@ -74,9 +91,12 @@ Deno.serve(async (req) => {
   let enlace = '', imagen = ''
   if (tipo === 'link' || tipo === 'photo') {
     if (!productId) return responder({ ok: false, motivo: 'falta_producto', error: 'Elige un producto.' }, 400)
-    const { data: p } = await admin.from('products').select('id, seller_id, status, images')
+    const { data: p } = await admin.from('products').select('id, seller_id, status, archived_at, moderation_status, images')
       .eq('id', productId).maybeSingle()
-    if (!p || p.seller_id !== usuario.id || p.status !== 'active') return rechazo('producto_no_disponible')
+    // Publicado de verdad: propio, activo, sin archivar (archivar NO cambia
+    // status) y aprobado por moderación. Misma regla que usa la app.
+    if (!p || p.seller_id !== usuario.id || p.status !== 'active' || p.archived_at !== null ||
+        p.moderation_status !== 'approved') return rechazo('producto_no_disponible')
     if (tipo === 'link') {
       // Enlace público real de RETADOR (el de shareLink). Las páginas de vista
       // previa se regeneran cada 20 min: si aún no existe, no se publica un
@@ -88,8 +108,22 @@ Deno.serve(async (req) => {
         return responder({ ok: false, motivo: 'enlace_no_disponible', error: 'La página pública de este producto todavía no está lista. Prueba en unos minutos.' }, 409)
       }
     } else {
-      const img = Array.isArray(p.images) ? String(p.images[0] ?? '') : ''
-      if (!/^https:\/\//.test(img)) return responder({ ok: false, motivo: 'sin_imagen', error: 'Este producto no tiene una foto publicable.' }, 400)
+      // La URL sale SOLO de products.images; nunca del frontend.
+      const fotos: unknown[] = Array.isArray(p.images) ? p.images : []
+      if ((fotoIndice as number) >= fotos.length) {
+        return fotoIndiceDado
+          ? responder({ ok: false, motivo: 'foto_no_disponible', error: 'Esa foto ya no está en el producto. Vuelve a elegirla.' }, 400)
+          : responder({ ok: false, motivo: 'sin_imagen', error: 'Este producto no tiene una foto publicable.' }, 400)
+      }
+      const bruta = fotos[fotoIndice as number]
+      const img = typeof bruta === 'string' ? bruta.trim() : ''
+      if (!/^https:\/\//.test(img) || img.length > URL_FOTO_MAX) {
+        return responder({ ok: false, motivo: 'sin_imagen', error: 'Esa foto del producto no se puede publicar.' }, 400)
+      }
+      // foto_esperada no se usa para publicar: solo detecta que el orden cambió.
+      if (fotoEsperada !== null && fotoEsperada !== img) {
+        return responder({ ok: false, motivo: 'foto_cambiada', error: 'Las fotos del producto cambiaron. Vuelve a elegir la foto.' }, 409)
+      }
       imagen = img
     }
   } else {
@@ -118,7 +152,8 @@ Deno.serve(async (req) => {
 
   const pubId = String(reserva.publicacion.id)
   const actualizar = (campos: Record<string, unknown>) => admin.from('social_publications').update(campos).eq('id', pubId)
-  await auditar(usuario.id, 'social_publish_started', pubId, { tipo, pagina: socialPageId })
+  await auditar(usuario.id, 'social_publish_started', pubId,
+    { tipo, pagina: socialPageId, ...(tipo === 'photo' ? { foto_indice: fotoIndice } : {}) })
 
   try {
     const credencial = await tokenDePagina(usuario.id, socialPageId)

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- El code y el state nunca deben salir de esta página por el Referer. -->
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Conectando Facebook…</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#080808;color:#f0f0f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+  .w{text-align:center;padding:24px;max-width:420px;}
+  .s{width:34px;height:34px;margin:0 auto 14px;border-radius:50%;border:3px solid #262626;border-top-color:#FFC01E;animation:g .8s linear infinite;}
+  @keyframes g{to{transform:rotate(360deg);}}
+  h1{font-size:17px;margin:0 0 8px;}
+  p{font-size:13px;color:#888;margin:0;line-height:1.5;}
+  ul{font-size:13px;color:#bbb;text-align:left;margin:12px auto 0;padding-left:18px;max-width:320px;}
+  a.b{display:inline-block;margin-top:18px;background:#FFC01E;color:#000;font-weight:700;font-size:14px;padding:11px 20px;border-radius:12px;text-decoration:none;}
+  .ok h1{color:#3ddc84;}
+  .err h1{color:#ff6b6b;}
+</style>
+</head>
+<body>
+<div class="w" id="w">
+  <div class="s" id="spinner"></div>
+  <p id="msg">Conectando tu Página de Facebook…</p>
+</div>
+<script>
+  // Callback de "Conectar Facebook" (Integración con redes sociales).
+  // Meta redirige aquí con ?code=...&state=... (o ?error=...). Esta página:
+  //  1) lee los parámetros y los BORRA de la barra de direcciones al instante;
+  //  2) los envía por POST a la Edge Function fb-oauth-callback, que consume el
+  //     state (un solo uso) y hace el intercambio con Meta en el servidor;
+  //  3) muestra el resultado. Nunca recibe ni guarda tokens de Facebook.
+  // Si hay sesión de RETADOR en este navegador se envía para comprobar que es
+  // la misma cuenta; si no la hay (PWA que volvió al navegador), el state basta.
+  // Sin scripts de terceros. El Service Worker no guarda esta ruta en caché.
+  (function () {
+    var FUNCION = "https://qsxtjuhueqdxoduyroli.supabase.co/functions/v1/fb-oauth-callback";
+    var CLAVE_SESION = "sb-qsxtjuhueqdxoduyroli-auth-token";
+    var q = new URLSearchParams(location.search);
+    var state = q.get("state") || "";
+    var code = q.get("code") || "";
+    var error = q.get("error") || "";
+    try { history.replaceState(null, "", location.pathname); } catch (e) {}
+
+    var cabeceras = { "Content-Type": "application/json" };
+    try {
+      var s = JSON.parse(localStorage.getItem(CLAVE_SESION) || "null");
+      if (s && s.access_token && (!s.expires_at || s.expires_at * 1000 > Date.now())) {
+        cabeceras.Authorization = "Bearer " + s.access_token;
+      }
+    } catch (e) { /* sin sesión: el state es la autoridad */ }
+
+    if (!state) {
+      pintar(false, "Enlace no válido", "Vuelve a RETADOR y toca otra vez «Conectar Facebook».", null);
+      return;
+    }
+
+    fetch(FUNCION, {
+      method: "POST", headers: cabeceras, credentials: "omit", referrerPolicy: "no-referrer",
+      body: JSON.stringify({ state: state, code: code || undefined, error: error || undefined }),
+    })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (d) {
+        if (d && d.ok) {
+          var n = (d.paginas || []).length;
+          pintar(true, "Facebook conectado",
+            n ? "Ya puedes elegir en qué Página publicar." : "Tu cuenta quedó conectada, pero no encontramos Páginas donde puedas publicar.",
+            (d.paginas || []).map(function (p) { return p.page_name; }));
+        } else {
+          pintar(false, d && d.motivo === "cancelado" ? "Conexión cancelada" : "No se pudo conectar",
+            (d && d.error) || "Vuelve a intentarlo desde RETADOR.", null);
+        }
+      })
+      .catch(function () {
+        pintar(false, "Sin conexión", "No se pudo contactar con RETADOR. Vuelve a intentarlo desde la app.", null);
+      });
+
+    function pintar(ok, titulo, mensaje, paginas) {
+      var w = document.getElementById("w");
+      w.className = "w " + (ok ? "ok" : "err");
+      document.getElementById("spinner").style.display = "none";
+      var h1 = document.createElement("h1");
+      h1.textContent = titulo;
+      var p = document.getElementById("msg");
+      p.textContent = mensaje;
+      w.insertBefore(h1, p);
+      if (paginas && paginas.length) {
+        var ul = document.createElement("ul");
+        paginas.forEach(function (n) { var li = document.createElement("li"); li.textContent = n; ul.appendChild(li); });
+        w.appendChild(ul);
+      }
+      var a = document.createElement("a");
+      a.className = "b";
+      a.href = "/?redesSociales=facebook";
+      a.textContent = "Volver a RETADOR";
+      w.appendChild(a);
+    }
+  })();
+</script>
+</body>
+</html>

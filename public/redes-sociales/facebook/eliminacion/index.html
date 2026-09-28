@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Eliminación de datos de Facebook</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#080808;color:#f0f0f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+  .w{text-align:center;padding:24px;max-width:440px;}
+  h1{font-size:17px;margin:0 0 8px;}
+  p{font-size:13px;color:#999;margin:0 0 8px;line-height:1.5;}
+  code{font-size:12px;color:#ccc;word-break:break-all;}
+  .ok h1{color:#3ddc84;}
+  .err h1{color:#ff6b6b;}
+</style>
+</head>
+<body>
+<div class="w" id="w">
+  <h1 id="t">Consultando…</h1>
+  <p id="m"></p>
+</div>
+<script>
+  // Página pública de estado que Meta muestra tras una solicitud de eliminación
+  // de datos (fb-data-deletion devuelve esta URL con ?codigo=...). Solo muestra
+  // el estado: no contiene datos personales.
+  (function () {
+    var codigo = new URLSearchParams(location.search).get("codigo") || "";
+    var t = document.getElementById("t"), m = document.getElementById("m"), w = document.getElementById("w");
+    function pintar(ok, titulo, msg) {
+      w.className = "w " + (ok ? "ok" : "err"); t.textContent = titulo; m.textContent = msg;
+      if (codigo) { var c = document.createElement("p"); c.innerHTML = "Código de confirmación:<br>"; var k = document.createElement("code"); k.textContent = codigo; c.appendChild(k); w.appendChild(c); }
+    }
+    if (!/^[A-Za-z0-9_-]{20,64}$/.test(codigo)) { pintar(false, "Código no válido", "Revisa el enlace que te dio Facebook."); return; }
+    fetch("https://qsxtjuhueqdxoduyroli.supabase.co/functions/v1/fb-data-deletion?codigo=" + encodeURIComponent(codigo), { credentials: "omit", referrerPolicy: "no-referrer" })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (d) {
+        if (d && d.status === "completed") pintar(true, "Datos eliminados", "RETADOR eliminó los datos de Facebook asociados a tu cuenta (conexión, Páginas, credenciales y registro de publicaciones). Tu cuenta de RETADOR no se eliminó.");
+        else if (d && d.status) pintar(false, "Solicitud registrada", "La eliminación no pudo completarse todavía. Escríbenos a retadormarketplace@gmail.com con tu código.");
+        else pintar(false, "No encontrada", "No existe una solicitud con este código.");
+      })
+      .catch(function () { pintar(false, "Sin conexión", "No se pudo consultar el estado. Inténtalo más tarde."); });
+  })();
+</script>
+</body>
+</html>

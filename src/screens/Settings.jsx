@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo } from "react";
-import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Globe, HelpCircle, Info, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Plus, Shield, ShoppingBag, Smartphone, Star, Trash2, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
+import { Activity, AlertCircle, ArrowLeft, Award, BarChart2, Bell, Calendar, Camera, Check, CheckCircle2, ChevronRight, Clock, CreditCard, Database, Download, Edit2, FileText, Fingerprint, Globe, HelpCircle, Info, LogOut, Mail, MapPin, MessageCircle, Package, Palette, Plus, Share2, Shield, ShoppingBag, Smartphone, Star, Trash2, TrendingUp, Truck, User, Volume2, Wallet, Zap } from "lucide-react";
 import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser, useAppVersion, CUBA_PROVINCES, ONBOARDING_PAISES, saveOnboarding, getMyVerification, signOutEverywhere, accountDeletionPrecheck, requestAccountDeletion } from "../shared/index.js";
 import { fechaBorradoTexto } from "./EliminacionPendiente.jsx";
 import { isPushSupported, hasActiveSubscription, enablePush, disablePush } from "../pwa/push.js";
+// Integración con redes sociales: el mismo cliente que usa la herramienta de video.
+import { FACEBOOK_PUBLICAR, fbEstado, fbConectar, fbElegirPredeterminada, fbDesconectar } from "../tools/promoVideo/v8/facebook.js";
 
 const CFG_DARK = {
   P:"#FFC01E", PL:"#FFC01E18",
@@ -224,6 +226,9 @@ function CFG_HomeScreen({ profile, settings, nav, onBack, user }) {
       { id:"region",        Icon:MapPin,        label:"Región",              value:regionValue, bg:"bg-lime-600" },
       { id:"deliveries",    Icon:Truck,         label:"Entregas y Envíos",   value:`${settings.deliveries.addresses.length} dirs.`,  bg:"bg-blue-600"    },
       { id:"payments",      Icon:CreditCard,    label:"Pagos",               value:`${settings.payments.methods.length} métodos`,    bg:"bg-emerald-600" },
+      // Mientras FACEBOOK_PUBLICAR siga apagado, solo la ve el admin (prueba real controlada).
+      ...(FACEBOOK_PUBLICAR || user?.role === "admin"
+        ? [{ id:"social", Icon:Share2, label:"Integración con redes sociales", bg:"bg-blue-700" }] : []),
     ]},
     { title:"Datos y Privacidad", items:[
       { id:"activity",      Icon:BarChart2,     label:"Actividad",           bg:"bg-pink-600"  },
@@ -488,6 +493,7 @@ function CFG_DeleteAccountScreen({ nav, flash }) {
         <>
           <div style={{ color:tk.T1 }} className="px-4 pt-4 text-[14px] leading-relaxed">
             Si eliminas tu cuenta tienes <b>30 días</b> para arrepentirte. Pasado ese plazo se borra para siempre y no se puede recuperar.
+            {" "}<a href="/data-deletion" style={{ color:tk.T2, textDecoration:"underline" }}>Qué se borra y qué se conserva</a>.
           </div>
           <CFG_Lbl>Al confirmar, en el momento</CFG_Lbl>
           <CFG_Crd><Lista items={[
@@ -1139,6 +1145,130 @@ function CFG_LanguageScreen({ nav, user, onUpdate, flash }) {
   );
 }
 
+/* Páginas legales públicas (estáticas, se abren sin iniciar sesión). */
+const CFG_LEGAL = [
+  ["/privacy", "Política de privacidad"],
+  ["/terms", "Términos de servicio"],
+  ["/cookies", "Cookies y almacenamiento"],
+  ["/data-deletion", "Eliminación de datos"],
+];
+
+/* ── INTEGRACIÓN CON REDES SOCIALES ───────────────────────────── */
+// Conectar Facebook, ver las Páginas donde se puede publicar, elegir la
+// predeterminada y desconectar. Todo pasa por el backend (fb-pages y
+// fb-oauth-start): aquí nunca llega un token, solo nombres y estados.
+const CFG_SOCIAL_MOTIVOS = {
+  plan_no_permitido: "Disponible en los planes Pro y Premium.",
+  cuenta_suspendida: "Tu cuenta está suspendida.",
+  eliminacion_pendiente: "Tu cuenta tiene una eliminación pendiente.",
+};
+function CFG_SocialScreen({ nav, flash }) {
+  const tk = CFG_useTk();
+  const [estado, setEstado] = useState(null);
+  const [error, setError] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const cargar = useCallback(async () => {
+    setError("");
+    try { setEstado(await fbEstado()); }
+    catch (e) { setError(e?.message || "No se pudo consultar la conexión."); }
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const conectar = async (reconectar = false) => {
+    setOcupado(true);
+    try { await fbConectar({ volverA: "ajustes", reconectar }); }
+    catch (e) { flash && flash("⚠️ " + (e?.message || "No se pudo conectar con Facebook")); setOcupado(false); }
+  };
+  const elegir = async (id) => {
+    setOcupado(true);
+    try { await fbElegirPredeterminada(id); await cargar(); }
+    catch (e) { flash && flash("⚠️ " + (e?.message || "No se pudo guardar")); }
+    setOcupado(false);
+  };
+  const desconectar = async () => {
+    if (!window.confirm("¿Desconectar Facebook? RETADOR dejará de poder publicar en tus Páginas. Lo ya publicado no se borra.")) return;
+    setOcupado(true);
+    try { await fbDesconectar(); flash && flash("Facebook desconectado"); await cargar(); }
+    catch (e) { flash && flash("⚠️ " + (e?.message || "No se pudo desconectar")); }
+    setOcupado(false);
+  };
+
+  const con = estado?.conexion;
+  const activa = con?.status === "active";
+  const caducada = con?.status === "expired";
+  const paginas = estado?.paginas || [];
+  const boton = (texto, onClick, secundario = false) => (
+    <button onClick={onClick} disabled={ocupado}
+      style={{ background: secundario ? tk.CARD2 : "#1877F2", color: secundario ? tk.T1 : "#fff", opacity: ocupado ? .6 : 1 }}
+      className="w-full rounded-xl py-2.5 text-[14px] font-semibold">{texto}</button>
+  );
+  let resumen = "Consultando…";
+  if (error) resumen = error;
+  else if (estado && !estado.configurado) resumen = "La conexión con Facebook todavía no está disponible.";
+  else if (estado && !estado.permitido) resumen = CFG_SOCIAL_MOTIVOS[estado.motivo] || "Tu plan no incluye esta función.";
+  else if (activa) resumen = `Conectado${con.external_name ? " como " + con.external_name : ""}`;
+  else if (caducada) resumen = "Facebook retiró el permiso. Vuelve a conectar.";
+  else if (estado) resumen = "Sin conectar";
+
+  return (
+    <div style={{ background:tk.BG }} className="">
+      <CFG_Hdr title="Integración con redes sociales" onBack={() => nav("home")} />
+      <CFG_Lbl>Facebook</CFG_Lbl>
+      <CFG_Crd>
+        <div style={{ background:tk.ROW }} className="flex items-center gap-2.5 px-3.5 py-3">
+          <div style={{ background:"#1877F2" }} className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white font-bold">f</div>
+          <div className="flex-1 min-w-0">
+            <div style={{ color:tk.T1 }} className="text-[14px] font-medium">Páginas de Facebook</div>
+            <div style={{ color: activa ? tk.OK_T : tk.T2 }} className="text-[12px] mt-0.5">{resumen}</div>
+          </div>
+        </div>
+      </CFG_Crd>
+
+      {estado?.configurado && estado?.permitido && !activa && (
+        <div className="mx-4 mt-3">{boton(caducada ? "Volver a conectar Facebook" : "Conectar Facebook", () => conectar(caducada))}</div>
+      )}
+
+      {activa && (
+        <>
+          <CFG_Lbl>Página donde se publica</CFG_Lbl>
+          <CFG_Crd>
+            {paginas.length === 0 && (
+              <div style={{ background:tk.ROW, color:tk.T2 }} className="px-3.5 py-3 text-[12px]">
+                No encontramos Páginas donde puedas publicar. Revisa tu rol en la Página o vuelve a conectar.
+              </div>
+            )}
+            {paginas.map((pg, i) => (
+              <div key={pg.id}>
+                {i > 0 && <CFG_Hr />}
+                <button onClick={() => !pg.is_default && elegir(pg.id)} disabled={ocupado} style={{ background:tk.ROW }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left active:opacity-60">
+                  {pg.picture_url
+                    ? <img src={pg.picture_url} alt="" className="w-8 h-8 rounded-full flex-shrink-0 object-cover" referrerPolicy="no-referrer" />
+                    : <div style={{ background:tk.CARD2, color:tk.T1 }} className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-[13px] font-bold">{String(pg.page_name || "?").charAt(0).toUpperCase()}</div>}
+                  <div style={{ color:tk.T1 }} className="flex-1 min-w-0 text-[14px] font-medium truncate">{pg.page_name}</div>
+                  {pg.is_default && (
+                    <div style={{ background:tk.P }} className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0">
+                      <Check size={10} className="text-white" strokeWidth={3} />
+                    </div>
+                  )}
+                </button>
+              </div>
+            ))}
+          </CFG_Crd>
+        </>
+      )}
+
+      {(activa || caducada) && <div className="mx-4 mt-4">{boton("Desconectar Facebook", desconectar, true)}</div>}
+
+      <p style={{ color:tk.T3 }} className="text-[11px] leading-relaxed mx-4 mt-4">
+        RETADOR solo publica cuando tú lo pides, como máximo 5 veces por hora en cada Página. Nunca vemos tu contraseña de Facebook y puedes desconectarlo cuando quieras.
+        {" "}Más información en la <a href="/privacy#facebook" style={{ color:tk.T2, textDecoration:"underline" }}>Política de privacidad</a> y en <a href="/data-deletion#facebook" style={{ color:tk.T2, textDecoration:"underline" }}>Eliminación de datos</a>.
+      </p>
+      <div className="h-8" />
+    </div>
+  );
+}
+
 /* ── HELP ─────────────────────────────────────────────────────── */
 // "¿Cómo funciona el pago?" y "¿Cómo participo en una subasta?" se quitaron:
 // describían cosas que hoy no pasan así (subastas sigue apagada) — mentira si
@@ -1225,9 +1355,15 @@ function CFG_AboutScreen({ nav }) {
       </div>
       <CFG_Lbl>Legal</CFG_Lbl>
       <CFG_Crd>
-        <div style={{ background:tk.ROW }} className="px-3.5 py-3 text-center">
-          <p style={{ color:tk.T2 }} className="text-[12px]">Política de privacidad, términos y licencias estarán disponibles próximamente.</p>
-        </div>
+        {CFG_LEGAL.map(([href, label], i) => (
+          <div key={href}>
+            {i > 0 && <CFG_Hr />}
+            <a href={href} style={{ background:tk.ROW }} className="w-full flex items-center gap-2.5 px-3.5 py-2.5 active:opacity-60">
+              <span style={{ color:tk.T1 }} className="flex-1 text-[14px] font-medium">{label}</span>
+              <ChevronRight size={13} style={{ color:tk.T3 }} />
+            </a>
+          </div>
+        ))}
       </CFG_Crd>
       <CFG_Lbl>Información</CFG_Lbl>
       <CFG_Crd>
@@ -1247,8 +1383,8 @@ function CFG_AboutScreen({ nav }) {
 }
 
 /* ── APP ──────────────────────────────────────────────────────── */
-export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTheme="auto", onThemeChange, imgScale=1, onImgScaleChange, appTextScale=1, onTextScaleChange, profileData={}, onProfileUpdate, isVerified=false, onRequestVerification, onEditProfile, blockedUsers=[], onToggleBlock, onOpenWallet, walletOn=true, orders=[], productView="grid", onProductViewChange }) {
-  const [screen, setScreen]     = useState("home");
+export function SettingsScreen({ user, pantallaInicial=null, onBack, onSignOut, onUpdate, flash, appTheme="auto", onThemeChange, imgScale=1, onImgScaleChange, appTextScale=1, onTextScaleChange, profileData={}, onProfileUpdate, isVerified=false, onRequestVerification, onEditProfile, blockedUsers=[], onToggleBlock, onOpenWallet, walletOn=true, orders=[], productView="grid", onProductViewChange }) {
+  const [screen, setScreen]     = useState(pantallaInicial || "home");
   const me0 = profileData?.name || user?.name || "Usuario";
   // Solo LECTURA aquí (nombre/correo se editan de verdad en Perfil → Editar
   // perfil): este objeto ya no se guarda hacia atrás, solo refleja lo real.
@@ -1286,6 +1422,7 @@ export function SettingsScreen({ user, onBack, onSignOut, onUpdate, flash, appTh
     language:      <CFG_LanguageScreen      {...p} />,
     help:          <CFG_HelpScreen          {...p} />,
     about:         <CFG_AboutScreen         {...p} />,
+    social:        <CFG_SocialScreen        {...p} />,
   };
   return (
     <CFG_ThemeCtx.Provider value={tk}>

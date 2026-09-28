@@ -7,7 +7,7 @@
 //   · Otros orígenes (Supabase, imágenes externas): NO se tocan → van directo a la red.
 // No interfiere con el login de Google, el perfil, los productos ni las tasas.
 // ─────────────────────────────────────────────────────────────────────────────
-const CACHE = "retador-pwa-v242";
+const CACHE = "retador-pwa-v243";
 const START = self.registration.scope; // p.ej. https://retadormarketplace.es/
 
 self.addEventListener("install", (event) => {
@@ -44,6 +44,12 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // solo mismo origen
+
+  // Callbacks de autorización (Facebook y AliExpress): llegan con ?code=&state=
+  // de un solo uso. Nunca pasan por la caché (ni se guardan ni se sirven desde
+  // ella): el navegador va siempre directo a la red.
+  const base = new URL(START).pathname;
+  if (url.pathname.startsWith(base + "redes-sociales/") || url.pathname.startsWith(base + "aliexpress/callback")) return;
 
   // Navegaciones (abrir/recargar la app): red primero, copia como respaldo.
   // Solo la PÁGINA DE INICIO se guarda como START: el Generador de Video

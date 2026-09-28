@@ -24,6 +24,11 @@ const MOTIVOS = {
   eliminacion_pendiente: "Tu cuenta tiene una eliminación pendiente.",
   limite_por_hora: "Llegaste al límite de 5 publicaciones por hora en esta Página.",
   reconectar: "Facebook retiró el permiso. Vuelve a conectar tu Página.",
+  // Publicación de fotos (mismos textos que devuelve fb-publish).
+  foto_cambiada: "Las fotos del producto cambiaron. Vuelve a elegir la foto.",
+  foto_no_disponible: "Esa foto ya no está en el producto. Vuelve a elegirla.",
+  sin_imagen: "Esa foto del producto no se puede publicar.",
+  publicacion_en_curso: "Ya hay una publicación de este producto en curso en esta Página.",
 };
 
 // Conexión con Supabase solo cuando hace falta (no pesa en la carga inicial).
@@ -34,6 +39,11 @@ async function cliente() {
 
 // Llama a una Edge Function y devuelve su respuesta; si falla, lanza un error
 // con el mensaje real del backend (nunca un token: el backend no los envía).
+// Datos extra opcionales para quien los necesite (el creador de publicaciones):
+//   e.http               código HTTP de la respuesta, si la hubo
+//   e.reintentarDespues  hora devuelta por el límite de 5 por hora
+//   e.red = true         la petición no llegó a completarse (corte de red): NO
+//                        se sabe si el servidor la recibió.
 async function invocar(nombre, cuerpo) {
   const supabase = await cliente();
   const { data, error } = await supabase.functions.invoke(nombre, { body: cuerpo });
@@ -42,6 +52,10 @@ async function invocar(nombre, cuerpo) {
     try { detalle = await error.context?.json(); } catch (_e) { /* sin cuerpo legible */ }
     const e = new Error((detalle && (MOTIVOS[detalle.motivo] || detalle.error)) || "No se pudo completar la acción con Facebook.");
     e.motivo = detalle?.motivo || null;
+    const http = Number(error.context?.status);
+    if (Number.isInteger(http) && http > 0) e.http = http;
+    if (detalle?.reintentar_despues) e.reintentarDespues = detalle.reintentar_despues;
+    if (error.name === "FunctionsFetchError") e.red = true;
     throw e;
   }
   return data;
@@ -116,12 +130,21 @@ export async function fbPublicar({ subidaId, paginaId, texto, tipo }) {
 }
 
 // Publica un producto propio como enlace (vista previa de RETADOR) o como foto.
-export async function fbPublicarProducto({ productoId, paginaId, texto, tipo = "link" }) {
-  const d = await invocar("fb-publish", {
-    social_page_id: paginaId, tipo: tipo === "photo" ? "photo" : "link",
-    idempotency_key: crypto.randomUUID(), mensaje: texto || "", product_id: productoId,
-  });
-  return { id: d.publicacion.id, status: d.publicacion.status, enlace: d.publicacion.permalink || null };
+// Foto: fotoIndice es la posición en products.images; la URL la elige SIEMPRE el
+// servidor desde la base. fotoEsperada solo sirve para que el servidor detecte
+// que el orden de fotos cambió. idempotencyKey: si llega, se usa tal cual (así
+// un reintento tras un corte de red no publica dos veces); si no, se genera una.
+// Esta función nunca cambia la clave por su cuenta: eso lo decide quien llama.
+export async function fbPublicarProducto({ productoId, paginaId, texto, tipo = "link", fotoIndice, fotoEsperada, idempotencyKey } = {}) {
+  const esFoto = tipo === "photo";
+  const cuerpo = {
+    social_page_id: paginaId, tipo: esFoto ? "photo" : "link",
+    idempotency_key: idempotencyKey || crypto.randomUUID(), mensaje: texto || "", product_id: productoId,
+  };
+  if (esFoto && fotoIndice !== undefined && fotoIndice !== null) cuerpo.foto_indice = fotoIndice;
+  if (esFoto && fotoEsperada !== undefined && fotoEsperada !== null) cuerpo.foto_esperada = fotoEsperada;
+  const d = await invocar("fb-publish", cuerpo);
+  return { id: d.publicacion.id, status: d.publicacion.status, enlace: d.publicacion.permalink || null, reutilizada: !!d.reutilizada };
 }
 
 // Facebook procesa el video de forma asíncrona: consulta con la espera que

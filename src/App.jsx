@@ -55,6 +55,7 @@ const OmniPanel = lazy(() => import("./screens/AdminPanel.jsx"));
 const WalletApp = lazy(() => import("./screens/Wallet.jsx"));
 const ProductToolsApp = lazy(() => import("./screens/ProductTools.jsx"));
 const PromoVideoTool = lazy(() => import("./tools/promoVideo/PromoVideoTool.jsx"));
+const CreadorPublicaciones = lazy(() => import("./tools/creadorPublicaciones/CreadorPublicaciones.jsx"));
 const CourierFlow = lazy(() => import("./screens/Courier.jsx").then(m => ({ default: m.CourierFlow })));
 const SubastasScreen = lazy(() => import("./screens/Auctions.jsx").then(m => ({ default: m.SubastasScreen })));
 // Relleno neutro mientras se descarga el código de una pantalla cargada bajo
@@ -62,6 +63,9 @@ const SubastasScreen = lazy(() => import("./screens/Auctions.jsx").then(m => ({ 
 // caché). Nunca pantalla en blanco/negra sin explicación.
 const LazyFallback = () => <div style={{ position: "fixed", inset: 0, zIndex: 4000, background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center" }}><Spin size={32} /></div>;
 import { SettingsScreen } from "./screens/Settings.jsx";
+// Interruptor de la publicación en Facebook (mientras esté apagado, "Crear
+// publicación" solo lo ve el admin, igual que Ajustes → redes sociales).
+import { FACEBOOK_PUBLICAR } from "./tools/promoVideo/v8/facebook.js";
 import { PantallaEliminacionPendiente } from "./screens/EliminacionPendiente.jsx";
 import { FreeProfileScreen, ProfileMenuDrawer, FollowingListScreen } from "./screens/Profile.jsx";
 import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
@@ -604,6 +608,7 @@ function AppShell({ sessionUser, platformStats = null }) {
   const [showTools, setShowTools] = useState(false);
   const [toolApp, setToolApp] = useState(false);
   const [promoVideoOpen, setPromoVideoOpen] = useState(false); // Generador de Video Promocional
+  const [creadorPubOpen, setCreadorPubOpen] = useState(false); // Marketing y publicidad → Crear publicación
   // Producto con el que abrir el generador (estilo Directo) y aviso tras publicar/guardar.
   const [promoVideoInicial, setPromoVideoInicial] = useState(null);
   const [videoOffer, setVideoOffer] = useState(null); // { producto, texto }
@@ -1346,10 +1351,18 @@ function AppShell({ sessionUser, platformStats = null }) {
     return () => { alive = false; };
   }, [isProStore, user?.id]);
   const myStoreProducts = useMemo(() => [...ownListings, ...ownArchived].filter(p => p.kind !== "service"), [ownListings, ownArchived]);
-  // Generador de video: solo productos PUBLICADOS del vendedor (activos, aprobados, sin archivar).
-  const promoVideoProductos = useMemo(() => ownListings
-    .filter(p => p.kind !== "service" && p.status === "active" && p.moderation_status === "approved" && !p.archived_at)
-    .map(aProductoDeVideo), [ownListings]);
+  // Productos PUBLICADOS del vendedor (activos, aprobados, sin archivar): los
+  // usan el Generador de video y "Crear publicación". Filtro solo visual: el
+  // backend vuelve a comprobarlo todo.
+  const misProductosPublicados = useMemo(() => ownListings
+    .filter(p => p.kind !== "service" && p.status === "active" && p.moderation_status === "approved" && !p.archived_at),
+    [ownListings]);
+  const promoVideoProductos = useMemo(() => misProductosPublicados.map(aProductoDeVideo), [misProductosPublicados]);
+  // "Crear publicación": solo los datos que usa (todas las fotos, en su orden original).
+  const creadorPubProductos = useMemo(() => misProductosPublicados.map(p => ({
+    id: p.id, title: p.title || "", price: p.price, currency: p.currency, description: p.description || "",
+    images: Array.isArray(p.images) ? p.images : [],
+  })), [misProductosPublicados]);
   const myStoreOrders = useMemo(() => orders.filter(o => o.sellerId === user?.id), [orders, user?.id]);
   const storeApi = {
     onNewProduct: () => setPubOpen("product"),
@@ -1497,9 +1510,9 @@ function AppShell({ sessionUser, platformStats = null }) {
   // (Va DESPUÉS de declarar todos los estados de navegación que lee, incl. selOrderId.)
   // Estado de navegación actual (pantallas + modales) y su "firma" para comparar.
   const navSnap = { tab, mScr, pScr, eScr, selProd, selSeller, selOrderId, prodBackTo,
-    plusMenu, showCourier, toolApp, promoVideoOpen, showTools, showAdmin, showWallet, showFollowing, chatOpen, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
+    plusMenu, showCourier, toolApp, promoVideoOpen, creadorPubOpen, showTools, showAdmin, showWallet, showFollowing, chatOpen, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
   const navSig = [tab, mScr, pScr, eScr, (selProd && selProd.id) || selProd || 0, selSeller || 0, selOrderId || 0, prodBackTo || 0,
-    !!plusMenu, !!showCourier, !!toolApp, !!promoVideoOpen, !!showTools, !!showAdmin, !!showWallet, !!showFollowing, !!chatOpen, !!showNotif, !!showCats, !!pubOpen, !!buyModal, !!confirmCfg, !!editProd].join("|");
+    !!plusMenu, !!showCourier, !!toolApp, !!promoVideoOpen, !!creadorPubOpen, !!showTools, !!showAdmin, !!showWallet, !!showFollowing, !!chatOpen, !!showNotif, !!showCats, !!pubOpen, !!buyModal, !!confirmCfg, !!editProd].join("|");
 
   const stackRef = useRef([]);      // [{sig, snap}] una entrada por cada paso hacia adelante
   const lastRef = useRef(null);     // {sig, snap} del estado actual
@@ -1509,7 +1522,7 @@ function AppShell({ sessionUser, platformStats = null }) {
   const applySnap = (sn) => {
     setTab(sn.tab); setMScr(sn.mScr); setPScr(sn.pScr); setEScr(sn.eScr);
     setSelProd(sn.selProd); setSelSeller(sn.selSeller); setSelOrderId(sn.selOrderId); setProdBackTo(sn.prodBackTo);
-    setPlusMenu(sn.plusMenu); setShowCourier(sn.showCourier); setToolApp(sn.toolApp); setPromoVideoOpen(!!sn.promoVideoOpen); setShowTools(sn.showTools);
+    setPlusMenu(sn.plusMenu); setShowCourier(sn.showCourier); setToolApp(sn.toolApp); setPromoVideoOpen(!!sn.promoVideoOpen); setCreadorPubOpen(!!sn.creadorPubOpen); setShowTools(sn.showTools);
     setShowAdmin(sn.showAdmin); setShowWallet(sn.showWallet); setShowFollowing(sn.showFollowing); setChatOpen(sn.chatOpen); setShowNotif(sn.showNotif);
     setShowCats(sn.showCats); setPubOpen(sn.pubOpen); setBuyModal(sn.buyModal); setConfirmCfg(sn.confirmCfg); setEditProd(sn.editProd);
   };
@@ -2305,15 +2318,18 @@ function AppShell({ sessionUser, platformStats = null }) {
               </div>
             </div>
 
+            {/* ── Marketing y publicidad ── */}
+            <h2 style={{ fontSize: 13, fontWeight: 800, color: t2, textTransform: "uppercase", letterSpacing: ".06em", margin: "24px 2px 0" }}>Marketing y publicidad</h2>
+
             {/* Generador de Video Promocional — visible para TODOS los planes
                 (gratis incluido). Los gratis exportan con marca de agua. */}
-            <div style={{ marginTop: 14, background: card, border: `1px solid ${bd}`, borderRadius: 18, overflow: "hidden" }}>
+            <div style={{ marginTop: 10, background: card, border: `1px solid ${bd}`, borderRadius: 18, overflow: "hidden" }}>
               <div style={{ height: 90, background: "linear-gradient(135deg,#F26B0F,#FFB25B)", position: "relative", display: "flex", alignItems: "center", padding: "0 18px", overflow: "hidden" }}>
                 <span style={{ fontSize: 38, position: "relative" }}>🎬</span>
                 <span style={{ position: "absolute", top: 12, right: 12, fontSize: 10, fontWeight: 800, color: "#7a2e00", background: "rgba(255,255,255,.85)", borderRadius: 100, padding: "3px 9px" }}>PARA TODOS</span>
               </div>
               <div style={{ padding: "16px 18px 18px" }}>
-                <h2 style={{ fontSize: 17, fontWeight: 800, color: t1, marginBottom: 6 }}>Video Promocional</h2>
+                <h2 style={{ fontSize: 17, fontWeight: 800, color: t1, marginBottom: 6 }}>Crear vídeo</h2>
                 <p style={{ fontSize: 13, lineHeight: 1.55, color: t2, marginBottom: 14 }}>
                   Crea un video vertical para <b style={{ color: t1 }}>Reels, Stories y TikTok</b> con tus productos, precios y reseñas. Elige entre 5 estilos de animación y descárgalo en tu teléfono — todo se genera en tu dispositivo.
                 </p>
@@ -2325,6 +2341,24 @@ function AppShell({ sessionUser, platformStats = null }) {
                 <button onClick={() => setPromoVideoOpen(true)} style={{ width: "100%", height: 46, borderRadius: 12, border: "none", background: "#F26B0F", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>Abrir herramienta →</button>
               </div>
             </div>
+
+            {/* Crear publicación (foto de un producto → Página de Facebook).
+                Mientras FACEBOOK_PUBLICAR siga apagado, solo la ve el admin. */}
+            {(FACEBOOK_PUBLICAR || isOwner) && (
+              <div style={{ marginTop: 14, background: card, border: `1px solid ${bd}`, borderRadius: 18, overflow: "hidden" }}>
+                <div style={{ height: 90, background: "linear-gradient(135deg,#1877F2,#FFC01E)", position: "relative", display: "flex", alignItems: "center", padding: "0 18px", overflow: "hidden" }}>
+                  <span style={{ fontSize: 38, position: "relative" }}>📸</span>
+                  <span style={{ position: "absolute", top: 12, right: 12, fontSize: 10, fontWeight: 800, color: "#0b3a82", background: "rgba(255,255,255,.85)", borderRadius: 100, padding: "3px 9px" }}>FACEBOOK</span>
+                </div>
+                <div style={{ padding: "16px 18px 18px" }}>
+                  <h2 style={{ fontSize: 17, fontWeight: 800, color: t1, marginBottom: 6 }}>Crear publicación</h2>
+                  <p style={{ fontSize: 13, lineHeight: 1.55, color: t2, marginBottom: 14 }}>
+                    Publica una foto de tu producto en tu <b style={{ color: t1 }}>Página de Facebook</b>, con un texto preparado a partir de tus datos reales que puedes editar.
+                  </p>
+                  <button onClick={() => setCreadorPubOpen(true)} style={{ width: "100%", height: 46, borderRadius: 12, border: "none", background: "#FFC01E", color: "#1a1200", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>Abrir herramienta →</button>
+                </div>
+              </div>
+            )}
 
             <div style={{ marginTop: 14, background: card, border: `1px dashed ${bd}`, borderRadius: 16, padding: "18px", textAlign: "center" }}>
               <span style={{ fontSize: 22, opacity: .5 }}>🧩</span>
@@ -2355,6 +2389,18 @@ function AppShell({ sessionUser, platformStats = null }) {
           </Suspense>
         </div>;
       })()}
+      {creadorPubOpen && (
+        <div style={{ position: "fixed", top: 0, left: 0, zIndex: 4100, width: `calc(100vw / ${densZoom})`, height: `calc(100dvh / ${densZoom})`, overflowY: "auto", WebkitOverflowScrolling: "touch", background: effectiveTheme === "dark" ? "#0a0a0a" : "#f1f5f9", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+          <Suspense fallback={<LazyFallback />}>
+            <CreadorPublicaciones
+              productos={creadorPubProductos}
+              dark={effectiveTheme === "dark"}
+              onBack={() => setCreadorPubOpen(false)}
+              onRecargar={reloadOwn}
+            />
+          </Suspense>
+        </div>
+      )}
       {videoOffer && !promoVideoOpen && (
         <div role="status" style={{ position: "fixed", left: "50%", bottom: "calc(86px + env(safe-area-inset-bottom, 0px))", transform: "translateX(-50%)", zIndex: 4050, width: "min(92vw, 420px)", background: effectiveTheme === "dark" ? "#1c1c22" : "#ffffff", color: effectiveTheme === "dark" ? "#f0f0f2" : "#0f172a", border: `1px solid ${effectiveTheme === "dark" ? "rgba(255,255,255,.1)" : "rgba(0,0,0,.1)"}`, borderRadius: 16, boxShadow: "0 10px 30px rgba(0,0,0,.35)", padding: "12px 12px 12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 22 }}>🎬</span>

@@ -4,7 +4,7 @@ import { DENSITY_TOKENS, TEXT_STEPS, money, useDensity, signOutUser, useAppVersi
 import { fechaBorradoTexto } from "./EliminacionPendiente.jsx";
 import { isPushSupported, hasActiveSubscription, enablePush, disablePush } from "../pwa/push.js";
 // Integración con redes sociales: el mismo cliente que usa la herramienta de video.
-import { FACEBOOK_PUBLICAR, fbEstado, fbConectar, fbElegirPredeterminada, fbDesconectar } from "../tools/promoVideo/v8/facebook.js";
+import { fbEstado, fbEstadoCacheado, fbPuedeUsar, fbConectar, fbElegirPredeterminada, fbDesconectar } from "../tools/promoVideo/v8/facebook.js";
 
 const CFG_DARK = {
   P:"#FFC01E", PL:"#FFC01E18",
@@ -211,6 +211,16 @@ function CFG_HomeScreen({ profile, settings, nav, onBack, user }) {
   const shopCountry = user?.profile?.shop_country || null;
   const shopProvince = user?.profile?.shop_province || null;
   const regionValue = shopProvince || paisLabel[shopCountry] || "Sin elegir";
+  // "Integración con redes sociales": la muestra el backend (fb-pages), no el rol.
+  // Visible si el plan permite Facebook o si ya hay una conexión (desconectar
+  // debe ser posible siempre, aunque el plan ya no lo incluya).
+  const [verSocial, setVerSocial] = useState(false);
+  useEffect(() => {
+    if (!user?.id) return;
+    let vivo = true;
+    fbEstadoCacheado().then((e) => { if (vivo) setVerSocial(fbPuedeUsar(e) || !!e?.conexion); });
+    return () => { vivo = false; };
+  }, [user?.id]);
   const sections = [
     { title:"Cuenta", items:[
       { id:"account",       Icon:User,         label:"Cuenta",              value:profile.name, bg:"bg-violet-600" },
@@ -226,8 +236,7 @@ function CFG_HomeScreen({ profile, settings, nav, onBack, user }) {
       { id:"region",        Icon:MapPin,        label:"Región",              value:regionValue, bg:"bg-lime-600" },
       { id:"deliveries",    Icon:Truck,         label:"Entregas y Envíos",   value:`${settings.deliveries.addresses.length} dirs.`,  bg:"bg-blue-600"    },
       { id:"payments",      Icon:CreditCard,    label:"Pagos",               value:`${settings.payments.methods.length} métodos`,    bg:"bg-emerald-600" },
-      // Mientras FACEBOOK_PUBLICAR siga apagado, solo la ve el admin (prueba real controlada).
-      ...(FACEBOOK_PUBLICAR || user?.role === "admin"
+      ...(verSocial
         ? [{ id:"social", Icon:Share2, label:"Integración con redes sociales", bg:"bg-blue-700" }] : []),
     ]},
     { title:"Datos y Privacidad", items:[

@@ -22,8 +22,8 @@ import { setWatermarkLogo } from "./salida.js";
 const ORIGEN = window.location.origin;
 const LOGO = import.meta.env.BASE_URL + "icons/icon-192.png";
 
-function avisarApp(tipo) {
-  if (window.parent && window.parent !== window) window.parent.postMessage({ fuente: "retador-video", tipo }, ORIGEN);
+function avisarApp(tipo, datos) {
+  if (window.parent && window.parent !== window) window.parent.postMessage({ fuente: "retador-video", tipo, datos }, ORIGEN);
 }
 
 // El canvas no espera a las fuentes ni al logo: se cargan antes del primer dibujo.
@@ -47,7 +47,7 @@ window.addEventListener("message", async function (e) {
     const datos = e.data.datos || {};
     document.documentElement.setAttribute("data-theme", datos.tema === "dark" ? "dark" : "light");
     await Promise.all([logoListo, fuentesListas]);
-    editor = iniciarEditor(Object.assign({}, datos, { onPlanes: () => avisarApp("planes") }));
+    editor = iniciarEditor(Object.assign({}, datos, { onPlanes: () => avisarApp("planes"), onFacebook: (d) => avisarApp("facebook", d) }));
     if (pendiente) { editor.actualizar(pendiente); pendiente = null; }
   } else if (e.data.tipo === "actualizar") {
     if (editor) editor.actualizar(e.data.datos); else pendiente = Object.assign({}, pendiente, e.data.datos);

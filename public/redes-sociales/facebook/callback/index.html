@@ -67,17 +67,21 @@
           var n = (d.paginas || []).length;
           pintar(true, "Facebook conectado",
             n ? "Ya puedes elegir en qué Página publicar." : "Tu cuenta quedó conectada, pero no encontramos Páginas donde puedas publicar.",
-            (d.paginas || []).map(function (p) { return p.page_name; }));
+            (d.paginas || []).map(function (p) { return p.page_name; }), d.return_to);
         } else {
           pintar(false, d && d.motivo === "cancelado" ? "Conexión cancelada" : "No se pudo conectar",
-            (d && d.error) || "Vuelve a intentarlo desde RETADOR.", null);
+            (d && d.error) || "Vuelve a intentarlo desde RETADOR.", null, d && d.return_to);
         }
       })
       .catch(function () {
         pintar(false, "Sin conexión", "No se pudo contactar con RETADOR. Vuelve a intentarlo desde la app.", null);
       });
 
-    function pintar(ok, titulo, mensaje, paginas) {
+    // Vuelve a la pantalla desde donde se tocó "Conectar Facebook". El destino
+    // lo guarda el backend junto al state (fb-oauth-start) y lo devuelve
+    // fb-oauth-callback; aquí solo se aceptan los mismos valores que el backend.
+    var DESTINOS = ["ajustes", "herramienta-video", "producto"];
+    function pintar(ok, titulo, mensaje, paginas, volverA) {
       var w = document.getElementById("w");
       w.className = "w " + (ok ? "ok" : "err");
       document.getElementById("spinner").style.display = "none";
@@ -93,7 +97,9 @@
       }
       var a = document.createElement("a");
       a.className = "b";
-      a.href = "/?redesSociales=facebook";
+      // "ajustes" (el primero) es el destino de siempre y no necesita parámetro.
+      a.href = "/?redesSociales=facebook" +
+        (DESTINOS.indexOf(volverA) > 0 ? "&volver=" + encodeURIComponent(volverA) : "");
       a.textContent = "Volver a RETADOR";
       w.appendChild(a);
     }

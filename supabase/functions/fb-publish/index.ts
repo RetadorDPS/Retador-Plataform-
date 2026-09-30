@@ -1,12 +1,18 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // fb-publish — publica en una Página de Facebook (verify_jwt = true).
 //
-// POST { social_page_id, tipo: 'link'|'photo'|'video'|'reel', idempotency_key,
-//        product_id?, mensaje?, storage_path?, foto_indice?, foto_esperada? }
+// POST { social_page_id, tipo: 'link'|'photo'|'photos'|'video'|'reel', idempotency_key,
+//        product_id?, mensaje?, storage_path?, foto_indice?, foto_esperada?,
+//        fotos?: [{ product_id, foto_indice, foto_esperada? }] }
 //
 // 'photo': foto_indice es la posición dentro de products.images (0 si no llega).
 // La URL SIEMPRE sale del registro del producto; foto_esperada (opcional) solo
 // se compara con ella para detectar que el orden de fotos cambió.
+// 'photos': UNA publicación con varias fotos (de uno o varios productos propios).
+// Cada foto se valida igual que 'photo'. Se reserva UNA sola publicación (una
+// clave de idempotencia, cuenta 1 en el límite por hora, product_id nulo para
+// no bloquear por producto); Meta descarga cada foto como no publicada y después
+// se crea un único post en el feed con attached_media.
 //
 // Orden de comprobaciones (todas en el servidor):
 //  1) sesión; 2) plan central (Gratis y Empresas no, Pro y Premium sí; ni
@@ -28,7 +34,10 @@ import {
 } from '../_shared/social.ts'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const TIPOS = ['link', 'photo', 'video', 'reel']
+const TIPOS = ['link', 'photo', 'photos', 'video', 'reel']
+// Máximo de fotos por publicación. Prudente a propósito: Meta no publica una cifra
+// clara. Para cambiarlo, cambiar también FB_FOTOS_MAX en facebook.js.
+const FOTOS_MAX = 6
 const DURACION_URL_FIRMADA = 2 * 60 * 60 // 2 h: Meta descarga el video de forma asíncrona
 const FOTO_INDICE_MAX = 199
 const URL_FOTO_MAX = 2000
@@ -47,6 +56,26 @@ const MOTIVOS: Record<string, [number, string]> = {
 // Texto del usuario: sin caracteres de control (salvo saltos de línea), máx. 5000.
 const limpiarMensaje = (s: unknown) =>
   String(s ?? '').replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, '').slice(0, 5000).trim()
+
+// URL de la foto número `indice` de products.images, o la respuesta de error.
+// La URL sale SOLO de la base; foto_esperada solo detecta que el orden cambió.
+function fotoDeProducto(images: unknown, indice: number, esperada: string | null, indiceDado: boolean): string | Response {
+  const fotos: unknown[] = Array.isArray(images) ? images : []
+  if (indice >= fotos.length) {
+    return indiceDado
+      ? responder({ ok: false, motivo: 'foto_no_disponible', error: 'Esa foto ya no está en el producto. Vuelve a elegirla.' }, 400)
+      : responder({ ok: false, motivo: 'sin_imagen', error: 'Este producto no tiene una foto publicable.' }, 400)
+  }
+  const bruta = fotos[indice]
+  const img = typeof bruta === 'string' ? bruta.trim() : ''
+  if (!/^https:\/\//.test(img) || img.length > URL_FOTO_MAX) {
+    return responder({ ok: false, motivo: 'sin_imagen', error: 'Esa foto del producto no se puede publicar.' }, 400)
+  }
+  if (esperada !== null && esperada !== img) {
+    return responder({ ok: false, motivo: 'foto_cambiada', error: 'Las fotos del producto cambiaron. Vuelve a elegir la foto.' }, 409)
+  }
+  return img
+}
 
 function rechazo(motivo: string, extra: Record<string, unknown> = {}): Response {
   const [estado, texto] = MOTIVOS[motivo] ?? [400, 'No se pudo publicar.']
@@ -84,11 +113,35 @@ Deno.serve(async (req) => {
     return responder({ ok: false, motivo: 'datos_invalidos', error: 'Datos de publicación no válidos.' }, 400)
   }
 
+  // Varias fotos: lista de { product_id, foto_indice, foto_esperada? }, sin repetidas.
+  let lista: { productId: string; indice: number; esperada: string | null }[] = []
+  if (tipo === 'photos') {
+    const bruta = Array.isArray(c.fotos) ? c.fotos : null
+    // Sin product_id ni storage_path sueltos: los productos van dentro de la lista.
+    if (productId || storagePath) return responder({ ok: false, motivo: 'datos_invalidos', error: 'Datos de publicación no válidos.' }, 400)
+    if (!bruta || bruta.length < 2 || bruta.length > FOTOS_MAX) {
+      return responder({ ok: false, motivo: 'datos_invalidos', error: `Elige entre 2 y ${FOTOS_MAX} fotos.` }, 400)
+    }
+    const vistas = new Set<string>()
+    for (const f of bruta as Record<string, unknown>[]) {
+      const pid = String(f?.product_id ?? '')
+      const ind = f?.foto_indice
+      const esp = f?.foto_esperada === undefined || f?.foto_esperada === null ? null : f.foto_esperada
+      if (!UUID.test(pid) || !Number.isInteger(ind) || (ind as number) < 0 || (ind as number) > FOTO_INDICE_MAX ||
+          (esp !== null && (typeof esp !== 'string' || esp.length > URL_FOTO_MAX)) || vistas.has(`${pid}:${ind}`)) {
+        return responder({ ok: false, motivo: 'datos_invalidos', error: 'Datos de publicación no válidos.' }, 400)
+      }
+      vistas.add(`${pid}:${ind}`)
+      lista.push({ productId: pid, indice: ind as number, esperada: esp as string | null })
+    }
+  }
+
   const permiso = await permisoDePlan(usuario.id)
   if (!permiso.permitido) return rechazo(permiso.motivo ?? 'plan_no_permitido')
 
   // ── Datos de lo que se publica (antes de reservar: un rechazo aquí no gasta cupo)
   let enlace = '', imagen = ''
+  const imagenes: string[] = []   // 'photos': URLs sacadas de la base, en el orden elegido
   if (tipo === 'link' || tipo === 'photo') {
     if (!productId) return responder({ ok: false, motivo: 'falta_producto', error: 'Elige un producto.' }, 400)
     const { data: p } = await admin.from('products').select('id, seller_id, status, archived_at, moderation_status, images')
@@ -108,23 +161,23 @@ Deno.serve(async (req) => {
         return responder({ ok: false, motivo: 'enlace_no_disponible', error: 'La página pública de este producto todavía no está lista. Prueba en unos minutos.' }, 409)
       }
     } else {
-      // La URL sale SOLO de products.images; nunca del frontend.
-      const fotos: unknown[] = Array.isArray(p.images) ? p.images : []
-      if ((fotoIndice as number) >= fotos.length) {
-        return fotoIndiceDado
-          ? responder({ ok: false, motivo: 'foto_no_disponible', error: 'Esa foto ya no está en el producto. Vuelve a elegirla.' }, 400)
-          : responder({ ok: false, motivo: 'sin_imagen', error: 'Este producto no tiene una foto publicable.' }, 400)
-      }
-      const bruta = fotos[fotoIndice as number]
-      const img = typeof bruta === 'string' ? bruta.trim() : ''
-      if (!/^https:\/\//.test(img) || img.length > URL_FOTO_MAX) {
-        return responder({ ok: false, motivo: 'sin_imagen', error: 'Esa foto del producto no se puede publicar.' }, 400)
-      }
-      // foto_esperada no se usa para publicar: solo detecta que el orden cambió.
-      if (fotoEsperada !== null && fotoEsperada !== img) {
-        return responder({ ok: false, motivo: 'foto_cambiada', error: 'Las fotos del producto cambiaron. Vuelve a elegir la foto.' }, 409)
-      }
-      imagen = img
+      const r = fotoDeProducto(p.images, fotoIndice as number, fotoEsperada as string | null, fotoIndiceDado)
+      if (r instanceof Response) return r
+      imagen = r
+    }
+  } else if (tipo === 'photos') {
+    // Todos los productos en UNA consulta; cada foto con las mismas reglas que 'photo'.
+    const ids = [...new Set(lista.map((f) => f.productId))]
+    const { data: filas } = await admin.from('products').select('id, seller_id, status, archived_at, moderation_status, images')
+      .in('id', ids)
+    const porId = new Map((filas ?? []).map((p: Record<string, unknown>) => [String(p.id), p]))
+    for (const f of lista) {
+      const p = porId.get(f.productId) as Record<string, unknown> | undefined
+      if (!p || p.seller_id !== usuario.id || p.status !== 'active' || p.archived_at !== null ||
+          p.moderation_status !== 'approved') return rechazo('producto_no_disponible')
+      const r = fotoDeProducto(p.images, f.indice, f.esperada, true)
+      if (r instanceof Response) return r
+      imagenes.push(r)
     }
   } else {
     // Video: solo de la carpeta del propio usuario en el bucket privado.
@@ -152,8 +205,13 @@ Deno.serve(async (req) => {
 
   const pubId = String(reserva.publicacion.id)
   const actualizar = (campos: Record<string, unknown>) => admin.from('social_publications').update(campos).eq('id', pubId)
-  await auditar(usuario.id, 'social_publish_started', pubId,
-    { tipo, pagina: socialPageId, ...(tipo === 'photo' ? { foto_indice: fotoIndice } : {}) })
+  if (tipo === 'photos') {
+    await actualizar({ media: lista.map((f) => ({ product_id: f.productId, foto_indice: f.indice })) })
+  }
+  await auditar(usuario.id, 'social_publish_started', pubId, {
+    tipo, pagina: socialPageId,
+    ...(tipo === 'photo' ? { foto_indice: fotoIndice } : {}), ...(tipo === 'photos' ? { fotos: lista.length } : {}),
+  })
 
   try {
     const credencial = await tokenDePagina(usuario.id, socialPageId)
@@ -173,6 +231,39 @@ Deno.serve(async (req) => {
       await actualizar({ status: 'published', facebook_post_id: postId.slice(0, 100), permalink, published_at: new Date().toISOString() })
       await auditar(usuario.id, 'social_publish_completed', pubId, { tipo })
       return responder({ ok: true, publicacion: { id: pubId, status: 'published', permalink } })
+    }
+
+    if (tipo === 'photos') {
+      // 1) Meta descarga cada foto (de la base) como NO publicada; 2) un único post
+      // en el feed las adjunta. Si algo falla a mitad, se borran las ya subidas.
+      const subidas: string[] = []
+      try {
+        for (const url of imagenes) {
+          const f = await grafo('foto_sin_publicar', `${pageId}/photos`, { metodo: 'POST', token, cuerpo: { url, published: 'false' } })
+          const id = String(f.id ?? '')
+          if (!/^[0-9]{1,32}$/.test(id)) throw new ErrorMeta('foto_sin_publicar', 'sin_id', '', 'Meta no devolvió la foto')
+          subidas.push(id)
+        }
+        const cuerpo: Record<string, string> = { message: mensaje }
+        subidas.forEach((id, i) => { cuerpo[`attached_media[${i}]`] = JSON.stringify({ media_fbid: id }) })
+        const r = await grafo('publicar_fotos', `${pageId}/feed`, { metodo: 'POST', token, cuerpo })
+        const postId = String(r.id ?? '')
+        let permalink: string | null = null
+        try {
+          const d = await grafo('permalink', postId, { token, params: { fields: 'permalink_url' } })
+          permalink = typeof d.permalink_url === 'string' ? d.permalink_url : null
+        } catch (_e) { /* el enlace es opcional: la publicación ya existe */ }
+        await actualizar({
+          status: 'published', facebook_post_id: postId.slice(0, 100), permalink, published_at: new Date().toISOString(),
+          media: lista.map((f, i) => ({ product_id: f.productId, foto_indice: f.indice, facebook_photo_id: subidas[i] })),
+        })
+        await auditar(usuario.id, 'social_publish_completed', pubId, { tipo, fotos: subidas.length })
+        return responder({ ok: true, publicacion: { id: pubId, status: 'published', permalink } })
+      } catch (e) {
+        // Las fotos no publicadas no se ven en la Página; se borran igualmente.
+        for (const id of subidas) await grafo('borrar_foto', id, { metodo: 'DELETE', token }).catch(() => {})
+        throw e
+      }
     }
 
     // Video: URL firmada de duración limitada para que Meta lo descargue.

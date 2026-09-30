@@ -56,6 +56,7 @@ const WalletApp = lazy(() => import("./screens/Wallet.jsx"));
 const ProductToolsApp = lazy(() => import("./screens/ProductTools.jsx"));
 const PromoVideoTool = lazy(() => import("./tools/promoVideo/PromoVideoTool.jsx"));
 const CreadorPublicaciones = lazy(() => import("./tools/creadorPublicaciones/CreadorPublicaciones.jsx"));
+const PublicarVideoFacebook = lazy(() => import("./tools/promoVideo/PublicarVideoFacebook.jsx"));
 const CourierFlow = lazy(() => import("./screens/Courier.jsx").then(m => ({ default: m.CourierFlow })));
 const SubastasScreen = lazy(() => import("./screens/Auctions.jsx").then(m => ({ default: m.SubastasScreen })));
 // Relleno neutro mientras se descarga el código de una pantalla cargada bajo
@@ -65,7 +66,8 @@ const LazyFallback = () => <div style={{ position: "fixed", inset: 0, zIndex: 40
 import { SettingsScreen } from "./screens/Settings.jsx";
 // Interruptor de la publicación en Facebook (mientras esté apagado, "Crear
 // publicación" solo lo ve el admin, igual que Ajustes → redes sociales).
-import { FACEBOOK_PUBLICAR } from "./tools/promoVideo/v8/facebook.js";
+import { fbEstadoCacheado, fbPuedeUsar } from "./tools/promoVideo/v8/facebook.js";
+import { limpiarVideoCaducado } from "./tools/promoVideo/videoPendiente.js";
 import { PantallaEliminacionPendiente } from "./screens/EliminacionPendiente.jsx";
 import { FreeProfileScreen, ProfileMenuDrawer, FollowingListScreen } from "./screens/Profile.jsx";
 import { MessagesScreen, ChatScreen } from "./screens/Messages.jsx";
@@ -609,6 +611,19 @@ function AppShell({ sessionUser, platformStats = null }) {
   const [toolApp, setToolApp] = useState(false);
   const [promoVideoOpen, setPromoVideoOpen] = useState(false); // Generador de Video Promocional
   const [creadorPubOpen, setCreadorPubOpen] = useState(false); // Marketing y publicidad → Crear publicación
+  // "Publicar en Facebook" desde un video terminado: { video, productos, texto }
+  // (el archivo real y el texto de Compartir) o { restaurar: true } al volver de
+  // conectar Facebook (el video se recupera de IndexedDB, ver videoPendiente.js).
+  const [fbVideo, setFbVideo] = useState(null);
+  // ¿Se muestra "Crear publicación"? Lo decide el backend (fb-pages: configurado
+  // y plan permitido), no el rol. Se pregunta al abrir Herramientas.
+  const [fbVisible, setFbVisible] = useState(false);
+  useEffect(() => {
+    if (!showTools || !user?.id) return;
+    let vivo = true;
+    fbEstadoCacheado().then((e) => { if (vivo) setFbVisible(fbPuedeUsar(e)); });
+    return () => { vivo = false; };
+  }, [showTools, user?.id]);
   // Producto con el que abrir el generador (estilo Directo) y aviso tras publicar/guardar.
   const [promoVideoInicial, setPromoVideoInicial] = useState(null);
   const [videoOffer, setVideoOffer] = useState(null); // { producto, texto }
@@ -1221,17 +1236,24 @@ function AppShell({ sessionUser, platformStats = null }) {
   // deep link tiene que ser un query param leído aquí, igual que openConv/openOrder.
   useEffect(() => {
     if (!user?.id) return;
-    let convId = null, orderId = null, productId = null, profileId = null, redesSociales = null;
+    let convId = null, orderId = null, productId = null, profileId = null, redesSociales = null, volver = null;
     try {
       const q = new URLSearchParams(window.location.search);
       convId = q.get("openConv"); orderId = q.get("openOrder");
       productId = q.get("openProduct"); profileId = q.get("openProfile");
       // Vuelta del callback de Facebook (/redes-sociales/facebook/callback/).
       redesSociales = q.get("redesSociales");
+      // Pantalla desde donde se tocó "Conectar Facebook" (la devuelve el callback).
+      volver = q.get("volver");
     } catch (e) {}
+    // Video guardado para un OAuth del que nunca se volvió: se borra al caducar.
+    if (!(redesSociales && volver === "herramienta-video")) limpiarVideoCaducado();
     if (!convId && !orderId && !productId && !profileId && !redesSociales) return;
     try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
-    if (redesSociales) { setSettingsInicial("social"); setTab("perfil"); setPScr("settings"); }
+    if (redesSociales && volver === "producto") { setShowTools(true); setCreadorPubOpen(true); }
+    // Vuelve a "Publicar en Facebook" del video (no al editor): se rehace desde el borrador guardado.
+    else if (redesSociales && volver === "herramienta-video") { setShowTools(true); setFbVideo({ restaurar: true }); }
+    else if (redesSociales) { setSettingsInicial("social"); setTab("perfil"); setPScr("settings"); }
     else if (convId) openConversationById(convId, true);
     else if (orderId) openOrderById(orderId);
     else if (productId) openProductFromChat(productId);
@@ -1510,9 +1532,9 @@ function AppShell({ sessionUser, platformStats = null }) {
   // (Va DESPUÉS de declarar todos los estados de navegación que lee, incl. selOrderId.)
   // Estado de navegación actual (pantallas + modales) y su "firma" para comparar.
   const navSnap = { tab, mScr, pScr, eScr, selProd, selSeller, selOrderId, prodBackTo,
-    plusMenu, showCourier, toolApp, promoVideoOpen, creadorPubOpen, showTools, showAdmin, showWallet, showFollowing, chatOpen, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
+    plusMenu, showCourier, toolApp, promoVideoOpen, creadorPubOpen, fbVideo, showTools, showAdmin, showWallet, showFollowing, chatOpen, showNotif, showCats, pubOpen, buyModal, confirmCfg, editProd };
   const navSig = [tab, mScr, pScr, eScr, (selProd && selProd.id) || selProd || 0, selSeller || 0, selOrderId || 0, prodBackTo || 0,
-    !!plusMenu, !!showCourier, !!toolApp, !!promoVideoOpen, !!creadorPubOpen, !!showTools, !!showAdmin, !!showWallet, !!showFollowing, !!chatOpen, !!showNotif, !!showCats, !!pubOpen, !!buyModal, !!confirmCfg, !!editProd].join("|");
+    !!plusMenu, !!showCourier, !!toolApp, !!promoVideoOpen, !!creadorPubOpen, !!fbVideo, !!showTools, !!showAdmin, !!showWallet, !!showFollowing, !!chatOpen, !!showNotif, !!showCats, !!pubOpen, !!buyModal, !!confirmCfg, !!editProd].join("|");
 
   const stackRef = useRef([]);      // [{sig, snap}] una entrada por cada paso hacia adelante
   const lastRef = useRef(null);     // {sig, snap} del estado actual
@@ -1522,7 +1544,7 @@ function AppShell({ sessionUser, platformStats = null }) {
   const applySnap = (sn) => {
     setTab(sn.tab); setMScr(sn.mScr); setPScr(sn.pScr); setEScr(sn.eScr);
     setSelProd(sn.selProd); setSelSeller(sn.selSeller); setSelOrderId(sn.selOrderId); setProdBackTo(sn.prodBackTo);
-    setPlusMenu(sn.plusMenu); setShowCourier(sn.showCourier); setToolApp(sn.toolApp); setPromoVideoOpen(!!sn.promoVideoOpen); setCreadorPubOpen(!!sn.creadorPubOpen); setShowTools(sn.showTools);
+    setPlusMenu(sn.plusMenu); setShowCourier(sn.showCourier); setToolApp(sn.toolApp); setPromoVideoOpen(!!sn.promoVideoOpen); setCreadorPubOpen(!!sn.creadorPubOpen); setFbVideo(sn.fbVideo || null); setShowTools(sn.showTools);
     setShowAdmin(sn.showAdmin); setShowWallet(sn.showWallet); setShowFollowing(sn.showFollowing); setChatOpen(sn.chatOpen); setShowNotif(sn.showNotif);
     setShowCats(sn.showCats); setPubOpen(sn.pubOpen); setBuyModal(sn.buyModal); setConfirmCfg(sn.confirmCfg); setEditProd(sn.editProd);
   };
@@ -2343,8 +2365,8 @@ function AppShell({ sessionUser, platformStats = null }) {
             </div>
 
             {/* Crear publicación (foto de un producto → Página de Facebook).
-                Mientras FACEBOOK_PUBLICAR siga apagado, solo la ve el admin. */}
-            {(FACEBOOK_PUBLICAR || isOwner) && (
+                Solo si el backend permite Facebook a este usuario (fbVisible). */}
+            {fbVisible && (
               <div style={{ marginTop: 14, background: card, border: `1px solid ${bd}`, borderRadius: 18, overflow: "hidden" }}>
                 <div style={{ height: 90, background: "linear-gradient(135deg,#1877F2,#FFC01E)", position: "relative", display: "flex", alignItems: "center", padding: "0 18px", overflow: "hidden" }}>
                   <span style={{ fontSize: 38, position: "relative" }}>📸</span>
@@ -2384,6 +2406,7 @@ function AppShell({ sessionUser, platformStats = null }) {
               inicial={promoVideoInicial}
               dark={dark}
               onClose={cerrar}
+              onFacebook={(d) => setFbVideo(d)}
               onOpenPlans={() => { cerrar(); setShowTools(false); setTab("perfil"); setPScr("profile-full"); setAutoOpenPlans(true); }}
             />
           </Suspense>
@@ -2397,6 +2420,21 @@ function AppShell({ sessionUser, platformStats = null }) {
               dark={effectiveTheme === "dark"}
               onBack={() => setCreadorPubOpen(false)}
               onRecargar={reloadOwn}
+            />
+          </Suspense>
+        </div>
+      )}
+      {fbVideo && (
+        <div style={{ position: "fixed", top: 0, left: 0, zIndex: 4150, width: `calc(100vw / ${densZoom})`, height: `calc(100dvh / ${densZoom})`, overflowY: "auto", WebkitOverflowScrolling: "touch", background: effectiveTheme === "dark" ? "#0a0a0a" : "#f1f5f9", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+          <Suspense fallback={<LazyFallback />}>
+            <PublicarVideoFacebook
+              video={fbVideo.video || null}
+              texto={fbVideo.texto || ""}
+              productos={fbVideo.productos || []}
+              restaurar={!!fbVideo.restaurar}
+              usuarioId={user?.id || null}
+              dark={effectiveTheme === "dark"}
+              onBack={() => setFbVideo(null)}
             />
           </Suspense>
         </div>

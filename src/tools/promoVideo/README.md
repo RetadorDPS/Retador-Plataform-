@@ -233,7 +233,7 @@ El build genera `precache.json` (plugin en vite.config.js, con los nombres con h
 | `audio.js` | música y efectos creados por código, mezcla, AAC |
 | `salida.js` | formatos, calidad, marca de agua, `makeRenderer`, exportación MP4/grabación |
 | `ui.js` | formularios, vista previa, compartir, texto del post, Facebook |
-| `facebook.js` | interruptor `FACEBOOK_PUBLICAR` y funciones vacías para el backend |
+| `facebook.js` | cliente de las Edge Functions de Facebook (`fb-pages`, `fb-oauth-start`, `fb-publish`…); sin tokens en el navegador |
 | `pagina.js` | entrada del iframe: fuentes, logo y datos de la app por `postMessage` |
 | `editor.css` | CSS del prototipo, tal cual |
 
@@ -266,13 +266,34 @@ al prototipo (80/80 en vertical, feed y cuadrado).
   `retadormarketplace.es/?openProfile={idVendedor}` (los enlaces de invitado de la
   app: funcionan al instante, también para un producto recién publicado).
 
-### Facebook
-- `FACEBOOK_PUBLICAR = false` en `facebook.js`: el botón no aparece en producción.
-- Se quitó toda la simulación (páginas de ejemplo, esperas falsas, enlace inventado).
-  El flujo (conectar → elegir página → texto → publicar → estado) llama a
-  `fbConectar`, `fbListarPaginas`, `fbSubirVideo`, `fbPublicar`, `fbEsperarProcesado`,
-  que hoy lanzan "todavía no disponible". Cada una debe llamar a una Edge Function:
-  el token nunca vive en el navegador.
+### Facebook (v245 de RETADOR)
+- **Quién lo ve:** lo decide SOLO el backend (`fb-pages` → `configurado` y `permitido`
+  según el plan). Ya no existe el interruptor `FACEBOOK_PUBLICAR` ni ninguna regla
+  por rol. Para apagarlo para todos: `private.social_plan_access` o quitar los secretos.
+- **Dónde aparece:** SOLO con el video terminado, junto a "📤 Compartir"
+  (`#fbPublishBtn` en `herramientas/video.html`). Mientras se crea el video no hay
+  Facebook.
+- **Qué hace:** el editor no publica nada. Al terminar el video guarda su resultado
+  (`ultimoVideo`: el MISMO Blob de `exportVideo()` que usan Descargar y Compartir, con
+  extensión, formato, medidas, duración y ruta de generación) y, al tocar Facebook,
+  lo envía a la app por postMessage (`facebook`, ver `pagina.js` y
+  `PromoVideoTool.jsx`, que valida el mensaje) junto con el texto de
+  `buildCaption("directo", captionContext())`. La app abre "Publicar en Facebook"
+  (`PublicarVideoFacebook.jsx`) encima del editor, que sigue intacto.
+- **Qué se publica:** el ARCHIVO DE VIDEO real. Vertical → Reel; feed y cuadrado →
+  video normal (lo decide `FORMATS[].fb`). Flujo, todo con el backend que ya existía:
+  Blob → bucket privado `social-videos` (`fbSubirVideo`, ruta fija por borrador) →
+  `fb-publish` tipo `reel`/`video` → Meta procesa → `fb-publish-status`
+  (`fbEsperarProcesado`). Solo MP4 de hasta 50 MB: un WebM (grabación de respaldo)
+  no se sube y se explica por qué. El enlace va dentro del texto; Facebook no muestra
+  tarjeta de enlace en los videos.
+- **Conectar:** si no hay conexión, "Conectar Facebook" usa el OAuth de siempre con
+  `volverA: "herramienta-video"`. Antes de salir, el video se guarda en IndexedDB
+  (`videoPendiente.js`: un solo registro, del usuario, caduca a los 30 min, se borra
+  al recuperarlo); el callback devuelve a "Publicar en Facebook" (no al editor).
+- El flujo antiguo dentro del iframe (hoja "Conecta tu página", `startFbFlow`,
+  `runFbPublish`) sigue en `ui.js` sin entrada; se limpiará cuando el nuevo esté
+  probado en real.
 
 ### Otros cambios necesarios
 - `public/sw.js`: antes guardaba CUALQUIER navegación como página de inicio; el

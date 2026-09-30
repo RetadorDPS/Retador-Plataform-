@@ -116,7 +116,6 @@
         <div class="opt-row"><span class="opt-label" id="fmtLbl">Formato</span><div class="opt-seg" id="fmtSeg" role="group" aria-labelledby="fmtLbl"></div></div>
         <p class="fmt-hint" id="fmtHint"></p>
         <p class="size-est" id="sizeEst" aria-live="polite"></p>
-        <button class="fb-btn" id="fbPublishBtn" style="margin-bottom:8px;"><span class="fb-glyph">f</span>Publicar en Facebook</button>
         <button class="primary" id="generateBtn">Generar y descargar video</button>
         <!-- [integración] plan gratis: aviso con enlace a los planes reales -->
         <p class="fmt-hint" id="planNotice" style="display:none; text-align:center; margin:8px 0 0;">Tu video incluye la marca 'Hecho con RETADOR'. Quítala con el <button type="button" id="planLink" class="tap-ext" style="background:none; border:none; padding:0; color:var(--accent-dark); font:inherit; font-weight:700; text-decoration:underline; cursor:pointer;">plan Pro</button>.</p>
@@ -128,6 +127,8 @@
         <div class="status" id="statusMsg" aria-live="polite"></div>
         <a id="downloadLink" class="download-link" style="display:none;" download="promo-retador.mp4">Descargar video</a>
         <button type="button" class="primary" id="shareBtn" style="display:none; margin-top:8px; background:#1E8E5A;">📤 Compartir (WhatsApp, Instagram…)</button>
+        <!-- [integración] Facebook: solo con el video terminado, junto a Compartir -->
+        <button type="button" class="fb-btn" id="fbPublishBtn" style="display:none; margin-top:8px;"><span class="fb-glyph">f</span>Publicar en Facebook</button>
         <!-- [v8.8] Consejos para que no pierda calidad al compartir -->
         <details class="share-note" id="shareNote" style="display:none;">
           <summary>Para que se vea nítido en WhatsApp e Instagram</summary>

@@ -219,7 +219,7 @@ import {
 // [integración] asignadores de estado que vive en otros módulos + Facebook (apagado)
 import { setBgPhoto, setCurrency } from "./motor.js";
 import { setFormat, setQuality, setPlan, setProgressHandler, setFps, cancelExport, estimateBytes, outFps, PROBAR_OPUS } from "./salida.js";
-import { FACEBOOK_PUBLICAR, fbConectar, fbListarPaginas, fbSubirVideo, fbPublicar, fbEsperarProcesado } from "./facebook.js";
+import { fbEstadoCacheado, fbPuedeUsar, fbConectar, fbListarPaginas, fbSubirVideo, fbPublicar, fbEsperarProcesado } from "./facebook.js";
 
 export function iniciarEditor(P) {
   // ============================================================
@@ -1337,6 +1337,7 @@ export function iniciarEditor(P) {
     clearStatus();
     els.downloadLink.style.display = "none";
     $("shareBtn").style.display = "none";
+    els.fbPublishBtn.style.display = "none"; ultimoVideo = null;
     $("shareNote").style.display = "none";
     els.exportDetail.textContent = ""; $("diagLine").textContent = "";
     const cancelBtn = $("cancelBtn"); cancelBtn.disabled = false; cancelBtn.textContent = "Cancelar";
@@ -1351,6 +1352,11 @@ export function iniciarEditor(P) {
       els.downloadLink.download = name + "-promo-" + fmt().id + "." + r.ext;
       els.downloadLink.style.display = "block";
       prepareShare(blob, els.downloadLink.download);
+      // [integración] Para Facebook: el MISMO archivo y sus datos reales (formato
+      // con el que se generó → Reel o video normal, según FORMATS[].fb).
+      ultimoVideo = { blob: blob, nombre: els.downloadLink.download, ext: r.ext, fb: fmt().fb, formato: fmt().id,
+        ancho: r.w, alto: r.h, duracion: Math.ceil(tl.total / opts.speed) / FPS, ruta: r.ruta };
+      if (fbDisponible) els.fbPublishBtn.style.display = "block"; // [integración] Facebook, junto a Compartir
       $("shareNote").style.display = "";
       els.exportDetail.textContent = "Video " + fmt().label.toLowerCase() + " (." + r.ext + ") · " + audioLabel(r.audio) + "." + (r.note ? " " + r.note : "") + (codec ? "" : " (Modo de compatibilidad.)");
       // [v8.8] línea de diagnóstico: ruta, fps, medidas, peso real y tiempo de generación
@@ -1431,6 +1437,8 @@ export function iniciarEditor(P) {
   // [integración] Sin páginas de ejemplo: las da el backend (ver facebook.js).
   let FB_PAGES = [], fbPageId = null;
   let fbConnected = false, fbPage = null, fbBusy = false;
+  let fbDisponible = false; // [integración] lo decide el backend (fb-pages), ver Inicio
+  let ultimoVideo = null;   // [integración] el video terminado (mismo Blob que Descargar y Compartir)
   const fbScrim = $("fbScrim"), fbSheet = $("fbSheet"), toastEl = $("toast");
 
   function toast(msg) {
@@ -1610,7 +1618,22 @@ export function iniciarEditor(P) {
   }
 
   els.fbPublishBtn = $("fbPublishBtn");
-  els.fbPublishBtn.addEventListener("click", startFbFlow);
+  els.fbPublishBtn.addEventListener("click", pedirPublicacionFacebook);
+
+  // [integración] Facebook es una acción DESPUÉS del video, junto a Compartir:
+  // la app abre "Publicar en Facebook" (fuera de este iframe) con el VIDEO REAL
+  // ya generado y el mismo texto que usa Compartir (buildCaption). Allí el
+  // vendedor revisa el video, el texto y la Página antes de publicar.
+  function pedirPublicacionFacebook() {
+    if (!ultimoVideo) { toast("Primero genera el video."); return; }
+    const data = currentData();
+    const items = currentStyle === "directo" ? [data.item] : (data.items || []);
+    const ids = [];
+    items.forEach(function (i) { if (i && i.product && i.product.id && ids.indexOf(i.product.id) < 0) ids.push(i.product.id); });
+    let texto = "";
+    try { texto = buildCaption("directo", captionContext(), false); } catch (e) { texto = ""; }
+    if (P.onFacebook) P.onFacebook({ video: ultimoVideo, productos: ids, texto: texto });
+  }
 
   function startFbFlow() {
     if (fbBusy) return;
@@ -1742,7 +1765,9 @@ export function iniciarEditor(P) {
   setPlan(P.conMarcaDeAgua === false ? "pro" : "gratis");
   if (/^#[0-9a-f]{6}$/i.test(P.acento || "")) { els.accentColor.value = P.acento; els.accentColorHex.textContent = P.acento.toUpperCase(); }
   els.storeName.value = P.nombreTienda || "";
-  if (!FACEBOOK_PUBLICAR) els.fbPublishBtn.style.display = "none";
+  // [integración] Facebook solo para quien el backend autoriza (fb-pages); el
+  // botón aparece al terminar el video (ver generateBtn).
+  fbEstadoCacheado().then(function (e) { fbDisponible = fbPuedeUsar(e); });
   $("planLink").addEventListener("click", function () { if (P.onPlanes) P.onPlanes(); });
   renderTabs();
   renderStyleCarousel();
